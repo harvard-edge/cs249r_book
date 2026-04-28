@@ -8,27 +8,20 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Evaluating Rail-Optimized Topologies for Cross-Node TP
-scenario: 'You are architecting a cluster of 1,024 H100 GPUs (128 nodes, 8 GPUs each) to train a large-scale
-  LLM. The memory requirements force you to use a Tensor Parallelism (TP) degree of 16, which means TP
-  groups must span across two nodes. You are evaluating two backend network designs: a standard leaf-spine
-  where all 8 NICs on a node connect to a single top-of-rack (ToR) switch, and a rail-optimized topology
-  where NIC i of every node connects to a dedicated switch i. Evaluate the performance implications of
-  these two designs on the cross-node TP AllReduce operations.'
+scenario: You are architecting a cluster of 1,024 H100 GPUs (128 nodes, 8 GPUs each) to train a large-scale LLM. The memory requirements force you to use a Tensor Parallelism (TP) degree of 16, which means TP groups must span across two nodes. You are evaluating two backend network designs: a standard leaf-spine where all 8 NICs on a node connect to a single top-of-rack (ToR) switch, and a rail-optimized topology where NIC i of every node connects to a dedicated switch i.
 question: "For TP=16 spanning two nodes, how do standard leaf-spine and rail-optimized topologies affect cross-node TP AllReduce performance?"
 details:
-  realistic_solution: Choose the rail-optimized topology. Because cross-node TP AllReduce patterns are
-    symmetric (GPU i on Node A communicates directly with GPU i on Node B), connecting all NIC 0s to Switch
-    0 creates 8 independent, parallel network planes. This physical isolation eliminates ECMP collisions
-    and in-switch contention, guaranteeing predictable, minimum-latency 400Gbps line rate for the latency-sensitive
-    TP collective.
-  common_mistake: Focusing solely on aggregate bisection bandwidth and assuming a non-blocking standard
-    fat-tree will perform identically. Candidates often fail to recognize that standard routing suffers
-    from ECMP hash collisions and microbursts during highly synchronized collective operations like AllReduce.
-  napkin_math: 'For a 2GB tensor chunk cross-node AllReduce (data moved ≈ 2x): 4GB per GPU. Rail-opt dedicated
-    path at 400Gbps (~50GB/s payload) = 80ms latency. Standard ToR with 8 synchronized flows routinely
-    experiences 30-50% congestion degradation due to hash collisions, reducing effective per-GPU bandwidth
-    to ~25GB/s and doubling latency to 160ms. Since TP is in the critical path of every forward/backward
-    layer, this penalty compounds significantly per iteration.'
+  realistic_solution: Choose the rail-optimized topology. Because cross-node TP AllReduce patterns are symmetric (GPU i on Node A communicates directly with GPU i on Node B), connecting all NIC 0s to Switch 0 creates 8 independent, parallel network planes. This physical isolation eliminates ECMP collisions and in-switch contention, guaranteeing predictable, minimum-latency 400Gbps line rate for the latency-sensitive TP collective.
+  common_mistake: |
+    **The Pitfall:** Relying solely on aggregate bisection bandwidth to evaluate network topologies for collective operations.
+    **The Rationale:** Assuming that non-blocking standard fat-trees distribute traffic perfectly without considering hash collisions and microbursts.
+    **The Consequence:** 30-50% congestion degradation due to ECMP collisions during highly synchronized TP operations, severely bottlenecking the training loop.
+  napkin_math: |
+    * **Data Movement:** 2GB cross-node AllReduce moves ~4GB per GPU.
+    * **Rail-Optimized (Isolated Planes):** Hits 400Gbps (~50GB/s payload) linearly = 80ms latency.
+    * **Standard ToR (ECMP Collisions):** Congestion reduces effective bandwidth to ~25GB/s.
+    * **Standard ToR Latency:** 160ms latency (2x slower).
+    * **Conclusion:** **Rail-optimized topologies isolate flows and eliminate ECMP collisions, halving cross-node TP latency.**
 status: published
 provenance: imported
 requires_explanation: true

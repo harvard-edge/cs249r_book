@@ -8,26 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing Autograd Tape Memory Leaks in Gradient Accumulation
-scenario: You are training a 3B parameter Transformer on an A100 (80GB) GPU. To maintain a large effective
-  batch size, you implement gradient accumulation over 16 micro-batches. During the forward pass, GPU
-  memory usage grows linearly with each micro-batch, and the job crashes with a CUDA OutOfMemoryError
-  at micro-batch 14. Your training loop accumulates the loss via `total_loss += loss` in order to compute
-  the average before calling `.backward()`. Diagnose the root cause of this memory scaling and explain
-  how the autograd tape mechanism contributes to the failure.
-question: "Why does gradient accumulation OOM at micro-batch 14, and how should the training loop use autograd to avoid it?"
+scenario: You are training a 3B parameter Transformer on an A100 (80GB) GPU. To maintain a large effective batch size, you implement gradient accumulation over 16 micro-batches. During the forward pass, GPU memory usage grows linearly with each micro-batch, and the job crashes with a CUDA OutOfMemoryError at micro-batch 14.
+question: Why does gradient accumulation OOM at micro-batch 14, and how should the training loop use autograd to avoid it?
 details:
-  realistic_solution: The `total_loss += loss` operation links the autograd tape across all micro-batches,
-    preventing activation memory from being freed. The fix is to call `loss.backward()` independently
-    per micro-batch (which consumes the tape and frees activations) and only accumulate the detached scalar
-    `loss.item()` for logging. This caps activation memory at a constant ~2GB regardless of the number
-    of accumulation steps.
-  common_mistake: Assuming gradient accumulation inherently requires linearly increasing memory, or failing
-    to recognize that the Python `+=` operator on a loss tensor extends the computational graph and prevents
-    garbage collection of intermediate activations.
-  napkin_math: 3B params (FP16) = 6GB. FP32 master weights = 12GB. FP32 gradients = 12GB. Adam FP32 states
-    (m + v) = 24GB. Total static memory = 54GB. Remaining for activations = 26GB. If one micro-batch stores
-    ~2GB of activations in the tape, step 13 requires 13 * 2GB = 26GB. Total = 54GB + 26GB = 80GB (OOM).
-    Releasing the tape per micro-batch caps activation memory at 2GB.
+  realistic_solution: The `total_loss += loss` operation links the autograd tape across all micro-batches, preventing activation memory from being freed. The fix is to call `loss.backward()` independently per micro-batch (which consumes the tape and frees activations) and only accumulate the detached scalar `loss.item()` for logging. This caps activation memory at a constant ~2GB regardless of the number of accumulation steps.
+  common_mistake: |
+    **The Pitfall:** Accumulating the loss via `total_loss += loss` before calling `.backward()`.
+    **The Rationale:** Candidates fail to realize that the Python `+=` operator on a PyTorch loss tensor extends the computational graph across all micro-batches, preventing garbage collection of intermediate activations.
+    **The Consequence:** Activation memory grows linearly instead of staying constant, defeating the purpose of gradient accumulation and causing an OOM.
+  napkin_math: |
+    - 3B params static memory: FP16 Weights (6GB) + FP32 Master (12GB) + FP32 Grads (12GB) + Adam states (24GB) = 54 GB.
+    - Remaining VRAM for activations: 80 GB - 54 GB = 26 GB.
+    - If one micro-batch stores ~2 GB of activations in the tape, step 13 requires 13 * 2 GB = 26 GB.
+    - Total VRAM at step 13: 54 GB + 26 GB = 80 GB (OOM).
+    - **Calling `loss.backward()` independently per micro-batch consumes the tape and caps activation memory at a constant 2 GB.**
 status: published
 provenance: imported
 requires_explanation: false

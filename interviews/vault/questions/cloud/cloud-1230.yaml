@@ -8,26 +8,20 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Evaluating Error Feedback Memory Trade-offs
-scenario: You are training a 20B parameter Dense model across 64 A100 (40GB) GPUs. To alleviate a 100
-  Gbps network bottleneck during AllReduce, your team implements Top-K (1%) gradient sparsification. To
-  prevent divergence, you add local Error Feedback (EF) to accumulate the 99% of truncated gradients.
-  However, enabling EF immediately causes an Out-Of-Memory (OOM) error. Evaluate the memory trade-offs
-  of this EF implementation and justify a design decision to fix the OOM while preserving at least a 10x
-  communication reduction.
-question: "Why does error feedback cause OOM for the 20B model, and how would you fix it while preserving at least a 10x communication reduction?"
+scenario: You are training a 20B parameter Dense model across 64 A100 (40GB) GPUs. To alleviate a network bottleneck, your team implements Top-K (1%) gradient sparsification. To prevent divergence, you add local Error Feedback (EF) to accumulate the 99% of truncated gradients. However, enabling EF immediately causes an Out-Of-Memory (OOM) error.
+question: Why does error feedback cause OOM for the 20B model, and how would you fix it while preserving the communication reduction?
 details:
-  realistic_solution: Store the error feedback state in FP16 instead of FP32, and shard the error tensor
-    across the data parallel ranks using ZeRO-2. The dense FP16 error tensor for 20B parameters is 40GB
-    — enough to OOM an A100 40GB when combined with model and optimizer states. Sharding across 8 GPUs
-    per node reduces the overhead to 5GB per GPU, safely resolving the OOM while maintaining mathematical
-    convergence of the sparsified gradient communication.
-  common_mistake: Candidates often assume error feedback is purely a compute operation and fail to account
-    for the memory required to store the dense error tensor, which must persist across training steps
-    and can easily exceed available VRAM.
-  napkin_math: '20B parameters = 20 * 10^9. Dense FP16 error tensor = 20B * 2 bytes = 40GB. A100 capacity
-    = 40GB (immediate OOM as model/optimizer states also need space). Sharding the error tensor with ZeRO-2
-    across 8 GPUs per node: 40GB / 8 = 5GB overhead per GPU. Effective memory freed: 35GB, safely resolving
-    the OOM.'
+  realistic_solution: Store the error feedback state in FP16 instead of FP32, and shard the error tensor across the data parallel ranks using ZeRO-2. The dense FP16 error tensor for 20B parameters is 40GB — enough to OOM an A100 40GB when combined with model and optimizer states. Sharding across 8 GPUs per node reduces the overhead to 5GB per GPU, safely resolving the OOM while maintaining mathematical convergence of the sparsified gradient communication.
+  common_mistake: |
+    **The Pitfall:** Assuming error feedback is purely a compute operation.
+    **The Rationale:** It's easy to view EF as just "adding the leftover gradients back," forgetting that the dense error tensor must persist in memory across training steps.
+    **The Consequence:** The system immediately OOMs because the error tensor doubles the gradient memory footprint, crashing the entire training run.
+  napkin_math: |
+    - **Model State:** $20\text{B parameters}$.
+    - **Dense Error Tensor:** $20\times 10^9 \times 2\text{ bytes (FP16)} = 40\text{ GB}$.
+    - **OOM Cause:** $40\text{ GB}$ instantly consumes the entire A100 capacity, leaving no room for weights or optimizer states.
+    - **ZeRO-2 Sharding:** Shard the error tensor across 8 GPUs per node $\rightarrow 40\text{ GB} / 8 = 5\text{ GB}$ overhead per GPU.
+    - **Conclusion:** **Sharding the error state reduces memory overhead to 5GB**, safely resolving the OOM.
 status: published
 provenance: imported
 requires_explanation: false

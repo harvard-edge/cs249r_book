@@ -8,24 +8,20 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Design EfficientNetV2 training pipeline for large-scale cloud fine-tuning
-scenario: You need to fine-tune EfficientNetV2-XL (208M params) on a proprietary 50M-image
-  dataset using 8× H100 SXM5 GPUs. The model uses Fused-MBConv blocks with progressive
-  learning (small images early, larger later). Design the distributed training strategy,
-  gradient accumulation schedule, and memory optimization plan to complete training
-  in under 48 hours.
-question: What distributed training, gradient accumulation, and memory plan would
-  let EfficientNetV2-XL fine-tune on 50M images in under 48 hours?
+scenario: You need to fine-tune EfficientNetV2-XL (208M params) on a proprietary 50M-image dataset using 8×H100 SXM5 GPUs. The model uses Fused-MBConv blocks with progressive learning (small images early, larger later).
+question: What distributed training, gradient accumulation, and memory plan would let EfficientNetV2-XL fine-tune on 50M images in under 48 hours?
 details:
-  realistic_solution: 'Use DDP across 8 H100s with gradient checkpointing on the MBConv/Fused-MBConv
-    blocks (reduces activation memory by ~60% at 30% compute overhead). Progressive
-    training: epoch 1–20 at 128×128 (batch=512/GPU), epoch 21–40 at 224×224 (batch=256/GPU),
-    epoch 41–60 at 380×380 (batch=64/GPU). Use BF16 mixed precision. Gradient accumulation
-    of 4 steps at high resolution to maintain effective batch of 2048. Total effective
-    batch = 8 GPUs × 64 × 4 accum = 2048.'
-  common_mistake: Using DDP without gradient checkpointing on EfficientNetV2-XL, which
-    requires ~6.4GB activation memory per image at full resolution (480×480), causing
-    OOM at any practical batch size on 80GB H100s.
-  napkin_math: 'EfficientNetV2-XL: 208M params. FP32 memory: 0.83GB params + 0.83GB grads + 1.66GB Adam states = 3.3GB. Activations at 380×380 batch=64: ~18GB with checkpointing. Total memory: ~21GB < 80GB HBM3. Training throughput: at 60 epochs on 50M images, total images = 3B. Across 8 GPUs over 48h (172,800s), required throughput is ~2,170 images/sec/GPU. EfficientNetV2-XL requires ~100 GFLOPs (fwd+bwd) per image. 2,170 images/sec × 100 GFLOPs = 217 TFLOPS. H100 provides 989 TFLOPS (BF16), meaning we need ~22% MFU, which is easily achievable with gradient accumulation.'
+  realistic_solution: 'Use DDP across 8 H100s with gradient checkpointing on the MBConv/Fused-MBConv blocks (reduces activation memory by ~60% at 30% compute overhead). Progressive training: epoch 1–20 at 128×128 (batch=512/GPU), epoch 21–40 at 224×224 (batch=256/GPU), epoch 41–60 at 380×380 (batch=64/GPU). Use BF16 mixed precision. Gradient accumulation of 4 steps at high resolution to maintain effective batch of 2048. Total effective batch = 8 GPUs × 64 × 4 accum = 2048.'
+  common_mistake: |
+    **The Pitfall:** Using DDP without gradient checkpointing on large input resolutions.
+    **The Rationale:** Candidates underestimate activation memory, which for EfficientNetV2-XL at high resolutions (e.g., 480x480) requires massive VRAM.
+    **The Consequence:** Unavoidable OOM errors at any practical batch size on 80GB GPUs.
+  napkin_math: |
+    - 1. Calculate parameter/optimizer memory: 208M params * 16 bytes (FP32 Adam) ≈ 3.3 GB.
+    - 2. Estimate activation memory with checkpointing: ~18 GB at 380x380 resolution with batch size 64.
+    - 3. Verify memory fit: 3.3 GB + 18 GB ≈ 21.3 GB < 80 GB HBM3.
+    - 4. Calculate required throughput: 50M images * 60 epochs = 3B images. 3B / (48 hours * 3600) = 17,361 images/sec. Per GPU (8 GPUs): ~2,170 images/sec.
+    - 5. Calculate required TFLOPS: 2,170 images/sec * 100 GFLOPs/image = **217 TFLOPS** per GPU (easily achievable on H100).
 status: published
 provenance: imported
 requires_explanation: true

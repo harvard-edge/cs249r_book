@@ -8,31 +8,20 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: Synchronous FSDP Straggler Mitigation at 256 GPUs
-scenario: 'A 256-GPU training job for a 7B LLM is running synchronous PyTorch FSDP (ZeRO-3 sharding)
-  on H100 nodes connected with InfiniBand NDR. p50 step time is 720 ms, but p99 step time is 1.4 s
-  — a 30% per-step straggler tail caused by intermittent ECC retries and one slow rack. The team must
-  keep AdamW convergence intact for the 7B run. Evaluate three production options — (a) a pure synchronous
-  FSDP run with no mitigation, (b) synchronous FSDP plus N+2 backup workers with infrastructure-level
-  node remediation, and (c) bounded-staleness asynchronous FSDP with a one-step staleness window.'
-question: "For 256-GPU synchronous FSDP training of a 7B LLM with a 30% straggler tail, which mitigation strategy preserves convergence with the smallest throughput cost?"
+scenario: A 256-GPU training job for a 7B LLM is running synchronous PyTorch FSDP (ZeRO-3) on H100 nodes. p50 step time is 720 ms, but p99 step time is 1.4 s — a 30% per-step straggler tail caused by intermittent ECC retries and one slow rack. The team must keep AdamW convergence intact for the 7B run.
+question: For 256-GPU synchronous FSDP training of a 7B LLM, which mitigation strategy (pure sync, sync + backup workers, or bounded-staleness async) preserves convergence with the smallest throughput cost?
 details:
-  realistic_solution: Choose (b), synchronous FSDP plus backup workers and node remediation. AdamW at
-    7B scale is sensitive to even one-step gradient staleness once the run is past warmup; option (c)
-    risks the kind of silent loss-spike that has cost real teams entire runs. Option (a) lets the slowest
-    rank dominate every collective, so step time stays at p99 = 1.4 s. With backup workers and a fast
-    eviction policy that quarantines a rack as soon as its rank is consistently in the top quartile of
-    step time, the AllReduce/ReduceScatter is run over a healthy 256-rank world while the stragglers
-    are resharded to spares. Throughput recovers to roughly p50 = 720 ms with a 1-3% redundancy overhead
-    versus the >40% gap between p50 and p99.
-  common_mistake: Reaching for stale-gradient asynchronous schemes (SSP/ASP) at LLM scale. These were
-    proposed for parameter-server CNN workloads on commodity Ethernet and have been deprecated for
-    foundation-model training because Adam's second-moment estimate amplifies stale-gradient noise — modern
-    256-GPU stacks use synchronous FSDP plus infrastructure remediation, not bounded-staleness training.
-  napkin_math: 'Pure synchronous (a): step = p99 = 1.4 s, throughput ratio = 1.0x (baseline waste). Backup
-    workers (b): once a slow rack is quarantined, step → p50 = 720 ms; redundancy cost = (k_backup /
-    256) ≈ 1-3%. Effective throughput = 1.4 / 0.72 × (1 - 0.03) ≈ 1.88x over (a). Bounded-staleness async
-    (c): throughput per step similar to (b) but expected loss-curve degradation of 5-15% extra steps to
-    target loss for a 7B model — net wall-clock often *worse* and risks divergence under AdamW.'
+  realistic_solution: Choose synchronous FSDP plus N+2 backup workers with infrastructure-level node remediation. AdamW at 7B scale is sensitive to even one-step gradient staleness once the run is past warmup; async risks the kind of silent loss-spike that has cost real teams entire runs. Pure sync lets the slowest rank dominate every collective, so step time stays at p99 = 1.4 s. With backup workers and a fast eviction policy, the AllReduce/ReduceScatter is run over a healthy 256-rank world while the stragglers are resharded to spares. Throughput recovers to roughly p50 = 720 ms with a 1-3% redundancy overhead.
+  common_mistake: |
+    **The Pitfall:** Reaching for stale-gradient asynchronous schemes (SSP/ASP) at LLM scale.
+    **The Rationale:** Async methods worked well for parameter-server CNN workloads on commodity Ethernet.
+    **The Consequence:** Adam's second-moment estimate amplifies stale-gradient noise, causing loss-curve degradation or divergence that completely wastes the multi-million dollar compute run.
+  napkin_math: |
+    * Pure synchronous: step = p99 = 1.4 s. Throughput ratio = 1.0x (baseline).
+    * Backup workers: once slow rack is quarantined, step approaches p50 = 720 ms.
+    * Redundancy cost = (k_backup / 256) ≈ 1-3%.
+    * Effective throughput = 1.4 / 0.72 * (1 - 0.03) ≈ 1.88x speedup over pure sync.
+    * **Backup workers provide near 2x throughput recovery without the convergence risks of async training.**
 status: published
 provenance: imported
 requires_explanation: false

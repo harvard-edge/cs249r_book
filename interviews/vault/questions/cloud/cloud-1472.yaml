@@ -8,24 +8,21 @@ competency_area: reliability
 bloom_level: analyze
 phase: training
 title: Diagnosing Network Bottlenecks in KV Cache Checkpointing
-scenario: A multi-turn LLM serving system uses a 70B model (80 layers, 8 KV heads, 128 dim) on 8x H100
-  spot instances, handling user sessions up to 64K tokens. To survive spot instance preemptions without
-  re-prefilling context, the team implemented a fault-tolerance mechanism that checkpoints the full KV
-  cache to a remote Redis cluster over a 100 Gbps network every 5 conversational turns. However, when
-  spot preemption rates increase during peak hours, users experience 30-second failover delays, and the
-  node's network egress hits 100% utilization. Diagnose the root cause of the bottleneck.
-question: "Why do full-KV checkpoints cause 30-second failover delays and 100% network egress at 64K-token contexts?"
+scenario: A multi-turn LLM serving system uses a 70B model (80 layers, 8 KV heads, 128 dim) on 8x H100 spot instances, handling user sessions up to 64K tokens. To survive spot instance preemptions without re-prefilling context, the team implemented a fault-tolerance mechanism that checkpoints the full KV cache to a remote Redis cluster over a 100 Gbps network every 5 conversational turns. However, when spot preemption rates increase during peak hours, users experience 30-second failover delays, and the node's network egress hits 100% utilization.
+question: Why do full-KV checkpoints cause 30-second failover delays and 100% network egress at 64K-token contexts?
 details:
-  realistic_solution: Implement incremental KV cache checkpointing (streaming only the new tokens' KV
-    pairs generated since the last checkpoint) and overlap the transfer with computation asynchronously.
-    Alternatively, leverage CPU RAM as a local buffer before asynchronously staging to remote storage.
-  common_mistake: Failing to account for the massive absolute size of the KV cache at 64K tokens, and
-    attempting to synchronously checkpoint the entire cache for the batch rather than streaming incremental
-    deltas.
-  napkin_math: KV cache per token = 80 layers * 8 KV heads * 128 dim * 2 (K+V) * 2 bytes = ~328 KB. For
-    a 64K token context, cache size is ~21 GB per request. For a batch of 16 requests, total cache is
-    336 GB. Transferring 336 GB over a 100 Gbps (12.5 GB/s) network takes 336 / 12.5 = 26.8 seconds, which
-    explains the ~30s delay and network saturation.
+  realistic_solution: Implement incremental KV cache checkpointing (streaming only the new tokens' KV pairs generated since the last checkpoint) and overlap the transfer with computation asynchronously. Alternatively, leverage CPU RAM as a local buffer before asynchronously staging to remote storage.
+  common_mistake: |
+    **The Pitfall:** Treating KV cache as a small metadata payload.
+    **The Rationale:** Candidates often underestimate the massive absolute size of the KV cache at long context windows (64K).
+    **The Consequence:** Attempting to synchronously checkpoint the entire batch's cache causes severe network saturation and latency spikes.
+  napkin_math: |
+    *   **KV cache per token:** 80 layers × 8 KV heads × 128 dim × 2 (K+V) × 2 bytes = 327,680 bytes (~328 KB).
+    *   **Context size:** 64,000 tokens × 328 KB = ~21 GB per request.
+    *   **Batch size:** 16 requests = 336 GB total cache.
+    *   **Network bandwidth:** 100 Gbps = 12.5 GB/s.
+    *   **Transfer time:** 336 GB / 12.5 GB/s = 26.8 seconds.
+    *   **Result:** Synchronously transferring the massive **~336 GB** KV cache saturates the 100 Gbps network, causing the **~30s delay**.
 status: published
 provenance: imported
 requires_explanation: false

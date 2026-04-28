@@ -8,25 +8,20 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: Mitigating Outliers with Robust Loss
-scenario: Your team is training a robotics kinematics model on 64 A100 GPUs using
-  FP16 mixed precision. The dataset contains 5% corrupted sensor readings acting as
-  extreme outliers. When using standard Mean Squared Error (MSE) loss, an outlier
-  with an error magnitude of 500 units produces a squared loss of 250,000 and a gradient
-  of 1,000. When accumulated across a global batch size of 4096, these outlier gradients
-  frequently cause FP16 overflow (max value ~65,504), destabilizing the loss.
-question: How should you change the loss to prevent FP16 overflows from 5% extreme
-  outliers without giving up mixed precision?
+scenario: Your team is training a robotics kinematics model on 64 A100 GPUs using FP16 mixed precision. The dataset contains 5% corrupted sensor readings acting as extreme outliers. When using standard Mean Squared Error (MSE) loss, an outlier with an error magnitude of 500 units produces a squared loss of 250,000 and a gradient of 1,000.
+question: How should you change the loss to prevent FP16 overflows from 5% extreme outliers without giving up mixed precision?
 details:
-  realistic_solution: Apply a robust training objective like Huber Loss (Smooth L1
-    Loss) with a threshold parameter (delta=1.0). This modifies the loss function
-    to be linear for errors larger than delta, strictly bounding the gradient magnitude.
-  common_mistake: Falling back to pure FP32 training to avoid overflows (which halves
-    tensor core throughput), or using aggressive post-hoc gradient clipping without
-    fixing the underlying sensitivity of the quadratic loss landscape.
-  napkin_math: MSE gradient for error e=500 is 2*e = 1000. With Huber loss (delta=1.0),
-    the gradient for e > delta is clamped to exactly delta * sign(e) = 1.0. The outlier's
-    gradient contribution drops from 1000 to 1 (a 1000x reduction), ensuring the sum
-    across the batch remains safely below the 65,504 FP16 limit.
+  realistic_solution: Apply a robust training objective like Huber Loss (Smooth L1 Loss) with a threshold parameter (delta=1.0). This modifies the loss function to be linear for errors larger than delta, strictly bounding the gradient magnitude.
+  common_mistake: |
+    **The Pitfall:** Disabling mixed precision and falling back to pure FP32 training.
+    **The Rationale:** Candidates see an FP16 overflow and immediately blame the precision constraint rather than fixing the underlying sensitivity of the quadratic loss landscape.
+    **The Consequence:** Falling back to FP32 completely halves the Tensor Core throughput, unnecessarily doubling the training time just to accommodate 5% bad data.
+  napkin_math: |
+    1. **MSE Gradient:** For an error of $e=500$, the gradient is $2e = 1000$.
+    2. **Batch Accumulation:** 5% of a 4096 batch = 204 outliers. Summing their gradients yields $204 \times 1000 = 204,000$.
+    3. **FP16 Overflow:** $204,000 \gg 65,504$ (FP16 max), guaranteeing an overflow.
+    4. **Huber Loss (Smooth L1):** With $\delta=1.0$, gradients for $e > 1.0$ are clamped to exactly $\delta \times \text{sign}(e) = 1.0$.
+    5. **New Accumulation:** The sum becomes $204 \times 1 = 204$, well within FP16 limits.
 status: published
 provenance: imported
 requires_explanation: false

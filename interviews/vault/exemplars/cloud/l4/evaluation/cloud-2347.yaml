@@ -4,24 +4,20 @@ title: RoCEv2 Incast in 3D Parallelism
 topic: congestion-control
 status: published
 provenance: human
-scenario: A 1024-GPU cluster uses an oversubscribed spine-leaf network with 400Gbps RoCEv2. During the
-  pipeline flush phase of 3D parallel training, 64 GPUs simultaneously send 50 MB of activation data to
-  a single target GPU (a classic incast pattern). Network tail latency spikes from 10us to 5ms, causing
-  massive pipeline bubbles and dropping cluster utilization to 35%.
+scenario: A 1024-GPU cluster uses an oversubscribed spine-leaf network with 400Gbps RoCEv2. During the pipeline flush phase of 3D parallel training, 64 GPUs simultaneously send 50 MB of activation data to a single target GPU (a classic incast pattern). Network tail latency spikes from 10us to 5ms, causing massive pipeline bubbles and dropping cluster utilization to 35%.
+question: What architectural mechanism causes this severe performance degradation during incast, and how should it be mitigated?
 details:
-  realistic_solution: The architectural requirement is to handle microbursts and incast traffic inherent
-    in many-to-one communication patterns. RoCEv2 is lossless and relies on Priority Flow Control (PFC).
-    During incast, the ToR switch buffers overflow, triggering PFC pause frames that spread upstream through
-    the network, causing severe Head-of-Line blocking (congestion spreading) that halts even unrelated
-    traffic. The solution is to architect application-level traffic pacing, tune DCQCN (Data Center Quantized
-    Congestion Notification) for faster rate reduction at the NIC level before PFC triggers, and ensure
-    QoS classes isolate this collective traffic.
-  common_mistake: Attempting to solve the issue by simply increasing the TCP window size or adding more
-    physical links to the spine without addressing the lossless nature of RoCE.
-  napkin_math: 'Incast volume: 64 senders * 50 MB = 3.2 GB. Target port bandwidth: 400Gbps (50 GB/s).
-    Time to drain to the single target: 3.2 GB / 50 GB/s = 64 ms. Switch buffer per port is typically
-    only ~32-64 MB. 3.2 GB overwhelmingly exceeds the switch buffer (50x larger), triggering immediate
-    PFC pause frames across the fabric.'
+  realistic_solution: The architectural requirement is to handle microbursts and incast traffic inherent in many-to-one communication patterns. RoCEv2 is lossless and relies on Priority Flow Control (PFC). During incast, the ToR switch buffers overflow, triggering PFC pause frames that spread upstream through the network, causing severe Head-of-Line blocking (congestion spreading) that halts even unrelated traffic. The solution is to architect application-level traffic pacing, tune DCQCN (Data Center Quantized Congestion Notification) for faster rate reduction at the NIC level before PFC triggers, and ensure QoS classes isolate this collective traffic.
+  common_mistake: |
+    **The Pitfall:** Attempting to fix RoCEv2 congestion by increasing TCP window sizes or adding more physical spine links.
+    **The Rationale:** Engineers try applying standard TCP/IP troubleshooting to a lossless RoCEv2 network, failing to recognize PFC's role.
+    **The Consequence:** Ineffective tuning and wasted CapEx that fails to prevent head-of-line blocking and congestion spreading.
+  napkin_math: |
+    - Incast volume: 64 senders × 50 MB = 3.2 GB.
+    - Target port bandwidth: 400 Gbps (50 GB/s).
+    - Time to drain to the single target: 3.2 GB / 50 GB/s = 64 ms.
+    - Switch buffer per port is typically only ~32-64 MB.
+    - **3.2 GB overwhelmingly exceeds the switch buffer (50x larger), triggering immediate PFC pause frames across the fabric.**
 last_modified: '2026-04-01'
 tags:
 - scope:single-system

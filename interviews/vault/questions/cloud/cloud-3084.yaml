@@ -8,31 +8,20 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: 'Systolic Array Design: Weight-Stationary vs Output-Stationary Tradeoff'
-scenario: 'Design the dataflow strategy for a custom 256x256 systolic array processing
-  a transformer attention layer (Q,K,V matmul: hidden=4096, seq=2048, batch=32) on
-  a TPU v5e (16GB HBM, 197 TFLOPS BF16). Choose between weight-stationary and output-stationary
-  dataflow, justify with memory reuse analysis and bandwidth savings.'
-question: For the 2048-token attention QKᵀ on a 256x256 systolic array, should you
-  use weight-stationary or output-stationary dataflow, and why?
+scenario: Design the dataflow strategy for a custom 256x256 systolic array processing a transformer attention layer (Q,K,V matmul: hidden=4096, seq=2048, batch=32) on a TPU. Choose between weight-stationary and output-stationary dataflow, and justify with memory reuse analysis.
+question: For the 2048-token attention layer Q*K^T on a 256x256 systolic array, should you use weight-stationary or output-stationary dataflow, and why?
 details:
-  realistic_solution: 'Attention Q*K^T: input Q (seq*head_dim), input K (seq*head_dim),
-    output (seq*seq). Both inputs stream, output accumulates. Output-stationary (OS):
-    each PE accumulates partial sums of one output element — requires reading Q row
-    and K column repeatedly. Weight-stationary (WS): ''weights'' K are stationary,
-    Q streams — saves K bandwidth. For seq=2048, head_dim=64: K size = 2048*64*2 bytes
-    = 256KB. WS keeps K in array registers, Q streams: saves 2048 reads of K (only
-    1 load). Bandwidth savings: 2047/2048 reduction in K memory reads = 99.95%. Use
-    WS for attention.'
-  common_mistake: Applying weight-stationary dataflow to attention computation without
-    recognizing that attention weights (Q*K^T) are recomputed from inputs and don't
-    benefit from weight caching in the same way as FC layers.
-  napkin_math: 'Attention head (head_dim=64, seq=2048): Q shape = (2048,64), K shape
-    = (2048,64). Q*K^T = (2048,2048). WS: K loaded once (256KB), Q streams (256KB).
-    Total BW = 512KB + output (2048^2 * 2 = 8MB) = 8.5MB per head. 64 heads: 544MB.
-    OS: Q and K both stream per output row: K read 2048 times = 256KB * 2048 = 512MB
-    for K alone. WS saves 511.75MB K reads. At 819 GB/s TPU BW: time saved = 0.51GB
-    / 819GB/s = 0.6ms per head. 64 heads: 38ms saved total per forward pass. Significant
-    for seq=2048.'
+  realistic_solution: 'Attention Q*K^T: input Q (seq*head_dim), input K (seq*head_dim), output (seq*seq). Both inputs stream, output accumulates. Output-stationary (OS): each PE accumulates partial sums of one output element — requires reading Q row and K column repeatedly. Weight-stationary (WS): ''weights'' K are stationary, Q streams — saves K bandwidth. For seq=2048, head_dim=64: K size = 2048*64*2 bytes = 256KB. WS keeps K in array registers, Q streams: saves 2048 reads of K (only 1 load). Bandwidth savings: 2047/2048 reduction in K memory reads = 99.95%. Use WS for attention.'
+  common_mistake: |
+    **The Pitfall:** Misapplying output-stationary dataflow to attention computation.
+    **The Rationale:** Candidates treat attention weights (Q*K^T) like standard fully connected layers, failing to recognize that they are recomputed from inputs and benefit massively from caching K in registers.
+    **The Consequence:** Generating 99.9% unnecessary memory reads, destroying memory bandwidth and throttling the systolic array.
+  napkin_math: |
+    * Attention head (head_dim=64, seq=2048): Q shape = (2048,64), K shape = (2048,64). Q*K^T = (2048,2048).
+    * Output-Stationary (OS): Q and K stream per output row. K read 2048 times = 256 KB * 2048 = 512 MB for K alone.
+    * Weight-Stationary (WS): K loaded once (256 KB), Q streams (256 KB). Total BW = 512 KB + output (8 MB) = 8.5 MB per head.
+    * WS saves 511.75 MB K reads.
+    * **Result:** At 819 GB/s TPU BW, time saved is 0.6 ms per head (38 ms saved total per forward pass for 64 heads).
 status: published
 provenance: imported
 requires_explanation: true

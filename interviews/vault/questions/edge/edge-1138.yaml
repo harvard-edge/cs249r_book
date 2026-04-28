@@ -8,24 +8,23 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: 'Edge Systolic Array Mastery: Full EfficientNet Roofline on Jetson Orin DLA'
-scenario: Perform a complete Roofline analysis for EfficientNet-B0 (390M FLOPs INT8,
-  5.3M params) on Jetson Orin DLA (2 cores, 5.5 TOPS INT8 each = 11 TOPS, internal
-  BW 200GB/s). Identify compute-bound vs memory-bound layers, calculate MFU, and specify
-  which layers should be moved to GPU vs DLA for optimal throughput.
-question: For EfficientNet-B0 on Orin DLA, which layers are memory or compute bound,
-  what MFU do you expect, and what should run on GPU vs DLA?
+scenario: Perform a complete Roofline analysis for EfficientNet-B0 (390M FLOPs INT8, 5.3M params) on Jetson Orin DLA (2 cores, 5.5 TOPS INT8 each = 11 TOPS, internal BW 200GB/s).
+question: For EfficientNet-B0 on Orin DLA, which layers are memory or compute bound, what MFU do you expect, and what should run on GPU vs DLA?
 details:
-  realistic_solution: 'EfficientNet-B0: DLA ridge = 11T/200G = 55 FLOPs/byte. Stem conv (3->32, 224x224, 3x3, stride 2): FLOPs=2*32*112^2*9*3=21.7M. BW=(3*224^2 + 32*3*3*3 + 32*112^2)*1=0.15MB+0.001MB+0.4MB=0.55MB. AI=21.7M/0.55MB=39.5. Memory bound. 1x1 heads (end, 320->1280, 7x7): FLOPs=2*1280*7*7*320=40.1M. BW=(320*7^2 + 320*1280 + 1280*7^2)=0.016MB+0.41MB+0.063MB=0.49MB. AI=40.1M/0.49MB=81.8. Compute bound. MBConv blocks (mid): various AI 30-80. Mix of bound regions. DLA excels at MBConv. Move classifier head to GPU for better scheduling flexibility. MFU overall: 390M/11T = 0.035ms theoretical. Actual ≈ 0.5ms -> MFU = 7%.'
-  common_mistake: Running the entire network on DLA without checking that some layers
-    (like the final classifier head) have very low arithmetic intensity and would
-    benefit from GPU execution with higher memory bandwidth.
-  napkin_math: 'DLA ridge: 11T/200G=55 FLOPs/byte. EfficientNet-B0 breakdown: early
-    layers (high resolution) AI≈30-40 (memory bound), middle (stride 2) AI≈50-80 (near
-    ridge), late (small spatial) AI≈80-100 (compute bound). Overall: 390M FLOPs,
-    weight BW=5.3MB, activation BW≈12MB, total=17.3MB. AI=390M/17.3MB=22.5. Memory
-    bound overall (AI=22.5 < ridge=55). Compute time=390M/11T=0.035ms. BW time=17.3MB/200GB/s=0.087ms.
-    BW limited. FPS=1/0.087ms=11,500 FPS. Power: 11 TOPS * 0.2W/TOPS ≈ 2.2W (DLA).
-    Energy: 2.2W/11500FPS=0.19mJ/frame.'
+  realistic_solution: 'EfficientNet-B0: DLA ridge = 11T/200G = 55 FLOPs/byte. Stem conv (3->32, 224x224, 3x3, stride 2) has AI = 39.5 (Memory bound). 1x1 heads (end, 320->1280, 7x7) has AI = 81.8 (Compute bound). MBConv blocks (mid) vary from AI 30-80. DLA excels at MBConv, but late layers like the final classifier head have very low arithmetic intensity and should run on the GPU. MFU overall: 390M/11T = 0.035ms theoretical. Actual ≈ 0.5ms -> MFU = 7%.'
+  common_mistake: |
+    **The Pitfall:** Running the entire network blindly on the DLA.
+    **The Rationale:** Candidates fail to identify that late layers (like the 1x1 classifier head) have very low arithmetic intensity and are heavily memory-bound on the DLA.
+    **The Consequence:** Sub-optimal throughput because memory-bound operations are not offloaded to the GPU which has better bandwidth handling for specific layers.
+  napkin_math: |
+    - **DLA Ridge Point:** 11 TOPS / 200 GB/s = 55 FLOPs/byte.
+    - **Total Compute:** 390M FLOPs.
+    - **Total Bandwidth:** 5.3MB weights + ~12MB activations = 17.3MB.
+    - **Overall AI:** 390M FLOPs / 17.3MB = 22.5 FLOPs/byte.
+    - **Diagnosis:** 22.5 < 55, so it is **Memory Bound overall**.
+    - **Compute time:** 390M / 11T = 0.035ms.
+    - **BW time:** 17.3MB / 200 GB/s = 0.087ms.
+    - **Expected FPS:** 1 / 0.087ms = **11,500 FPS**.
 status: published
 provenance: imported
 requires_explanation: true

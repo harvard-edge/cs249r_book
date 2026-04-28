@@ -8,25 +8,23 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Evaluating MoE Serving Topologies on H100 Nodes
-scenario: Your team is deploying an 8x22B Mixture of Experts (MoE) LLM (141B total parameters, 39B active
-  per token) on a node with 8xH100 80GB GPUs connected via NVSwitch. Serving with standard Tensor Parallelism
-  (TP=8) yields poor throughput due to massive communication bottlenecks during expert routing. You must
-  evaluate alternative parallelization strategies (Expert Parallelism vs. TP vs. Pipeline Parallelism)
-  to justify the optimal topology for maximizing batch size and throughput while remaining within the
-  680 GB total VRAM limit.
-question: "Which parallelization topology should you use for the 8x22B MoE on 8x H100s, and why is it better than pure TP or pipeline parallelism?"
+scenario: Your team is deploying an 8x22B Mixture of Experts (MoE) LLM (141B total parameters, 39B active per token) on a node with 8x H100 80GB GPUs connected via NVSwitch. Serving with standard Tensor Parallelism (TP=8) yields poor throughput due to massive communication bottlenecks during expert routing.
+question: Which parallelization topology should you use for the 8x22B MoE on 8x H100s, and why is it better than pure TP or pipeline parallelism?
 details:
-  realistic_solution: Implement a hybrid strategy using Tensor Parallelism for the dense attention layers
-    and Expert Parallelism (EP=8) for the MoE layers. By placing one expert on each GPU, you isolate the
-    massive parameters while utilizing the 900 GB/s NVSwitch efficiently for All-to-All token routing,
-    allowing you to maximize the KV cache size.
-  common_mistake: Treating the MoE model exactly like a dense model by defaulting to TP=8 across all layers,
-    ignoring the severe All-to-All communication overhead introduced by token routing in the MoE layers.
-  napkin_math: 'Total model size at FP16 = 141B * 2B = 282GB. Node VRAM = 8 * 80GB = 640GB. Remaining
-    VRAM for KV cache = 640GB - 282GB = 358GB. With EP=8, each GPU holds ~35GB of weights. The All-to-All
-    routing communication moves ~O(batch_size * sequence_length * hidden_dim) bytes. For batch 256, seq
-    2048, hidden 4096: ~4.3GB transferred (256 * 2048 * 4096 * 2 bytes). Over a 900 GB/s NVSwitch, this
-    takes <5ms per layer, which is trivial compared to the compute gains.'
+  realistic_solution: Implement a hybrid strategy using Tensor Parallelism for the dense attention layers and Expert Parallelism (EP=8) for the MoE layers. By placing one expert on each GPU, you isolate the massive parameters while utilizing the 900 GB/s NVSwitch efficiently for All-to-All token routing, allowing you to maximize the KV cache size.
+  common_mistake: |
+    **The Pitfall:** Treating the MoE model exactly like a dense model by defaulting to TP=8 across all layers.
+    **The Rationale:** TP=8 is the standard, easy-to-deploy strategy for large dense models.
+    **The Consequence:** Ignoring the severe All-to-All communication overhead introduced by token routing in the MoE layers, leading to heavily bottlenecked throughput.
+  napkin_math: |
+    - **Model Size:** 141B parameters at FP16 (2 bytes) = 282GB.
+    - **Node VRAM:** 8 * 80GB = 640GB.
+    - **Remaining VRAM:** 640GB - 282GB = 358GB available for KV cache.
+    - **Weight Distribution (EP=8):** Each GPU holds ~35GB of weights.
+    - **Communication Overhead:** All-to-All routing communication moves ~O(batch_size * sequence_length * hidden_dim) bytes.
+    - **Transfer Size:** For batch 256, seq 2048, hidden 4096: 256 * 2048 * 4096 * 2 bytes ≈ 4.3GB transferred.
+    - **Transfer Time:** Over a 900 GB/s NVSwitch, this takes <5ms per layer.
+    - **Conclusion:** The transfer time is trivial compared to the compute gains of isolating the massive parameters.
 status: published
 provenance: imported
 requires_explanation: false

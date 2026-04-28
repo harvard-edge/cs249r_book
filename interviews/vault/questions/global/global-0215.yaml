@@ -8,21 +8,20 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: Tensor Parallelism Communication Volume
-scenario: A Transformer MLP layer has weight matrices of shape (4096, 16384) and (16384, 4096) in FP16.
-  You split across 4 GPUs using tensor parallelism. Estimate the AllReduce volume per layer per forward
-  pass.
+scenario: A Transformer MLP layer has weight matrices of shape (4096, 16384) and (16384, 4096) in FP16. You split across 4 GPUs using tensor parallelism.
 question: "What is the AllReduce volume per layer per forward pass under 4-way tensor parallelism, assuming batch=1 and seq_len=2048?"
 details:
-  realistic_solution: 'In Megatron-style TP, the first linear is column-parallel (each GPU has 4096×4096
-    shard) and the second is row-parallel (each GPU has 4096×4096 shard). After the second linear, an
-    AllReduce of the output is needed. Output shape = (batch × seq, 4096). For batch=1, seq=2048: output
-    = 2048 × 4096 × 2 bytes = 16 MB. AllReduce volume = 2 × (3/4) × 16 MB = 24 MB per layer forward. With
-    32 layers, total = 768 MB. This is why TP needs NVLink — 768 MB / 300 GB/s = 2.6 ms overhead for the
-    forward pass alone.'
-  common_mistake: Thinking tensor parallelism splits the weights and that's it. Each TP shard produces
-    a partial result that must be AllReduced to get the correct output.
-  napkin_math: 'Output per layer = 2048 × 4096 × 2B = 16 MB. AllReduce: 2 × (3/4) × 16 = 24 MB. 32 layers
-    → 768 MB. Over NVLink (300 GB/s): 2.6 ms total.'
+  realistic_solution: "In Megatron-style TP, the first linear is column-parallel (each GPU has 4096×4096 shard) and the second is row-parallel (each GPU has 4096×4096 shard). After the second linear, an AllReduce of the output is needed. Output shape = (batch × seq, 4096). For batch=1, seq=2048: output = 2048 × 4096 × 2 bytes = 16 MB. AllReduce volume = 2 × (3/4) × 16 MB = 24 MB per layer forward. With 32 layers, total = 768 MB. This is why TP needs NVLink — 768 MB / 300 GB/s = 2.6 ms overhead for the forward pass alone."
+  common_mistake: |
+    **The Pitfall:** Thinking tensor parallelism only splits the weights and requires no communication.
+    **The Rationale:** It's easy to forget that partitioned matrix multiplications yield partial sums that must be aggregated.
+    **The Consequence:** Underestimating network bottlenecks and deploying TP across slow interconnects like PCIe instead of NVLink.
+  napkin_math: |
+    - Output shape per layer = (batch × seq_len, 4096).
+    - For batch=1, seq_len=2048: output = 2048 × 4096 × 2 bytes = 16 MB.
+    - AllReduce volume = 2 × ((N-1)/N) × size = 2 × (3/4) × 16 MB = 24 MB per layer forward pass.
+    - For a 32-layer model: 32 × 24 MB = 768 MB.
+    - **Over NVLink (300 GB/s bidirectional effective), this adds 2.56 ms overhead for the forward pass.**
 status: published
 provenance: imported
 requires_explanation: false

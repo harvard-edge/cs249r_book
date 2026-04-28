@@ -4,76 +4,19 @@ title: Optimizing Large Language Model Inference on AMD MI300X with Roofline Ana
 topic: roofline-analysis
 status: published
 provenance: human
-scenario: Your team is deploying a large language model (LLM) for real-time inference on an AMD MI300X
-  accelerator. The model has 70 billion parameters, uses FP16 precision, and requires approximately 140
-  GB of model weights. During initial profiling, you observe that the MI300X's compute units are frequently
-  underutilized, despite the theoretical 1,307 TFLOPS FP16 sparse capability. The HBM3 memory bandwidth
-  is 5.3 TB/s, and the device has 192 GB of HBM3. You suspect a bottleneck. Using the roofline model,
-  diagnose the most likely bottleneck (compute-bound vs. memory-bound) for this LLM inference workload
-  and propose strategies to improve accelerator utilization. Consider both the model loading phase and
-  the per-token generation phase.
+scenario: Your team is deploying a large language model (LLM) for real-time inference on an accelerator. The model has 70 billion parameters, uses FP16 precision, and requires approximately 140 GB of model weights. During initial profiling, you observe that the compute units are frequently underutilized, despite a theoretical 1,307 TFLOPS FP16 capability. The memory bandwidth is 5.3 TB/s.
+question: Using the roofline model, how would you diagnose the bottleneck and propose strategies to improve utilization?
 details:
-  realistic_solution: "1.  **Operational Intensity (OI) Estimation**: For LLM inference (primarily matrix\
-    \ multiplications), the OI (FLOPs/byte) is often lower than anticipated due to the large working set\
-    \ of weights and activations relative to the operations performed, especially for memory-intensive\
-    \ operations like loading weights or non-fused kernels. While dense matrix multiplications are theoretically\
-    \ compute-intensive, the need to fetch large weights and activations often makes them memory-bound\
-    \ on high-bandwidth architectures.\n2.  **Diagnosis with Roofline**: Given the MI300X's specs (192GB\
-    \ HBM3, 5.3 TB/s, 1,307 TFLOPS FP16 sparse) and a 140GB FP16 model, the model fits entirely within\
-    \ HBM3. The underutilized compute units strongly suggest the workload is *memory-bound*. The observed\
-    \ performance is likely constrained by the 5.3 TB/s memory bandwidth rather than the 1,307 TFLOPS\
-    \ compute capacity.\n3.  **Strategies for Improvement**:\n    *   **Quantization**: Migrate to INT8\
-    \ or INT4 inference (if accuracy permits) to drastically reduce model size and memory traffic, thereby\
-    \ increasing effective OI.\n    *   **Leverage Sparse Compute**: If the model can be pruned or trained\
-    \ with sparsity, and if the inference framework effectively maps these sparse operations to the MI300X's\
-    \ 1,307 TFLOPS FP16 *sparse* capabilities, this can significantly boost performance.\n    *   **Kernel\
-    \ Optimization & Fusion**: Ensure that critical kernels (e.g., attention, feed-forward layers) are\
-    \ highly optimized for MI300X, using kernel fusion to reduce intermediate memory I/O and maximize\
-    \ memory coalescing.\n    *   **Batching**: Increase inference batch size to amortize memory access\
-    \ overhead and provide more work for the compute units, thereby potentially increasing effective OI,\
-    \ although this also increases activation memory requirements.\n    *   **Data Layout Optimization**:\
-    \ Ensure optimal data layouts (e.g., channel-last, blocked formats) to maximize cache utilization\
-    \ and memory bandwidth efficiency.\n    *   **Profiling**: Utilize AMD ROCm profiling tools to precisely\
-    \ identify memory access patterns, cache misses, and effective compute utilization to validate these\
-    \ hypotheses and guide specific optimization efforts."
-  common_mistake: Overlooking the actual operational intensity of LLM workloads, especially the impact
-    of data movement patterns and sparsity on effective memory bandwidth utilization. Developers often
-    assume high theoretical TFLOPS translate directly to high throughput without considering memory access
-    patterns, cache efficiency, or the overhead/inefficiency of sparse operations if the sparse capabilities
-    aren't fully utilized by the software stack.
-  napkin_math: 'Let''s consider a highly simplified estimate for operational intensity (OI).
-
-    *   **FP16 Model Size**: 70B parameters * 2 bytes/parameter = 140 GB.
-
-    *   **Peak HBM3 Bandwidth**: 5.3 TB/s = 5300 GB/s.
-
-    *   **Peak FP16 Sparse Compute**: 1,307 TFLOPS (tera floating-point operations per second).
-
-
-    For many LLM inference workloads, particularly if not heavily optimized for sparsity or with small
-    batch sizes, a significant portion of operations involves fetching weights and activations from HBM.
-    A naive lower bound for operational intensity (e.g., a simple matrix-vector multiply where you fetch
-    two operands and produce one result, roughly 1 FLOP/byte) can quickly illustrate the bottleneck.
-
-
-    **If OI is 1 FLOP/byte (typical for memory-bound scenarios)**:
-
-    *   Maximum achievable performance = OI * Bandwidth = 1 FLOP/byte * 5300 GB/s = 5300 GFLOPS = 5.3
-    TFLOPS.
-
-
-    This ''memory-bound'' performance (5.3 TFLOPS) is significantly lower than the MI300X''s theoretical
-    1,307 TFLOPS sparse compute peak. This large disparity immediately indicates a severe memory bottleneck.
-    To become compute-bound at 1,307 TFLOPS (assuming we can leverage the sparse capacity), the operational
-    intensity would need to be:
-
-
-    *   Required OI = Compute_Peak / Bandwidth_Peak = (1307 * 10^12 FLOPs/s) / (5.3 * 10^12 Bytes/s) ≈
-    247 FLOPs/byte.
-
-
-    Achieving an OI of ~247 FLOPs/byte for an LLM workload requires extremely sophisticated techniques
-    like deep sparsity, aggressive quantization, and extensive kernel fusion, which are often not present
-    in initial deployments. The observed underutilization of compute units directly points to the workload
-    operating in the memory-bound region of the roofline model.'
+  realistic_solution: "1.  **Operational Intensity (OI) Estimation**: For LLM inference, the OI (FLOPs/byte) is often lower than anticipated due to the large working set of weights and activations relative to the operations performed. \n2.  **Diagnosis with Roofline**: Given the large model size fitting entirely within HBM, the underutilized compute units strongly suggest the workload is *memory-bound*. The observed performance is likely constrained by the 5.3 TB/s memory bandwidth rather than the compute capacity. \n3.  **Strategies for Improvement**: Migrate to INT8 or INT4 inference (if accuracy permits) to drastically reduce memory traffic; leverage sparse compute if applicable; ensure critical kernels are highly optimized with kernel fusion; and increase inference batch size to amortize memory access overhead."
+  common_mistake: |
+    **The Pitfall:** Overlooking the actual operational intensity of LLM workloads and focusing solely on theoretical TFLOPS.
+    **The Rationale:** Developers often assume high theoretical compute capabilities translate directly to high throughput without considering memory access patterns and data movement bottlenecks.
+    **The Consequence:** Wasted optimization efforts on compute tuning when the model is fundamentally starved for data from memory.
+  napkin_math: |
+    - FP16 Model Size: 70B parameters × 2 bytes = 140 GB.
+    - Peak Bandwidth: 5.3 TB/s (5300 GB/s).
+    - Peak Compute: 1,307 TFLOPS.
+    - If OI is 1 FLOP/byte (typical for memory-bound LLM ops): Max Perf = 1 FLOP/byte × 5300 GB/s = 5.3 TFLOPS.
+    - Required OI to be compute bound: 1307 TFLOPS / 5.3 TB/s ≈ 246.6 FLOPs/byte.
+    - **Achieving ~247 FLOPs/byte is practically impossible for standard LLM inference, directly explaining why the hardware operates in the memory-bound region of the roofline.**
 last_modified: '2026-04-01'

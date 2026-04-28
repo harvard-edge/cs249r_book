@@ -8,25 +8,20 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: The Chunked Prefill Starvation
-scenario: On an edge server (RTX 4000 Ada, 20GB) running continuous batching, normal decode latency is
-  stable at 15ms/token. However, when a user submits a large 6000-token document for summarization, all
-  other active decodes in the batch completely freeze for roughly 850ms before resuming.
+scenario: On an edge server (RTX 4000 Ada, 20GB) running continuous batching, normal decode latency is stable at 15ms/token. However, when a user submits a large 6000-token document for summarization, all other active decodes in the batch completely freeze for roughly 850ms before resuming.
 question: "Why does a 6000-token summarization request freeze other decodes for 850ms, and how would you prevent that jitter?"
 details:
-  realistic_solution: The root cause is unchunked prefill monopolizing the GPU's compute resources. In
-    continuous batching, incoming requests undergo a compute-bound prefill phase, while existing requests
-    undergo a memory-bound decode phase. If a massive 6000-token prompt is processed as a single operation,
-    the matrix multiplications for its prefill consume all available Streaming Multiprocessors (SMs) on
-    the GPU for the entire duration of that forward pass. This starves the decode operations, causing
-    the 850ms jitter. The solution is to implement chunked prefill (e.g., splitting the 6000 tokens into
-    blocks of 512). By processing one 512-token chunk alongside the decode batch in each iteration, the
-    prefill is interleaved with token generation, capping the maximum latency spike to acceptable limits
-    at the cost of a slightly longer Time-To-First-Token for the large document.
-  common_mistake: Blaming the PCIe bandwidth for transferring the 6000 tokens and trying to compress the
-    prompt.
-  napkin_math: 'Model: 7B params. 6000 tokens prefill requires 2 * 7B * 6000 = 84 TFLOPs. RTX 4000 Ada
-    delivers ~100 effective TFLOPs/s. 84 / 100 = 840ms prefill time. Chunking to 512 tokens: 2 * 7B *
-    512 = 7.1 TFLOPs -> ~71ms per iteration. Max jitter drops from 840ms to 71ms.'
+  realistic_solution: The root cause is unchunked prefill monopolizing the GPU's compute resources. In continuous batching, incoming requests undergo a compute-bound prefill phase, while existing requests undergo a memory-bound decode phase. If a massive 6000-token prompt is processed as a single operation, the matrix multiplications for its prefill consume all available Streaming Multiprocessors (SMs) on the GPU for the entire duration of that forward pass. This starves the decode operations, causing the 850ms jitter. The solution is to implement chunked prefill (e.g., splitting the 6000 tokens into blocks of 512). By processing one 512-token chunk alongside the decode batch in each iteration, the prefill is interleaved with token generation, capping the maximum latency spike to acceptable limits at the cost of a slightly longer Time-To-First-Token for the large document.
+  common_mistake: |
+    **The Pitfall:** Blaming PCIe bandwidth for transferring the 6000 tokens.
+    **The Rationale:** Candidates misunderstand the compute-bound nature of the prefill phase compared to the memory-bound decode phase.
+    **The Consequence:** Implementing ineffective solutions like prompt compression instead of addressing the compute monopolization via chunked prefill.
+  napkin_math: |
+    *   **Model Size:** 7B parameters.
+    *   **Unchunked Prefill:** 6000 tokens requires 2 * 7B * 6000 = 84 TFLOPs.
+    *   **Compute Time:** RTX 4000 Ada delivers ~100 effective TFLOPs/s. 84 / 100 = 840ms.
+    *   **Chunked Prefill:** Chunking to 512 tokens requires 2 * 7B * 512 = 7.1 TFLOPs.
+    *   **Result:** Chunk iteration takes ~71ms. Max jitter drops from **840ms to 71ms**.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,64 +8,24 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: The AR Navigation Preemption Crisis
-scenario: 'You are the Lead ML Systems Engineer designing a new flagship ''AR Live
-  View'' feature for a luxury electric vehicle''s infotainment system. The system
-  must render navigation guidance (e.g., glowing arrows) over a live 4K camera feed
-  at a buttery-smooth 30 FPS. A key differentiator is the ''Vision Query'' feature:
-  the user can tap on any building in the camera view and ask, ''What is that?'',
-  which triggers a powerful 2-billion parameter multimodal VLM.'
-question: 'A key differentiator is the ''Vision Query'' feature: the user can tap
-  on any building in the camera view and ask, ''What is that?'
+scenario: An AR navigation feature renders guidance over a camera feed at 30 FPS. A 'Vision Query' feature triggers a 2B parameter VLM.
+question: How do you schedule a 400ms VLM inference without starving a 30 FPS navigation task on a non-preemptible NPU?
 details:
   realistic_solution: The core challenge is that a long-running, low-priority task
     (VLM) must not starve a short, high-priority, real-time task (Navigation) on shared,
     non-preemptible hardware like an NPU. The architecture must create the *illusion*
     of preemption.
-  common_mistake: A common but flawed approach is to create a simple FIFO (First-In,
-    First-Out) queue for the NPU, assuming the hardware will handle it. This fails
-    because a single, long VLM prefill task (100ms+) will occupy the NPU and block
-    multiple, short, time-sensitive navigation tasks (e.g., 3-4 frames), causing a
-    massive visual stutter. Another mistake is to suggest running the VLM on the CPU;
-    a 2B model is far too heavy for a mobile CPU to run efficiently and it will still
-    compete for the same memory bus, creating a bottleneck.
-  napkin_math: 'Let''s quantify why a simple queue fails and why chunking is necessary.
-
-
-    **Timing Requirements:**
-
-    - Navigation: 30 FPS → 33 ms/frame budget. Nav model inference: ~8 ms.
-
-    - VLM prefill (2B params): ~400 ms for a single forward pass on mobile NPU.
-
-
-    **FIFO Queue Failure:**
-
-    - User taps ''Vision Query''. VLM prefill enters queue: 400 ms.
-
-    - During this 400 ms, navigation misses 400/33 = **12 frames** → 0.4s visible
-    stutter.
-
-    - Unacceptable for a driving application.
-
-
-    **Chunked Scheduling Solution & Memory Budget:**
-
-    - NPU SRAM needed: ~52 MB. Snapdragon 8 Gen 3 NPU shared memory: 12 MB → activations
-    spill to DRAM, adding ~2 ms overhead per chunk for save/restore.
-
-    - To fit the 33ms budget: Split VLM prefill into chunks of ~23 ms each.
-
-    - Schedule: [Nav 8ms] → [VLM chunk 23ms] → [Nav 8ms] → ...
-
-    - Per nav frame: 8 (Nav) + 23 (VLM) + 2 (overhead) = 33 ms → exactly fills the
-    frame budget.
-
-    - Navigation maintains 30 FPS. VLM completes in ceil(400 / 23) = 18 chunks.
-
-    - Total time for VLM: 18 × 33 = 594 ms (48% overhead vs uninterrupted).
-
-    - User perceives: smooth navigation + VLM response in ~0.6s (acceptable for a
-    tap query).'
+  common_mistake: |
+    **The Pitfall:** Using a simple FIFO queue for NPU scheduling.
+    **The Rationale:** Assuming the OS or hardware will magically multiplex tasks, ignoring that NPUs generally run coarse-grained workloads to completion.
+    **The Consequence:** The 400ms VLM prefill blocks the navigation task, causing a dangerous 12-frame visual stutter in a driving application.
+  napkin_math: |
+    - **Navigation Budget:** 33 ms/frame. Nav inference takes 8 ms.
+    - **VLM Prefill:** 400 ms total.
+    - **Chunking Strategy:** Split VLM into chunks of 23 ms. 
+    - **Overhead:** ~2 ms for DRAM spill/restore per chunk.
+    - **Total Frame Time:** 8 ms (Nav) + 23 ms (VLM) + 2 ms (Overhead) = 33 ms.
+    - **Result:** Navigation stays at 30 FPS, while the VLM completes in **~594 ms** (18 chunks * 33 ms).
 status: published
 provenance: imported
 requires_explanation: true

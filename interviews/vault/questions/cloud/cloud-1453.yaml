@@ -8,24 +8,20 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: JIT Recompilation Spikes in Dynamic Inference
-scenario: You are running a production NLP inference service on NVIDIA A100 GPUs. To improve throughput,
-  your team enabled JIT compilation (e.g., `torch.compile` or XLA). While median latency improved by 30%,
-  P99 latency severely degraded, spiking from 45ms to over 2.5 seconds. The incoming API requests have
-  highly variable sequence lengths ranging from 10 to 1024 tokens. How do you root-cause and resolve these
-  P99 latency spikes?
-question: "How do you root-cause and resolve these P99 latency spikes?"
+scenario: You are running a production NLP inference service on NVIDIA A100 GPUs. After enabling JIT compilation (e.g., `torch.compile`), median latency improved by 30%, but P99 latency spiked from 45ms to over 2.5 seconds. API requests have variable sequence lengths ranging from 10 to 1024 tokens.
+question: How do you root-cause and resolve these P99 latency spikes associated with JIT compilation?
 details:
-  realistic_solution: Diagnose that the JIT compiler generates a new execution graph for every unique
-    sequence length, causing cache misses and 2.5s recompilations during inference. Fix this by padding
-    inputs to power-of-two buckets (e.g., 128, 256, 512, 1024) to constrain the shape space, or by explicitly
-    enabling dynamic shapes in the JIT compiler.
-  common_mistake: Failing to recognize that variable input shapes trigger JIT recompilation. Candidates
-    often incorrectly blame GPU memory fragmentation, Python garbage collection, or network I/O, missing
-    the graph compiler's caching mechanics.
-  napkin_math: 'Without JIT: P99 = 45ms. With JIT (unbounded shapes): Cache hit = 30ms, Cache miss = 2500ms.
-    If 2% of requests have a previously unseen sequence length, P99 is dominated by the 2500ms recompilation
-    penalty. Bucketing reduces the state space to 4 shapes; after 4 initial compilations (10s total),
-    cache hit rate reaches 100%, stabilizing P99 at ~35ms (including padding overhead).'
+  realistic_solution: Diagnose that the JIT compiler generates a new execution graph for every unique sequence length, causing cache misses and 2.5s recompilations during inference. Fix this by padding inputs to power-of-two buckets (e.g., 128, 256, 512, 1024) to constrain the shape space, or by explicitly enabling dynamic shapes in the JIT compiler.
+  common_mistake: |
+    **The Pitfall:** Failing to recognize that dynamic input shapes trigger continuous JIT recompilation.
+    **The Rationale:** Candidates assume compilation happens strictly once during startup and incorrectly blame network I/O or garbage collection for random latency spikes.
+    **The Consequence:** P99 latency SLAs are severely violated because the GPU is constantly stalled waiting for the CPU to recompile computation graphs.
+  napkin_math: |
+    * **Baseline (No JIT):** P99 = 45ms.
+    * **With JIT (Unbounded Shapes):** Cache hit = 30ms, Cache miss (recompilation) = 2,500ms.
+    * **Impact:** If just 2% of requests have unseen sequence lengths, P99 is dominated by the 2,500ms penalty.
+    * **Bucketing Solution:** Restricting shapes to 4 buckets (e.g., 128, 256, 512, 1024) limits cache misses to exactly 4 times per worker.
+    * **Conclusion:** After initial warm-up, the cache hit rate hits 100%, stabilizing P99 at **~35ms**.
 status: published
 provenance: imported
 requires_explanation: false

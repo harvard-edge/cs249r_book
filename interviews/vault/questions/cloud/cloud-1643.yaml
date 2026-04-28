@@ -8,25 +8,18 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing GPU Starvation via Cross-Socket Memory Bottlenecks
-scenario: You are training a large vision model on a dual-socket Intel Xeon server with 8x A100 GPUs (4
-  GPUs per socket). Your storage backend provides 40 GB/s read bandwidth, but training throughput is capped,
-  with GPU utilization hovering at 65%. Profiling shows that CPU utilization is relatively low, but the
-  UPI (Ultra Path Interconnect) link between the two CPU sockets is saturated at nearly 100%. Analyze
-  the root cause of this GPU starvation and propose a solution.
+scenario: "You are training a large vision model on a dual-socket Intel Xeon server with 8x A100 GPUs (4 GPUs per socket). Your storage backend provides 40 GB/s read bandwidth, but training throughput is capped, with GPU utilization at 65%. Profiling shows low CPU utilization, but the Ultra Path Interconnect (UPI) link between the two CPU sockets is saturated at nearly 100%."
 question: "What is starving the A100 GPUs despite 40 GB/s storage bandwidth, and how would you fix the NUMA placement?"
 details:
-  realistic_solution: 'Diagnose that cross-socket memory accesses for staging host-to-device transfers
-    are bottlenecking the system. Resolve this by implementing NUMA-aware allocation: pin DataLoader workers
-    to the specific CPU cores physically attached to the same socket as their target GPU using `numactl`
-    or process-level core affinity bindings.'
-  common_mistake: Blindly increasing the number of PyTorch DataLoader workers, which randomly schedules
-    threads across both CPU sockets. This actually worsens UPI congestion because data fetched and decoded
-    by Socket 0 must be transferred over the interconnect to GPUs on Socket 1.
-  napkin_math: 8 GPUs consuming 4,000 images/sec (decoded to ~600KB per image) = 8 * 4000 * 600 KB = ~19.2
-    GB/s of uncompressed tensor data. If OS thread scheduling randomly places 50% of the dataloader workers
-    on the wrong socket, ~9.6 GB/s of tensor data must traverse the UPI link. Combined with coherence
-    traffic and PCIe host-to-device transfers, this easily saturates a typical UPI link's effective bandwidth
-    (often ~15-20 GB/s in practice), starving the GPUs.
+  realistic_solution: 'Diagnose that cross-socket memory accesses for staging host-to-device transfers are bottlenecking the system. Resolve this by implementing NUMA-aware allocation: pin DataLoader workers to the specific CPU cores physically attached to the same socket as their target GPU using `numactl` or process-level core affinity bindings.'
+  common_mistake: |
+    **The Pitfall:** Blindly increasing the number of PyTorch DataLoader workers.
+    **The Rationale:** Engineers assume that low GPU utilization means data isn't being loaded fast enough and try to throw more threads at the problem.
+    **The Consequence:** The OS randomly schedules threads across both sockets, worsening UPI congestion because data decoded by Socket 0 must traverse the interconnect to GPUs on Socket 1, further starving the GPUs.
+  napkin_math: |
+    - **Calculate required data rate:** 8 GPUs consuming 4,000 images/sec (decoded to ~600KB per image) = 8 * 4000 * 600 KB = ~19.2 GB/s of uncompressed tensor data.
+    - **Analyze socket distribution:** If OS thread scheduling randomly places 50% of the dataloader workers on the wrong socket, ~9.6 GB/s of tensor data must traverse the UPI link.
+    - **Identify the bottleneck:** Combined with coherence traffic and PCIe host-to-device transfers, 9.6 GB/s easily saturates a typical UPI link's effective bandwidth (~15-20 GB/s), causing **GPU starvation**.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,34 +8,20 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: All-to-All Communication Optimization for Distributed DLRM
-scenario: A distributed DLRM training system runs on 128 GPUs. Each GPU processes
-  a batch shard and looks up embeddings from tables sharded across all GPUs. The all-to-all
-  communication for embedding lookups takes 40% of training time. Reduce this to under
-  10%.
-question: How would you reduce embedding all-to-all communication on 128 GPUs from
-  40% of DLRM training time to under 10%?
+scenario: A distributed DLRM training system runs on 128 GPUs. Each GPU processes a batch shard and looks up embeddings from tables sharded across all GPUs. The all-to-all communication for embedding lookups takes 40% of training time.
+question: How would you reduce embedding all-to-all communication on 128 GPUs from 40% of DLRM training time to under 10%?
 details:
-  realistic_solution: 'All-to-all optimization strategies: (1) Message size analysis:
-    128 GPUs, batch=4K samples, avg 10 embedding lookups per sample, 50 embedding
-    tables sharded across GPUs. Message per GPU-pair: 4K×10/128 lookups × 256B = 78KB
-    per GPU pair. With 128 pairs: 78KB × 127 = 9.9MB per GPU. At 400 Gbps: 0.2ms.
-    Not bandwidth-limited. (2) Latency reduction: fuse all 50 embedding table lookups
-    into a single all-to-all operation (FBGEMM TBE). Reduces 50 NCCL launches to 1:
-    saves 49 × 50µs = 2.45ms of launch overhead. (3) Overlap communication with computation:
-    while all-to-all for embedding tables is in flight, compute dense MLP for previous
-    batch. (4) Reduce all-to-all message size: use FP16 embeddings (2B) instead of
-    FP32 (4B): 2× communication reduction. Combined: TBE fusion + FP16 + overlap →
-    from 40% to <5% overhead.'
-  common_mistake: 'Increasing network bandwidth as the primary solution. The all-to-all
-    communication is often not bandwidth-limited but latency-limited: 128-GPU all-to-all
-    requires 127 communication operations, and with small message sizes (each GPU
-    sends to each other GPU), the latency overhead per message dominates.'
-  napkin_math: 'Current: 40% of 10ms training step = all-to-all = 4ms. TBE fusion:
-    50 all-to-alls → 1 all-to-all. NCCL launch overhead per all-to-all: ~50µs. Saved
-    overhead: 49 × 50µs = 2.45ms. Correct framing: each of 50 small all-to-alls has
-    ~50µs overhead + data (30µs). With TBE fusion: 1 all-to-all with same data = 50µs
-    overhead + 0.2ms data = 0.25ms total. Net reduction: 2.45ms + data packing improvement.
-    FP16 encoding: reduces data 2×. Overlap: hide behind 10ms step compute.'
+  realistic_solution: 'All-to-all optimization strategies: (1) Message size analysis: 128 GPUs, batch=4K samples, avg 10 embedding lookups per sample, 50 embedding tables sharded across GPUs. Message per GPU-pair: 4K×10/128 lookups × 256B = 78KB per GPU pair. With 128 pairs: 78KB × 127 = 9.9MB per GPU. At 400 Gbps: 0.2ms. Not bandwidth-limited. (2) Latency reduction: fuse all 50 embedding table lookups into a single all-to-all operation (FBGEMM TBE). Reduces 50 NCCL launches to 1: saves 49 × 50µs = 2.45ms of launch overhead. (3) Overlap communication with computation: while all-to-all for embedding tables is in flight, compute dense MLP for previous batch. (4) Reduce all-to-all message size: use FP16 embeddings (2B) instead of FP32 (4B): 2× communication reduction. Combined: TBE fusion + FP16 + overlap -> from 40% to <5% overhead.'
+  common_mistake: |
+    **The Pitfall:** Assuming the communication is bandwidth-limited and trying to upgrade the network.
+    **The Rationale:** Engineers see high communication time and default to "we need faster networking," ignoring message size and launch latency.
+    **The Consequence:** Expensive network upgrades yield no improvement because the workload is dominated by NCCL launch overhead for many tiny messages, not raw bandwidth.
+  napkin_math: |
+    1. **Current State:** 40% of 10ms training step = 4ms spent on all-to-all.
+    2. **Latency Overhead:** 50 independent all-to-alls. NCCL launch overhead per call ≈ 50 µs. Total overhead = 50 * 50 µs = 2.5 ms.
+    3. **TBE Fusion:** Fusing into 1 all-to-all saves 49 * 50 µs = 2.45 ms.
+    4. **FP16 Encoding:** Reduces payload by 2x.
+    5. **Result:** New all-to-all time = 50 µs (launch) + ~0.1 ms (data) = 0.15 ms. Net reduction brings overhead from 4ms down to **< 5% of the step**.
 status: published
 provenance: imported
 requires_explanation: false

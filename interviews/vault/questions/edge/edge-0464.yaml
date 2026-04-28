@@ -8,36 +8,26 @@ competency_area: networking
 bloom_level: apply
 phase: inference
 title: The Autonomous Data Jam
-scenario: You're diagnosing a latency issue in an autonomous vehicle's perception system. The car has
-  a dual-GPU 'trunk computer' with GPUs connected via 900 GB/s NVLink. The system must process a 10 GB/s
-  LIDAR stream and meet a 33ms end-to-end deadline. For field testing, the full 10 GB/s sensor stream
-  is also being offloaded to a central data logger over a 400 Gbps InfiniBand NDR card. You use a profiler
-  and find that the initial `cudaMemcpy` from the CPU to GPU-1 for each frame is taking nearly 25ms, consuming
-  most of your latency budget. GPU-to-GPU transfers are, by contrast, nearly instantaneous. Using the
-  provided hardware constants, diagnose the most likely cause of this severe data transfer slowdown.
+scenario: You're diagnosing a latency issue in an autonomous vehicle's perception system. The car has a dual-GPU 'trunk computer' with GPUs connected via 900 GB/s NVLink. The system must process a 10 GB/s LIDAR stream and meet a 33ms end-to-end deadline. For field testing, the full 10 GB/s sensor stream is also being offloaded to a central data logger over a 400 Gbps InfiniBand NDR card. You use a profiler and find that the initial `cudaMemcpy` from the CPU to GPU-1 for each frame is taking nearly 25ms, consuming most of your latency budget. GPU-to-GPU transfers are, by contrast, nearly instantaneous.
 question: "What is the most likely cause of the 25ms CPU-to-GPU cudaMemcpy slowdown despite fast NVLink GPU-to-GPU transfers?"
 details:
-  realistic_solution: The PCIe bus is saturated by resource contention. An H100-era system uses a PCIe
-    Gen5 x16 bus, which has a theoretical bandwidth of ~63 GB/s. The 400 Gbps InfiniBand NDR card, used
-    for data logging, can consume up to 50 GB/s of that bandwidth. When the CPU tries to send the LIDAR
-    data to the GPU, it's competing for what's left of that same PCIe resource. The effective bandwidth
-    available for the `cudaMemcpy` is drastically reduced, causing the massive transfer latency and making
-    it the primary bottleneck.
-  common_mistake: Engineers often focus on the high-speed interconnects they know about, like NVLink,
-    without considering the full data path. They forget that data from peripherals like NICs or sensors
-    must first traverse the PCIe bus to get to the CPU and then traverse it *again* to get to the GPU.
-    This bus is a powerful but finite and heavily shared resource.
-  napkin_math: 1. **Calculate data per frame:** The system has a 33ms deadline. The LIDAR stream is 10
-    GB/s. `Data = 10 GB/s * 0.033s = 0.33 GB` or `330 MB`.
+  realistic_solution: The PCIe bus is saturated by resource contention. An H100-era system uses a PCIe Gen5 x16 bus, which has a theoretical bandwidth of ~63 GB/s. The 400 Gbps InfiniBand NDR card, used for data logging, can consume up to 50 GB/s of that bandwidth. When the CPU tries to send the LIDAR data to the GPU, it's competing for what's left of that same PCIe resource. The effective bandwidth available for the `cudaMemcpy` is drastically reduced, causing the massive transfer latency and making it the primary bottleneck.
+  common_mistake: |
+    **The Pitfall:** Focusing exclusively on high-speed interconnects like NVLink without considering the full data path.
+    **The Rationale:** Engineers forget that data from peripherals like NICs or sensors must first traverse the PCIe bus to get to the CPU and then traverse it *again* to get to the GPU.
+    **The Consequence:** The system is deployed with a severe bottleneck because the PCIe bus is treated as an infinite resource, causing real-time deadline misses.
+  napkin_math: |
+    1. **Data per frame:** The system has a 33ms deadline. The LIDAR stream is 10 GB/s. `Data = 10 GB/s * 0.033s = 0.33 GB` or `330 MB`.
+    2. **PCIe Bandwidth:** PCIe Gen5 x16 provides ~63 GB/s.
+    3. **Resource Contention:** The 400 Gbps InfiniBand card consumes up to 50 GB/s of PCIe bandwidth.
+    4. **Remaining Bandwidth:** `63 GB/s - 50 GB/s = 13 GB/s` available for the CPU-to-GPU transfer.
+    5. **Transfer Time:** `330 MB / 13 GB/s ≈ 25ms`.
+    **The contention on the PCIe bus leaves only enough bandwidth for a ~25ms transfer.**
   options:
-  - The host CPU is too slow to stage the 10 GB/s data stream, causing a data preparation bottleneck before
-    the transfer begins.
-  - The NVLink bridge is misconfigured, and the CPU-to-GPU communication is secretly falling back to a
-    slower interconnect path.
-  - The InfiniBand card used for data logging is saturating the PCIe bus, leaving insufficient bandwidth
-    for the CPU-to-GPU data transfer.
-  - The CUDA driver has high overhead, adding fixed latency to every transfer operation regardless of
-    PCIe bandwidth.
+  - The host CPU is too slow to stage the 10 GB/s data stream, causing a data preparation bottleneck before the transfer begins.
+  - The NVLink bridge is misconfigured, and the CPU-to-GPU communication is secretly falling back to a slower interconnect path.
+  - The InfiniBand card used for data logging is saturating the PCIe bus, leaving insufficient bandwidth for the CPU-to-GPU data transfer.
+  - The CUDA driver has high overhead, adding fixed latency to every transfer operation regardless of PCIe bandwidth.
   correct_index: 2
 status: published
 provenance: imported

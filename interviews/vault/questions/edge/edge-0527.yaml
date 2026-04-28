@@ -8,34 +8,19 @@ competency_area: power
 bloom_level: analyze
 phase: inference
 title: The GPU Power Gating Latency
-scenario: Your battery-powered drone runs a Jetson Orin Nano (15W TDP) for obstacle avoidance. During
-  straight-line flight (80% of mission time), the GPU is idle — only the CPU runs a lightweight IMU fusion
-  algorithm. Your power engineer enables GPU power gating to save battery. On the next test flight, the
-  drone clips a tree branch during a sudden turn. Investigation reveals the obstacle detection model took
-  180ms to produce its first detection after the turn began, instead of the expected 25ms. What happened?
-question: "What happened?"
+scenario: Your battery-powered drone runs a Jetson Orin Nano (15W TDP) for obstacle avoidance. During straight-line flight, the GPU is idle. Your power engineer enables GPU power gating to save battery. On the next test flight, the drone clips a tree branch during a sudden turn. Investigation reveals the obstacle detection model took 180ms to produce its first detection after the turn began, instead of the expected 25ms.
+question: Why did GPU power gating increase the initial detection latency to 180ms?
 details:
-  realistic_solution: 'GPU power gating doesn''t just idle the GPU — it **removes power from the GPU''s
-    transistors** to eliminate leakage current. When the obstacle detection model is needed, the GPU must
-    go through a full power-on sequence: (1) **Rail ramp-up (5-10ms):** The PMIC (Power Management IC)
-    ramps the GPU voltage rail from 0V to operating voltage. This is slew-rate limited to prevent current
-    inrush that could cause voltage droop on shared rails (affecting the CPU). (2) **Clock stabilization
-    (2-5ms):** The PLL must lock to the target frequency. (3) **Context restoration (10-20ms):** GPU register
-    state, memory controller configuration, and TensorRT engine context must be reloaded from DRAM. (4)
-    **First inference cold penalty (50-100ms):** TensorRT''s first inference after context restore is
-    slower due to instruction cache misses, TLB misses, and CUDA context initialization. Total: 67-135ms
-    of wake latency before the first useful detection. The fix: use **clock gating** instead of power
-    gating — keep the GPU powered but stop the clock. Wake latency drops to ~2ms (just PLL relock). The
-    power savings are less (clock gating saves ~60% vs power gating''s ~95% of idle power), but for a
-    safety-critical system, 2ms wake beats 135ms wake.'
-  common_mistake: '"The model is slow on first inference — just warm it up." Warm-up explains part of
-    the delay, but the root cause is deeper: the GPU silicon was physically powered off.'
-  napkin_math: 'GPU power gating savings: Orin Nano GPU idle leakage ~1.5W. Power gating saves 1.5W. Clock
-    gating saves ~0.9W (60% of leakage). Difference: 0.6W. Over a 20-minute straight-line flight segment:
-    power gating saves 0.6W × 0.33hr = 0.2 Wh extra vs clock gating. Drone battery: ~100 Wh. The 0.2 Wh
-    savings (0.2% of battery) bought 155ms of detection delay — a terrible trade-off for a safety-critical
-    system. At 15 m/s flight speed, 155ms of blindness = 2.3 meters of undetected travel — exactly enough
-    to hit that tree branch.'
+  realistic_solution: GPU power gating removes power from the GPU's transistors to eliminate leakage current. When needed, the GPU must go through a full power-on sequence: rail ramp-up, clock stabilization, context restoration, and TensorRT cold-start penalty. The fix is to use clock gating instead, which keeps the GPU powered but stops the clock, dropping wake latency to ~2ms.
+  common_mistake: |
+    **The Pitfall:** Assuming the model is just slow to warm up and ignoring the hardware power state.
+    **The Rationale:** Software engineers often don't realize that power gating physically removes voltage from transistors, requiring a full hardware initialization sequence.
+    **The Consequence:** Trading critical safety latency for negligible battery savings. Clock gating should be used instead to maintain a 2ms wake latency.
+  napkin_math: |
+    - **Wake latency breakdown:** Rail ramp-up (5-10ms) + Clock stabilization (2-5ms) + Context restoration (10-20ms) + First inference cold penalty (50-100ms) = 67-135ms penalty.
+    - **Power savings calculation:** Power gating saves 1.5W; clock gating saves ~0.9W. Difference is 0.6W. Over 20 mins, savings = 0.2 Wh.
+    - **Consequence distance:** At 15 m/s flight speed, 155ms of blindness = 2.3 meters of undetected travel.
+    - **Final result:** **A trivial 0.2 Wh battery saving caused 2.3 meters of blind flight, leading to the crash.**
 status: published
 provenance: imported
 requires_explanation: false

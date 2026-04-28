@@ -8,23 +8,19 @@ competency_area: memory
 bloom_level: create
 phase: both
 title: Cloud New 0004
-scenario: Design a tiered KV-cache architecture for serving a 70B LLM with 100k context on an 8x H100
-  node. HBM3 is insufficient for max concurrency. Utilize host memory via PCIe Gen4 to maintain high throughput
-  decoding.
-question: "How would you design a tiered KV-cache for a 70B LLM with 100k context on an 8x H100 node?"
+scenario: Design a tiered KV-cache architecture for serving a 70B LLM with 100k context on an 8x H100 node. HBM3 is insufficient for max concurrency. Utilize host memory via PCIe Gen4 to maintain high throughput decoding.
+question: How would you design a tiered KV-cache for a 70B LLM with 100k context on an 8x H100 node?
 details:
-  realistic_solution: Implement a cache eviction and prefetching architecture using a virtual memory manager.
-    Map GPU HBM3 as L1 and host RAM as L2. Group KV blocks by token sequence. For a 70B model with 64
-    layers, 8 GQA KV heads, and 128 head dimension, the KV cache per token is 64 × 8 × 128 × 2 bytes ×
-    2 (K+V) = 262,144 bytes (0.25 MB/token). At 100k tokens, one full context occupies 26.2 GB. Anticipate
-    generation length and proactively offload inactive sequences to L2 via PCIe Gen4. When a sequence
-    is scheduled, prefetch its KV blocks from L2 to L1 async. Use a dedicated CUDA stream for PCIe transfers
-    to overlap with the H100's heavy compute during continuous batching.
-  common_mistake: Synchronous swapping of KV blocks on a cache miss, stalling the decoding loop and dropping
-    utilization of the 3.35TB/s HBM3 bandwidth.
-  napkin_math: '70B params = 140GB FP16. 8x H100 = 640GB HBM3. Available HBM = 500GB. KV cache (100k context,
-    64 layers, 8 GQA KV heads, 128 head_dim, FP16): 100k × 64 layers × 8 KV_heads × 128 dim × 2 bytes
-    × 2 (K+V) = 26.2 GB. With 8 GPUs swapping in parallel, PCIe Gen4 (32GB/s per GPU) can swap one 100k context in ~0.10s.'
+  realistic_solution: Implement a cache eviction and prefetching architecture using a virtual memory manager. Map GPU HBM3 as L1 and host RAM as L2. Group KV blocks by token sequence. For a 70B model with 64 layers, 8 GQA KV heads, and 128 head dimension, the KV cache per token is 64 × 8 × 128 × 2 bytes × 2 (K+V) = 262,144 bytes (0.25 MB/token). At 100k tokens, one full context occupies 26.2 GB. Anticipate generation length and proactively offload inactive sequences to L2 via PCIe Gen4. When a sequence is scheduled, prefetch its KV blocks from L2 to L1 async. Use a dedicated CUDA stream for PCIe transfers to overlap with the H100's heavy compute during continuous batching.
+  common_mistake: |
+    **The Pitfall:** Synchronous swapping of KV blocks on a cache miss.
+    **The Rationale:** This stalls the decoding loop while waiting for PCIe transfers.
+    **The Consequence:** This drops utilization of the massive HBM3 bandwidth and drastically increases latency.
+  napkin_math: |
+    - 1. **Model Weights:** 70B params = 140GB FP16.
+    - 2. **Memory Available:** 8x H100 = 640GB HBM3. Available HBM = ~500GB.
+    - 3. **KV Cache Size:** 100k context, 64 layers, 8 GQA KV heads, 128 head_dim, FP16: 100k × 64 × 8 × 128 × 2 bytes × 2 (K+V) = 26.2 GB per sequence.
+    - 4. **PCIe Transfer:** With 8 GPUs swapping in parallel, PCIe Gen4 (32GB/s per GPU) can swap one 100k context in **~0.10s**.
 status: published
 provenance: imported
 requires_explanation: true

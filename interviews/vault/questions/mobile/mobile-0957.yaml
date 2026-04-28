@@ -8,27 +8,25 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: 'KV-Cache: Realize KV Cache Memory Layout for 3B LLM on A17 Pro'
-scenario: 'Realize the complete KV cache memory layout for a 3B LLM on A17 Pro (35
-  TOPS, 8GB unified memory). The model has 32 layers, GQA with 8 KV heads, head_dim=128.
-  Chat session length: 2048 tokens. Specify tensor dimensions, memory addresses, data
-  types, and total allocation.'
-question: How would you specify tensor dimensions, memory addresses, data types, and
-  total allocation?
+scenario: Realize the complete KV cache memory layout for a 3B LLM on A17 Pro (35 TOPS, 8GB unified memory). The model has 32 layers, GQA with 8 KV heads, head_dim=128. Chat session length: 2048 tokens.
+question: "How would you specify tensor dimensions, memory addresses, data types, and total allocation for the KV cache?"
 details:
-  realistic_solution: 'K and V stored separately for attention computation efficiency.
-    Cache layout: [num_layers, 2, max_seq_len, num_kv_heads, head_dim]. Physical memory:
-    contiguous bf16 tensor.'
-  common_mistake: Not accounting for contiguous memory layout requirements for efficient
-    GPU access; storing K and V separately vs interleaved (page-cache style).
-  napkin_math: 'K cache: [32, 2048, 8, 128] bf16. Size: 32 × 2048 × 8 × 128 × 2B =
-    134MB. V cache: [32, 2048, 8, 128] bf16. Size: 134MB. Total KV: 268MB. Memory
-    layout: K_cache at base address 0x0, contiguous. V_cache at 0x8000000 (134MB offset).
-    Access pattern: per layer, per step, read K[layer, :current_len, :, :] = 2048
-    × 8 × 128 × 2B = 4.19MB (full K for layer). Stride pattern: K[layer] is contiguous
-    (good for GPU). Full forward pass KV reads: 32 layers × 2 (K+V) × 4.19MB = 268MB
-    per decode step. At A17 Pro 68 GB/s: 3.94ms for KV at 2048 context. Total memory:
-    3B model INT4 = 750MB + 268MB KV + 2GB OS + 200MB activations + 500MB framework
-    = 3.72GB << 8GB. 53.5% available for other tasks or longer context.'
+  realistic_solution: 'K and V stored separately for attention computation efficiency. Cache layout: [num_layers, 2, max_seq_len, num_kv_heads, head_dim]. Physical memory: contiguous bf16 tensor.'
+  common_mistake: |
+    **The Pitfall:** Storing K and V interleaved (page-cache style) without considering contiguous memory layout requirements.
+    **The Rationale:** Candidates might default to generic CPU/cloud KV cache structures without accounting for the A17 Pro GPU/NPU's preference for contiguous access patterns.
+    **The Consequence:** Suboptimal memory access strides, leading to significantly reduced effective memory bandwidth and higher Time-Per-Output-Token (TPOT).
+  napkin_math: |
+    * **K Cache Tensor:** [32 layers, 2048 tokens, 8 heads, 128 dim] in bf16 (2 bytes)
+    * K Size = 32 * 2048 * 8 * 128 * 2 = 134.2 MB
+    * **V Cache Tensor:** [32 layers, 2048 tokens, 8 heads, 128 dim] in bf16
+    * V Size = 134.2 MB
+    * Total KV Cache = 268.4 MB
+    * **Memory Layout:**
+      * K_cache base address 0x0, contiguous.
+      * V_cache at 134.2 MB offset.
+    * **Full Model Memory:** 3B INT4 (~1.5 GB) + 268 MB KV + 2 GB OS + 200 MB activations = ~3.97 GB.
+    * **3.97 GB easily fits within the 8 GB unified memory limit.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -41,8 +39,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

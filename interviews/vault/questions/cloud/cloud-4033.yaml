@@ -8,36 +8,21 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: ECMP vs Adaptive Routing Tradeoff Space
-scenario: An MI300X cluster with Broadcom Tomahawk-5 switches offers both static ECMP
-  and dynamic adaptive routing (DLB — Dynamic Load Balancing). DLB monitors egress
-  queue depths every 200ns and can reroute individual packets. Evaluate when ECMP
-  is actually preferable to DLB, considering the overhead of dynamic path selection.
-question: When is static ECMP preferable to Dynamic Load Balancing on Tomahawk-5 for
-  MI300X training traffic?
+scenario: An MI300X cluster with Broadcom Tomahawk-5 switches offers both static ECMP and dynamic adaptive routing (DLB — Dynamic Load Balancing). DLB monitors egress queue depths every 200ns and can reroute individual packets.
+question: When is static ECMP preferable to Dynamic Load Balancing on Tomahawk-5 for MI300X training traffic, considering overhead?
 details:
-  realistic_solution: 'ECMP is preferable when: (1) Flow count >> path count — with
-    1000+ flows over 32 paths, statistical multiplexing ensures even distribution
-    (law of large numbers). ECMP overhead: 0 extra ns per packet. DLB overhead: ~10ns
-    per packet for queue depth lookup. At 24.4M pkt/sec (400G), this is 244ms/sec
-    = 24.4% of one switch pipeline consumed by DLB. (2) All flows are same size —
-    ECMP distributes uniformly when flows are homogeneous. (3) Fabric is lightly loaded
-    (<50% utilization) — congestion is rare, so DLB''s benefit is minimal but its
-    overhead is constant. DLB is preferable when: (1) Few elephant flows dominate
-    (AllReduce with <64 flows per switch), creating hash collision risk with near-certain
-    (>99%) chance of collision. (2) Asymmetric traffic patterns (pipeline-parallel
-    + data-parallel mix). (3) Link failures create uneven path capacities. For MI300X
-    clusters: DLB is recommended because AllReduce creates few, large flows.'
-  common_mistake: Assuming dynamic is always better. DLB adds per-packet processing
-    overhead (queue depth lookup + path recomputation) and can cause packet reordering,
-    which triggers RoCE retransmissions. For well-balanced traffic patterns, static
-    ECMP's zero overhead wins.
-  napkin_math: 'With 32 ECMP paths and 64 flows (λ=2 flows/path, Poisson): P(single
-    path gets ≥4 flows) ≈ 14.3%. P(at least one of 32 paths gets ≥4 flows) ≈ 99.3%
-    — nearly certain. Those 4 flows share 1/32 of bandwidth: each gets 1/(4×32) =
-    1/128 ≈ 0.78% of total BW instead of the fair share of 1/64 ≈ 1.56% — a 2× imbalance
-    per flow. With DLB: max imbalance < 1.2× (20% overhead). DLB wins when flow count
-    < 4× path count (≤128 flows for 32 paths). Above that ratio, statistical multiplexing
-    dominates.'
+  realistic_solution: 'ECMP is preferable when: (1) Flow count >> path count — with 1000+ flows over 32 paths, statistical multiplexing ensures even distribution. ECMP overhead: 0 extra ns per packet. DLB overhead: ~10ns per packet for queue depth lookup. At 24.4M pkt/sec (400G), this is 244ms/sec = 24.4% of one switch pipeline consumed by DLB. (2) All flows are same size — ECMP distributes uniformly when flows are homogeneous. (3) Fabric is lightly loaded (<50% utilization) — congestion is rare, so DLB''s benefit is minimal but its overhead is constant. DLB is preferable when: (1) Few elephant flows dominate (AllReduce with <64 flows per switch), creating hash collision risk with near-certain (>99%) chance of collision. (2) Asymmetric traffic patterns. For MI300X clusters: DLB is recommended because AllReduce creates few, large flows.'
+  common_mistake: |
+    **The Pitfall:** Assuming dynamic routing is unilaterally superior without penalizing the per-packet processing overhead.
+    
+    **The Rationale:** Hardware vendors market adaptive routing as a magic bullet for congestion, leading engineers to ignore that packet reordering overhead triggers severe RoCEv2 retransmissions in well-balanced flows.
+    
+    **The Consequence:** Turning on DLB for a highly homogeneous, many-flow workload drastically slows down the network, actively causing throughput regressions instead of preventing them.
+  napkin_math: |
+    - **ECMP Imbalance**: With 32 ECMP paths and 64 flows (λ=2 flows/path, Poisson), P(at least one of 32 paths gets ≥4 flows) ≈ **99.3%** — nearly certain collision.
+    - **Bandwidth Penalty**: Those 4 flows share 1/32 of bandwidth; each gets ~0.78% of total BW instead of their fair share of 1.56% — a 2× degradation per flow.
+    - **DLB Optimization**: DLB actively rebalances, limiting max imbalance to < 1.2× (absorbing the 20% overhead).
+    - **Result**: DLB explicitly wins when flow count < 4× path count (e.g. ≤128 flows for 32 paths); beyond this, static ECMP statistical multiplexing dominates.
 status: published
 provenance: imported
 requires_explanation: false

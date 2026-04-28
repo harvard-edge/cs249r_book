@@ -4,29 +4,19 @@ title: Designing Mixed-Precision Backpropagation
 topic: compute-cost-estimation
 status: published
 provenance: human
-scenario: You are designing a mixed-precision training pipeline for a 70B LLM. The forward pass runs in
-  FP16 on Tensor Cores. Explain why the loss must be computed in FP32, why a loss scaler is needed, and
-  what happens to the master weights during the optimizer step. Trace the precision of each tensor through
-  the complete forward-backward-update cycle.
+scenario: You are designing a mixed-precision training pipeline for a 70B LLM. The forward pass runs in FP16 on Tensor Cores.
+question: Why must the loss be computed in FP32, why is a loss scaler needed, and what happens to master weights during the optimizer step?
 details:
-  realistic_solution: 'Precision trace: (1) Forward: inputs and weights cast to FP16. Matrix multiplies
-    execute on Tensor Cores at 2x throughput. Activations saved in FP16. (2) Loss computation: output
-    cast to FP32. Loss computed in FP32 to avoid overflow (softmax cross-entropy can produce values >65,504,
-    FP16 max). (3) Loss scaling: loss multiplied by scale factor (e.g., 2^16 = 65536) in FP32 before backward.
-    This shifts small gradients above FP16''s minimum representable value (~6e-8). (4) Backward: gradients
-    computed in FP16 (2x throughput). The scale factor ensures gradients that would be 1e-10 (below FP16
-    min) become 1e-10 * 65536 = 6.5e-6 (representable in FP16). (5) Optimizer step: gradients unscaled
-    (divided by 65536) and cast to FP32. Adam updates master weights in FP32 (critical: weight updates
-    are often 1e-7 scale, which rounds to zero in FP16). (6) Master FP32 weights cast back to FP16 for
-    next forward pass. Memory: FP16 weights (140 GB) + FP32 master (280 GB) + FP32 optimizer states (560
-    GB) = 980 GB.'
-  common_mistake: Thinking mixed precision just means 'use FP16 everywhere.' The critical insight is that
-    different stages require different precisions, and the loss scaler prevents gradient underflow in
-    the backward pass.
-  napkin_math: 'FP16 max: 65,504. FP16 min subnormal: 5.96e-8. Without loss scaling, any gradient <5.96e-8
-    rounds to zero. With scale=65536: minimum representable gradient becomes 5.96e-8 / 65536 = 9.1e-13.
-    Master weights in FP32 needed because weight update ~lr*grad ~1e-4 * 1e-3 = 1e-7, which is below FP16
-    precision for weights ~1.0.'
+  realistic_solution: 'Precision trace: (1) Forward: inputs and weights cast to FP16. Matrix multiplies execute on Tensor Cores at 2x throughput. Activations saved in FP16. (2) Loss computation: output cast to FP32. Loss computed in FP32 to avoid overflow (softmax cross-entropy can produce values >65,504, FP16 max). (3) Loss scaling: loss multiplied by scale factor (e.g., 2^16 = 65536) in FP32 before backward. This shifts small gradients above FP16''s minimum representable value (~6e-8). (4) Backward: gradients computed in FP16 (2x throughput). The scale factor ensures gradients that would be 1e-10 (below FP16 min) become 1e-10 * 65536 = 6.5e-6 (representable in FP16). (5) Optimizer step: gradients unscaled (divided by 65536) and cast to FP32. Adam updates master weights in FP32 (critical: weight updates are often 1e-7 scale, which rounds to zero in FP16). (6) Master FP32 weights cast back to FP16 for next forward pass. Memory: FP16 weights (140 GB) + FP32 master (280 GB) + FP32 optimizer states (560 GB) = 980 GB.'
+  common_mistake: |
+    **The Pitfall:** Assuming mixed precision simply means mapping every operation and weight to FP16.
+    **The Rationale:** Misunderstanding how small gradients interact with the minimum representable bounds of half-precision formats.
+    **The Consequence:** Gradient underflow during backpropagation, leading to stalled learning and catastrophic divergence.
+  napkin_math: |
+    - FP16 max: 65,504. FP16 min subnormal: $5.96 \times 10^{-8}$.
+    - Without loss scaling, a gradient $< 5.96 \times 10^{-8}$ rounds to zero.
+    - With scale=65536: a gradient of $10^{-10}$ scales to $10^{-10} \times 65536 = 6.5 \times 10^{-6}$, safely fitting in FP16.
+    - **Weight updates (learning rate × gradient) are often $\sim 10^{-7}$, which rounds to zero in FP16; therefore, the optimizer must apply updates to an FP32 master weight copy.**
 last_modified: '2026-04-01'
 tags:
 - scope:Foundations

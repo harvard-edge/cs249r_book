@@ -8,38 +8,22 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Zero-Copy DMA Pipeline for Ethos-U55
-scenario: You are deploying a 60 FPS visual wake-word model on an ARM Cortex-M7 +
-  Ethos-U55 (Corstone-300) platform. The camera sensor outputs 256x256 INT8 grayscale
-  frames over a DCMI interface. The system has exactly 512 KB of shared SRAM, and
-  the Ethos-U55 (configured here for 256 MAC/cycle) shares this SRAM with the 480
-  MHz M7 core. Design a DMA-driven data pipeline that minimizes M7 intervention, sizes
-  the memory regions appropriately, and evaluate any potential bus contention between
-  the incoming camera DMA and the NPU's intensive memory accesses during inference.
-question: How should Corstone-300 use zero-copy camera DMA buffers for 60 FPS visual
-  wake-word inference without bus contention?
+scenario: You are deploying a 60 FPS visual wake-word model on an ARM Cortex-M7 + Ethos-U55 platform. The camera sensor outputs 256x256 INT8 grayscale frames over a DCMI interface. The system has exactly 512 KB of shared SRAM, and the Ethos-U55 shares this SRAM with the 480 MHz M7 core.
+question: How should Corstone-300 use zero-copy camera DMA buffers for 60 FPS visual wake-word inference without bus contention?
 details:
-  realistic_solution: The optimal approach utilizes a zero-copy ping-pong DMA configuration
-    directly mapped to the NPU's input tensor addresses. The camera DMA writes sequentially
-    into two pre-allocated SRAM buffers. On a DMA transfer complete interrupt, the
-    M7 wakes up, updates the Ethos-U55 input pointer to the freshly filled buffer,
-    triggers the inference, and immediately goes back to sleep. Weights remain in
-    XIP Flash and are fetched dynamically via the Ethos-U55's dedicated AXI interface.
-    This leaves the majority of the 512 KB SRAM available strictly for NPU activations
-    and output buffers.
-  common_mistake: Candidates often propose an explicit CPU-driven memory copy from
-    a 'camera DMA buffer' to an 'NPU input buffer', instantly wasting M7 cycles, doubling
-    the input memory footprint, and draining the energy budget. Furthermore, they
-    frequently forget that weights must reside in slower external Flash memory and
-    try to allocate the scarce 512 KB SRAM for them, starving the network's activation
-    maps.
-  napkin_math: 'Input frame size: 256 x 256 INT8 = 64 KB. A ping-pong buffer setup
-    requires 64 KB * 2 = 128 KB of SRAM. SRAM remaining for NPU activations and system
-    overhead: 512 KB - 128 KB = 384 KB. At 60 FPS, the frame time budget is 16.6 ms.
-    The incoming DMA bandwidth required is 64 KB / 16.6 ms = 3.85 MB/s. Assuming a
-    64-bit wide shared SRAM bus at 480 MHz, peak theoretical bandwidth is 480 MHz
-    * 8 bytes = 3.84 GB/s. The camera DMA consumes 3.85 MB/s / 3840 MB/s = ~0.1% of
-    the total bus bandwidth. Therefore, the Ethos-U55 doing 256 MAC/cycle will experience
-    virtually zero bus contention from the background data movement.'
+  realistic_solution: The optimal approach utilizes a zero-copy ping-pong DMA configuration directly mapped to the NPU's input tensor addresses. The camera DMA writes sequentially into two pre-allocated SRAM buffers. On a DMA transfer complete interrupt, the M7 wakes up, updates the Ethos-U55 input pointer to the freshly filled buffer, triggers the inference, and immediately goes back to sleep. Weights remain in XIP Flash and are fetched dynamically via the Ethos-U55's dedicated AXI interface. This leaves the majority of the 512 KB SRAM available strictly for NPU activations and output buffers.
+  common_mistake: |
+    **The Pitfall:** Explicit CPU-driven memory copies.
+    **The Rationale:** Candidates fall back to standard sequential programming practices, explicitly mapping an input buffer and an NPU buffer, then moving data via `memcpy`.
+    **The Consequence:** This doubles the memory footprint, burns M7 cycles, and wastes power, while also frequently overlooking that weights must remain in external flash to preserve SRAM.
+  napkin_math: |
+    - Input frame: 256 x 256 INT8 = 64 KB.
+    - Ping-pong buffers: 64 KB * 2 = 128 KB SRAM.
+    - Remaining SRAM for activations: 512 - 128 = 384 KB.
+    - 60 FPS frame time = 16.6 ms.
+    - Required DMA bandwidth = 64 KB / 16.6 ms = 3.85 MB/s.
+    - 64-bit SRAM bus at 480 MHz = 3.84 GB/s theoretical peak.
+    - **DMA consumes 3.85 MB/s / 3840 MB/s = ~0.1% bus bandwidth (zero contention).**
 status: published
 provenance: imported
 requires_explanation: false

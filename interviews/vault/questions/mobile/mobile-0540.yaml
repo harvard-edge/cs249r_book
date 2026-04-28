@@ -8,44 +8,25 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The Live Translation Freeze
-scenario: 'You are the lead ML engineer for a new ''live translate'' feature on a flagship Android phone
-  powered by a Snapdragon 8 Gen 3. The UI must feel real-time, with a strict target for Time To First
-  Token (TTFT) of under 80ms. To maximize hardware utilization, your team implemented a static batching
-  strategy, where the system waits for 4 pending requests before dispatching a batch to the NPU. During
-  testing under load, users report that the translation ''freezes'' for a moment before the first word
-  appears. Your profiling confirms their complaint: the TTFT for the first request in a busy sequence
-  is consistently ~165ms, badly missing the budget. You know the end-to-end, single-token inference time
-  is 40ms, and the batched inference time follows the formula T = 40ms + (N-1)*5ms. Given this data, diagnose
-  the root cause of the excessive TTFT.'
-question: "What causes the live translation feature's excessive TTFT when static batching waits for four pending requests?"
+scenario: 'You are the lead ML engineer for a new ''live translate'' feature on a flagship Android phone powered by a Snapdragon 8 Gen 3. The UI must feel real-time, with a strict target for Time To First Token (TTFT) of under 80ms. To maximize hardware utilization, your team implemented a static batching strategy, where the system waits for 4 pending requests before dispatching a batch to the NPU. During testing under load, users report that the translation ''freezes'' for a moment before the first word appears. Your profiling confirms their complaint: the TTFT for the first request in a busy sequence is consistently ~165ms, badly missing the budget. You know the end-to-end, single-token inference time is 40ms, and the batched inference time follows the formula T = 40ms + (N-1)*5ms. Given this data, diagnose the root cause of the excessive TTFT.'
+question: What causes the live translation feature's excessive TTFT when static batching waits for four pending requests?
 details:
-  realistic_solution: The root cause is not the model's inference speed or the hardware's capability,
-    but the static batching policy. This policy introduces a significant queueing delay. A request is
-    forced to wait until three other requests have arrived, regardless of its own latency budget. This
-    'head-of-line blocking' for batches is fatal for interactive applications. The solution is to switch
-    to a continuous (or 'dynamic') batching strategy. In this model, the inference engine runs at a fixed
-    cadence (e.g., every 40ms). In each iteration, it batches together *all* requests currently waiting
-    in the queue and processes them. This ensures that no single request is starved for too long, dramatically
-    improving TTFT at the slight expense of maximum theoretical throughput.
-  common_mistake: Engineers often over-optimize for theoretical throughput (by using large, static batches)
-    and focus only on the raw inference time ('service time'). They forget that in interactive applications,
-    the time a request spends waiting in a queue ('queueing delay') is often the dominant factor in the
-    total latency experienced by the user. Blaming the model or hardware is common when the real issue
-    is the scheduling algorithm.
-  napkin_math: TTFT budget is 80ms. A 1.5B param LLM in INT4 requires 750MB of weights. Loading them from
-    LPDDR5X memory at 50 GB/s takes 750MB / 50 GB/s = 15ms. The audio encoder (e.g., Whisper-tiny) takes
-    ~25ms. Pre-filling the LLM prompt (say, 50 audio tokens) takes another 10ms. Total = 15 + 25 + 10
-    = 50ms. We meet the 80ms TTFT budget! But only if weights are pinned in RAM to avoid an additional
-    100ms storage read.
+  realistic_solution: The root cause is not the model's inference speed or the hardware's capability, but the static batching policy. This policy introduces a significant queueing delay. A request is forced to wait until three other requests have arrived, regardless of its own latency budget. This 'head-of-line blocking' for batches is fatal for interactive applications. The solution is to switch to a continuous (or 'dynamic') batching strategy. In this model, the inference engine runs at a fixed cadence (e.g., every 40ms). In each iteration, it batches together *all* requests currently waiting in the queue and processes them. This ensures that no single request is starved for too long, dramatically improving TTFT at the slight expense of maximum theoretical throughput.
+  common_mistake: |
+    **The Pitfall:** Over-optimizing for theoretical throughput with static batching.
+    **The Rationale:** Engineers focus only on the raw inference time ('service time') and forget that in interactive applications, queueing delay is often the dominant factor.
+    **The Consequence:** A design that causes 'head-of-line blocking', leading to severe TTFT violations and an unresponsive UI.
+  napkin_math: |
+    - Request 1 arrives at t=0. Wait for Request 4 to arrive.
+    - If arrival rate is e.g. 1 req/30ms, batch fills at t=90ms.
+    - Batch of 4 service time: 40ms + (3)*5ms = 55ms.
+    - Request 1 TTFT: 90ms (wait) + 55ms (compute) = 145ms.
+    - **The dominant cause of latency is not the compute time, but the static batching queue wait.**
   options:
-  - The model's single-token inference time of 40ms is too slow for the 80ms budget and requires further
-    optimization.
-  - The Snapdragon 8 Gen 3 NPU is saturated by a batch of 4, causing thermal throttling and increased
-    latency.
-  - The static batching policy creates excessive queueing delay, as early requests are starved waiting
-    for the batch to fill.
-  - The device's LPDDR5x memory bandwidth is insufficient for batching, causing stalls when moving four
-    requests' data to the NPU.
+  - The model's single-token inference time of 40ms is too slow for the 80ms budget and requires further optimization.
+  - The Snapdragon 8 Gen 3 NPU is saturated by a batch of 4, causing thermal throttling and increased latency.
+  - The static batching policy creates excessive queueing delay, as early requests are starved waiting for the batch to fill.
+  - The device's LPDDR5x memory bandwidth is insufficient for batching, causing stalls when moving four requests' data to the NPU.
   correct_index: 2
 status: published
 provenance: imported

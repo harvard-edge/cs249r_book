@@ -8,39 +8,24 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The On-Device Copilot's Janky Keyboard
-scenario: You are the lead ML systems engineer for a new on-device AI assistant on a flagship smartphone
-  (powered by an Apple A17 Pro). The assistant provides real-time text predictions in the keyboard. During
-  testing, users complain the keyboard feels 'janky' and 'freezes,' especially when typing quickly. Your
-  telemetry confirms the UI thread is frequently missing its 16ms frame deadline. The system currently
-  uses a static batching strategy, collecting up to 4 requests before sending them to the NPU for processing.
-  The on-device model takes, on average, 5ms to generate a single token. A typical prediction is 20 tokens
-  long. The peak arrival rate of prediction requests is 10 per second. You suspect a queueing problem.
-  What is the most likely cause of the UI jank?
-question: "Why does static batching four 20-token keyboard predictions on A17 Pro cause 16ms UI deadline misses?"
+scenario: You are the lead ML systems engineer for an on-device AI assistant providing real-time keyboard text predictions on an Apple A17 Pro. Users complain the keyboard 'freezes' when typing quickly. Telemetry confirms the UI thread frequently misses its 16ms frame deadline. The system uses static batching, collecting up to 4 requests before sending them to the NPU. The model takes 5ms to generate a single token, and a prediction is 20 tokens long. Peak request arrival rate is 10 per second.
+question: Why does static batching four 20-token keyboard predictions on A17 Pro cause 16ms UI deadline misses?
 details:
-  realistic_solution: The core issue is **head-of-line blocking** caused by the static batching policy.
-    When the system batches four 20-token requests, it creates a single, monolithic compute block on the
-    NPU that takes 100ms to complete. If the UI thread is waiting for the first token (TTFT) from a new
-    request that just missed the start of a batch, it will be blocked for the entire 100ms duration. This
-    dramatically exceeds the 16ms UI frame deadline, causing the perceived 'jank' and 'freezes'. The system
-    has sufficient capacity on average, but the scheduling strategy is wrong for a real-time, interactive
-    workload. The correct solution is to implement continuous batching, where the system can immediately
-    start processing new requests as they arrive and stream tokens back as they are generated, ensuring
-    TTFT remains low and the NPU is never locked in a long, uninterruptible task.
-  common_mistake: Engineers often blame the hardware's raw performance (TOPS) or focus only on the average
-    latency, which can be misleading. A good average can hide a terrible tail latency (P99), and it's
-    the P99 latency that kills user experience. Another common mistake is to solve the latency problem
-    by sacrificing all throughput (e.g., setting batch size to 1), which makes the system inefficient.
-  napkin_math: 'Batch of 4 requests, each 20 tokens. If average TPOT is 5ms per token for the batch, total batch time = 20 tokens * 5ms/token = 100ms. Static batching means this 100ms is uninterruptible. A UI thread waiting for TTFT will be blocked for up to 100ms, far exceeding the 16ms frame deadline. Peak arrival is 10/s (100ms inter-arrival), so the NPU can handle the throughput (100ms compute per 4 requests = 40/s capacity), but the static batching creates severe head-of-line blocking.'
+  realistic_solution: The core issue is **head-of-line blocking** caused by the static batching policy. When the system batches four 20-token requests, it creates a single, monolithic compute block on the NPU that takes 100ms to complete. If the UI thread is waiting for the first token (TTFT) from a new request that just missed the start of a batch, it will be blocked for the entire 100ms duration. This dramatically exceeds the 16ms UI frame deadline, causing the perceived 'jank' and 'freezes'. The system has sufficient capacity on average, but the scheduling strategy is wrong for a real-time, interactive workload. The correct solution is to implement continuous batching, where the system can immediately start processing new requests as they arrive and stream tokens back as they are generated, ensuring TTFT remains low and the NPU is never locked in a long, uninterruptible task.
+  common_mistake: |
+    **The Pitfall:** Blaming the hardware's raw performance (TOPS) or focusing exclusively on average latency rather than tail latency (P99).
+    **The Rationale:** Engineers assume that if average throughput is sufficient, the system will not drop frames, forgetting that a single long, uninterruptible batch block delays new requests.
+    **The Consequence:** They either declare the hardware insufficient or drastically reduce batch size to 1, ruining overall efficiency while failing to solve the underlying head-of-line blocking.
+  napkin_math: |
+    1. **Batch Time:** A batch of 4 requests, each 20 tokens long. TPOT is 5ms per token. Total uninterruptible compute block = 20 tokens × 5ms = 100ms.
+    2. **Arrival Rate:** 10 requests per second means an inter-arrival time of 100ms. The NPU can handle 40 requests/sec, so capacity is not the issue.
+    3. **UI Blocking:** If the UI thread waits for Time To First Token (TTFT) for a request that arrives right after a batch starts, it is blocked for the entire 100ms duration.
+    **Result:** The 100ms static batching causes **head-of-line blocking**, severely exceeding the **16ms UI deadline** and causing keyboard freezes.
   options:
-  - The NPU is too slow. With a 25% utilization rate, it is clear the hardware cannot keep up with the
-    10 request/sec arrival rate, causing the request queue to grow indefinitely and block the UI thread.
-  - The memory bandwidth is the bottleneck. The model is too large, and the NPU is spending most of its
-    time waiting for data from DRAM instead of computing, which is why the processing time is so long.
-  - The static batching creates head-of-line blocking. The 100ms uninterruptible batch processing time
-    exceeds the 16ms UI deadline, causing frame drops. A switch to continuous batching is needed.
-  - The batch size is too large. Reducing the batch size to 1 is the only way to minimize latency and
-    ensure the 16ms deadline is never missed, even if it means lower overall throughput.
+  - The NPU is too slow. With a 25% utilization rate, it is clear the hardware cannot keep up with the 10 request/sec arrival rate, causing the request queue to grow indefinitely and block the UI thread.
+  - The memory bandwidth is the bottleneck. The model is too large, and the NPU is spending most of its time waiting for data from DRAM instead of computing, which is why the processing time is so long.
+  - The static batching creates head-of-line blocking. The 100ms uninterruptible batch processing time exceeds the 16ms UI deadline, causing frame drops. A switch to continuous batching is needed.
+  - The batch size is too large. Reducing the batch size to 1 is the only way to minimize latency and ensure the 16ms deadline is never missed, even if it means lower overall throughput.
   correct_index: 2
 status: published
 provenance: imported

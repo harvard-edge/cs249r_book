@@ -8,28 +8,24 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: 'Pipeline Parallelism Realization: Memory per Stage for LLaMA-70B'
-scenario: Size the per-GPU memory requirements for 8-stage pipeline parallelism of
-  LLaMA-70B on H100 (80GB HBM3). The model has 80 layers, hidden dim 8192, 64 attention
-  heads, and is trained in BF16 with Adam optimizer and gradient checkpointing. Determine
-  if it fits and what's the spare headroom.
-question: For 8-stage pipeline parallel LLaMA-70B training on 80GB H100s, how much
-  memory does each stage need and what headroom remains?
+scenario: Size the per-GPU memory requirements for 8-stage pipeline parallelism of LLaMA-70B on H100 (80GB HBM3). The model has 80 layers, hidden dim 8192, 64 attention heads, and is trained with an Adam optimizer and gradient checkpointing. Assume data parallelism (DP) degree is 1.
+question: For 8-stage pipeline parallel LLaMA-70B training on 80GB H100s with DP=1, how much memory does each stage need, does it fit, and what headroom remains?
 details:
-  realistic_solution: '70B params / 8 stages = 8.75B params/stage. BF16 weights: 8.75B
-    * 2 = 17.5GB. Adam optimizer (FP32): 8.75B * 12 = 105GB — but this must fit across
-    DP replicas. If DP=1 (pure PP): optimizer = 105GB >> 80GB. Solution: use ZeRO-1
-    to shard optimizer states across pipeline stages or use BF16 Adam. BF16 optimizer:
-    8.75B * 6 = 52.5GB. Plus activations (checkpointed): ~4GB/stage. Total: 17.5+52.5+4
-    = 74GB — fits in 80GB with 6GB headroom.'
-  common_mistake: 'Forgetting optimizer state memory (Adam requires 3 copies: fp32
-    weights, first moment, second moment = 4+4+4=12 bytes/param) and counting only
-    model weights.'
-  napkin_math: 'Weights per stage: 70B/8 * 2B = 17.5GB. Optimizer (FP32 Adam): 70B/8
-    * 12B = 105GB — does NOT fit. BF16 Adam (2+2+2 bytes): 70B/8 * 6B = 52.5GB. Gradient
-    buffer: 70B/8 * 2B = 17.5GB. Activations (checkpointed, 10 layers): 10 * 8192
-    * 2048 * 2 = 335MB. Total: 17.5 + 52.5 + 17.5 + 0.335 = 87.8GB — still over. Must
-    use ZeRO-2 or reduce gradient buffer. With ZeRO-2 (gradients sharded): 17.5 +
-    52.5 + 0.335 = 70.3GB — fits with 9.7GB headroom.'
+  realistic_solution: '70B params / 8 stages = 8.75B params/stage. BF16 weights: 8.75B * 2B = 17.5GB. Adam optimizer requires FP32 states normally (first moment, second moment, FP32 master weights = 12 bytes/param), but with BF16 Adam it is 6 bytes/param = 52.5 GB. Gradients are another 2 bytes/param = 17.5 GB. With DP=1, ZeRO parallelism cannot be used to shard optimizer states because there are no DP peers. The total memory for BF16 Adam would be 17.5 + 52.5 + 17.5 = 87.5 GB, which OOMs the 80 GB limit. The solution is to use 8-bit Adam (2 bytes/param = 17.5 GB), bringing total footprint to 17.5 + 17.5 + 17.5 + 0.335 (acts) = 52.8 GB, leaving ~27.2 GB headroom.'
+  common_mistake: |
+    **The Pitfall:** Forgetting the optimizer state memory entirely, or incorrectly assuming ZeRO can be used when Data Parallelism is 1.
+    
+    **The Rationale:** Engineers frequently estimate memory strictly based on weight size (17.5 GB) and falsely conclude it easily fits, neglecting the massive footprint of the Adam optimizer states (which are 3-6x the size of the weights in FP32/BF16).
+    
+    **The Consequence:** Training jobs crash with Out-Of-Memory errors immediately upon initialization, forcing a complete redesign of the parallelism strategy or forcing adoption of quantized optimizers.
+  napkin_math: |
+    - **Weights per stage**: 70B / 8 = 8.75B params. At 2 bytes/param = 17.5 GB.
+    - **Optimizer state (BF16 Adam)**: 8.75B * 6 bytes/param = 52.5 GB.
+    - **Gradient buffer**: 8.75B * 2 bytes/param = 17.5 GB.
+    - **Activations (checkpointed)**: ~335 MB.
+    - **Total without ZeRO (DP=1)**: 17.5 + 52.5 + 17.5 + 0.335 = 87.8 GB.
+    - **Result**: **Does NOT fit** in 80 GB.
+    - **Solution**: Must use 8-bit Adam (2 bytes/param -> 17.5 GB), reducing total memory to 17.5 + 17.5 + 17.5 + 0.335 = **52.8 GB**, leaving **27.2 GB headroom**.
 status: published
 provenance: imported
 requires_explanation: false

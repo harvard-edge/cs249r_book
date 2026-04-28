@@ -8,24 +8,20 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Root Causing H2D Serialization in CUDA Streams
-scenario: A vision transformer processing 4K images operates at 20 QPS. Profiling shows the GPU is completely
-  idle 40% of the time. The application uses `cudaMemcpyAsync` to transfer the 500MB input batch to the
-  GPU, followed immediately by the forward pass kernel invocation.
-question: "Why is the ViT GPU idle 40% of the time despite using cudaMemcpyAsync for the 500MB input batch, and how would you overlap transfer and compute?"
+scenario: A vision transformer processing 4K images operates at 20 QPS. Profiling shows the GPU is completely idle 40% of the time. The application uses `cudaMemcpyAsync` to transfer the 500MB input batch to the GPU, followed immediately by the forward pass kernel invocation.
+question: "Why is the GPU idle 40% of the time despite using cudaMemcpyAsync, and how would you overlap transfer and compute?"
 details:
-  realistic_solution: The root cause is stream serialization. Although `cudaMemcpyAsync` is non-blocking
-    to the host CPU, if it is placed on the same default CUDA stream (Stream 0) as the compute kernel,
-    the GPU strictly serializes the operations. The GPU waits for the entire 500MB transfer over PCIe
-    to finish before launching the compute kernel, resulting in idle compute units during the transfer.
-    The solution is to use dual CUDA streams (a dedicated copy stream and a compute stream) and implement
-    double-buffering. Transfer batch N+1 on the copy stream while batch N is computing on the compute
-    stream, synchronizing them via `cudaEventRecord` and `cudaStreamWaitEvent`.
-  common_mistake: Assuming that using `cudaMemcpyAsync` automatically guarantees overlap with compute,
-    ignoring stream semantics.
-  napkin_math: 500MB input batch. PCIe Gen4 x16 effective bandwidth = 32 GB/s. Transfer time = 500MB /
-    32 GB/s = 15.6ms. Compute time = 30ms. Since they are serialized, total time per batch = 15.6ms +
-    30ms = 45.6ms (equivalent to 21.9 QPS). If successfully overlapped via separate streams, total time
-    per batch = max(15.6ms, 30ms) = 30ms (equivalent to 33 QPS).
+  realistic_solution: The root cause is stream serialization. Although `cudaMemcpyAsync` is non-blocking to the host CPU, if it is placed on the same default CUDA stream (Stream 0) as the compute kernel, the GPU strictly serializes the operations. The GPU waits for the entire 500MB transfer over PCIe to finish before launching the compute kernel, resulting in idle compute units during the transfer. The solution is to use dual CUDA streams (a dedicated copy stream and a compute stream) and implement double-buffering. Transfer batch N+1 on the copy stream while batch N is computing on the compute stream, synchronizing them via `cudaEventRecord` and `cudaStreamWaitEvent`.
+  common_mistake: |
+    **The Pitfall:** Assuming that invoking `cudaMemcpyAsync` automatically guarantees overlap with compute.
+    **The Rationale:** Candidates write the API call but ignore CUDA stream semantics, unaware that placing both operations on the default stream forces strict serialization.
+    **The Consequence:** Leaving massive amounts of GPU compute capacity idle while the accelerator waits for host-to-device PCIe transfers to finish.
+  napkin_math: |
+    - 500MB input batch. PCIe Gen4 x16 effective bandwidth = 32 GB/s.
+    - Transfer time = 500MB / 32 GB/s = 15.6 ms. Compute time = 30 ms.
+    - Serialized total time per batch = 15.6 ms + 30 ms = 45.6 ms (21.9 QPS).
+    - Overlapped via separate streams: total time per batch = max(15.6 ms, 30 ms) = **30 ms**.
+    - **Throughput increases from 21.9 QPS to 33.3 QPS.**
 status: published
 provenance: imported
 requires_explanation: false

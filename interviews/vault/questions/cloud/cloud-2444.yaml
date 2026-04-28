@@ -8,27 +8,20 @@ competency_area: compute
 bloom_level: evaluate
 phase: both
 title: Batched Prefill Throughput Collapse
-scenario: You are serving a 70B model on an A100 (80GB, 2000 GB/s, 312 TFLOPS). During the prefill phase
-  for 2048-token prompts, your system processes 1 request at a time, achieving ~150,000 tokens/sec. To
-  maximize throughput, the team updates the serving engine to batch 16 of these 2048-token prompts together.
-  They expect a massive throughput (tokens/sec) increase, similar to the gains seen when batching autoregressive
-  decoding. Instead, the prefill throughput barely increases (less than 5%).
-question: "Why does batching 16 simultaneous 2048-token prefill requests barely increase tokens/sec on the A100?"
+scenario: You are serving a 70B model on an A100 (80GB, 2000 GB/s, 312 TFLOPS). During the prefill phase for 2048-token prompts, your system processes 1 request at a time, achieving ~150,000 tokens/sec. To maximize throughput, the team updates the serving engine to batch 16 of these 2048-token prompts together. They expect a massive throughput (tokens/sec) increase, similar to the gains seen when batching autoregressive decoding. Instead, the prefill throughput barely increases (less than 5%).
+question: Why does batching 16 simultaneous 2048-token prefill requests barely increase tokens/sec on the A100?
 details:
-  realistic_solution: The diagnosis is that the prefill phase for large prompts is already heavily compute-bound,
-    meaning it has saturated the 'flat roof' of the roofline model. In decoding (batch size 1), the arithmetic
-    intensity is ~1 FLOP/byte, which is memory-bound, so increasing batch size linearly increases intensity
-    and throughput. However, in prefill, the arithmetic intensity is roughly equal to the sequence length.
-    For a 2048-token prompt, the intensity is ~2048 FLOPs/byte. The A100's ridge point is 156 FLOPs/byte.
-    Because 2048 >> 156, the GPU's Tensor Cores are already operating at near 100% utilization. Batching
-    16 requests pushes the arithmetic intensity to ~32,768 FLOPs/byte, but since you are already at the
-    peak compute ceiling (312 TFLOPS), the extra intensity cannot be converted into higher throughput.
-  common_mistake: Assuming that increasing batch size always increases GPU utilization and throughput,
-    regardless of the current arithmetic intensity.
-  napkin_math: A100 Ridge Point = 312 TFLOPS / 2000 GB/s = 156 FLOPs/byte. Prefill AI (BS=1, Seq=2048)
-    = (2 * 70B * 2048) / (70B * 2 bytes) = 2048 FLOPs/byte. Since 2048 > 156, peak throughput is capped
-    at 312 TFLOPS. Tokens/sec = 312 TFLOPS / (2 * 70B FLOPs/token) = ~2,228 tokens/sec theoretically (achieved
-    lower due to MFU). Batching to 16 increases AI to 32768, but the ceiling remains 312 TFLOPS.
+  realistic_solution: The diagnosis is that the prefill phase for large prompts is already heavily compute-bound, meaning it has saturated the 'flat roof' of the roofline model. In decoding (batch size 1), the arithmetic intensity is ~1 FLOP/byte, which is memory-bound, so increasing batch size linearly increases intensity and throughput. However, in prefill, the arithmetic intensity is roughly equal to the sequence length. For a 2048-token prompt, the intensity is ~2048 FLOPs/byte. The A100's ridge point is 156 FLOPs/byte. Because 2048 >> 156, the GPU's Tensor Cores are already operating at near 100% utilization. Batching 16 requests pushes the arithmetic intensity to ~32,768 FLOPs/byte, but since you are already at the peak compute ceiling (312 TFLOPS), the extra intensity cannot be converted into higher throughput.
+  common_mistake: |
+    **The Pitfall:** Assuming that increasing batch size always increases GPU utilization and throughput.
+    **The Rationale:** Batching works wonders for memory-bound tasks like autoregressive decoding, so engineers assume it universally applies.
+    **The Consequence:** They waste engineering effort implementing complex batching mechanisms for a prefill phase that is already compute-bound.
+  napkin_math: |
+    - **A100 Ridge Point:** 312 TFLOPS / 2000 GB/s = 156 FLOPs/byte.
+    - **Prefill Arithmetic Intensity (BS=1, Seq=2048):** (2 × 70B × 2048 FLOPs) / (70B params × 2 bytes) = 2048 FLOPs/byte.
+    - **Compute Cap:** Since 2048 >> 156, prefill is already deeply compute-bound.
+    - **Peak Theoretical Tokens/sec:** 312 TFLOPS / (2 × 70B FLOPs/token) = ~2,228 tokens/sec/prompt (achieved lower due to MFU).
+    - **Effect of Batching:** Batching to 16 increases AI to 32,768, but the throughput ceiling remains fixed at **312 TFLOPS.**
 status: published
 provenance: imported
 requires_explanation: false

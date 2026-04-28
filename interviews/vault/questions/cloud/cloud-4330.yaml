@@ -8,35 +8,21 @@ competency_area: architecture
 bloom_level: create
 phase: inference
 title: Model Parallelism Strategy for 100TB Embedding Cluster
-scenario: 'Design the full training parallelism strategy for a DLRM with 100 TB of
-  embedding tables and a 10B parameter dense MLP. You have 512 H100s (80 GB each)
-  and 512 CPU nodes (2 TB DRAM each). Specify: embedding sharding strategy, MLP parallelism,
-  gradient synchronization protocol, and expected training throughput in samples/second.'
-question: What hybrid training strategy and throughput would you expect for 100 TB
-  embeddings and a 10B-parameter MLP on 512 H100s plus CPU nodes?
+scenario: Design the full training parallelism strategy for a DLRM with 100 TB of embedding tables and a 10B parameter dense MLP. You have 512 H100s (80 GB each) and 512 CPU nodes (2 TB DRAM each).
+question: What hybrid training strategy and throughput would you expect for 100 TB embeddings and a 10B-parameter MLP on 512 H100s plus CPU nodes?
 details:
-  realistic_solution: 'Hybrid parallelism: (1) Embedding model parallelism: 100 TB
-    / (512 H100s × 80 GB + 512 CPU nodes × 2 TB) = 100 TB / (40.96 TB GPU + 1024 TB
-    CPU). Hot embeddings on GPU HBM (40.96 TB fits ~41% of tables by frequency). Cold
-    embeddings on CPU DRAM. Row-wise sharding: each GPU/CPU holds a disjoint row range
-    per table. (2) MLP data parallelism: 10B params at FP16 = 20 GB — fits on a single
-    H100 with room for activations. Replicate MLP across all 512 H100s. Data-parallel
-    batches: 512 replicas × batch_size_per_replica. (3) Gradient sync: MLP: standard
-    all-reduce across 512 GPUs (NCCL ring-allreduce, 20 GB array → 40 GB transferred
-    per node, ~800 ms on 400 Gbps). Embeddings: sparse row-wise updates sent to the
-    GPU/CPU holding that row (all-to-all pattern). (4) Throughput: assume each H100
-    processes 4096 samples/step. The step time is dominated by the massive 800 ms
-    MLP all-reduce. 4096 × 512 / 0.810 = 2.58M samples/s aggregate.'
-  common_mistake: Applying data parallelism uniformly — data parallelism for 100 TB
-    embeddings requires all-to-all communication that scales poorly. The embeddings
-    need model parallelism, while the MLP needs data parallelism.
-  napkin_math: 'MLP backward all-reduce: 10B params × 2 bytes = 20 GB. Ring-allreduce
-    on 512 GPUs: each node sends 2 × (N-1)/N × 20 GB ≈ 40 GB. At 400 Gbps (50 GB/s):
-    40 GB / 50 GB/s = 800 ms. Embedding all-to-all: each GPU holds batch=4096 × 500
-    features × 256 bytes = 524 MB of local activations. In an all-to-all, each GPU
-    sends ~524 MB. At 50 GB/s: 524 MB / 50 GB/s = 10.5 ms. The bottleneck is the massive
-    10B dense MLP all-reduce (800 ms), NOT the embedding all-to-all. With step time
-    ≈ 810 ms: throughput = 4096 × 512 / 0.81 s = 2.58M samples/s.'
+  realistic_solution: 'Hybrid parallelism: (1) Embedding model parallelism: 100 TB / (512 H100s × 80 GB + 512 CPU nodes × 2 TB) = 100 TB / (40.96 TB GPU + 1024 TB CPU). Hot embeddings on GPU HBM (40.96 TB fits ~41% of tables by frequency). Cold embeddings on CPU DRAM. Row-wise sharding: each GPU/CPU holds a disjoint row range per table. (2) MLP data parallelism: 10B params at FP16 = 20 GB — fits on a single H100 with room for activations. Replicate MLP across all 512 H100s. Data-parallel batches: 512 replicas × batch_size_per_replica. (3) Gradient sync: MLP: standard all-reduce across 512 GPUs (NCCL ring-allreduce, 20 GB array → 40 GB transferred per node, ~800 ms on 400 Gbps). Embeddings: sparse row-wise updates sent to the GPU/CPU holding that row (all-to-all pattern). (4) Throughput: assume each H100 processes 4096 samples/step. The step time is dominated by the massive 800 ms MLP all-reduce. 4096 × 512 / 0.810 = 2.58M samples/s aggregate.'
+  common_mistake: |
+    **The Pitfall:** Applying data parallelism uniformly across the entire model.
+    **The Rationale:** Candidates assume standard DP works for all model components.
+    **The Consequence:** Data parallelism for 100 TB embeddings requires all-to-all communication of massive weights that scales poorly. Embeddings need model parallelism, while the MLP needs data parallelism.
+  napkin_math: |
+    - **MLP backward all-reduce:** 10B params * 2 bytes = 20 GB.
+    - **Ring-allreduce on 512 GPUs:** Each node sends 2 * (N-1)/N * 20 GB ≈ 40 GB.
+    - **MLP Network Time:** 40 GB / 50 GB/s (400 Gbps) = **800 ms**.
+    - **Embedding all-to-all:** Each GPU holds batch=4096 * 500 features * 256 bytes = 524 MB.
+    - **Embedding Network Time:** 524 MB / 50 GB/s ≈ 10.5 ms.
+    - **Throughput:** Step time ≈ 810 ms. 4096 batch * 512 GPUs / 0.81 s = **2.58M samples/s**.
 status: published
 provenance: imported
 requires_explanation: true

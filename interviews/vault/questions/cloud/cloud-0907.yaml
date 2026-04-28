@@ -8,32 +8,21 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: SyncBatchNorm Communication Overhead
-scenario: You are training a 3D ResNet for video action recognition on a single node with 8x H100 (80GB)
-  GPUs. Due to the massive activation memory required for 3D convolutions, your per-GPU micro-batch size
-  is limited to 2. To maintain training stability with such a small local batch, you replace standard
-  Batch Normalization with Synchronized Batch Normalization (SyncBN). For a specific intermediate layer
-  with 1024 output channels, calculate the total data transmitted by a single GPU during the forward pass
-  All-Reduce operation required to compute the global statistics. Assume FP32 precision for the statistics
-  and a Ring All-Reduce topology.
-question: "How much data does one GPU transmit during the SyncBN forward-pass Ring AllReduce for 1024 FP32 channels on 8 GPUs?"
+scenario: 'You are training a 3D ResNet for video action recognition on a single node with 8x H100 GPUs. Due to activation memory, micro-batch size is limited to 2. You replace standard Batch Normalization with Synchronized Batch Normalization (SyncBN).'
+question: 'How much data does one GPU transmit during the SyncBN forward-pass Ring AllReduce for 1024 FP32 channels on 8 GPUs?'
 details:
-  realistic_solution: Each GPU only needs to communicate the local sum and sum of squares of the activations
-    per channel, not the full activation tensor. For 1024 channels in FP32, this creates an 8 KB payload
-    per GPU. During an 8-GPU Ring All-Reduce, each GPU transmits exactly 14 KB of data. Because the payload
-    is so small, SyncBN is heavily latency-bound rather than bandwidth-bound, making kernel fusion and
-    fast interconnects critical.
-  common_mistake: Candidates often believe the full activation tensor (N x C x D x H x W) must be gathered
-    across all GPUs, leading to bandwidth estimates in the gigabytes. Alternatively, they forget that
-    calculating the global variance requires reducing both the sum and the sum of squares across devices.
-  napkin_math: '1. Stats needed per channel: sum and sum of squares (2 values).
-
-    2. Values per GPU payload (S): 2 stats/channel * 1024 channels = 2048 values.
-
-    3. Payload size in bytes: 2048 values * 4 bytes/value (FP32) = 8,192 bytes (8 KB).
-
-    4. Ring All-Reduce transfer formula per GPU: 2 * ((N-1)/N) * S.
-
-    5. Calculation for N=8: 2 * (7/8) * 8 KB = 14 KB transmitted per GPU.'
+  realistic_solution: 'Each GPU only needs to communicate the local sum and sum of squares of the activations per channel, not the full activation tensor. For 1024 channels in FP32, this creates an 8 KB payload per GPU. During an 8-GPU Ring All-Reduce, each GPU transmits exactly 14 KB of data. Because the payload is so small, SyncBN is heavily latency-bound rather than bandwidth-bound, making kernel fusion and fast interconnects critical.'
+  common_mistake: |
+    **The Pitfall:** Believing the full activation tensor must be gathered across all GPUs.
+    **The Rationale:** Candidates forget that calculating global variance only requires reducing the sum and sum of squares, not the `N x C x D x H x W` tensor.
+    **The Consequence:** Estimating gigabytes of bandwidth instead of kilobytes, fundamentally misunderstanding the latency-bound nature of SyncBN.
+  napkin_math: |
+    * Stats needed per channel: sum and sum of squares (2 values).
+    * Values per GPU payload: 2 stats/channel * 1024 channels = 2048 values.
+    * Payload size: 2048 values * 4 bytes/value (FP32) = 8,192 bytes (8 KB).
+    * Ring All-Reduce formula per GPU: 2 * ((N-1)/N) * Payload.
+    * Calculation for N=8: 2 * (7/8) * 8 KB = 14 KB.
+    * **Each GPU transmits exactly 14 KB of data.**
 status: published
 provenance: imported
 requires_explanation: false

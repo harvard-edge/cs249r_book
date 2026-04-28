@@ -8,16 +8,20 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: The Model Cascade Routing Decision
-scenario: 'You serve a customer support chatbot with a 3-tier model cascade: a 1B model ($0.0002/request,
-  85% accuracy), a 7B model ($0.002/request, 93% accuracy), and a 70B model ($0.02/request, 98% accuracy).
-  Design a routing system that achieves 95% effective accuracy while minimizing cost. Your traffic is
-  100K requests/day. What routing strategy achieves the best cost-accuracy Pareto frontier?'
-question: "What routing strategy achieves the best cost-accuracy Pareto frontier?"
+scenario: You serve a customer support chatbot with a 3-tier model cascade: a 1B model ($0.0002/request, 85% accuracy), a 7B model ($0.002/request, 93% accuracy), and a 70B model ($0.02/request, 98% accuracy). Your traffic is 100K requests/day.
+question: What routing strategy achieves 95% effective accuracy while minimizing cost?
 details:
   realistic_solution: 'Confidence-based cascading (running 1B, then escalating if unconfident) is inefficient because running larger models on the tail adds latency and the 1B model''s confidence scores are often poorly calibrated. A naive cascade keeping 60% of queries at 1B (with 85% accuracy on that slice), 25% at 7B (93% accuracy), and 15% at 70B (98% accuracy) only yields 89% effective accuracy. Fix: train a separate lightweight router model (~100M params, 1ms inference) that predicts query complexity before generation. With a well-trained router routing 50% -> 1B (easy queries, 92% accuracy on these), 35% -> 7B (medium, 95% accuracy), 15% -> 70B (hard, 98% accuracy), you achieve 0.50 × 0.92 + 0.35 × 0.95 + 0.15 × 0.98 = 0.9395 ≈ 94% accuracy. Tuning the thresholds to send slightly more to 70B achieves 95%.'
-  common_mistake: Always routing to the 70B model for guaranteed 98% accuracy. This costs $2,000/day.
-    Or routing everything to 1B to save cost, accepting 85% accuracy.
-  napkin_math: 'All 70B: 100K * $0.02 = $2,000/day. Naive cascade: 100K hit 1B ($20). 40K escalate to 7B ($80). 15K escalate to 70B ($300). Total: $400/day. Effective accuracy: (60K*0.85 + 25K*0.93 + 15K*0.98)/100K = 89.0%. With trained predictive router: 50K -> 1B (92% acc), 35K -> 7B (95% acc), 15K -> 70B (98% acc). Cost: 50K*$0.0002 + 35K*$0.002 + 15K*$0.02 + $5 router = $10 + $70 + $300 + $5 = $385/day. Effective accuracy: (50K*0.92 + 35K*0.95 + 15K*0.98)/100K = 93.95%. Further threshold tuning hits 95% for ~$400/day. Savings vs all-70B: 80%.'
+  common_mistake: |
+    **The Pitfall:** Relying purely on sequential cascading or routing everything to the largest model.
+    **The Rationale:** Engineers assume confidence scores from tiny models are reliable enough for routing, or they simply throw money at the problem by relying solely on the 70B model.
+    **The Consequence:** They suffer massive tail latencies from re-running queries or burn through budget needlessly ($2,000/day vs $400/day).
+  napkin_math: |
+    - All 70B: 100K * $0.02 = $2,000/day.
+    - Naive cascade: 100K hit 1B ($20) -> 40K escalate to 7B ($80) -> 15K escalate to 70B ($300). Total: $400/day. Effective accuracy = 89.0%.
+    - With trained predictive router: 50K -> 1B (92% acc), 35K -> 7B (95% acc), 15K -> 70B (98% acc).
+    - Cost: 50K*$0.0002 + 35K*$0.002 + 15K*$0.02 + $5 router = $385/day.
+    - **Effective accuracy: (50K*0.92 + 35K*0.95 + 15K*0.98)/100K = 93.95%. Threshold tuning cleanly hits 95% for ~$400/day (80% savings vs 70B).**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,36 +8,20 @@ competency_area: data
 bloom_level: evaluate
 phase: both
 title: Designing a Multi-Signal Data Quality Pipeline at Petabyte Scale
-scenario: 'You are the tech lead for the data team at an LLM lab. Your task: build a reusable data quality
-  scoring pipeline that processes 100 TB of raw web crawl (~800 GB extracted text \u2248 200B tokens) per week and assigns a composite quality score
-  to each document. The score must combine: (1) a learned quality classifier, (2) a perplexity score from
-  a 1B parameter reference LM, (3) 15 heuristic signals (repetition ratio, boilerplate fraction, toxic
-  content score, etc.), and (4) a deduplication flag. The pipeline must be deterministic (same input always
-  produces same output) and fully reproducible. The research team wants to ablate each quality signal
-  by rerunning the pipeline with different scoring weights. Design the distributed systems architecture.'
-question: "How would you design a deterministic, reproducible 100 TB/week quality-scoring pipeline that supports cheap signal-weight ablations?"
+scenario: You must build a deterministic, reproducible scoring pipeline that processes 100 TB of raw web crawl (~200B tokens) per week. The score combines a quality classifier, a 1B parameter perplexity score, 15 heuristics, and deduplication. The research team wants to repeatedly ablate each signal by rerunning the pipeline with different scoring weights.
+question: How would you design a 100 TB/week quality-scoring pipeline that supports cheap, rapid signal-weight ablations?
 details:
-  realistic_solution: 'Use a columnar, append-only architecture with signal decomposition. Phase 1 \u2014 Signal
-    Computation (run once per crawl): (a) Heuristic signals: embarrassingly parallel Spark job, ~100 TB/hour
-    on 500 nodes. Write 15 score columns to a Parquet table keyed by doc_id. (b) Quality classifier: batch
-    inference on CPU cluster, ~50 TB/hour. Write classifier_score column. (c) Perplexity scoring: batch
-    inference on GPU cluster (1B model, ~10K tokens/sec per GPU). Extracted text is \u2248 200B tokens. On 64 A100s: ~200B
-    / (64 \u00d7 10K) = 312,500 seconds \u2248 3.6 days. Write perplexity column. (d) Deduplication: MinHash LSH
-    pipeline. Write dedup_flag and cluster_id columns. Phase 2 \u2014 Score Composition (run per experiment):
-    Read only the pre-computed score columns (not the raw text). Apply weighted combination: final_score
-    = w1 \u00d7 classifier + w2 \u00d7 (1/perplexity) + w3 \u00d7 heuristic_composite + w4 \u00d7 dedup_penalty. This reads
-    ~20 GB of score columns instead of 100 TB of raw text. Ablation runs complete in minutes. All columns
-    are versioned with the pipeline git hash for reproducibility. The architecture is essentially a feature
-    store for data quality signals.'
-  common_mistake: '"Compute everything in a single monolithic Spark job that reads the raw data, runs
-    all scorers, and writes the output." This fails the ablation requirement \u2014 changing one weight forces
-    re-running every signal computation, including the expensive LM perplexity inference.'
-  napkin_math: 'Phase 1 total compute cost: Heuristics (500 CPU nodes \u00d7 2 hours \u00d7 $0.10/hr) = $100. Classifier
-    (500 CPU nodes \u00d7 2 hours \u00d7 $0.10/hr) = $100. Perplexity (64 A100s \u00d7 86 hours \u00d7 $3/hr) = $16,500. Dedup
-    (500 nodes \u00d7 4 hours \u00d7 $0.10/hr) = $200. Total: ~$17K per crawl. Phase 2 per ablation: read 20 GB
-    score table, apply weights, write 5 GB output. Cost: $0.50 on a single node. 100 ablation experiments:
-    $50 vs re-running Phase 1 each time: $1.7M. The decomposed architecture saves 34,000\u00d7 in ablation
-    cost.'
+  realistic_solution: 'Use a columnar, append-only architecture with signal decomposition. Phase 1 (Signal Computation): Run all scorers once, writing individual score columns to a Parquet table keyed by doc_id. Phase 2 (Score Composition): Read only the pre-computed score columns (not the raw text) and apply weighted combinations. Ablation runs complete in minutes because they only read ~20 GB of score columns instead of 100 TB of raw text.'
+  common_mistake: |
+    **The Pitfall:** Computing everything in a single monolithic Spark job that reads raw data, runs all scorers, and outputs a final composite score.
+    **The Rationale:** It seems like the simplest end-to-end data engineering architecture.
+    **The Consequence:** A single weight change forces re-running the entire 100 TB pipeline, including the astronomically expensive 1B parameter perplexity inference over 200B tokens.
+  napkin_math: |
+    1. **Phase 1 Perplexity Cost:** 64 A100s at 10K tok/s per GPU = 640K tok/s.
+    2. Processing 200B tokens takes: $200\text{B} / 640\text{K} \approx 312,500\text{ seconds} \approx 3.6\text{ days}$. Cost is $\sim \$16,500$ per crawl.
+    3. **Phase 2 (Ablation):** Read 20 GB score table, apply weights, write output.
+    4. Cost per ablation is $\sim \$0.50$ on a single node.
+    5. **100 ablation experiments cost $50 using the decomposed architecture, compared to $1.7M if rerunning Phase 1.**
 status: published
 provenance: imported
 requires_explanation: true

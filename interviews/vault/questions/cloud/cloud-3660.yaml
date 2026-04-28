@@ -12,8 +12,16 @@ scenario: A cloud ML platform team needs a custom Kubernetes scheduler that plac
 question: How would you design a Kubernetes scheduler plugin that places A100 inference pods based on free GPU memory instead of GPU count?
 details:
   realistic_solution: 'Implement a Kubernetes scheduler plugin using the Scheduler Framework. In the Filter plugin: query DCGM (Data Center GPU Manager) for per-GPU free memory via Prometheus metrics, filter nodes where any GPU has insufficient free memory for the requested model size. In the Score plugin: prefer nodes where model fits with least fragmentation. Expose gpu.memory.free as a custom resource via Extended Resources.'
-  common_mistake: Building a full custom scheduler from scratch. Kubernetes has a well-defined Scheduler Framework with extension points (Filter, Score, Reserve, Bind) that allow plugins without replacing the default scheduler. Writing a standalone scheduler loses all built-in features (pod affinity, taints, topology spread).
-  napkin_math: 'Node with 8x A100 80GB = 640GB total GPU memory. Models running: 4x 13B (104GB) spread across 4 GPUs, and 4x 7B (56GB) on the other 4 GPUs. Default scheduler might see all GPUs allocated but still try to bin-pack based on total node memory or simplistic GPU counts. If a new 30B request (60GB) arrives, it needs 1 GPU with 60GB free. If the 4 GPUs running 13B only have 54GB free, and the 4 GPUs running 7B have 66GB free, it can only fit on the latter. By exposing nvidia.com/gpu.memory.free per GPU as Extended Resources, the Scheduler sees exactly which individual GPUs can satisfy the 60GB contiguous requirement, preventing OOMs.'
+  common_mistake: |
+    **The Pitfall:** Building a full custom scheduler from scratch.
+    **The Rationale:** Standard Kubernetes resource tracking doesn't natively support dynamic metrics like live GPU memory, leading engineers to think they need a completely custom solution.
+    **The Consequence:** Losing all built-in Kubernetes features (pod affinity, taints, topology spread) and creating a massive maintenance burden, instead of extending the existing Scheduler Framework.
+  napkin_math: |
+    * Node with 8x A100 80GB = 640 GB total GPU memory.
+    * Active models: 4x 13B (104 GB) spread across 4 GPUs, 4x 7B (56 GB) on the remaining 4 GPUs.
+    * The 4 GPUs running 13B have 54 GB free each; the 4 GPUs running 7B have 66 GB free each.
+    * A new 30B model needs 60 GB contiguous memory.
+    * **A naive total-memory scheduler sees 480 GB free and assigns the pod, but exposing `gpu.memory.free` per GPU via Extended Resources ensures it's placed exactly on one of the GPUs with 66 GB free.**
 status: published
 provenance: imported
 requires_explanation: true

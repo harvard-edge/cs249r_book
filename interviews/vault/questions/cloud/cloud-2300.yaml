@@ -8,27 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Hopper FP8 MoE Latency Regression
-scenario: You are serving an 8x7B Mixture of Experts (MoE) LLM on an 8x H100 node. To increase throughput,
-  you convert the model from FP16 to FP8 to leverage the Hopper Transformer Engine. Instead of the expected
-  speedup, P99 Time-Per-Output-Token (TPOT) degrades from 45ms to 62ms. Nsight Systems profiling shows
-  GPU utilization dropped, and the time spent in MoE routing and GEMM kernels significantly increased.
+scenario: You are serving an 8x7B Mixture of Experts (MoE) LLM on an 8x H100 node. To increase throughput, you convert the model from FP16 to FP8 to leverage the Hopper Transformer Engine. Instead of the expected speedup, P99 Time-Per-Output-Token (TPOT) degrades from 45ms to 62ms. Nsight Systems profiling shows GPU utilization dropped, and the time spent in MoE routing and GEMM kernels significantly increased.
 question: "Why did FP8 make MoE decoding slower on the 8x H100 node, and how would you fix the routing and GEMM kernels?"
 details:
-  realistic_solution: 'The root cause is a failure in Hardware-Compiler-Algorithm co-design regarding
-    MoE routing and FP8 Tensor Core alignment. In an MoE model, tokens are dynamically routed to experts.
-    This often results in highly skewed, small token counts per expert (e.g., Expert 1 gets 3 tokens,
-    Expert 2 gets 45). Hopper FP8 Tensor Cores require strict memory alignment (multiples of 16 or 32)
-    to achieve peak throughput. Unaligned GEMMs fall back to slower execution paths. Furthermore, FP8
-    requires calculating dynamic scaling factors (amax), which adds a reduction kernel before the GEMM.
-    For tiny, unaligned matrices (like 3 tokens), the overhead of launching the amax reduction kernel
-    plus the unaligned FP8 GEMM completely dominates the actual math execution, making the system heavily
-    kernel-launch and memory-bound. The fix requires co-design: 1) Algorithm: Implement expert capacity
-    factors or token dropping to enforce fixed, balanced batch sizes per expert. 2) Compiler/Mapping:
-    Pad the routed token tensors to multiples of 16 to ensure FP8 Tensor Core alignment, and fuse the
-    amax calculation into the routing kernel.'
-  common_mistake: Assuming FP8 compute is inherently slower due to downcasting overhead, and reverting
-    to FP16 instead of investigating the kernel execution profile.
-  napkin_math: 'FP16 GEMM for 3 tokens: ~3us kernel time. FP8 for 3 tokens: Amax kernel launch (4us) + Unaligned FP8 GEMM execution (fallback path, ~60us) = 64us minimum overhead, completely negating the 2x theoretical math speedup. Across 32 layers * 8 experts = 256 expert calls per decode step. 256 * 61us extra overhead = ~15.6ms extra overhead per step, matching the 17ms latency regression.'
+  realistic_solution: 'The root cause is a failure in Hardware-Compiler-Algorithm co-design regarding MoE routing and FP8 Tensor Core alignment. In an MoE model, tokens are dynamically routed to experts. This often results in highly skewed, small token counts per expert (e.g., Expert 1 gets 3 tokens, Expert 2 gets 45). Hopper FP8 Tensor Cores require strict memory alignment (multiples of 16 or 32) to achieve peak throughput. Unaligned GEMMs fall back to slower execution paths. Furthermore, FP8 requires calculating dynamic scaling factors (amax), which adds a reduction kernel before the GEMM. For tiny, unaligned matrices (like 3 tokens), the overhead of launching the amax reduction kernel plus the unaligned FP8 GEMM completely dominates the actual math execution, making the system heavily kernel-launch and memory-bound. The fix requires co-design: 1) Algorithm: Implement expert capacity factors or token dropping to enforce fixed, balanced batch sizes per expert. 2) Compiler/Mapping: Pad the routed token tensors to multiples of 16 to ensure FP8 Tensor Core alignment, and fuse the amax calculation into the routing kernel.'
+  common_mistake: |
+    **The Pitfall:** Assuming FP8 compute is inherently slower due to downcasting overhead.
+    **The Rationale:** Engineers revert to FP16 instead of investigating the kernel execution profile to find alignment issues.
+    **The Consequence:** Missing out on the 2x theoretical throughput of FP8 Tensor Cores on Hopper architectures.
+  napkin_math: |
+    1. FP16 GEMM for 3 tokens: ~3us kernel time.
+    2. FP8 for 3 tokens: Amax kernel launch (4us) + Unaligned FP8 GEMM execution (fallback path, ~60us) = 64us minimum overhead.
+    3. Calculate step overhead: Across 32 layers * 8 experts = 256 expert calls per decode step.
+    4. Total extra overhead: 256 * 61us = ~15.6ms extra overhead per step.
+    **Final Result: The 15.6ms kernel launch and alignment overhead perfectly matches the 17ms latency regression.**
   options:
   - 'The Hopper architecture does not support FP8 for Mixture of Experts because expert routing requires FP16 precision to maintain numerical stability; the solution is to revert to FP16.'
   - 'FP8 Tensor Cores operate at double the clock speed of FP16, causing thermal throttling on the H100; the fix is to lower the GPU power limit to 350W during MoE inference.'

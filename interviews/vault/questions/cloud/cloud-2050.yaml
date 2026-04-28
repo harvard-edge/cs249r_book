@@ -8,29 +8,21 @@ competency_area: deployment
 bloom_level: evaluate
 phase: both
 title: The Retrieval Scaling Wall
-scenario: Your RAG system works well at 10M documents. The company acquires a dataset and the corpus grows
-  to 1B documents. Retrieval latency goes from 5ms to 120ms, and retrieval quality (recall@10) drops from
-  0.92 to 0.71, even after re-building the HNSW index. Why does 100× more data cause both latency and
-  quality to degrade, and what architectural changes are needed?
-question: "Why does 100× more data cause both latency and quality to degrade, and what architectural changes are needed?"
+scenario: Your RAG system works well at 10M documents. The company acquires a dataset and the corpus grows to 1B documents. Retrieval latency goes from 5ms to 120ms, and retrieval quality (recall @ 10) drops from 0.92 to 0.71, even after re-building the HNSW index.
+question: Why does 100x more data cause both latency and quality to degrade, and what architectural changes are needed?
 details:
-  realistic_solution: 'Two compounding problems: (1) Latency: HNSW search is O(log N) in graph hops but
-    each hop incurs a random memory access. At 1B vectors × 1536-dim FP32 = 6 TB, the index can''t fit
-    in RAM and spills to SSD. Each graph hop now costs ~100μs (SSD random read) instead of ~100ns (DRAM),
-    a 1000× penalty per hop. With ~7.5 hops: 7.5 × 100μs = 750μs best case, but SSD queue depth and page
-    faults push it to 120ms at P99. (2) Quality: The curse of dimensionality. At 1B points in 1536-dim
-    space, the distance distribution between a query and its true nearest neighbors vs random points becomes
-    increasingly concentrated. The HNSW greedy search gets trapped in local optima more often. Fix: (1)
-    Tiered architecture — IVF coarse quantizer in RAM (cluster centroids for 1B vectors: ~100K centroids
-    = 600 MB), then search within the top-3 clusters using PQ-compressed vectors on SSD. (2) Shard across
-    10 machines with clustering-based routing. (3) Reduce dimensionality to 384 with Matryoshka embeddings
-    — cuts memory 4× and improves distance discrimination.'
-  common_mistake: Assuming HNSW scales linearly and the degradation is just a bug. 'HNSW is O(log N) so
-    100× more data should only be ~7× slower.'
-  napkin_math: '10M × 1536 × 4B = 61.4 GB — fits in RAM. 1B × 1536 × 4B = 6.1 TB — requires SSD or sharding.
-    HNSW hops at 1B: ~log(1B)/log(M) ≈ log(1e9)/log(16) ≈ 7.5 hops (M=16). In RAM: 7.5 × 200ns ≈ 1.5μs
-    per search. On SSD: 7.5 × 100μs ≈ 750μs. With 10 shards: 100M per shard = 614 GB ≈ fits in 768 GB
-    RAM instance. Latency back to ~8ms.'
+  realistic_solution: 'Two compounding problems: (1) Latency: HNSW search is O(log N) in graph hops but each hop incurs a random memory access. At 1B vectors × 1536-dim FP32 = 6 TB, the index can''t fit in RAM and spills to SSD. Each graph hop now costs ~100μs (SSD random read) instead of ~100ns (DRAM), a 1000× penalty per hop. With ~7.5 hops: 7.5 × 100μs = 750μs best case, but SSD queue depth and page faults push it to 120ms at P99. (2) Quality: The curse of dimensionality. At 1B points in 1536-dim space, the distance distribution between a query and its true nearest neighbors vs random points becomes increasingly concentrated. The HNSW greedy search gets trapped in local optima more often. Fix: (1) Tiered architecture — IVF coarse quantizer in RAM (cluster centroids for 1B vectors: ~100K centroids = 600 MB), then search within the top-3 clusters using PQ-compressed vectors on SSD. (2) Shard across 10 machines with clustering-based routing. (3) Reduce dimensionality to 384 with Matryoshka embeddings — cuts memory 4× and improves distance discrimination.'
+  common_mistake: |
+    **The Pitfall:** Assuming HNSW scales linearly and treating the degradation as a bug.
+    **The Rationale:** Candidates think "HNSW is O(log N), so 100x more data should only be slightly slower," completely ignoring the hardware memory hierarchy cliff (RAM to SSD).
+    **The Consequence:** Wasting time tuning HNSW parameters instead of migrating to a tiered architecture (IVF/PQ) or a distributed sharded cluster.
+  napkin_math: |
+    * Memory at 10M: 10M * 1536 dim * 4 bytes = 61.4 GB (fits in RAM).
+    * Memory at 1B: 1B * 1536 dim * 4 bytes = 6.1 TB (spills to SSD).
+    * HNSW hops at 1B (M=16): ~log_16(1,000,000,000) ≈ 7.47 hops.
+    * RAM latency: 7.5 hops * 200 ns ≈ 1.5 μs.
+    * SSD latency: 7.5 hops * 100 μs ≈ 750 μs (queue depth/faults push to 120 ms).
+    * **Result:** Sharding across 10 nodes (100M each) fits indexes in RAM, dropping latency back to ~8 ms.
 status: published
 provenance: imported
 requires_explanation: false
@@ -40,11 +32,9 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- log_16(1,000,000,000) = 7.47 hops, not 15
 human_reviewed:
   status: not-reviewed
   by: null

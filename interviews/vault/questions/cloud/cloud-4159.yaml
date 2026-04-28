@@ -8,31 +8,20 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: Adaptive Timeout Design for LLM Serving
-scenario: Your MI300X LLM serving system has a fixed 5-second timeout. Short prompts
-  (< 100 tokens) complete in 200ms, but long prompts (4096 tokens) legitimately need
-  3.5s for prefill + generation. The fixed timeout kills 8% of long requests prematurely
-  while being too generous for short requests (masking failures). Design an adaptive
-  timeout strategy.
-question: How would you design adaptive timeouts for short and 4096-token prompts
-  so long requests are not killed and short failures are caught?
+scenario: An LLM serving system uses a fixed 5-second timeout. Short prompts (<100 tokens) normally complete in 200ms, while 4096-token prompts need 3.5s. The fixed timeout prematurely kills 8% of valid long requests and masks failures for short requests.
+question: How would you design an adaptive timeout strategy that protects long requests and catches short failures?
 details:
-  realistic_solution: 'Implement per-request adaptive timeouts based on input characteristics:
-    timeout = base_latency(input_tokens) × safety_multiplier. Profile: base_latency
-    = prefill_time(n_tokens) + expected_output_tokens × decode_time. For 100-token
-    input: expected = 20ms prefill + 100 × 12ms = 1.22s, timeout = 1.22s × 2.5 = 3.05s.
-    For 4096-token input: expected = 180ms + 256 × 12ms = 3.25s, timeout = 3.25s ×
-    2.0 = 6.5s (tighter multiplier at scale because variance is lower). Track streaming
-    tokens — if no token arrives within 2× the expected inter-token interval (24ms),
-    abort early regardless of overall timeout. This catches stuck requests within
-    50ms instead of waiting for the full timeout.'
-  common_mistake: Setting the timeout based on the worst case (long prompts) and applying
-    it uniformly. This masks failures for short requests — a short request that takes
-    4.9s is clearly broken but passes the timeout check.
-  napkin_math: 'Fixed 5s timeout: kills 8% of long requests (3.5-5s range), misses
-    stuck short requests for 4.8s. Adaptive: short (100 tokens) timeout = 3s, catches
-    failures in 3s instead of 5s. Long (4096 tokens) timeout = 6.5s, saves 8% of legitimate
-    requests. Token-level timeout (24ms): catches stuck decode in 24ms. Overall timeout
-    violations drop from 8% to 0.3%.'
+  realistic_solution: 'Implement per-request adaptive timeouts based on input characteristics: timeout = base_latency(input_tokens) × safety_multiplier. Profile: base_latency = prefill_time(n_tokens) + expected_output_tokens × decode_time. For 100-token input: expected = 20ms prefill + 100 × 12ms = 1.22s, timeout = 1.22s × 2.5 = 3.05s. For 4096-token input: expected = 180ms + 256 × 12ms = 3.25s, timeout = 3.25s × 2.0 = 6.5s (tighter multiplier at scale because variance is lower). Track streaming tokens — if no token arrives within 2× the expected inter-token interval (24ms), abort early regardless of overall timeout. This catches stuck requests within 50ms instead of waiting for the full timeout.'
+  common_mistake: |
+    **The Pitfall:** Setting a static timeout based on the worst-case scenario.
+    **The Rationale:** Prioritizing simplicity over operational visibility.
+    **The Consequence:** A short request that hangs for 4.9s is broken, but passes the timeout check, destroying user experience metrics while remaining hidden from alerts.
+  napkin_math: |
+    - Fixed 5s timeout misses stuck short requests for 4.8s.
+    - **Adaptive timeout = base_latency(input_tokens) × safety_multiplier.**
+    - Short prompt (100 tokens): expected 1.2s $\to$ timeout 3.0s.
+    - Long prompt (4096 tokens): expected 3.25s $\to$ timeout 6.5s.
+    - **Token-level timeout:** Abort if inter-token time exceeds 24ms, catching stuck decodes instantly.
 status: published
 provenance: imported
 requires_explanation: true

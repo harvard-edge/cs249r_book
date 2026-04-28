@@ -8,28 +8,21 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: KV Cache Memory Bandwidth Bottleneck
-scenario: You are deploying a 70B parameter standard transformer model on a single node with 4x A100 80GB
-  GPUs (2TB/s memory bandwidth each). During profiling of the autoregressive generation phase, you observe
-  that GPU compute (Tensor Core) utilization is under 5%, but HBM memory bandwidth utilization is pegged
-  at 98%. As you increase the batch size from 8 to 64 with a sequence length of 2048, the latency per
-  generated token increases linearly, and overall throughput plateaus. Analyze the root cause of this
-  bottleneck and identify the specific architectural component driving the memory bandwidth saturation.
-question: "What is causing memory bandwidth saturation during 70B autoregressive decoding, and which component should you redesign?"
+scenario: You are deploying a 70B parameter standard transformer model on a single node with 4x A100 80GB GPUs. During profiling of the autoregressive generation phase, you observe that GPU compute utilization is under 5%, but HBM memory bandwidth utilization is pegged at 98%. As you increase the batch size from 8 to 64 with a sequence length of 2048, the latency per generated token increases linearly, and overall throughput plateaus.
+question: What is causing memory bandwidth saturation during 70B autoregressive decoding, and which component should you redesign?
 details:
-  realistic_solution: The root cause is the autoregressive KV cache. During decoding, for every generated
-    token, the entire KV cache for all previous tokens in all active sequences must be read from HBM to
-    SRAM to compute attention. At large batch sizes and sequence lengths, the KV cache data transfer vastly
-    exceeds the model weights transfer and completely saturates memory bandwidth, leaving compute units
-    starved. GQA reduces KV heads by 8x, shrinking the cache from ~10.24GB to ~1.28GB per sequence, enabling
-    batch sizes of ~140 instead of ~17.
-  common_mistake: Candidates often incorrectly assume the bottleneck is related to loading the massive
-    model weights or the compute intensity of self-attention, failing to recognize that generation latency
-    is dominated by repeatedly loading the growing KV cache from HBM for every single generated token.
-  napkin_math: MHA KV cache/token = 2(K,V) * 2 bytes * 8192 (hidden) * 80 (layers) = 2,621,440 bytes ≈
-    2.5 MB. For 4096 context, 1 seq = 2.5 MB × 4096 = 10.24 GB. Available VRAM = 320GB (total) - 140GB
-    (weights) = 180GB. Max MHA batch size = 180GB / 10.24GB ≈ 17. PagedAttention +30% efficiency ≈ 22
-    batch size. GQA (8x reduction) KV cache/token ≈ 0.31 MB (1.28 GB/seq). Max GQA batch size = 180GB
-    / 1.28GB ≈ 140. GQA provides >8x maximum throughput scaling.
+  realistic_solution: The root cause is the autoregressive KV cache. During decoding, for every generated token, the entire KV cache for all previous tokens in all active sequences must be read from HBM to SRAM to compute attention. At large batch sizes and sequence lengths, the KV cache data transfer vastly exceeds the model weights transfer and completely saturates memory bandwidth, leaving compute units starved. GQA reduces KV heads by 8x, shrinking the cache from ~10.24GB to ~1.25GB per sequence, enabling batch sizes of ~144 instead of ~18.
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is model weight loading or self-attention compute.
+    **The Rationale:** Candidates overlook that generation latency is heavily dominated by repeatedly fetching the growing KV cache from memory.
+    **The Consequence:** Attempting to optimize compute kernels rather than shrinking the cache via GQA.
+  napkin_math: |
+    1. **MHA KV Cache/Token:** 2 (K,V) × 2 bytes × 8192 × 80 = 2.5 MB.
+    2. **Context Size (4096):** 1 seq = 2.5 MB × 4096 = 10 GB.
+    3. **Available VRAM:** 320 GB - 140 GB = 180 GB.
+    4. **Max MHA Batch Size:** 180 GB / 10 GB = 18.
+    5. **GQA (8x reduction):** Cache per sequence drops to 1.25 GB.
+    6. **Max GQA Batch Size:** 180 GB / 1.25 GB = **144 sequences**.
 status: published
 provenance: imported
 requires_explanation: false
@@ -50,4 +43,3 @@ human_reviewed:
   by: null
   date: null
   notes: null
-created_at: '2026-03-23T21:00:00.037118'

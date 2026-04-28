@@ -8,26 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Serving 70B LLMs on Single Node
-scenario: You need to deploy a 70B parameter LLM for a global chatbot service. The hardware budget strictly
-  limits you to a single node with 4x A10G (24GB VRAM each, 96GB total). The throughput requirement is
-  500 tokens/sec. The model in FP16 requires ~140GB just for weights. How do you architect the deployment
-  to meet memory constraints while maximizing generation throughput?
-question: "How do you architect the deployment to meet memory constraints while maximizing generation throughput?"
+scenario: You need to deploy a 70B parameter LLM for a global chatbot service. The hardware budget strictly limits you to a single node with 4x A10G (24GB VRAM each, 96GB total). The throughput requirement is 500 tokens/sec. The model in FP16 requires ~140GB just for weights.
+question: How do you architect the deployment to meet the 96GB memory constraints while maximizing generation throughput?
 details:
-  realistic_solution: Implement Weight-Only Post-Training Quantization (e.g., AWQ or GPTQ) down to 4-bit
-    (INT4). In autoregressive generation, the process is heavily memory-bandwidth bound (batch size of
-    1 per step implies reading the entire weight matrix to generate a single token). By quantizing weights
-    to INT4 and keeping activations in FP16 (W4A16), you reduce the memory footprint to fit within the
-    96GB limit with plenty of room for the KV cache, while drastically reducing the bytes read from VRAM
-    per token, directly accelerating generation throughput. A calibration set must be used during the
-    PTQ process to protect salient weights, minimizing the perplexity degradation typically seen in uniform
-    4-bit quantization.
-  common_mistake: Applying W8A8 quantization to reduce weights and compute, which degrades accuracy and
-    doesn't maximize generation token throughput since generation is memory-bandwidth bound.
-  napkin_math: 'FP16 weights: 70B * 2 bytes = 140GB (OOM on 96GB node). INT4 weights: 70B * 0.5 bytes
-    = 35GB. VRAM remaining: 96GB - 35GB = 61GB. KV Cache per token (Llama-2 70B GQA): 80 layers * 8 KV
-    heads * 128 dim * 2 (K+V) * 2 bytes = 327KB/token. 61GB allows for ~186,000 tokens in the KV cache,
-    easily supporting high concurrency.'
+  realistic_solution: Implement Weight-Only Post-Training Quantization (e.g., AWQ or GPTQ) down to 4-bit (INT4). In autoregressive generation, the process is heavily memory-bandwidth bound (batch size of 1 per step implies reading the entire weight matrix to generate a single token). By quantizing weights to INT4 and keeping activations in FP16 (W4A16), you reduce the memory footprint to fit within the 96GB limit with plenty of room for the KV cache, while drastically reducing the bytes read from VRAM per token, directly accelerating generation throughput. A calibration set must be used during the PTQ process to protect salient weights, minimizing the perplexity degradation typically seen in uniform 4-bit quantization.
+  common_mistake: |
+    **The Pitfall:** Applying W8A8 quantization to reduce weights and compute.
+    **The Rationale:** Assuming reducing activation precision (A8) helps speed up generation.
+    **The Consequence:** Degrading accuracy unnecessarily, since autoregressive generation is purely memory-bandwidth bound and activating in INT8 provides little throughput benefit over W4A16.
+  napkin_math: |
+    - FP16 weights: 70B × 2 bytes = 140 GB (OOM on 96 GB node).
+    - INT4 weights: 70B × 0.5 bytes = 35 GB.
+    - VRAM remaining: 96 GB - 35 GB = 61 GB.
+    - KV Cache per token (Llama-2 70B GQA): 80 layers × 8 KV heads × 128 dim × 2 (K+V) × 2 bytes = ~327 KB/token.
+    - Capacity: 61 GB / 327 KB = **~186,000 tokens** in KV cache.
 status: published
 provenance: imported
 requires_explanation: false

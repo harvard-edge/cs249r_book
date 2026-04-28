@@ -8,25 +8,20 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Designing MoE Expert Sharding for TPU v5e
-scenario: You are designing a 128-expert MoE model to run on a pod of 64x TPU v5e
-  chips (16GB HBM, 197 TFLOPS BF16 each). Each expert has 1B parameters in BF16 (2
-  GB). You need to fit all experts in memory while maintaining high utilization. Design
-  the expert sharding strategy and explain the all-to-all communication cost.
-question: How would you shard 128 1B-parameter experts across 64 TPU v5e chips, and
-  what all-to-all cost should you expect?
+scenario: You are designing a 128-expert MoE model to run on a pod of 64x TPU v5e chips (16GB HBM, 197 TFLOPS BF16 each). Each expert has 1B parameters in BF16 (2 GB). You need to fit all experts in memory while maintaining high utilization.
+question: How would you shard 128 1B-parameter experts across 64 TPU v5e chips, and what all-to-all cost should you expect?
 details:
-  realistic_solution: 'Use expert parallelism: partition 128 experts across 64 chips
-    (2 experts/chip). Each chip holds 2 × 2 GB = 4 GB of expert params, leaving 12
-    GB for activations. Use XLA''s all-to-all over the 4096-chip interconnect to route
-    tokens to the correct expert chip. Combine with data parallelism for the dense
-    attention layers.'
-  common_mistake: 'Placing one expert per chip wastes capacity: 128 experts / 64 chips
-    = 2 experts/chip minimum, but naively mapping all experts to all chips defeats
-    the purpose of sparsity and blows the all-to-all volume.'
-  napkin_math: 'Each chip holds 2 experts × 2 GB = 4 GB, well within 16 GB. All-to-all
-    volume per step: batch_tokens × hidden_dim × 2 (BF16) = 4096 × 4096 × 2 = 32 MB
-    per layer. TPU v5e ICI bandwidth ~900 GB/s; all-to-all: 32 MB / 900 GB/s ≈ 35
-    µs per layer. Acceptable for ~100ms step time.'
+  realistic_solution: 'Use expert parallelism: partition 128 experts across 64 chips (2 experts/chip). Each chip holds 2 × 2 GB = 4 GB of expert params, leaving 12 GB for activations. Use XLA''s all-to-all over the 4096-chip interconnect to route tokens to the correct expert chip. Combine with data parallelism for the dense attention layers.'
+  common_mistake: |
+    **The Pitfall:** Placing one expert per chip or naively mapping all experts to all chips.
+    **The Rationale:** Candidates either waste capacity (putting 1 expert/chip leaves half the chips idle) or blow up the network by fully replicating experts, defeating the purpose of sparsity.
+    **The Consequence:** Poor memory utilization or massive all-to-all communication overhead that cripples training performance.
+  napkin_math: |
+    - Expert distribution: 128 experts / 64 chips = 2 experts per chip.
+    - Memory per chip: 2 experts * 2 GB = 4 GB (fits easily within 16 GB HBM, leaving 12 GB for activations).
+    - All-to-all volume per step (Batch=4096, dim=4096): 4096 tokens * 4096 dim * 2 bytes (BF16) = 33.5 MB per layer.
+    - Communication latency: 33.5 MB / 900 GB/s (TPU v5e ICI bandwidth) = ~37 microseconds per layer.
+    - **Conclusion: Sharding 2 experts per chip is highly memory efficient, and the 37µs all-to-all overhead is negligible for a ~100ms step time.**
 status: published
 provenance: imported
 requires_explanation: true

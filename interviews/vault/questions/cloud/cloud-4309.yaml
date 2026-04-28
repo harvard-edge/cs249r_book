@@ -8,37 +8,18 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Multi-Model Disaggregated Serving Isolation
-scenario: 'You run a platform serving 5 different LLM models (7B, 13B, 34B, 70B, 140B)
-  to thousands of tenants with different SLOs. Design the full disaggregated serving
-  architecture: how do you partition prefill and decode pools across models, handle
-  model loading, manage KV-cache isolation between tenants, and set capacity allocation
-  rules that prevent one model''s load spike from impacting SLOs of others?'
-question: How would you architect disaggregated serving for 5 LLMs and thousands of
-  tenants while isolating KV caches and capacity across SLOs?
+scenario: 'You run a platform serving 5 different LLM models (7B, 13B, 34B, 70B, 140B) to thousands of tenants with different SLOs.'
+question: 'How would you architect disaggregated serving for 5 LLMs and thousands of tenants while isolating KV caches and capacity across SLOs?'
 details:
-  realistic_solution: 'Use a two-level architecture: (1) Physical pools: prefill pool
-    (H100s optimized for compute) and decode pool (MI300X for memory capacity). Both
-    pools are shared across models. (2) Logical isolation via virtual queues per model
-    with reserved + burstable capacity. Each model gets a reserved capacity slice
-    (e.g., 20% for each of 5 models) and can burst into unused capacity. (3) Model
-    loading: maintain all models hot on decode nodes using fractional GPU allocation.
-    140B requires TP=2 on MI300X (140 GB < 192 GB each, 2 GPUs for safety margin).
-    7B fits in 14 GB — multiplex 6 instances per MI300X GPU. (4) KV-cache isolation:
-    per-tenant KV namespaces with HBM quotas enforced by the PagedAttention block
-    allocator. Blocks are tagged with tenant ID; cross-tenant block reuse is disabled.
-    (5) Capacity allocation: weighted fair queuing at the prefill scheduler; decode
-    assignments respect per-model KV quotas. A load spike on the 70B model can consume
-    up to 150% of its reserved capacity (burst) but triggers autoscaling before consuming
-    200%.'
-  common_mistake: Statically partitioning pools per model — 5 dedicated pools waste
-    capacity when models have non-simultaneous peaks. The answer involves dynamic
-    pool multiplexing with priority-based isolation.
-  napkin_math: 'MI300X decode node (192 GB): 140B model TP=2 (280 GB across 2 GPUs,
-    140 GB each) + KV pool = 192-140 = 52 GB KV per GPU. 70B model on 1 GPU: 140 GB
-    fits, 52 GB KV. 34B: 68 GB, 124 GB KV. 13B: 26 GB, 166 GB KV. 7B: 14 GB, 178 GB
-    KV. 6 × 7B models on one GPU: 84 GB weights + shared KV pool of 108 GB. Total
-    GPU count for baseline reserved capacity: 70B needs 10 decode GPUs at 500 RPS;
-    scaling linearly, full 5-model platform ≈ 35 decode GPUs + 15 prefill H100s.'
+  realistic_solution: 'Use a two-level architecture: (1) Physical pools: prefill pool (H100s optimized for compute) and decode pool (MI300X for memory capacity). Both pools are shared across models. (2) Logical isolation via virtual queues per model with reserved + burstable capacity. Each model gets a reserved capacity slice (e.g., 20% for each of 5 models) and can burst into unused capacity. (3) Model loading: maintain all models hot on decode nodes using fractional GPU allocation. 140B requires TP=2 on MI300X (140 GB < 192 GB each, 2 GPUs for safety margin). 7B fits in 14 GB — multiplex 6 instances per MI300X GPU. (4) KV-cache isolation: per-tenant KV namespaces with HBM quotas enforced by the PagedAttention block allocator. Blocks are tagged with tenant ID; cross-tenant block reuse is disabled. (5) Capacity allocation: weighted fair queuing at the prefill scheduler; decode assignments respect per-model KV quotas. A load spike on the 70B model can consume up to 150% of its reserved capacity (burst) but triggers autoscaling before consuming 200%.'
+  common_mistake: |
+    **The Pitfall:** Statically partitioning prefill and decode hardware pools per model.
+    **The Rationale:** Statically assigning resources (e.g., 5 dedicated pools for 5 models) seems like the easiest way to ensure strict isolation and predictable performance.
+    **The Consequence:** This drastically wastes compute capacity when models have non-simultaneous traffic peaks, severely impacting the cost-efficiency of the platform.
+  napkin_math: |
+    - **Decode Node (192 GB):** 140B model requires TP=2 (280 GB total across 2 GPUs, 140 GB each). Leaves 192 - 140 = 52 GB per GPU for KV cache.
+    - **7B Model Multiplexing:** 7B model weights take 14 GB. Multiplexing 6 instances on one GPU takes 84 GB weights, leaving 108 GB for a shared KV pool.
+    - **Baseline Sizing:** A 70B model needs ~10 decode GPUs for 500 RPS. Scaling linearly, the full 5-model platform requires **~35 decode GPUs + ~15 prefill GPUs.**
 status: published
 provenance: imported
 requires_explanation: true

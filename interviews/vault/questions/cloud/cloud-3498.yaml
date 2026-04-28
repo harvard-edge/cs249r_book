@@ -8,76 +8,19 @@ competency_area: deployment
 bloom_level: analyze
 phase: both
 title: Diagnosing Latency Spikes and OOM During Canary Rollout on NVIDIA H100
-scenario: Your team is conducting a canary rollout of a new, complex deep learning
-  model for real-time video analytics to an inference service deployed on a Kubernetes
-  cluster. The service utilizes a pool of NVIDIA H100 GPUs (80 GB HBM3, 989 TFLOPS
-  FP16 dense, 3.35 TB/s memory bandwidth, 700W TDP). You've configured the traffic
-  split to route 5% of production requests to the canary deployment. Shortly after
-  initiating the canary, monitoring dashboards reveal a 300ms increase in p99 inference
-  latency for the canary instances, while the baseline remains unaffected. Simultaneously,
-  GPU utilization on the canary H100s shows unusual fluctuations, often dropping below
-  20%, yet application logs are intermittently reporting `CUDA_OUT_OF_MEMORY` errors.
-  How would you systematically diagnose the root cause of these seemingly contradictory
-  symptoms (low utilization and OOM) and what immediate steps would you take to stabilize
-  the system?
-question: How would you systematically diagnose the root cause of these seemingly
-  contradictory symptoms (low utilization and OOM) and what immediate steps would
-  you take to stabilize the system?
+scenario: 'Your team is conducting a 5% canary rollout of a new deep learning model for real-time video analytics to an inference service deployed on a Kubernetes cluster. Monitoring dashboards reveal a 300ms increase in p99 inference latency for the canary instances. Simultaneously, GPU utilization on the canary instances fluctuates wildly, often dropping below 20%, yet application logs are intermittently reporting `CUDA_OUT_OF_MEMORY` errors.'
+question: "How would you systematically diagnose the root cause of these seemingly contradictory symptoms (low utilization and OOM) and stabilize the system?"
 details:
-  realistic_solution: "1.  **Immediate Action:** Pause the canary rollout by routing\
-    \ 100% of traffic back to the stable version. This stops the bleeding and gives\
-    \ time for investigation without impacting more users.\n2.  **Data Collection:**\n\
-    \    *   **Detailed Metrics Comparison:** Gather granular GPU metrics (memory\
-    \ allocated, memory usage, compute utilization, memory bandwidth) for both canary\
-    \ and baseline instances before and during the failure. Use tools like `nvidia-smi`\
-    \ or GPU-aware exporters (e.g., Prometheus `dcgm-exporter`).\n    *   **Application\
-    \ Logs:** Collect all logs from the canary pods, specifically looking for the\
-    \ full stack traces of `CUDA_OUT_OF_MEMORY` errors, and any preceding or subsequent\
-    \ warnings/errors. Look for patterns related to input data size, specific model\
-    \ layers, or request IDs.\n    *   **Request Characteristics:** Analyze the characteristics\
-    \ of requests routed to the canary (e.g., average batch size, largest input dimensions,\
-    \ data types) to see if the 5% traffic contains unusual patterns.\n3.  **Hypothesis\
-    \ Generation & Validation:**\n    *   **Hypothesis 1: Transient OOM due to peak\
-    \ allocation:** The new model might have an intermediate tensor or an operation\
-    \ (e.g., gradient accumulation, large temporary buffer) that briefly exceeds HBM3\
-    \ capacity, even if overall utilization is low. The low utilization could be a\
-    \ consequence of the GPU stalling or re-initializing after OOM.\n    *   **Validation:**\
-    \ Use GPU profiling tools (`Nsight Systems`, PyTorch/TensorFlow profilers) in\
-    \ a controlled environment with the new model to identify peak memory allocations.\
-    \ Check if the model's forward pass dynamically allocates large tensors based\
-    \ on input shape/batch size.\n    *   **Hypothesis 2: Memory Fragmentation or\
-    \ Leak:** Repeated allocations and deallocations could lead to memory fragmentation,\
-    \ where sufficient contiguous memory is unavailable, causing OOM even if total\
-    \ free memory exists. A subtle memory leak in the new model's inference loop could\
-    \ also gradually exhaust HBM3.\n    *   **Validation:** Monitor memory allocated\
-    \ vs. memory free over time during sustained canary load in a test environment.\
-    \ Look for a steady increase in allocated memory that isn't released.\n    * \
-    \  **Hypothesis 3: Incorrect Batching Strategy:** The new model might not handle\
-    \ the configured batch size efficiently, or the inference server's batching logic\
-    \ might have a bug with the new model, leading to excessively large internal buffers\
-    \ or inefficient memory reuse.\n    *   **Validation:** Test the new model with\
-    \ varying batch sizes (especially smaller ones) in isolation to see if OOM errors\
-    \ disappear. Inspect the inference server's batching configuration and its interaction\
-    \ with the new model's input expectations.\n4.  **Mitigation/Resolution:** Once\
-    \ the root cause is identified, implement a targeted fix: e.g., optimize model\
-    \ memory footprint, adjust batch size, improve memory management in the inference\
-    \ code, or allocate more GPU memory if feasible (though 80GB HBM3 is substantial).\
-    \ Deploy and re-test in a staged environment before another canary rollout."
-  common_mistake: Panicking and immediately scaling down the canary without collecting
-    sufficient diagnostic data, or misattributing the OOM to a general 'model size'
-    issue rather than a specific interaction between the new model's architecture,
-    batching strategy, or memory allocation patterns and the H100's capabilities.
-    Another common mistake is failing to correlate the OOM events with specific code
-    paths or input characteristics.
-  napkin_math: "Your new model introduces an activation tensor with dimensions `(Batch_Size,\
-    \ 4096, 4096, 32)` (FP16). \n1. How much memory (in GB) does this single tensor\
-    \ consume if the batch size is `B=1`? 1 * 4096 * 4096 * 32 * 2 bytes = 1,073,741,824 bytes = 1 GB.\n2. If the canary is configured for `B=16`,\
-    \ what is the total memory consumption of this tensor? 16 GB.\n3. Given an H100 with\
-    \ 80GB HBM3, and assuming model weights, optimizer states, and system overhead\
-    \ consume 30GB, leaving 50GB for activations and intermediate tensors, what is\
-    \ the maximum theoretical batch size `B` that could accommodate *just this tensor*\
-    \ if it were the sole limiting factor? 50 GB / 1 GB = 50. If the inference server tried to batch > 50,\
-    \ this single tensor causes an OOM."
+  realistic_solution: "1.  **Immediate Action:** Pause the canary rollout by routing 100% of traffic back to the stable version. This stops the bleeding and gives time for investigation without impacting more users.\n2.  **Data Collection:**\n    *   **Detailed Metrics Comparison:** Gather granular GPU metrics (memory allocated, memory usage, compute utilization, memory bandwidth) for both canary and baseline instances before and during the failure. Use tools like `nvidia-smi` or GPU-aware exporters (e.g., Prometheus `dcgm-exporter`).\n    *   **Application Logs:** Collect all logs from the canary pods, specifically looking for the full stack traces of `CUDA_OUT_OF_MEMORY` errors, and any preceding or subsequent warnings/errors. Look for patterns related to input data size, specific model layers, or request IDs.\n    *   **Request Characteristics:** Analyze the characteristics of requests routed to the canary (e.g., average batch size, largest input dimensions, data types) to see if the 5% traffic contains unusual patterns.\n3.  **Hypothesis Generation & Validation:**\n    *   **Hypothesis 1: Transient OOM due to peak allocation:** The new model might have an intermediate tensor or an operation (e.g., gradient accumulation, large temporary buffer) that briefly exceeds HBM3 capacity, even if overall utilization is low. The low utilization could be a consequence of the GPU stalling or re-initializing after OOM.\n    *   **Validation:** Use GPU profiling tools (`Nsight Systems`, PyTorch/TensorFlow profilers) in a controlled environment with the new model to identify peak memory allocations. Check if the model's forward pass dynamically allocates large tensors based on input shape/batch size.\n    *   **Hypothesis 2: Memory Fragmentation or Leak:** Repeated allocations and deallocations could lead to memory fragmentation, where sufficient contiguous memory is unavailable, causing OOM even if total free memory exists. A subtle memory leak in the new model's inference loop could also gradually exhaust HBM3.\n    *   **Validation:** Monitor memory allocated vs. memory free over time during sustained canary load in a test environment. Look for a steady increase in allocated memory that isn't released.\n    *   **Hypothesis 3: Incorrect Batching Strategy:** The new model might not handle the configured batch size efficiently, or the inference server's batching logic might have a bug with the new model, leading to excessively large internal buffers or inefficient memory reuse.\n    *   **Validation:** Test the new model with varying batch sizes (especially smaller ones) in isolation to see if OOM errors disappear. Inspect the inference server's batching configuration and its interaction with the new model's input expectations.\n4.  **Mitigation/Resolution:** Once the root cause is identified, implement a targeted fix: e.g., optimize model memory footprint, adjust batch size, improve memory management in the inference code, or allocate more GPU memory if feasible (though 80GB HBM3 is substantial). Deploy and re-test in a staged environment before another canary rollout."
+  common_mistake: |
+    **The Pitfall:** Panicking and attributing the OOM to a general "model size" issue rather than diagnosing the specific dynamic tensor allocations.
+    **The Rationale:** OOM errors intuitively suggest the model is too big for the VRAM.
+    **The Consequence:** Aborting the rollout entirely instead of finding the specific batching or memory fragmentation issue causing intermediate tensor blowups.
+  napkin_math: |
+    1. **Tensor Size:** A new activation tensor with dimensions `(Batch_Size, 4096, 4096, 32)` in FP16 (2 bytes).
+    2. **B=1 Cost:** 1 * 4096 * 4096 * 32 * 2 bytes ≈ 1.07 GB.
+    3. **B=16 Cost:** At batch size 16, this single intermediate tensor consumes **~17.2 GB**.
+    4. **Conclusion:** Dynamic spikes in batch size can easily exhaust remaining VRAM with just a few intermediate tensors, triggering OOM and causing utilization to crater while the GPU stalls or crashes.
 status: published
 provenance: imported
 requires_explanation: false

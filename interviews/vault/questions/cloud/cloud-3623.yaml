@@ -8,21 +8,21 @@ competency_area: networking
 bloom_level: analyze
 phase: training
 title: 'AllReduce Topology Diagnosis: Ring vs Butterfly on TPU v5e Pod'
-scenario: A TPU v5e pod (256 chips, 197 TFLOPS BF16) uses a 2D torus interconnect.
-  The MXU training job shows AllReduce time of 2.1s but a colleague's ring-AllReduce
-  analysis predicts 800ms. Diagnose why the measured time is 2.6x slower and what
-  interconnect property explains the discrepancy.
-question: Why is TPU v5e AllReduce measured at 2.1 s when ring-AllReduce analysis
-  predicts 800 ms?
+scenario: A TPU v5e pod (256 chips, 197 TFLOPS BF16) uses a 2D torus interconnect. The MXU training job shows AllReduce time of 2.1s but a colleague's ring-AllReduce analysis predicts 800ms.
+question: Diagnose why the measured TPU v5e AllReduce time is 2.1s when ring-AllReduce analysis predicts 800ms, and explain the interconnect property responsible.
 details:
   realistic_solution: 'Ring-AllReduce assumes effective bandwidth equals link bandwidth. TPU torus: each chip has 4 links. Bisection of an NxN torus cuts 2N links in each direction (due to wrap-around). For a 16x16 torus (256 chips), unidirectional bisection BW = 32 * link_BW. Since 128 chips share these 32 links, the per-chip cross-bisection bandwidth is 32/128 = 1/4th of link_BW. A naive ring-AllReduce would see a 4x slowdown (800ms * 4 = 3.2s). The measured 2.1s is faster because XLA uses a topology-aware 2D AllReduce (reduce along rows, then columns), but it still cannot match the 800ms of a full non-blocking switch due to the fundamental bisection limits of the 2D torus.'
-  common_mistake: 'Applying ring-AllReduce bandwidth formula to a 2D torus without
-    accounting for the bisection bandwidth limitation of torus topologies.'
-  napkin_math: 'Ring formula assumes full link BW. Torus bisection: cut 256-chip 16x16
-    torus in half -> 32 links * 112.5GB/s (ICI) = 3600GB/s bisection BW. vs. single
-    ring with 256 chips: effective BW per GPU for ring = 1 link = 112.5GB/s. Torus
-    BW per chip for cross-bisection traffic: 3600GB/s / 128 = 28.1GB/s. That''s why
-    naive ring AllReduce is slow: cross-bisection traffic sees 112.5/28.1=4x bandwidth reduction.'
+  common_mistake: |
+    **The Pitfall:** Applying ring-AllReduce formulas to a 2D torus without accounting for bisection limits.
+    **The Rationale:** Candidates treat all cluster topologies as non-blocking switches, ignoring that torus topologies force traffic to share limited physical links across the middle.
+    **The Consequence:** Wildly inaccurate performance predictions and confusion when measured latency is much higher than theoretical ring math.
+  napkin_math: |
+    - Single link bandwidth: 112.5 GB/s (ICI).
+    - Torus bisection (16x16 = 256 chips): Cutting the torus halves 32 links.
+    - Bisection bandwidth: 32 links * 112.5 GB/s = 3600 GB/s.
+    - Bisection per chip: 3600 GB/s / 128 chips = ~28.1 GB/s per chip.
+    - Topology bottleneck: 112.5 GB/s vs 28.1 GB/s is a 4x bandwidth reduction across the bisection.
+    - **Conclusion: A naive ring AllReduce takes 4x longer (3.2s). The measured 2.1s is the result of XLA's optimized 2D AllReduce partially mitigating the 2D torus bisection limit.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,32 +8,19 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: Evaluating Gang Scheduling vs. Elastic Training Tradeoffs
-scenario: Your team must choose between strict gang scheduling (Volcano) and elastic
-  distributed training (PyTorch Elastic / torchrun with `--nnodes=4:8`) for a shared
-  H100 cluster running week-long LLM fine-tunes. The cluster has 128 H100 GPUs across
-  16 nodes and experiences 5% node failure rate per week. Evaluate which approach
-  yields higher cluster utilization and training throughput under these conditions.
-question: For week-long fine-tunes on the 128-H100 cluster with a 5% weekly node failure
-  rate, should you use Volcano gang scheduling or elastic training, and why?
+scenario: Your team must choose between strict gang scheduling (Volcano) and elastic distributed training (PyTorch Elastic / torchrun with `--nnodes=4:8`) for a shared H100 cluster running week-long LLM fine-tunes. The cluster has 128 H100 GPUs across 16 nodes and experiences a 5% node failure rate per week.
+question: For week-long fine-tunes on the 128-H100 cluster with a 5% weekly node failure rate, should you use Volcano gang scheduling or elastic training, and why?
 details:
-  realistic_solution: With 5% weekly failure rate across 16 nodes, the probability
-    of at least one failure during a 7-day run is 1 − (0.95)^16 ≈ 56%. Gang scheduling
-    means a coin-flip chance of full restart. Elastic training with `--nnodes=4:8`
-    lets the job continue on 7 nodes after a failure, accepting a ~12.5% throughput
-    drop. For long runs, elastic training amortizes checkpoint overhead and maintains
-    forward progress. Prefer elastic for week-long jobs; reserve gang scheduling for
-    short (<4 hr) jobs where setup overhead dominates.
-  common_mistake: Defaulting to gang scheduling because it is simpler to configure;
-    failing to account for the compounding effect of node failures on gang jobs —
-    a single node failure in a 16-node gang causes full job restart, wasting all accumulated
-    gradient steps.
-  napkin_math: 'Gang restart cost: checkpoint save at 70 GB/s NVMe × 140 GB model
-    = 2 s write + 10 s barrier + relaunch = ~60 s overhead per restart. With 56% restart
-    probability over 7 days, expected wasted time = 0.56 × 60 s = 33.6 s — negligible.
-    But if a restart causes 30 min of re-computation before next checkpoint, expected
-    waste = 0.56 × 30 min = 16.8 min/week, vs. elastic''s 0-restart, 12.5% throughput
-    loss = 12.5% × 7 days = 21 hr of equivalent lost compute. Gang wins on short jobs;
-    elastic wins on long ones.'
+  realistic_solution: With 5% weekly failure rate across 16 nodes, the probability of at least one failure during a 7-day run is 1 − (0.95)^16 ≈ 56%. Gang scheduling means a coin-flip chance of full restart. Elastic training with `--nnodes=4:8` lets the job continue on 7 nodes after a failure, accepting a ~12.5% throughput drop. For long runs, elastic training amortizes checkpoint overhead and maintains forward progress. Prefer elastic for week-long jobs; reserve gang scheduling for short (<4 hr) jobs where setup overhead dominates.
+  common_mistake: |
+    **The Pitfall:** Defaulting to gang scheduling because it is simpler to configure.
+    **The Rationale:** Engineers assume checkpoint/restart overhead is small (just reloading weights), failing to account for the queue waiting time in a shared cluster.
+    **The Consequence:** A single node failure causes a full job restart, forcing the job to wait in the queue for a full block of nodes, vastly extending wall-clock completion time.
+  napkin_math: |
+    - Probability of 1 failure among 8 nodes over 7 days: 1 - (0.95)^8 ≈ 33%.
+    - If gang scheduled, the job dies and must wait for a healthy 8-node block to be scheduled in the shared cluster (queue time can be 12-24 hours).
+    - If elastic, the job drops to 7 nodes, losing 12.5% throughput (equivalent to ~21 hours of lost compute over 7 days).
+    - **Elastic training is superior because a single 24-hour queue wait for gang scheduling wastes more time than the 12.5% throughput drop.**
 status: published
 provenance: imported
 requires_explanation: false

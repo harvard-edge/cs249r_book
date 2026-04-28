@@ -8,36 +8,21 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: The NCCL Timeout
-scenario: You're training a 30B model across 64 H100 GPUs (8 nodes × 8 GPUs). At random intervals — sometimes
-  after 2 hours, sometimes after 20 — the job hangs and eventually dies with `NCCL WARN Timeout on rank
-  47`. The hang always resolves to a different rank. Your network monitoring shows no packet loss. What's
-  happening?
-question: "What's happening?"
+scenario: 'You are training a 30B model across 64 H100 GPUs (8 nodes × 8 GPUs). At random intervals—sometimes after 2 hours, sometimes after 20—the job hangs and eventually dies with `NCCL WARN Timeout on rank 47`. The hang always resolves to a different rank. Your network monitoring shows no packet loss.'
+question: 'What is causing the random NCCL timeout hangs across different ranks, and how do you diagnose it?'
 details:
-  realistic_solution: 'The timeout means one GPU fell behind the collective — all other ranks are waiting
-    for rank 47 to contribute its chunk in the AllReduce ring, but rank 47 is still computing. The randomness
-    across ranks points to a *stochastic* slowdown, not a deterministic one. Top suspects: (1) **GPU thermal
-    throttling** — one node''s cooling is marginal; under sustained load, a random GPU hits 83°C and throttles
-    from 700W to ~500W, falling behind the collective. The "random rank" pattern occurs because different
-    GPUs throttle at different times depending on workload and airflow. (2) **ECC error correction storms**
-    — intermittent HBM errors trigger ECC correction, which stalls memory accesses for microseconds. At
-    64 GPUs, even rare per-GPU events become frequent cluster-wide. (3) **OS-level interference** — a
-    cron job, log rotation, or kernel memory compaction on the host CPU stalls the PCIe DMA engine, delaying
-    the GPU''s NCCL kernel launch. Diagnosis: set `NCCL_DEBUG=INFO` and `NCCL_DEBUG_SUBSYS=COLL` to log
-    per-rank timing. Correlate the slow rank with `nvidia-smi -q -d TEMPERATURE,ECC` and host-level `dmesg`
-    logs.'
-  common_mistake: '"It''s a network issue — increase `NCCL_TIMEOUT` to give the slow node more time."
-    Increasing the timeout just delays the crash; it doesn''t fix the root cause. And the randomness across
-    ranks rules out a single bad NIC.'
-  napkin_math: 'AllReduce for 30B × 4 bytes = 120 GB across 64 GPUs via ring: bandwidth time = $2 \times
-    120 / 50 = $ **4.8 s**. Each ring step must complete within a per-step budget of $4.8 / (2 \times
-    63) \approx $ **38 ms**. A thermally throttled GPU running at 71% speed delays its compute by ~30%,
-    adding ~11 ms per step. Over 126 ring steps, this accumulates to **1.4 s** of straggler delay — within
-    NCCL''s default 5-minute timeout. But if the throttled GPU also hits an ECC storm (adding ~5 ms per
-    correction, 10 corrections per step), total delay = $(11 + 50) \times 126 = $ **7.7 s** per AllReduce.
-    With 1000 AllReduces per epoch, the job falls progressively behind until the accumulated delay exceeds
-    the timeout. Fix: monitor `nvidia-smi --query-gpu=clocks_throttle_reasons.hw_thermal_slowdown` per
-    GPU and proactively drain throttling nodes.'
+  realistic_solution: 'The timeout means one GPU fell behind the collective — all other ranks are waiting for rank 47 to contribute its chunk in the AllReduce ring, but rank 47 is still computing. The randomness across ranks points to a *stochastic* slowdown, not a deterministic one. Top suspects: (1) **GPU thermal throttling** — one node''s cooling is marginal; under sustained load, a random GPU hits 83°C and throttles from 700W to ~500W, falling behind the collective. The "random rank" pattern occurs because different GPUs throttle at different times depending on workload and airflow. (2) **ECC error correction storms** — intermittent HBM errors trigger ECC correction, which stalls memory accesses for microseconds. At 64 GPUs, even rare per-GPU events become frequent cluster-wide. (3) **OS-level interference** — a cron job, log rotation, or kernel memory compaction on the host CPU stalls the PCIe DMA engine, delaying the GPU''s NCCL kernel launch. Diagnosis: set `NCCL_DEBUG=INFO` and `NCCL_DEBUG_SUBSYS=COLL` to log per-rank timing. Correlate the slow rank with `nvidia-smi -q -d TEMPERATURE,ECC` and host-level `dmesg` logs.'
+  common_mistake: |
+    **The Pitfall:** Assuming it's a network issue and increasing `NCCL_TIMEOUT` to give the slow node more time.
+    **The Rationale:** Because NCCL errors mention timeouts, engineers reflexively treat it as a network configuration problem.
+    **The Consequence:** Increasing the timeout just delays the crash; it doesn't fix the root cause, and the randomness across ranks rules out a single bad NIC.
+  napkin_math: |
+    * AllReduce for 30B × 4 bytes = 120 GB across 64 GPUs via ring.
+    * Bandwidth time = 2 × 120 GB / 50 GB/s = 4.8 s.
+    * Per-step budget = 4.8 / (2 × 63) ≈ 38 ms.
+    * A thermally throttled GPU running at 71% speed adds ~11 ms per step. Over 126 steps, this accumulates to 1.4 s delay.
+    * If hit by an ECC storm (~5 ms per correction), total delay = (11 + 50) × 126 = 7.7 s per AllReduce.
+    * **Result: Accumulated delays exceed NCCL's default timeout.**
 status: published
 provenance: imported
 requires_explanation: false

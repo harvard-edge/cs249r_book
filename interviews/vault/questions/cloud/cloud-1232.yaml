@@ -8,22 +8,19 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: SDC Propagation vs Checksum Trade-off
-scenario: You are evaluating the error model for a 500B parameter LLM training job on 8,192 H100 GPUs.
-  Hardware telemetry indicates a 0.2% probability of silent data corruption (SDC) in GPU HBM per hour,
-  which can propagate as global gradient noise. You must evaluate the trade-off between a strict fail-stop
-  model (checksumming every gradient synchronization) versus a relaxed containment model (checksumming
-  only periodic checkpoint states). Justify your design based on fault propagation blast radius and the
-  900GB/s NVLink bandwidth.
+scenario: You are evaluating the error model for a 500B parameter LLM training job on 8,192 GPUs. Hardware telemetry indicates a 0.2% probability of silent data corruption (SDC) in GPU HBM per hour, which can propagate as global gradient noise. The network uses 900GB/s NVLink bandwidth.
 question: "For the 500B job, would you checksum every gradient sync or only checkpoint states, and why?"
 details:
-  realistic_solution: Adopt a relaxed containment error model. Since neural network training exhibits
-    inherent noise tolerance, accept localized gradient SDCs and only checksum the FP32 master weights
-    during the infrequent checkpointing phase.
-  common_mistake: Assuming that all hardware faults trigger immediate node crashes, and failing to model
-    how silent data corruptions statistically propagate into loss spikes rather than hard failures.
-  napkin_math: 'Gradient sync size: 500B params * 2 bytes (BF16) = 1TB. At 900GB/s NVLink bandwidth, checksumming
-    every sync adds ~1.1 seconds. If the base iteration time is 200ms, this introduces a >500% latency
-    overhead. Periodic checksumming every 500 steps reduces this overhead to ~1%.'
+  realistic_solution: Adopt a relaxed containment error model. Since neural network training exhibits inherent noise tolerance, accept localized gradient SDCs and only checksum the FP32 master weights during the infrequent checkpointing phase.
+  common_mistake: |
+    **The Pitfall:** Assuming all hardware faults trigger immediate node crashes and require strict fail-stop checksums.
+    **The Rationale:** Candidates fail to model how SDCs statistically propagate into loss spikes rather than hard failures, and underestimate the massive overhead of checking every sync.
+    **The Consequence:** The proposed training architecture incurs a >500% latency penalty, destroying throughput.
+  napkin_math: |
+    - Gradient sync size: 500B params * 2 bytes (BF16) = 1 TB.
+    - Checksumming time per sync: 1 TB / 900 GB/s NVLink bandwidth ≈ 1.1 seconds.
+    - If base iteration time is ~200ms, checksumming every sync adds ~1.1s (a >500% latency overhead).
+    - **Conclusion: Checksumming every sync is computationally prohibitive, favoring a relaxed periodic containment model.**
 status: published
 provenance: imported
 requires_explanation: false

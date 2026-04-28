@@ -8,23 +8,19 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Diagnose Dataflow Mismatch Between Hailo-8 and Attention Pattern
-scenario: A vision transformer (ViT-S/16) on Hailo-8 achieves 95 FPS for image classification
-  but only 12 FPS when attention is implemented as explicit QK^T matrix multiply.
-  The Hailo-8 has 13 TOPS and is optimized for convolution-heavy workloads. Standard
-  attention requires a dynamic N×N matrix where N=196 patches. Profiling shows attention
-  consumes 79% of inference time despite being only 23% of FLOPs. Diagnose the architectural
-  mismatch.
-question: What is the correct latency for 4.9M MACs on a 13 TOPS DLA, and why is a
-  25ms estimate wrong?
+scenario: A vision transformer (ViT-S/16) on Hailo-8 achieves 95 FPS for image classification but drops to 12 FPS when attention is implemented as an explicit QK^T matrix multiply. The attention mechanism consumes 79% of inference time despite being only 23% of total FLOPs. A junior engineer estimates attention should take 25ms based on FLOPs.
+question: What is the correct theoretical latency for 4.9M MACs on a 13 TOPS DLA, and why is the 25ms estimate completely wrong?
 details:
-  realistic_solution: '4.9M MACs at 13 TOPS DLA: 9.8M/13T = 0.75μs (not 25ms — 25ms
-    implies GOPS not TOPS hardware).'
-  common_mistake: Assuming the FLOPs-to-latency ratio is constant across operation
-    types; Hailo-8's dataflow engine is optimized for weight-stationary conv patterns,
-    not dynamic attention's output-stationary QK^T.
-  napkin_math: 'Jetson Orin: 275 TOPS INT8. 4.9M MACs = 9.8M INT8 ops. At 13 TOPS
-    (DLA only, not full 275 TOPS): 9.8M / 13T = 7.5×10^-7 s = 0.75μs (not 25ms — 25ms
-    would require 0.39 GOPS, 33,000× slower than DLA). Full Orin: 9.8M/275T = 0.036μs.'
+  realistic_solution: '4.9M MACs on a 13 TOPS DLA takes 0.75μs (not 25ms). The 25ms estimate implies GOPS-level hardware, not TOPS. The real issue is the dataflow architecture: Hailo-8 is optimized for weight-stationary convolution patterns, whereas dynamic attention demands an output-stationary QK^T matrix multiply. This mismatch completely breaks the NPU utilization.'
+  common_mistake: |
+    **The Pitfall:** Assuming the FLOPs-to-latency ratio is constant across all operation types.
+    **The Rationale:** Engineers fail to realize that dataflow engines are heavily optimized for spatial weight-stationary convolutions, not dynamic output-stationary patterns.
+    **The Consequence:** Severe underutilization of the NPU and massive latency spikes when executing transformer architectures on legacy CNN hardware.
+  napkin_math: |
+    - Attention MACs: 4.9 million = 9.8 million INT8 ops.
+    - Compute capacity (DLA): 13 TOPS (13 * 10^12 ops/sec).
+    - Theoretical latency: 9.8 * 10^6 / (13 * 10^12) = 7.5 * 10^-7 seconds = **0.75 μs**.
+    - Reality check: A 25ms latency implies the hardware is operating at a mere 0.39 GOPS, indicating massive starvation, not compute saturation.
 status: published
 provenance: imported
 requires_explanation: false
@@ -37,8 +33,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 4.9M MACs at 13 TOPS takes ~0.75μs, not 25ms
 human_reviewed:
   status: not-reviewed
   by: null

@@ -8,26 +8,18 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Evaluate Rail-Optimized DP Replica Scheduling
-scenario: You are designing the scheduling placement logic for a 1,024 GPU cluster (128 nodes, 8x H100
-  GPUs each) training a large language model using 3D parallelism (TP=8, PP=4, DP=32). The cluster network
-  topology uses 8 independent InfiniBand rails (one per GPU index across all nodes) connected to 8 separate
-  leaf switch hierarchies. Evaluate two placement strategies for your Data Parallel (DP) replica groups
-  across the 128 nodes. Strategy A places DP groups across nodes without restricting local GPU indices.
-  Strategy B strictly pins all replicas of the same DP rank to the identical local GPU index (e.g., GPU
-  0 on all participating nodes). Compare the implications for gradient synchronization tail latency and
-  network congestion.
-question: "For TP=8, PP=4, DP=32 on 8 InfiniBand rails, should DP replicas use unrestricted placement or identical GPU-index pinning, and why?"
+scenario: You are designing the scheduling placement logic for a 1,024 GPU cluster (128 nodes, 8x GPUs each) training a large language model using 3D parallelism (TP=8, PP=4, DP=32). The cluster network topology uses 8 independent InfiniBand rails connected to 8 separate leaf switch hierarchies. Evaluate two placement strategies for your Data Parallel (DP) replica groups. Strategy A places DP groups across nodes without restricting local GPU indices. Strategy B strictly pins all replicas of the same DP rank to the identical local GPU index.
+question: For TP=8, PP=4, DP=32 on 8 InfiniBand rails, should DP replicas use unrestricted placement or identical GPU-index pinning, and why?
 details:
-  realistic_solution: Strategy B (Rail-Optimized Scheduling) must be chosen. By mapping DP communication
-    to identical GPU indices across nodes, AllReduce traffic stays strictly within a single rail's switch
-    hierarchy (single-hop). This eliminates inter-rail contention and maximizes non-blocking throughput.
-  common_mistake: Candidates often evaluate purely on total available node bandwidth, failing to recognize
-    that crossing rail hierarchies (inter-rail routing) introduces multi-hop latency, switch contention,
-    and ECMP hash collisions that severely degrade AllReduce tail latency.
-  napkin_math: Single rail AllReduce (Strategy B) takes 1 hop (Leaf switch). Inter-rail (Strategy A) takes
-    3 hops (Leaf -> Spine -> Leaf). With 400Gbps per NIC, Strategy B achieves near 380Gbps effective bandwidth,
-    while Strategy A might drop to <200Gbps due to ECMP collisions on the spine, doubling a 100MB gradient
-    sync time from ~2ms to ~4ms per step.
+  realistic_solution: Strategy B (Rail-Optimized Scheduling) must be chosen. By mapping DP communication to identical GPU indices across nodes, AllReduce traffic stays strictly within a single rail's switch hierarchy (single-hop). This eliminates inter-rail contention and maximizes non-blocking throughput.
+  common_mistake: |
+    **The Pitfall:** Evaluating placement purely on total available node bandwidth.
+    **The Rationale:** Candidates fail to recognize that rail-optimized topologies lack full non-blocking cross-rail bandwidth; inter-rail routing introduces multi-hop latency and ECMP hash collisions.
+    **The Consequence:** Severe degradation of AllReduce tail latency, causing the entire distributed training job to stall waiting for the slowest gradient sync.
+  napkin_math: |
+    *   **Strategy B (Rail-Optimized):** 1 hop (Leaf switch). Max non-blocking bandwidth.
+    *   **Strategy A (Unrestricted):** 3 hops (Leaf -> Spine -> Leaf). Subject to ECMP collisions.
+    *   **Final Result:** **Strategy A doubles latency (e.g., 100MB takes ~4ms instead of ~2ms) due to spine congestion; Strategy B guarantees single-hop, congestion-free transfers.**
 status: published
 provenance: imported
 requires_explanation: true

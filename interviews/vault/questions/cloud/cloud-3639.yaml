@@ -8,30 +8,22 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: RDMA Read vs Write Semantics for KV Cache Transfer in LLM Disaggregation
-scenario: In a disaggregated LLM serving system, the prefill node (H100) must transfer
-  KV cache (2GB for a long context request) to the decode node (H100) via InfiniBand.
-  Compare RDMA Read (decode node pulls) vs RDMA Write (prefill node pushes) for this
-  transfer and choose the better option.
-question: Would you use RDMA Read or RDMA Write to transfer the 2GB KV cache between
-  prefill and decode H100s, and why?
+scenario: 'In a disaggregated LLM serving system, the prefill node (H100) must transfer KV cache (2GB for a long context request) to the decode node (H100) via InfiniBand.'
+question: Would you use RDMA Read or RDMA Write to transfer the 2GB KV cache between prefill and decode H100s, and why?
 details:
-  realistic_solution: 'RDMA Write (push): prefill node completes KV cache → writes
-    directly to decode node''s pre-registered memory → signals completion via small
-    RDMA Send. Requires: decode node pre-registers KV cache buffer and communicates
-    rkey to prefill. Benefit: one-sided, no decode CPU in hot path. RDMA Read (pull):
-    decode node pulls from prefill''s registered memory. Requires: prefill registers
-    memory and communicates rkey. Decode initiates when ready. Benefit: decode controls
-    timing precisely. For LLM disaggregation: RDMA Write preferred because prefill
-    knows when KV cache is complete and can immediately push; decode node allocates
-    buffer upon request arrival. Latency: 2GB / 25GB/s (200Gbps IB) = 80ms. CPU-path
-    TCP: 80ms + kernel overhead ≈ 120ms. RDMA saves 40ms on KV cache transfer.'
-  common_mistake: Choosing RDMA Write without considering that the decode node must
-    pre-allocate and register the KV cache memory region before the transfer begins
-    — adding synchronization overhead.
-  napkin_math: 'KV cache: 2GB at 200Gbps IB = 2GB/25GB/s=80ms transfer. Decode TTFT
-    saved: 80ms (no KV wait) - this is significant for 1-2s TTFT targets. RDMA Write
-    setup: pre-register 2GB buffer at startup (one-time 20ms cost). Per-request overhead:
-    1 ibv_post_send() call ≈ 1μs. 40ms savings per long-context request vs TCP path.'
+  realistic_solution: 'RDMA Write (push): prefill node completes KV cache → writes directly to decode node''s pre-registered memory → signals completion via small RDMA Send. Requires: decode node pre-registers KV cache buffer and communicates rkey to prefill. Benefit: one-sided, no decode CPU in hot path. RDMA Read (pull): decode node pulls from prefill''s registered memory. Requires: prefill registers memory and communicates rkey. Decode initiates when ready. Benefit: decode controls timing precisely. For LLM disaggregation: RDMA Write preferred because prefill knows when KV cache is complete and can immediately push; decode node allocates buffer upon request arrival. Latency: 2GB / 25GB/s (200Gbps IB) = 80ms. CPU-path TCP: 80ms + kernel overhead ≈ 120ms. RDMA saves 40ms on KV cache transfer.'
+  common_mistake: |
+    **The Pitfall:** Choosing RDMA Write without considering synchronization overhead.
+    
+    **The Rationale:** Candidates might forget that RDMA Write requires the decode node to pre-allocate and register the KV cache memory region before the transfer begins.
+    
+    **The Consequence:** Unnecessary latency added due to memory registration, negating some of the RDMA benefits.
+  napkin_math: |
+    * **KV Cache Size:** 2 GB
+    * **Network Speed:** 200 Gbps InfiniBand = 25 GB/s
+    * **RDMA Transfer Time:** 2 GB / 25 GB/s = 80 ms
+    * **TCP Path Time:** 80 ms + kernel overhead ≈ 120 ms
+    * **Result:** **RDMA saves 40 ms per request, significantly improving the 1-2s TTFT target.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,18 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: FlashAttention for Cross-Attention in Multimodal Models
-scenario: 'You build a multimodal model where a 2048-token text sequence cross-attends
-  to 16384 image patch tokens on an H100. The Q comes from text (2048 tokens) and
-  K,V come from image patches (16384 tokens). Standard cross-attention materializes
-  a 2048×16384 matrix. Apply FlashAttention analysis: is this cross-attention memory-bound
-  or compute-bound, and what is the speedup?'
+scenario: You build a multimodal model where a 2048-token text sequence cross-attends to 16384 image patch tokens on an H100. The Q comes from text (2048 tokens) and K,V come from image patches (16384 tokens). Standard cross-attention materializes a 2048x16384 matrix.
 question: Is this cross-attention operation memory-bound or compute-bound with standard attention, and how does FlashAttention change this?
 details:
-  realistic_solution: 'Standard cross-attention computes a 2048×16384 matrix. The IO per head per layer requires reading Q (0.5MB), K (4MB), V (4MB), writing the attention matrix S (67.1MB), reading S (67.1MB), and writing O (0.5MB). Total IO is ~143MB per head, or ~9.16GB across 64 heads. The arithmetic intensity is 1.1 TFLOPs / 9.16GB ≈ 120 FLOPs/Byte. Since the H100 ridge point is ~295 FLOPs/Byte, standard attention is memory-bound. FlashAttention avoids reading/writing the 67.1MB S matrix to HBM. Total IO per head drops to ~9MB (Q, K, V, O), or 576MB across 64 heads. The arithmetic intensity jumps to 1.1 TFLOPs / 576MB ≈ 1910 FLOPs/Byte, pushing the operation deep into the compute-bound regime and yielding a ~2.5x speedup.'
-  common_mistake: Treating cross-attention the same as self-attention for FlashAttention
-    analysis. In cross-attention, Q and K,V have different lengths, so the attention
-    matrix is rectangular (M×N), not square (N×N). The tiling and IO analysis differs.
-  napkin_math: 'Standard IO (64 heads, 128 dim): Q = 2048×128×2B = 0.5MB. K,V = 16384×128×2B = 4MB each. Matrix S = 2048×16384×2B = 67.1MB. IO per head = 0.5 + 4 + 4 + 2×67.1 + 0.5 ≈ 143MB. Total IO = 64 × 143MB = 9.16GB. Compute per layer = 4 × 2048 × 16384 × 128 × 64 = 1.1 TFLOPs. Intensity = 1.1 TFLOPs / 9.16GB ≈ 120 FLOPs/Byte (memory bound on H100). Flash IO: drops the 2×67.1MB. IO per head = 0.5 + 4 + 4 + 0.5 = 9MB. Total IO = 576MB. Intensity = 1.1 TFLOPs / 576MB ≈ 1910 FLOPs/Byte (compute bound).'
+  realistic_solution: Standard cross-attention requires massive HBM read/write volume for the rectangular attention matrix, bottlenecking on memory bandwidth. FlashAttention avoids materializing this matrix to HBM, drastically increasing the arithmetic intensity and making it compute-bound.
+  common_mistake: |
+    **The Pitfall:** Treating cross-attention identically to self-attention for FlashAttention analysis.
+    **The Rationale:** Engineers assume a square NxN attention matrix, forgetting that cross-attention produces a rectangular MxN matrix, which alters the tiling and IO arithmetic intensity.
+    **The Consequence:** Incorrect IO bandwidth and speedup estimations for multimodal workloads.
+  napkin_math: |
+    1. **Calculate Standard IO:** Q = 0.5MB. K,V = 4MB each. Matrix S = 67.1MB. IO per head = 0.5 + 4 + 4 + 2×67.1 + 0.5 ≈ 143MB. Total IO = 64 × 143MB = 9.16GB.
+    2. **Calculate Standard Intensity:** Compute = 1.1 TFLOPs. 1.1 TFLOPs / 9.16GB ≈ 120 FLOPs/Byte (Memory bound on H100).
+    3. **Calculate Flash IO:** Drops the 2×67.1MB matrix S. Total IO = 64 × 9MB = 576MB.
+    4. **Calculate Flash Intensity:** 1.1 TFLOPs / 576MB ≈ 1910 FLOPs/Byte (Compute bound).
+    **Final Result: Standard attention is memory-bound (~120 FLOPs/Byte), while FlashAttention makes it compute-bound (~1910 FLOPs/Byte), yielding a ~2.5x speedup.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,12 +8,22 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: FlashAttention Arithmetic Intensity Calculation
-scenario: On an H100 (989 TFLOPS FP16, 3.35 TB/s HBM3), compute the arithmetic intensity of the attention operation for seq_len=4096, head_dim=128, batch=1, 32 heads, and determine whether FlashAttention shifts it from memory-bound to compute-bound on the roofline.
+scenario: You are analyzing standard attention versus FlashAttention on an H100 GPU for seq_len=4096, head_dim=128, batch=1, and 32 heads.
 question: What is the arithmetic intensity of standard attention versus FlashAttention, and does FlashAttention shift it to being compute-bound?
 details:
   realistic_solution: 'H100 ridge point is 989 TFLOPS / 3.35 TB/s = 295 FLOPs/byte. Attention FLOPs = 4 * batch * heads * seq² * head_dim = 4 * 1 * 32 * 4096² * 128 = 274.8 GFLOPs. For standard attention, the N×N attention scores S and P must be written and read from HBM. S matrix = 1 × 32 × 4096² × 2B = 1.07 GB. Reading and writing S and P generates >4GB of HBM traffic. Standard AI = 274.8 GFLOPs / 4.4 GB ≈ 62.5 FLOPs/byte (Memory-bound). FlashAttention fuses the operation using tiling, keeping S and P in SRAM. HBM traffic is just reading Q, K, V and writing O (each is batch×seq×hidden×2B = 33.5 MB, total ~134 MB). FlashAttention AI = 274.8 GFLOPs / 134 MB ≈ 2050 FLOPs/byte. Since 2050 >> 295, FlashAttention successfully shifts the operation to be heavily compute-bound.'
-  common_mistake: 'Computing arithmetic intensity of the full fused kernel without recognizing that inner loop tiling is what keeps S and P in SRAM, thereby eliminating the massive O(N²) HBM trips.'
-  napkin_math: 'FLOPs: 4 × 32 × 4096² × 128 = 274.8 GFLOPs. Ridge point = 989e12 / 3.35e12 = 295 FLOPs/B. Standard IO = Q+K+V + 2*S + 2*P + O ≈ 4.4 GB. AI = 275 / 4.4 = 62.5 FLOPs/B (Memory-bound). FA IO = Q+K+V+O ≈ 134 MB. AI = 275 / 0.134 = 2052 FLOPs/B (Compute-bound).'
+  common_mistake: |
+    **The Pitfall:** Computing arithmetic intensity of the full fused kernel without acknowledging the inner loop.
+    **The Rationale:** Candidates look at the macro FLOPs vs macro I/O without understanding how tiling changes the I/O bounds.
+    **The Consequence:** They fail to explain *why* FlashAttention is compute-bound, missing that tiling keeps S and P in SRAM to eliminate massive O(N²) HBM trips.
+  napkin_math: |
+    - FLOPs: 4 × 32 × 4096² × 128 = 274.8 GFLOPs.
+    - Ridge point = 989e12 / 3.35e12 = 295 FLOPs/B.
+    - Standard IO = Q+K+V + 2*S + 2*P + O ≈ 4.4 GB.
+    - Standard AI = 275 / 4.4 = 62.5 FLOPs/B (Memory-bound).
+    - FA IO = Q+K+V+O ≈ 134 MB.
+    - FA AI = 275 / 0.134 = 2052 FLOPs/B.
+    - **FlashAttention AI (2052) >> Ridge Point (295), so it is heavily compute-bound.**
 status: published
 provenance: imported
 requires_explanation: false

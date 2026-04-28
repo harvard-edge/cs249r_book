@@ -8,25 +8,19 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: 'Latency Decomposition: Diagnose and Fix Decode Latency Regression on H100'
-scenario: After deploying a new model checkpoint (13B → 20B parameters, same architecture)
-  on H100 (80GB HBM3, 3.35TB/s), decode latency increases from 7.8ms/token to 12ms/token
-  — a 54% increase, but model size increased 54% so this seems proportional. However,
-  a team member notices GPU memory utilization jumped from 58% to 89%. Diagnose what
-  is happening and quantify the fix.
-question: Why did memory utilization jump to 89% after moving from 13B to 20B, and
-  how would you quantify the fix?
+scenario: 'After deploying a new model checkpoint (13B to 20B parameters, same architecture) on an H100, decode latency increases from 7.8ms/token to 12ms/token (a 54% increase, proportional to model size). However, a team member notices GPU memory utilization jumped from 58% to 89%.'
+question: Why did memory utilization jump to 89% after moving from 13B to 20B, and how would you quantify the fix?
 details:
-  realistic_solution: 'At 89% memory utilization, KV-cache for long sequences gets
-    evicted. Each eviction triggers a re-prefill that adds 50–200ms. Fix: quantize
-    KV-cache to INT8 (halves KV memory), freeing ~8GB for more concurrent sequences.
-    Or reduce max sequence length from 4096 to 2048, halving KV footprint.'
-  common_mistake: Assuming the latency increase is purely proportional to weight size;
-    missing that higher memory pressure reduces effective KV-cache capacity, causing
-    cache evictions and re-prefills.
-  napkin_math: '20B model FP16: 40GB. KV at 4096 tokens, 40 layers, batch=1: 4096×2×5120×2×40
-    = 3.4GB. Total: 43.4GB of 80GB = 54%. But at batch=4: 40 + 4×3.4 = 53.6GB (67%).
-    KV INT8 halves KV to 1.7GB/request → at batch=4: 40 + 4×1.7 = 46.8GB (58%), restoring
-    headroom.'
+  realistic_solution: 'At 89% memory utilization, KV-cache for long sequences gets evicted. Each eviction triggers a re-prefill that adds 50-200ms. Fix: quantize KV-cache to INT8 (halves KV memory), freeing ~8GB for more concurrent sequences. Or reduce max sequence length from 4096 to 2048, halving KV footprint.'
+  common_mistake: |
+    **The Pitfall:** Assuming the latency increase is purely proportional to weight size.
+    **The Rationale:** Engineers miss that higher memory pressure reduces the effective KV-cache capacity, causing cache evictions and re-prefills for long sequences.
+    **The Consequence:** The system experiences severe latency spikes due to re-prefills, not just the proportional decode slowdown.
+  napkin_math: |
+    - **20B Model Size**: 40GB in FP16.
+    - **KV Cache Size (Batch 4)**: At 4096 tokens, 40 layers: `4096 * 2 * 5120 * 2 * 40 = 3.4GB` per request. For batch 4: `4 * 3.4GB = 13.6GB`. Total memory: `40GB + 13.6GB = 53.6GB (67%)`.
+    - **Quantized KV Cache (INT8)**: Halves KV to 1.7GB/request. For batch 4: `4 * 1.7GB = 6.8GB`.
+    - **Final Result**: Total memory drops to **46.8GB (58%)**, restoring KV-cache headroom and eliminating re-prefills.
 status: published
 provenance: imported
 requires_explanation: false

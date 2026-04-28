@@ -8,22 +8,19 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: The Memory Map (mmap) Page Fault Freeze
-scenario: To load a 150 MB transformer model quickly on an iPhone without blowing up the app's RAM limit,
-  you use `mmap` (Memory-Mapped Files). The OS reports zero RAM used, which is great. However, during
-  the *first* inference pass, the app completely freezes for 1.2 seconds. Subsequent passes take only
-  40ms. Why did `mmap` cause a massive freeze?
-question: "Why does mmap of a 150 MB iPhone transformer freeze first inference for 1.2 seconds but not later passes?"
+scenario: To load a 150 MB transformer model quickly on a mobile device without blowing up the app's RAM limit, you use `mmap` (Memory-Mapped Files). The OS reports zero RAM used, which is great. However, during the first inference pass, the app completely freezes for 1.2 seconds. Subsequent passes take only 40ms.
+question: Why does mmap of a 150 MB model freeze the first inference for 1.2 seconds but not later passes?
 details:
-  realistic_solution: 'Memory-mapping defers loading to page faults. On first inference, the model accesses
-    all 150 MB of weights, triggering ~38,400 page faults (150 MB / 4 KB pages). Each fault requires a
-    random flash read at ~0.03ms, totaling 38,400 x 0.03ms = 1.15 seconds of blocking I/O. Subsequent
-    passes hit warm pages in the page cache and run at 40ms. Fix: call madvise(MADV_WILLNEED) or posix_madvise()
-    after mmap to trigger sequential read-ahead, pre-faulting pages in the background. Alternatively,
-    use mlockall() to force all pages resident before first inference. This reduces cold-start from 1.2s
-    to ~150ms.'
-  common_mistake: '"The model is moving from RAM to the NPU cache." It hasn''t even reached RAM yet.'
-  napkin_math: 150 MB / 4 KB page size = ~38,400 pages. A single random read from mobile flash storage
-    takes ~0.03ms. 38,400 * 0.03ms = 1,152ms (1.15 seconds) of pure I/O blocking time.
+  realistic_solution: 'Memory-mapping defers loading to page faults. On first inference, the model accesses all 150 MB of weights, triggering ~38,400 page faults (150 MB / 4 KB pages). Each fault requires a random flash read at ~0.03ms, totaling 38,400 x 0.03ms = 1.15 seconds of blocking I/O. Subsequent passes hit warm pages in the page cache and run at 40ms. Fix: call madvise(MADV_WILLNEED) or posix_madvise() after mmap to trigger sequential read-ahead, pre-faulting pages in the background. Alternatively, use mlockall() to force all pages resident before first inference. This reduces cold-start from 1.2s to ~150ms.'
+  common_mistake: |
+    **The Pitfall:** Stating that "the model is moving from RAM to the NPU cache."
+    **The Rationale:** Candidates misunderstand how memory-mapped files behave at the OS level, ignoring the page fault mechanism.
+    **The Consequence:** The actual disk I/O bottleneck remains unaddressed, leaving users with a massive app freeze on cold start.
+  napkin_math: |
+    - **Page Count:** 150 MB / 4 KB page size = 38,400 pages.
+    - **I/O Cost:** A single random read from mobile flash storage takes ~0.03ms.
+    - **Total Blocking Time:** 38,400 pages * 0.03ms = 1,152ms.
+    - **Result:** **The initial memory mapping triggers 1.15 seconds of pure I/O blocking time due to sequential page faults.**
 status: published
 provenance: imported
 requires_explanation: false

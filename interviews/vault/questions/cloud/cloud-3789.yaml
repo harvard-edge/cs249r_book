@@ -8,33 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: 'Chunked Prefill: Balancing TTFT and Decode Throughput'
-scenario: In an LLM serving system on H100, a long prefill request (8192 tokens) monopolizes
-  the GPU for 40ms, stalling all decode requests in the batch. This causes tail latency
-  spikes for concurrent users. How does chunked prefill work with FlashAttention to
-  solve this, and what chunk size should you choose?
-question: How does chunked prefill with FlashAttention prevent 8192-token prefills
-  from stalling decode, and what chunk size should you choose?
+scenario: In an LLM serving system on H100, a long prefill request (8192 tokens) monopolizes the GPU for 40ms, stalling all decode requests in the batch. This causes tail latency spikes for concurrent users.
+question: How does chunked prefill with FlashAttention prevent 8192-token prefills from stalling decode, and what chunk size should you choose?
 details:
-  realistic_solution: 'Chunked prefill divides a long prefill request into smaller
-    chunks (e.g., 512 or 1024 tokens) and interleaves them with decode iterations.
-    Instead of processing all 8192 prefill tokens in one FlashAttention kernel launch,
-    the scheduler processes 512 tokens of prefill, then runs one decode iteration
-    for all active requests, then processes the next 512 tokens, etc. This ensures
-    decode requests are served every ~2.5ms (512 tokens × ~5μs/token) instead of waiting
-    40ms. Chunk size selection: too small (64 tokens) → kernel launch overhead dominates.
-    Too large (4096) → decode latency spikes return. Optimal: find the chunk size
-    where prefill is still compute-bound (>100 tokens for H100). The target is decode
-    latency SLA / (prefill_time_per_token): if SLA = 5ms and prefill takes 5μs/token,
-    chunk = 1000 tokens. vLLM and Sarathi-Serve implement this. FlashAttention''s
-    tiling naturally supports partial prefill — you simply compute attention for the
-    first chunk of Q against the accumulated KV cache.'
-  common_mistake: Thinking you can simply preempt the prefill kernel. GPU kernels
-    are non-preemptible — once a CUDA kernel launches, it runs to completion. The
-    solution must be at the request scheduling level.
-  napkin_math: 'Full prefill: 8192 tokens × 5μs = 40ms blocking. Chunk=512: 512 ×
-    5μs = 2.5ms per chunk + 2ms decode iteration. Total prefill time: 16 chunks ×
-    (2.5 + 2) = 72ms (1.8× slower). But max decode delay: 2.5ms vs 40ms. Latency improvement:
-    16× for decode users.'
+  realistic_solution: 'Chunked prefill divides a long prefill request into smaller chunks (e.g., 512 or 1024 tokens) and interleaves them with decode iterations. Instead of processing all 8192 prefill tokens in one FlashAttention kernel launch, the scheduler processes 512 tokens of prefill, then runs one decode iteration for all active requests, then processes the next 512 tokens, etc. This ensures decode requests are served every ~2.5ms (512 tokens × ~5μs/token) instead of waiting 40ms. Chunk size selection: too small (64 tokens) → kernel launch overhead dominates. Too large (4096) → decode latency spikes return. Optimal: find the chunk size where prefill is still compute-bound (>100 tokens for H100). The target is decode latency SLA / (prefill_time_per_token): if SLA = 5ms and prefill takes 5μs/token, chunk = 1000 tokens. vLLM and Sarathi-Serve implement this. FlashAttention''s tiling naturally supports partial prefill — you simply compute attention for the first chunk of Q against the accumulated KV cache.'
+  common_mistake: |
+    **The Pitfall:** Thinking you can simply preempt the prefill kernel mid-execution.
+    **The Rationale:** Candidates treat CUDA kernels like OS threads, forgetting that GPU kernels are non-preemptible and run to completion.
+    **The Consequence:** Proposing impossible scheduler designs instead of realizing the solution must chunk the work at the framework level before launching kernels.
+  napkin_math: |
+    - Full prefill (8192 tokens): 8192 tokens * 5µs/token = 40ms blocking delay.
+    - Chunked prefill (Chunk=512): 512 tokens * 5µs/token = 2.5ms per chunk.
+    - Decode delay improvement: Decode iterations now run every 2.5ms instead of waiting 40ms (a 16x latency improvement for active users).
+    - Total prefill penalty: 16 chunks * (2.5ms + 2ms decode) = 72ms (slower prefill overall, but saves the system).
+    - **Conclusion: Chunking trades slightly longer prefill times for a 16x reduction in tail latency for decoding users.**
 status: published
 provenance: imported
 requires_explanation: false

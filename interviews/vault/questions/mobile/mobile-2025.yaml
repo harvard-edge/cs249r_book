@@ -8,46 +8,23 @@ competency_area: precision
 bloom_level: create
 phase: both
 title: A17 SLC-Resident Mixed-Precision Optimisation
-scenario: A mobile NLP feature on A17 Pro must hold weights + a 4 MB ping-pong activation
-  buffer (double-buffered for stage overlap) inside the 32 MB system-level cache (SLC).
-  The OS reserves 6 MB of SLC for other processes (camera ISP, GPU compositor), leaving
-  the app a hard 26 MB SLC budget. The model has 25M parameters arranged across 24
-  layers (10 attention layers, 14 MLP layers). A naive INT4 quantisation of all weights
-  fits trivially (25M * 0.5 B = 12.5 MB), but the team has profiled per- layer accuracy
-  sensitivity - the 4 outermost attention layers (3.2M params total) lose >2% F1 below
-  INT8 and require INT8 quantisation; the embedding table (4M params) requires FP16
-  to preserve token-id distance semantics. The remaining 17.8M params can tolerate
-  INT4. Inference throughput on Hexagon scales as 2x for INT4 vs INT8 vs FP16 (the
-  datasheet 45 TOPS INT8 figure halves to 22.5 TFLOPS FP16 and doubles to 90 TOPS
-  INT4).
-question: Formulate the mixed-precision allocation that (a) fits the 26 MB SLC budget
-  while reserving the 4 MB activation buffer, (b) honours the per-layer precision
-  floors, and (c) maximises decode throughput. Show the SLC budget arithmetic, compute
-  the realised throughput in TOPS- equivalent, and verify the answer is feasible.
-  Identify which constraint binds the design - capacity, activation buffer, or per-layer
-  accuracy.
+scenario: A mobile NLP feature on A17 Pro must hold weights plus a 4 MB ping-pong activation buffer inside the 32 MB system-level cache (SLC). The OS reserves 6 MB of SLC. The model has 25M parameters (4M embedding, 3.2M outer attention, 17.8M bulk). The embedding requires FP16, outer attention requires INT8, and bulk tolerates INT4. Apple Neural Engine throughput scales 2x per precision drop (FP16=22.5 TOPS, INT8=45 TOPS, INT4=90 TOPS).
+question: Formulate the mixed-precision allocation that fits the 26 MB SLC budget, honors per-layer precision floors, and maximizes throughput.
 details:
-  realistic_solution: 'Per-tier weight footprint. (a) Embedding FP16: 4M * 2 B = 8.0
-    MB (locked by token-distance semantics). (b) Outer attention INT8: 3.2M * 1 B
-    = 3.2 MB (locked by F1 floor). (c) Bulk INT4: 17.8M * 0.5 B = 8.9 MB. Total weights
-    = 20.1 MB. Plus 4 MB ping-pong activation buffer = 24.1 MB - inside the 26 MB
-    hard budget with 1.9 MB headroom. Throughput. Param-weighted effective TOPS =
-    0.712 * 90 (INT4 bulk) + 0.128 * 45 (INT8 attention) + 0.160 * 22.5 (FP16 embedding)
-    = 64.08 + 5.76 + 3.60 = 73.4 TOPS-equivalent, vs 90 TOPS for an all-INT4 lower
-    bound (infeasible) and 45 TOPS for an all-INT8 baseline (would total 25 + 4 =
-    29 MB, exceeds budget). Binding constraint: per-layer accuracy floors (the FP16
-    embedding alone consumes 8 MB, 31% of the budget). If that floor relaxed to INT8
-    with no F1 loss, weights fall to 16.1 MB and leave 5.9 MB for a larger activation
-    buffer or SLC headroom for other apps. Recommendation: ship the mixed allocation
-    above; investigate learned token-embedding quantisation as the next compression
-    lever.'
-  common_mistake: Reporting only the all-INT4 footprint (12.5 MB) and overstating
-    throughput at 90 TOPS without honouring the per-layer precision floors that the
-    accuracy-sensitivity profile imposes; or sizing against the full 32 MB SLC without
-    subtracting the OS-reserved 6 MB.
-  napkin_math: 'Tiers: 4M FP16 = 8 MB; 3.2M INT8 = 3.2 MB; 17.8M INT4 = 8.9 MB; weights
-    total = 20.1 MB; +4 MB activations = 24.1 MB inside 26 MB budget. Effective TOPS
-    = 0.712*90 + 0.128*45 + 0.160*22.5 = 73.4 TOPS-eq.'
+  realistic_solution: 'Per-tier weight footprint. (a) Embedding FP16: 4M * 2 B = 8.0 MB. (b) Outer attention INT8: 3.2M * 1 B = 3.2 MB. (c) Bulk INT4: 17.8M * 0.5 B = 8.9 MB. Total weights = 20.1 MB. Plus 4 MB ping-pong activation buffer = 24.1 MB - inside the 26 MB hard budget with 1.9 MB headroom. Effective TOPS = 0.712 * 90 + 0.128 * 45 + 0.160 * 22.5 = 73.4 TOPS-equivalent.'
+  common_mistake: |
+    **The Pitfall:** Reporting only the all-INT4 footprint and overstating throughput.
+    **The Rationale:** Ignoring per-layer accuracy sensitivity floors and failing to subtract OS-reserved SLC.
+    **The Consequence:** Deploying a model that suffers severe F1 loss or causes cache thrashing by exceeding the available 26 MB SLC.
+  napkin_math: |
+    - Budget: 32 MB - 6 MB OS = 26 MB.
+    - Embedding (FP16): 4M * 2 bytes = 8 MB.
+    - Outer Attn (INT8): 3.2M * 1 byte = 3.2 MB.
+    - Bulk (INT4): 17.8M * 0.5 bytes = 8.9 MB.
+    - Total weights = 8.0 + 3.2 + 8.9 = 20.1 MB. 
+    - Total footprint: 20.1 MB + 4 MB activations = 24.1 MB.
+    - Effective TOPS: (17.8/25 * 90) + (3.2/25 * 45) + (4/25 * 22.5) = 64.08 + 5.76 + 3.6 = 73.44 TOPS.
+    - **Fits within 26 MB budget while delivering ~73.4 effective TOPS.**
 status: published
 provenance: llm-draft
 expected_time_minutes: 5

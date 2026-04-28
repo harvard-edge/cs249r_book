@@ -8,36 +8,21 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Multi-Tenant LLM Serving on Cloud AI 100
-scenario: You are deploying a multi-tenant LLM serving infrastructure on an on-premise
-  edge server equipped with a single Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x,
-  400 TOPS INT8, 75W). You need to concurrently serve latency-sensitive conversational
-  queries using an 8B parameter model and throughput-optimized background summarizations
-  using a 14B parameter model. Design a serving architecture and request routing strategy
-  that maximizes hardware utilization, eliminates cold starts, and ensures strict
-  SLAs for the conversational agent within the strict power and memory constraints.
-question: How would you serve the 8B chat model and 14B summarization model concurrently
-  on one Cloud AI 100 while meeting chat SLAs?
+scenario: You are deploying a multi-tenant LLM serving infrastructure on an on-premise edge server equipped with a single Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). You need to concurrently serve latency-sensitive conversational queries using an 8B parameter model and throughput-optimized background summarizations using a 14B parameter model.
+question: How would you serve the 8B chat model and 14B summarization model concurrently on one Cloud AI 100 while meeting chat SLAs?
 details:
-  realistic_solution: Implement an inference server with continuous batching and paged
-    attention to rigidly manage the KV cache within the 32GB limit. Both models must
-    be quantized to INT8 to co-locate them in memory, entirely avoiding swap-induced
-    cold starts. A priority-aware scheduler should preempt the 14B background batch
-    at the token-generation iteration level to immediately process incoming 8B latency-sensitive
-    requests, heavily utilizing the 400 TOPS compute to maximize overall token throughput.
-  common_mistake: Candidates often propose swapping models in and out of memory, which
-    causes unacceptable cold start latencies over PCIe, or they fail to account for
-    the massive memory footprint of KV caches in a strict 32GB environment. They also
-    frequently overlook the INT8 optimization requirement necessary to fit both models
-    simultaneously.
-  napkin_math: 8B model INT8 weights = 8 GB; 14B model INT8 weights = 14 GB. Total
-    static memory = 22 GB. Remaining memory on the 32 GB Cloud AI 100 = 10 GB for
-    KV cache and workspace. Assuming an INT8 KV cache, a single token across 32 layers
-    (e.g., 4096 hidden size, 32 layers, 2 for K/V) takes ~256 KB. 10 GB / 256 KB = ~40,000
-    tokens total KV capacity. At an average context of 1000 tokens, this supports a
-    combined concurrent batch size of 40. Compute-wise, an 8B model requires ~16 GOPS/token;
-    the 400 TOPS INT8 engine at 75W can theoretically sustain ~25,000 tokens/sec (400
-    TOPS / 16 GOPS = 25,000), proving the system is memory-bandwidth bound and requires
-    large batch sizes via co-location.
+  realistic_solution: Implement an inference server with continuous batching and paged attention to rigidly manage the KV cache within the 32GB limit. Both models must be quantized to INT8 to co-locate them in memory, entirely avoiding swap-induced cold starts. A priority-aware scheduler should preempt the 14B background batch at the token-generation iteration level to immediately process incoming 8B latency-sensitive requests, heavily utilizing the 400 TOPS compute to maximize overall token throughput.
+  common_mistake: |
+    **The Pitfall:** Proposing model swapping over PCIe, or failing to account for the massive KV cache footprint in a strict 32 GB environment.
+    **The Rationale:** Candidates forget that swapping gigabytes of weights from host memory introduces unacceptable cold start latencies, and they overlook that autoregressive generation requires retaining activations across sequences.
+    **The Consequence:** The conversational agent fails its strict latency SLA due to swapping overhead or crashes due to OOM from an unmanaged KV cache.
+  napkin_math: |
+    - 8B INT8 weights = 8 GB; 14B INT8 weights = 14 GB. Total static memory = 22 GB.
+    - Remaining memory on 32 GB accelerator = 10 GB for KV cache and workspace.
+    - KV cache per token (INT8, 4096 dim, 32 layers): 4096 * 32 * 2 (K/V) * 1 byte = 262,144 bytes = 256 KB.
+    - Max KV capacity: 10 GB / 256 KB = 40,960 tokens total. At 1000 tokens/request, this supports a concurrent batch size of ~40.
+    - 8B compute = 16 GOPS/token. Max theoretical throughput = 400 TOPS / 16 GOPS = 25,000 tokens/sec.
+    **Conclusion: Co-locating both models in INT8 leaves 10 GB for KV cache, perfectly supporting a batched serving strategy that meets the SLA without swapping.**
 status: published
 provenance: imported
 requires_explanation: true

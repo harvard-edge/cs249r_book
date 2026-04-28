@@ -8,34 +8,20 @@ competency_area: power
 bloom_level: analyze
 phase: both
 title: Diagnosing High TDP in Low-Util Inference
-scenario: A deep learning inference cluster running large language models on A100 GPUs is unexpectedly
-  hitting its 20kW per-rack power limit. Profiling shows that the tensor core ALUs are executing FP16
-  operations at only 20% of peak theoretical throughput (TFLOPS), yet the GPUs are persistently operating
-  at their maximum 400W TDP. The workload is currently configured for interactive chat with a batch size
-  of 1. Diagnose the root cause of the power draw when compute utilization is so low, focusing on the
-  system's energy per operation breakdown.
+scenario: "A cluster running LLMs on A100 GPUs is hitting its 20kW per-rack power limit. Profiling shows tensor core ALUs executing FP16 operations at only 20% of peak throughput, yet the GPUs persistently run at their maximum 400W TDP. The workload is configured for interactive chat with a batch size of 1."
 question: "Why do A100s hit 400W TDP at batch size 1 despite only 20% tensor-core utilization, and what mitigations reduce the draw?"
 details:
-  realistic_solution: The root cause is the massive energy cost of memory access compared to computation.
-    An FP16 multiply-accumulate (MAC) operation consumes ~0.5-1 pJ, whereas fetching the corresponding
-    parameters from High Bandwidth Memory (HBM) consumes tens of picojoules. In a memory-bound decoding
-    workload (batch size 1), the system must fetch a weight from HBM for exactly one ALU operation. Consequently,
-    the memory controllers, interconnect fabric, and caches run at maximum bandwidth and dominate the
-    400W TDP, while the ALUs sit mostly idle waiting for data. To resolve this, you must increase the
-    batch size (to amortize the HBM read energy across multiple operations) or apply weight quantization
-    (e.g., INT8/INT4) to reduce the memory fetch payload and energy per parameter.
-  common_mistake: Candidates often incorrectly assume that power consumption correlates strictly with
-    ALU utilization. They might suggest the ALUs have a static power bug or propose undervolting the compute
-    units, failing to recognize that data movement dominates the energy budget at low batch sizes.
-  napkin_math: 'Let E_MAC ≈ 1 pJ (FP16 compute). Let E_HBM ≈ 80 pJ/byte (Data transfer).
-
-    For batch size 1, every MAC requires loading one FP16 weight (2 bytes).
-
-    Memory energy per MAC = 2 bytes * 80 pJ/byte = 160 pJ.
-
-    Total operation energy = 160 pJ (Data) + 1 pJ (Compute) = 161 pJ.
-
-    Ratio: 160/161 = ~99% of the power budget is spent moving data from memory rather than computing. The GPUs are power-capped by the memory interface.'
+  realistic_solution: The root cause is the massive energy cost of memory access compared to computation. An FP16 multiply-accumulate (MAC) operation consumes ~0.5-1 pJ, whereas fetching the corresponding parameters from High Bandwidth Memory (HBM) consumes tens of picojoules. In a memory-bound decoding workload (batch size 1), the system must fetch a weight from HBM for exactly one ALU operation. Consequently, the memory controllers, interconnect fabric, and caches run at maximum bandwidth and dominate the 400W TDP, while the ALUs sit mostly idle waiting for data. To resolve this, you must increase the batch size (to amortize the HBM read energy across multiple operations) or apply weight quantization (e.g., INT8/INT4) to reduce the memory fetch payload and energy per parameter.
+  common_mistake: |
+    **The Pitfall:** Assuming that power consumption correlates strictly with ALU compute utilization.
+    **The Rationale:** Candidates often believe that if compute utilization is low, power draw should be low, and they suggest undervolting the compute units.
+    **The Consequence:** Proposed optimizations fail to reduce power draw because they ignore the true bottleneck: data movement from HBM.
+  napkin_math: |
+    - **Define energy costs:** E_MAC ≈ 1 pJ (FP16 compute). E_HBM ≈ 80 pJ/byte (Data transfer).
+    - **Analyze batch size 1:** Every MAC operation requires loading one FP16 weight (2 bytes).
+    - **Calculate memory energy:** 2 bytes * 80 pJ/byte = 160 pJ per MAC.
+    - **Calculate total operation energy:** 160 pJ (Data) + 1 pJ (Compute) = 161 pJ.
+    - **Calculate power ratio:** 160 / 161 = **~99% of the power budget is spent moving data**, explaining why the GPUs hit 400W TDP despite low compute utilization.
 status: published
 provenance: imported
 requires_explanation: false

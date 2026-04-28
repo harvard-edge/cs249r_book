@@ -8,51 +8,21 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: 'H100 LLM Inference Optimization: Kernel Fusion for Memory-Bound Operations'
-scenario: You are tasked with optimizing the inference latency of a large language
-  model (LLM) deployed on a cloud instance. Each inference request involves processing
-  a sequence of tokens on an NVIDIA H100 GPU (80 GB HBM3, 989 TFLOPS FP16 dense, 3.35
-  TB/s memory bandwidth, 700W TDP). Profiling reveals that a significant portion of
-  the latency is attributed to frequent small kernel launches and excessive global
-  memory transfers between consecutive element-wise operations (e.g., ReLU, GELU,
-  Dropout) and subsequent layer normalization steps. Your goal is to apply kernel
-  and operator fusion techniques to reduce these overheads and maximize throughput.
-  Design a strategy to identify fusion opportunities and explain how you would implement
-  and validate the performance gains, specifically leveraging the H100's architecture.
-question: How would you identify, implement, and validate H100 operator fusion for
-  memory-bound LLM ops to reduce kernel launches and global memory traffic?
+scenario: You are optimizing LLM inference latency. Profiling reveals significant latency comes from frequent small kernel launches and excessive global memory transfers between consecutive element-wise operations (e.g., GELU, Dropout) and layer normalization.
+question: How would you identify, implement, and validate operator fusion for these memory-bound LLM ops to reduce kernel launches and global memory traffic?
 details:
-  realistic_solution: 'The solution involves identifying critical paths with sequential
-    memory-bound operations that can be fused. This typically includes combining element-wise
-    activations (e.g., ReLU, GELU, Dropout) with other element-wise operations or
-    even layer normalization into a single CUDA kernel. Implementation would involve
-    using custom CUDA C++ or frameworks like Triton to write the fused kernel. Key
-    steps: (1) Profile extensively with NVIDIA Nsight Compute to pinpoint memory-bound
-    operations and kernel launch overheads. (2) Design fused kernels to minimize global
-    memory reads/writes by keeping intermediate results in registers or shared memory.
-    (3) Optimize shared memory usage and register allocation to avoid spilling, considering
-    the H100''s SM architecture and increased shared memory capacity (up to 200KB
-    per SM). (4) Carefully manage thread block and grid dimensions to fully utilize
-    SMs and maximize occupancy. (5) Validate performance through rigorous benchmarking
-    against the unfused baseline, focusing on memory traffic, kernel launch count,
-    and overall inference latency/throughput.'
-  common_mistake: A common mistake is to focus solely on floating-point operation
-    (FLOPs) optimization without adequately addressing memory bandwidth limitations
-    and kernel launch overheads, especially for element-wise or memory-bound operations.
-    Another mistake is over-fusion, leading to kernels that are too large to fit in
-    shared memory or registers, causing register spills or requiring complex indexing
-    that negates performance benefits, or introducing fusion that is too specific
-    and not easily reusable or maintainable.
-  napkin_math: 'For ''N'' element-wise operations, each requiring one read and one
-    write to global memory for a tensor of size ''S'' bytes, unfused kernels incur
-    2 * N * S bytes of global memory traffic. Fusing them reduces this to 2 * S bytes.
-    For example, fusing 3 element-wise ops on a 10GB tensor: Unfused = 3 * 2 * 10GB
-    = 60GB memory traffic. Fused = 2 * 10GB = 20GB memory traffic, saving 40GB. Given
-    the H100''s 3.35 TB/s memory bandwidth, this 40GB saving translates to approximately
-    40e9 / 3.35e12 = ~11.9 milliseconds of saved memory access time. Additionally,
-    if each kernel launch has an overhead of ~5-10 microseconds, fusing 3 kernels
-    saves 2 kernel launches, or 10-20 microseconds. Total potential saving: ~12 ms
-    per sequence of fused operations, which can be significant in high-throughput
-    inference where thousands of such sequences are processed.'
+  realistic_solution: 'The solution involves identifying critical paths with sequential memory-bound operations that can be fused. This typically includes combining element-wise activations (e.g., ReLU, GELU, Dropout) with other element-wise operations or even layer normalization into a single CUDA kernel. Implementation would involve using custom CUDA C++ or frameworks like Triton to write the fused kernel. Key steps: (1) Profile extensively with NVIDIA Nsight Compute to pinpoint memory-bound operations and kernel launch overheads. (2) Design fused kernels to minimize global memory reads/writes by keeping intermediate results in registers or shared memory. (3) Optimize shared memory usage and register allocation to avoid spilling, considering the H100''s SM architecture and increased shared memory capacity (up to 200KB per SM). (4) Carefully manage thread block and grid dimensions to fully utilize SMs and maximize occupancy. (5) Validate performance through rigorous benchmarking against the unfused baseline, focusing on memory traffic, kernel launch count, and overall inference latency/throughput.'
+  common_mistake: |
+    **The Pitfall:** Focusing solely on FLOP optimization and ignoring memory bandwidth limitations.
+    **The Rationale:** Candidates try to rewrite the math of element-wise ops rather than realizing the true cost is the round-trip read/write to HBM.
+    **The Consequence:** Over-fused kernels that spill to global memory, negating the performance benefits of fusion.
+  napkin_math: |
+    1. **Unfused:** 3 element-wise ops on a 10GB tensor require 3 reads and 3 writes. Total traffic = 3 × 2 × 10GB = 60GB.
+    2. **Fused:** 1 read and 1 write. Total traffic = 2 × 10GB = 20GB.
+    3. **Savings:** 40GB saved per sequence.
+    4. **Latency Gain:** 40e9 bytes / 3.35e12 bytes/s ≈ 11.9 milliseconds saved.
+    5. **Launch Overhead:** Fusing 3 kernels saves 2 launches (~10-20 µs).
+    **Conclusion:** The primary gain is the ~12ms saved in HBM data movement, heavily outweighing kernel launch overheads.
 status: published
 provenance: imported
 requires_explanation: true

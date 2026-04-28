@@ -8,27 +8,20 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: Diagnosing P99 Latency Jitter on CPU Inference
-scenario: You deployed a BERT-based NER model on a dual-socket AWS c6i.16xlarge (64 vCPUs, 2 NUMA nodes)
-  using TorchServe. While P50 latency is stable at 15ms, P99 latency randomly spikes to over 85ms under
-  moderate load. CPU utilization hovers around 40%. Hardware profiling reveals a massive spike in Last
-  Level Cache (LLC) misses specifically during these high-latency requests. How do you diagnose and resolve
-  this performance jitter?
-question: "How do you diagnose and resolve this performance jitter?"
+scenario: You deployed a BERT-based NER model on a dual-socket AWS c6i.16xlarge (64 vCPUs, 2 NUMA nodes) using TorchServe. While P50 latency is stable at 15ms, P99 latency randomly spikes to over 85ms under moderate load. CPU utilization hovers around 40%. Hardware profiling reveals a massive spike in Last Level Cache (LLC) misses specifically during these high-latency requests.
+question: How do you diagnose and resolve this performance jitter?
 details:
-  realistic_solution: Diagnose thread migration using 'perf stat' and 'numastat'. The OS scheduler is
-    migrating worker threads across physical cores and NUMA boundaries, destroying warm L1/L2/LLC caches.
-    A single LLC miss costs ~100ns vs ~1-4ns for a cache hit. With hundreds of millions of memory accesses
-    per BERT forward pass, even a 5% drop in LLC hit rate adds hundreds of milliseconds of stall time.
-    Fix by pinning inference threads to specific cores using taskset or numactl, and binding memory allocations
-    to the local NUMA node.
-  common_mistake: Assuming the jitter is caused by garbage collection or network congestion, or trying
-    to fix it by blindly increasing OMP_NUM_THREADS to 64, which actually worsens NUMA cross-traffic and
-    cache thrashing.
-  napkin_math: L1/L2 cache accesses take ~1-4ns, whereas a main memory access (LLC miss) takes ~100ns.
-    A BERT forward pass requires hundreds of millions of memory reads. If thread migration causes even
-    a 5% drop in LLC hit rate across 10^8 accesses, that introduces 5,000,000 * ~100ns = 500,000,000ns
-    (500ms) of theoretical memory stall time, severely degrading latency and fully explaining the 70ms
-    P99 delta.
+  realistic_solution: Diagnose thread migration using 'perf stat' and 'numastat'. The OS scheduler is migrating worker threads across physical cores and NUMA boundaries, destroying warm L1/L2/LLC caches. Fix by pinning inference threads to specific cores using taskset or numactl, and binding memory allocations to the local NUMA node.
+  common_mistake: |
+    **The Pitfall:** Blindly increasing `OMP_NUM_THREADS` to utilize all 64 cores.
+    **The Rationale:** Developers see low CPU utilization and high latency, assuming more threads will speed up the compute.
+    **The Consequence:** Spanning threads across NUMA boundaries drastically worsens cross-node memory traffic and cache thrashing, leading to even higher P99 latency spikes.
+  napkin_math: |
+    - **Cache Hit Access Time:** L1/L2 access takes ~1-4 ns.
+    - **Cache Miss Access Time:** Main memory access (LLC miss) takes ~100 ns.
+    - **Memory Operations:** A BERT forward pass requires hundreds of millions of memory reads.
+    - **Impact of 5% Miss Rate:** A 5% drop in LLC hit rate across 10^8 accesses introduces `5,000,000 * 100 ns` = 500,000,000 ns = **500 ms** of theoretical stall time.
+    - **Conclusion:** This cache thrashing completely explains the severe 70ms+ P99 delta.
 status: published
 provenance: imported
 requires_explanation: false

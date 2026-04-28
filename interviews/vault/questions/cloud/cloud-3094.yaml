@@ -8,31 +8,24 @@ competency_area: compute
 bloom_level: apply
 phase: both
 title: 'Systolic Array Realization: Memory Layout for TPU Batch Inference'
-scenario: Concretely determine the optimal memory layout (row-major vs column-major
-  vs tiled) for weight matrices on TPU v5e (16GB HBM, 819 GB/s) for batched inference
-  of a feed-forward layer (in_features=8192, out_features=32768, batch=256, seq=128).
-  Calculate bandwidth utilization for each layout and justify the choice.
-question: Which weight layout should TPU v5e use for the 8192x32768 feed-forward layer,
-  and how much does layout affect bandwidth and performance?
+scenario: Concretely determine the optimal memory layout (row-major vs column-major vs tiled) for weight matrices on a TPU v5e for batched inference of a feed-forward layer (in_features=8192, out_features=32768, batch=256, seq=128).
+question: Which weight layout should TPU v5e use for the 8192x32768 feed-forward layer, and how much does layout affect bandwidth and performance?
 details:
-  realistic_solution: 'Weight matrix W: (8192, 32768) BF16 = 512MB. For C = X * W^T
-    where X is (256*128, 8192) = (32768, 8192). Row-major: W stored as [out, in].
-    Access: row-by-row along out dimension. Cache line (128 bytes) contains 64 BF16
-    values. Systolic array loads tiles: 128x128 block requires contiguous load in
-    in-dimension. Row-major stores contiguous in-features per output neuron: layout
-    matches systolic array access pattern for output-stationary. Column-major: transposing
-    access pattern → strided loads → poor cache utilization. TPU XLA uses tiled layouts
-    automatically. Recommendation: use XLA default (major-to-minor dimension ordering
-    for XLA tiles).'
-  common_mistake: Applying CPU-centric row-major reasoning to TPU hardware which uses
-    XLA-managed HBM with 128-byte cache lines optimized for systolic array access
-    patterns (NCHW-like tiled layouts).
-  napkin_math: 'W: 8192*32768*2 = 512MB. X: 32768*8192*2 = 512MB. C: 32768*32768*2
-    = 2GB. Total BW: 512+512+2048 = 3072MB = 3GB. At 819 GB/s: 3.66ms BW time. FLOPs:
-    2*32768*8192*32768 = 17.6 TFLOP. Compute time: 17.6T/197T = 89ms. Compute bound
-    (AI = 17.6T/3GB = 5867 FLOPs/byte >> 240 ridge). Actual measured: ~100ms → MFU
-    = 89/100 = 89% at ideal. Layout choice minimal impact when compute bound; matters
-    only at memory-bound regime (small batch).'
+  realistic_solution: 'Weight matrix W: (8192, 32768) BF16 = 512MB. For C = X * W^T where X is (256*128, 8192) = (32768, 8192). Row-major stores contiguous in-features per output neuron: layout matches systolic array access pattern for output-stationary. Column-major: transposing access pattern → strided loads → poor cache utilization. TPU XLA uses tiled layouts automatically. Recommendation: use XLA default (major-to-minor dimension ordering for XLA tiles).'
+  common_mistake: |
+    **The Pitfall:** Applying CPU-centric row-major reasoning to TPU hardware.
+    **The Rationale:** Candidates often default to CPU memory layout patterns, assuming simple row-major or column-major is best.
+    **The Consequence:** Failing to realize that TPUs use XLA-managed HBM with 128-byte cache lines optimized for systolic array access patterns (NCHW-like tiled layouts), and that the workload is compute-bound anyway.
+  napkin_math: |
+    - **Weight Matrix (W):** 8192 * 32768 * 2 bytes = 512 MB.
+    - **Input Matrix (X):** (256 * 128) * 8192 * 2 bytes = 32768 * 8192 * 2 bytes = 512 MB.
+    - **Output Matrix (C):** 32768 * 32768 * 2 bytes = 2 GB.
+    - **Total Memory Bandwidth Needed:** 512 MB + 512 MB + 2048 MB = 3 GB.
+    - **Bandwidth Time:** 3 GB / 819 GB/s = 3.66 ms.
+    - **FLOPs:** 2 * 32768 * 8192 * 32768 = 17.6 TFLOPs.
+    - **Compute Time:** 17.6 TFLOPs / 197 TFLOPs = 89 ms.
+    - **Conclusion:** 89 ms >> 3.66 ms, so the operation is highly compute-bound (AI = 17.6T / 3GB = 5867 FLOPs/byte >> 240 ridge).
+    - **Impact:** Layout choice has minimal impact when highly compute-bound; the system will achieve **~89% MFU** regardless of minor memory inefficiencies.
 status: published
 provenance: imported
 requires_explanation: false

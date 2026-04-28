@@ -8,27 +8,19 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: 'Model Size Estimation: Diagnose KV-Cache Memory Leak on H100 Serving System'
-scenario: A production LLM serving system (13B model, H100 80GB) shows memory usage
-  growing from 35GB to 78GB over 4 hours under constant load (100 req/min, avg 512
-  token context, 128 token output). No OOM yet but the team expects failure. Diagnose
-  the root cause and quantify how long until OOM.
-question: What is causing memory to grow from 35GB to 78GB over 4 hours, and how long
-  until the 80GB H100 OOMs?
+scenario: A production LLM serving system (13B model, H100 80GB) shows memory usage growing from 35GB to 78GB over 4 hours under constant load (100 req/min, avg 512 token context, 128 token output). No OOM yet but the team expects failure.
+question: "What is causing memory to grow from 35GB to 78GB over 4 hours, and how long until the 80GB H100 OOMs?"
 details:
-  realistic_solution: 'Root cause: KV-cache memory leak. At 100 req/min × 60 min/hr
-    × (512+128) = 38,400 tokens/hr context accumulation? No — if freed properly, memory
-    stays constant. Growth: 78-35=43GB over 4 hours = 10.75GB/hr leak. Per request:
-    640 tokens × 800KB/token = 512MB. 100 req/min: 51.2GB/min released correctly →
-    10.75GB/hr growth = 10.75/(100×60) = 1.79MB per request leaked. Fix: audit KV-cache
-    eviction logic — likely a reference counting bug where some requests'' KV blocks
-    aren''t returned to pool.'
-  common_mistake: Blaming model weight memory (constant at 26GB) when the growth is
-    entirely from KV-cache not being freed after request completion.
-  napkin_math: 'KV per token (13B, MHA): 800KB. Per request (640 tokens): 640×800KB=512MB.
-    At 100 req/min steady state (avg 5s service time): concurrent requests = 100/60×5=8.3.
-    KV in use: 8.3×512MB=4.3GB. Leak rate: 43GB/4hr=10.75GB/hr. Per request: 10.75GB/3600s/(100/60)=1.8MB/req.
-    Fix: find requests leaking 1.8MB = 2.25 tokens worth of KV never freed. Likely
-    1 padding block per request not freed.'
+  realistic_solution: 'Root cause: KV-cache memory leak. At 100 req/min \times 60 min/hr \times (512+128) = 38,400 tokens/hr context accumulation? No — if freed properly, memory stays constant. Growth: 78-35=43GB over 4 hours = 10.75GB/hr leak. Per request: 640 tokens \times 800KB/token = 512MB. 100 req/min: 51.2GB/min released correctly \rightarrow 10.75GB/hr growth = 10.75/(100\times 60) = 1.79MB per request leaked. Fix: audit KV-cache eviction logic — likely a reference counting bug where some requests'' KV blocks aren''t returned to pool.'
+  common_mistake: |
+    **The Pitfall:** Blaming model weight memory for the steady growth.
+    **The Rationale:** Engineers may be unfamiliar with the dynamic memory footprint of autoregressive decoding.
+    **The Consequence:** Debugging focuses on the static model footprint (constant at 26GB) rather than the KV-cache blocks that are not being freed after request completion.
+  napkin_math: |
+    *   **Leak Rate:** Growth is $78 - 35 = 43\text{GB}$ over 4 hours, which is $10.75 \text{ GB/hr}$.
+    *   **Per Request:** At 100 req/min, that's $10.75 \text{ GB} / 6000 \text{ reqs} \approx 1.8 \text{ MB leaked per request}$.
+    *   **KV Size:** KV per token (13B model) is 800KB. A 1.8MB leak equals $\approx 2.25$ tokens of KV-cache.
+    *   **Result:** **The leak is likely exactly 1 padding block per request not being properly freed by the eviction logic.**
 status: published
 provenance: imported
 requires_explanation: false

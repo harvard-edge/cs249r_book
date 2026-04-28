@@ -8,38 +8,24 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: PagedAttention Block Size Fragmentation
-scenario: An edge deployment of Llama-2-7B on a Jetson AGX Orin (iGPU MMU has ~512
-  TLB entries, no large-page support for the unified-memory carveout) uses PagedAttention.
-  With 32 concurrent sessions averaging 1024 tokens each, the architect compares 16-token
-  vs 256-token blocks. Naive analysis from the reference figure favours small blocks
-  because internal fragmentation drops from about 12% to under 1% (a 256-token block
-  holding only 17 live tokens wastes 239 slots).
-question: Starting from the fragmentation comparison shown, explain why the fragmentation
-  argument inverts on this iGPU once you account for block-table entries dereferenced
-  per attention kernel launch. Quantify the TLB pressure for both choices and recommend
-  a block size with justification.
+scenario: An edge deployment of Llama-2-7B on a Jetson AGX Orin uses PagedAttention. The iGPU MMU has ~512 TLB entries and lacks large-page support for the unified-memory carveout. The system runs 32 concurrent sessions averaging 1024 tokens each. The architect is comparing 16-token vs 256-token blocks.
+question: Starting from the fragmentation comparison shown, explain why the fragmentation argument inverts on this iGPU once you account for block-table entries, and recommend a block size.
 visual:
   kind: svg
   path: edge-2357.svg
-  alt: Bar chart showing high internal fragmentation for 256-token blocks compared
-    to 16-token blocks.
+  alt: Bar chart showing high internal fragmentation for 256-token blocks compared to 16-token blocks.
   caption: KV Cache Internal Fragmentation Ratio.
 details:
-  realistic_solution: '16-token blocks generate 16x more block-table entries per sequence.
-    For a 32-session, 1024-token workload: 16-block needs 32 * 64 = 2048 block-table
-    entries that the attention kernel must dereference per launch; 256-block needs
-    only 32 * 4 = 128 entries. The Orin iGPU MMU has a smaller TLB than discrete GPUs
-    (~512 entries vs 8K+ on H100), so 16-block KV thrashes the TLB and adds ~5-15%
-    kernel-launch overhead. Memory access granularity also matters: HBM-style burst-aligned
-    access wants 256-byte minimum, and 16-token blocks (each ~8 KB on Llama-2-7B)
-    still align well, but the page-walk cost per attention head multiplies. Choose
-    64-128 tokens as a tinyML-edge sweet spot.'
-  common_mistake: Focusing only on internal fragmentation and missing that on iGPUs
-    the TLB capacity and page-walk overhead bound the practical lower limit on block
-    size.
-  napkin_math: '16-block: 32 sessions * 64 entries = 2048 page table entries / launch
-    (TLB-thrash). 256-block: 32 * 4 = 128 entries (TLB-friendly). Sweet spot = 64-128
-    tokens.'
+  realistic_solution: '16-token blocks generate 16x more block-table entries per sequence. For a 32-session, 1024-token workload: 16-block needs 32 * 64 = 2048 block-table entries that the attention kernel must dereference per launch; 256-block needs only 32 * 4 = 128 entries. The Orin iGPU MMU has a smaller TLB than discrete GPUs (~512 entries vs 8K+ on H100), so 16-block KV thrashes the TLB and adds ~5-15% kernel-launch overhead. Memory access granularity also matters: HBM-style burst-aligned access wants 256-byte minimum, and 16-token blocks (each ~8 KB on Llama-2-7B) still align well, but the page-walk cost per attention head multiplies. Choose 64-128 tokens as a tinyML-edge sweet spot.'
+  common_mistake: |
+    **The Pitfall:** Focusing exclusively on internal fragmentation ratios.
+    **The Rationale:** Candidates look only at wasted KV slots (like CPU RAM fragmentation) but ignore MMU capabilities.
+    **The Consequence:** Thrashing the small TLB on the iGPU, creating massive memory latency that negates any capacity savings.
+  napkin_math: |
+    1. **16-Block Entries:** 1024 tokens / 16 = 64 blocks per session. 32 sessions * 64 = 2048 page table entries per launch.
+    2. **TLB Limit:** 2048 heavily exceeds the ~512 entry TLB, ensuring thrashing.
+    3. **256-Block Entries:** 1024 tokens / 256 = 4 blocks per session. 32 sessions * 4 = 128 entries.
+    4. **Conclusion:** 128 fits safely in TLB. The sweet spot is **64-128 tokens**.
 status: published
 provenance: llm-draft
 expected_time_minutes: 9

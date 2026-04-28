@@ -8,15 +8,20 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: The Speculative Decoding Accept Rate Crash
-scenario: You implement Speculative Decoding to speed up an LLM. You use a 1B draft model to guess 5 tokens,
-  and a 70B target model to verify them in a single pass. On standard English text, it yields a 2.5x speedup.
-  When you deploy it to your coding assistant API, the overall throughput actually *drops* by 15% compared
-  to not using Speculative Decoding at all. Why did the optimization become a penalty?
-question: "Why did the optimization become a penalty?"
+scenario: 'You implement Speculative Decoding to speed up an LLM. You use a 1B draft model to guess 5 tokens, and a 70B target model to verify them in a single pass. On standard English text, it yields a 2.5x speedup. When you deploy it to your coding assistant API, the overall throughput drops by 15% compared to not using Speculative Decoding at all.'
+question: 'Why did the Speculative Decoding optimization become a performance penalty for the coding assistant?'
 details:
   realistic_solution: 'Speculative decoding becomes a penalty when the draft model''s acceptance rate drops below the break-even threshold. With 5ms draft + 20ms verify, you spend 25ms per cycle. If 1 of 5 draft tokens is accepted, you generate 2 tokens total (1 draft + 1 target) per 25ms = 12.5ms/token. Standard decoding does 20ms/token, so speculation still helps here. But for code — with strict syntax, rare tokens, and low-entropy distributions — acceptance drops to ~0.3 draft tokens, meaning you spend 25ms to get 1.3 tokens (19.2ms/token). This tiny latency gain is completely wiped out by the draft model''s KV-cache consuming GPU memory, which reduces batch capacity and drops overall throughput by 15%.'
-  common_mistake: '"Code is harder to generate." It is, but that alone doesn''t explain why a speedup technique becomes an active *penalty*.'
-  napkin_math: 'Break-even Acceptance Rate: Draft takes 5ms for 5 tokens, target takes 20ms to verify. Total cycle = 25ms. In standard decoding, 1 token = 20ms. To break even, the cycle must generate at least 25 / 20 = 1.25 tokens (i.e., average >0.25 draft tokens accepted). If the draft gets 3 right (4 tokens total), generation is 25ms/4 = 6.25ms/tok (speedup). If complex code gets 0 right (only 1 target token generated), generation is 25ms/tok. Throughput drops because 1/25 is 20% less than 1/20, plus the draft model uses VRAM.'
+  common_mistake: |
+    **The Pitfall:** Dismissing the issue simply as "code is harder to generate."
+    **The Rationale:** Recognizing the entropy shift but failing to do the math on the break-even threshold for latency vs KV-cache overhead.
+    **The Consequence:** Leaving a performance-degrading "optimization" enabled because its failure mode isn't quantitatively understood.
+  napkin_math: |
+    * Break-even Acceptance Rate: Draft takes 5ms for 5 tokens, target takes 20ms to verify. Total cycle = 25ms.
+    * Standard decoding = 20ms/tok. Break-even requires 25 / 20 = 1.25 tokens generated per cycle (avg >0.25 draft accepted).
+    * If 3 draft tokens accepted (4 total): 25ms/4 = 6.25ms/tok (speedup).
+    * If code entropy causes 0 draft tokens accepted (1 target total): 25ms/tok (slowdown).
+    * **Result: 25ms/tok is 20% slower than baseline, and the draft model's VRAM overhead reduces batch capacity, combining for a 15% overall throughput drop.**
 status: published
 provenance: imported
 requires_explanation: true

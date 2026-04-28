@@ -8,26 +8,20 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: Tensor vs Pipeline Parallelism for 70B
-scenario: You have 8 A100-80GB GPUs connected by NVLink within a single node. You need to train a 70B
-  model. Compare TP=8 (tensor parallel across all 8) vs PP=8 (pipeline parallel, 8 stages). Which is better
-  for this configuration and why?
-question: "Which is better for this configuration and why?"
+scenario: You have 8 A100 GPUs connected by NVLink within a single node. You need to train a 70B model.
+question: Compare TP=8 (tensor parallel across all 8) vs PP=8 (pipeline parallel, 8 stages). Which is better for this configuration and why?
 details:
-  realistic_solution: 'TP=8 is far superior for a single NVLink-connected node. (1) Communication: TP
-    requires 2 AllReduce per layer (forward + backward) but NVLink provides 900 GB/s — each AllReduce
-    for a 4096×4096 weight is <0.1ms. PP requires only point-to-point send/recv but suffers from pipeline
-    bubbles. (2) Bubble fraction: PP with micro-batches m has bubble = (p-1)/(m+p-1) where p=stages. For
-    PP=8 with m=8 micro-batches: 7/15 = 46.6% idle time wasted. Even with m=32: 7/39 = 17.9% bubble. TP
-    has zero bubble — all GPUs compute simultaneously. (3) Memory: TP splits each layer''s weights across
-    8 GPUs: 70B × 16B/param / 8 = 140 GB/GPU — fits in 80GB? No, needs ZeRO or reduced batch. PP puts
-    70/8 ≈ 9B params per GPU = 144 GB/GPU for training — also doesn''t fit. Both need gradient checkpointing
-    + ZeRO. TP=8 with ZeRO Stage 1 is the standard approach.'
-  common_mistake: Choosing PP=8 because it seems simpler. With 8 pipeline stages and 8 micro-batches,
-    the bubble fraction is (8-1)/(8+8-1) = 46.6% — a significant waste. TP=8 within NVLink is the clear
-    winner.
-  napkin_math: 'PP=8 bubble: (p-1)/(m+p-1) micro-batches → m=8: 7/15 = 46.6% waste. m=32: 7/39 = 17.9%
-    waste. TP=8 AllReduce per layer: 32MB / 450 GB/s = 0.07ms × 80 layers = 5.6ms total per step. TP overhead
-    <1% vs PP overhead 18-47%.'
+  realistic_solution: "TP=8 is far superior for a single NVLink-connected node. (1) Communication: TP requires 2 AllReduce per layer (forward + backward) but NVLink provides 900 GB/s — each AllReduce for a 4096x4096 weight is <0.1ms. PP requires only point-to-point send/recv but suffers from pipeline bubbles. (2) Bubble fraction: PP with micro-batches m has bubble = (p-1)/(m+p-1) where p=stages. For PP=8 with m=8 micro-batches: 7/15 = 46.6% idle time wasted. Even with m=32: 7/39 = 17.9% bubble. TP has zero bubble — all GPUs compute simultaneously. (3) Memory: TP splits each layer's weights across 8 GPUs: 70B * 16B/param / 8 = 140 GB/GPU — fits in 80GB? No, needs ZeRO or reduced batch. PP puts 70/8 ≈ 9B params per GPU = 144 GB/GPU for training — also doesn't fit. Both need gradient checkpointing + ZeRO. TP=8 with ZeRO Stage 1 is the standard approach."
+  common_mistake: |
+    **The Pitfall:** Choosing PP=8 because it seems simpler to implement and conceptualize than tensor splitting.
+    **The Rationale:** Avoiding the complexity of splitting weight matrices and managing AllReduce collectives.
+    **The Consequence:** Wasting 20-40% of compute time on pipeline bubbles while NVLink bandwidth sits heavily underutilized.
+  napkin_math: |
+    * PP=8 bubble fraction: (p-1)/(m+p-1). For m=8 micro-batches: 7/15 = 46.6% waste.
+    * For m=32 micro-batches: 7/39 = 17.9% waste.
+    * TP=8 AllReduce per layer: 32MB / 450 GB/s (unidirectional) = 0.07ms.
+    * TP overhead for 80 layers = 80 * 0.07ms = 5.6ms total per step.
+    * **TP overhead is <1% compared to PP's 18-47% pipeline bubble waste.**
 status: published
 provenance: imported
 requires_explanation: false

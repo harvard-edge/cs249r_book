@@ -8,24 +8,20 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: W4A16 Batch-Size Latency Inversion
-scenario: Serving a 70B model via GPTQ (INT4 weights, FP16 activations) on 2x A100. At batch size 1, latency
-  is 15ms/token. At batch size 128, latency is 120ms/token, which is actually 20% SLOWER than the pure
-  FP16 model at the same batch size. Explain the architecture cause.
-question: "Why is the GPTQ INT4 model faster at batch size 1 but slower than FP16 at batch size 128?"
+scenario: Serving a 70B model via GPTQ (INT4 weights, FP16 activations) on 2x A100. At batch size 1, latency is 15ms/token. At batch size 128, latency is 120ms/token, which is actually 20% slower than the pure FP16 model at the same batch size.
+question: Why is the GPTQ INT4 model faster at batch size 1 but slower than FP16 at batch size 128?
 details:
-  realistic_solution: This is a classic computation vs memory-bandwidth crossover. At batch size 1, the
-    operation is memory-bandwidth bound. Fetching INT4 weights (35GB) is 4x faster than FP16 weights (140GB).
-    However, W4A16 requires dequantizing the weights to FP16 in registers before the FP16 Tensor Cores
-    can perform the MACs. At batch size 128, the operation becomes compute-bound. The FP16 model just
-    does FP16 MACs. The W4A16 model has to do the INT4->FP16 cast AND the FP16 MACs. The overhead of bit-shifting
-    and dequantizing the weights inside the SMs consumes ALU cycles, making the total compute time longer
-    than a native FP16 GEMM. The solution is to switch to W8A8 for high batch sizes.
-  common_mistake: Blaming PCIe interconnect bottleneck between the 2x A100s, which would affect both precisions
-    equally.
-  napkin_math: 'BS=1: Memory bound. FP16 fetch = 140GB / 3TB/s = 46ms. INT4 fetch = 35GB / 3TB/s = 11ms.
-    INT4 wins. BS=128: Compute bound. FLOPs = 2 * 70B * 128 = 17.9 TFLOPs. 2x A100 FP16 TFLOPs = 624.
-    Native compute time = 17.9 TFLOPs / 624 TFLOPS = 28.7ms. Dequantization overhead adds ~20-30ms ALU
-    time. FP16 wins.'
+  realistic_solution: This is a computation vs memory-bandwidth crossover. At BS=1, operations are memory-bandwidth bound, so smaller INT4 weights fetch faster. At BS=128, operations are compute-bound. W4A16 requires dequantizing weights to FP16 in registers before performing MACs, adding ALU overhead.
+  common_mistake: |
+    **The Pitfall:** Blaming the PCIe interconnect bottleneck between the 2x A100s.
+    **The Rationale:** Candidates incorrectly assume data transfer between GPUs is the issue, though it affects both precisions equally.
+    **The Consequence:** Misdiagnosing a compute-bound problem as an IO problem, leading to useless network or topology optimizations.
+  napkin_math: |
+    - **BS=1 (Memory Bound)**: FP16 fetch = 140 GB / 3 TB/s = 46 ms. INT4 fetch = 35 GB / 3 TB/s = 11 ms. INT4 is much faster.
+    - **BS=128 (Compute Bound)**: FLOPs = 2 * 70B * 128 = 17.9 TFLOPs.
+    - **FP16 Compute Time**: 17.9 TFLOPs / 624 TFLOPS (2x A100 FP16 peak) = 28.7 ms.
+    - **W4A16 Overhead**: Dequantization inside SMs consumes ALU cycles, adding ~20-30 ms.
+    - **Conclusion**: **At BS=128, native FP16 compute is faster because it avoids INT4 dequantization overhead.**
 status: published
 provenance: imported
 requires_explanation: false

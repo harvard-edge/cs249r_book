@@ -8,34 +8,20 @@ competency_area: compute
 bloom_level: analyze
 phase: inference
 title: On-Device LLM Tokenizer Bottleneck on Heterogeneous Chiplet
-scenario: A mobile on-device LLM (Gemma 2B) runs at 25 tokens/sec on NPU but end-to-end
-  user-perceived latency for a 50-token prompt is 3 seconds instead of the expected
-  2 seconds. Profiling shows tokenization and KV cache setup take 900ms. Investigate
-  the chiplet resource contention.
-question: How would you diagnose tokenization and KV cache setup adding 900ms to a
-  mobile Gemma 2B prompt on a heterogeneous chiplet?
+scenario: A mobile on-device LLM (Gemma 2B) runs at 25 tokens/sec on NPU but end-to-end user-perceived latency for a 50-token prompt is 3 seconds instead of the expected 2 seconds. Profiling shows tokenization and KV cache setup take 900ms.
+question: How would you diagnose and fix tokenization and KV cache setup adding 900ms to a mobile Gemma 2B prompt on a heterogeneous chiplet?
 details:
-  realistic_solution: 'Diagnosis: tokenizer uses ~32K * 8B = 256KB vocabulary lookup
-    table, fitting in CPU L3 but evicting NPU prefetch data. At 50 tokens/sec tokenization,
-    CPU makes 50 vocabulary lookups * 20 sub-word pieces = 1000 random accesses/sec
-    into a 256KB working set — high temporal locality, stays hot in cache. But KV
-    cache setup requires writing 50 tokens * 2 * layers * heads * head_dim * 2B =
-    50*2*18*8*256*2 = 7.4MB of KV data. This 7.4MB write evicts tokenizer data and
-    NPU cache. Fix: (1) Pre-allocate KV cache before tokenization; (2) Run tokenizer
-    on efficiency cores (A55) to avoid polluting big core caches; (3) Use memory-mapped
-    vocabulary with hugepages; (4) Prefill optimization: batch all 50 prompt tokens
-    in one NPU call instead of token-by-token.'
-  common_mistake: Assuming tokenization is a trivial preprocessing step. On mobile
-    chiplets, the tokenizer runs on the CPU die while the NPU executes inference.
-    The CPU die shares LPDDR5 bandwidth with the NPU, and for long prompts, BPE/SentencePiece
-    tokenization with a 32K vocabulary triggers many small random memory accesses
-    that pollute the L3 cache, degrading NPU memory bandwidth.
-  napkin_math: '50-token prompt at 25 tok/sec = 2 seconds compute. Observed: 3 seconds
-    = +1 second overhead. KV cache allocation: 7.4MB at 34 GB/s (CPU write) = 0.22ms.
-    Tokenization: 50 tokens * 200us/token (BPE with cache miss) = 10ms. These don''t
-    add up to 900ms. Actual: KV cache CUDA/NPU initialization including driver overhead
-    + NPU session warm-up = ~800ms first call (cold start). Subsequent calls: <50ms.
-    Solution: NPU session pre-warm at app launch.'
+  realistic_solution: 'Diagnosis: tokenizer uses ~32K * 8B = 256KB vocabulary lookup table, fitting in CPU L3 but evicting NPU prefetch data. At 50 tokens/sec tokenization, CPU makes 50 vocabulary lookups * 20 sub-word pieces = 1000 random accesses/sec into a 256KB working set — high temporal locality, stays hot in cache. But KV cache setup requires writing 50 tokens * 2 * layers * heads * head_dim * 2B = 50*2*18*8*256*2 = 7.4MB of KV data. This 7.4MB write evicts tokenizer data and NPU cache. Fix: (1) Pre-allocate KV cache before tokenization; (2) Run tokenizer on efficiency cores (A55) to avoid polluting big core caches; (3) Use memory-mapped vocabulary with hugepages; (4) Prefill optimization: batch all 50 prompt tokens in one NPU call instead of token-by-token.'
+  common_mistake: |
+    **The Pitfall:** Assuming tokenization is a trivial preprocessing step with negligible overhead.
+    **The Rationale:** Candidates forget that on mobile chiplets, the CPU and NPU share LPDDR5 bandwidth. Large vocabulary lookups trigger random memory accesses that pollute the L3 cache.
+    **The Consequence:** Memory bandwidth is degraded, and NPU driver initialization overhead causes massive cold-start latency spikes.
+  napkin_math: |
+    1. **Expected vs Actual:** 50-token prompt at 25 tok/sec = 2s compute. Observed is 3s, indicating 1s overhead.
+    2. **KV Cache Allocation:** 7.4MB write at 34 GB/s = ~0.22ms.
+    3. **Tokenization Time:** 50 tokens * 200µs/token = 10ms.
+    4. **Hidden Overhead:** Allocation and tokenization sum to barely ~10ms, not 900ms. The missing ~890ms is KV cache CUDA/NPU driver initialization and session warm-up.
+    5. **Solution:** Requires **NPU session pre-warming** at app launch.
 status: published
 provenance: imported
 requires_explanation: false

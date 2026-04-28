@@ -8,38 +8,21 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Decode Preemption and KV Swap
-scenario: Under heavy load, your decode scheduler preempts low-priority in-flight
-  sequences by swapping their KV-cache to CPU DRAM to free HBM for new high-priority
-  requests. Users report that preempted requests, when resumed, have TPOT 8× higher
-  than normal for the first 20 tokens before recovering. Explain the exact mechanism
-  causing this and how to fix it.
-question: Why do resumed preempted sequences have 8× TPOT for the first 20 tokens,
-  and how would you fix it?
+scenario: Under heavy load, your decode scheduler preempts low-priority in-flight sequences by swapping their KV-cache to CPU DRAM to free HBM for new high-priority requests. Users report that preempted requests, when resumed, have TPOT 8× higher than normal for the first 20 tokens before recovering.
+question: Why do resumed preempted sequences have 8× TPOT for the first 20 tokens, and how would you fix it?
 details:
-  realistic_solution: 'When a preempted sequence resumes, its KV-cache must be swapped
-    back from CPU DRAM to GPU HBM over PCIe (typically 64 GB/s). During the swap,
-    the decode kernel is also reading model weights from HBM (140 GB for 70B model
-    × decode step = streaming weights). The PCIe bus saturates during the KV swap-in,
-    stalling the HBM DMA engine because both operations compete for HBM write bandwidth.
-    The GPU cannot begin the decode kernel until the KV-cache is resident in HBM.
-    For 20 tokens, the KV-cache grows by 20 × (frame size per token), each token requiring
-    a PCIe read before it can be used. Fix: (1) Use asynchronous KV swap with double-buffering
-    — begin swapping the KV-cache for a sequence one step before it is scheduled to
-    resume. (2) Reduce swap frequency by increasing HBM KV pool (use MI300X 192 GB).
-    (3) Use NVLink-attached CPU memory pools (Grace Hopper) where swap bandwidth is
-    900 GB/s vs 64 GB/s PCIe.'
-  common_mistake: Attributing the slowdown to CPU-GPU synchronization overhead or
-    Python scheduler latency. The real cause is PCIe bandwidth saturation during KV
-    swap-in competing with weight reads during decode.
-  napkin_math: 'KV swap-in rate (PCIe): 64 GB/s. 192 MB KV for 2048-token sequence:
-    3 ms swap time. Normally decode step time = model_size / HBM_bw = 140 GB / 3.35
-    TB/s = 41.8 ms. During swap, effective HBM bandwidth drops to ~2 TB/s (PCIe contention):
-    step time = 140/2000 = 70 ms. Ratio: 70/41.8 = 1.67×. For full 192 MB swap affecting
-    3 ms window with 41.8 ms/step: first token post-preemption incurs 3 ms + 41.8
-    ms vs normal 41.8 ms = 1.07× overhead. Doesn''t match 8× — the real mechanism
-    is page-fault stalls if using demand paging. Full KV not pre-fetched: each token
-    decode triggers page faults for its own KV pages → stall per fault × 20 pages
-    = 8× plausible.'
+  realistic_solution: 'When a preempted sequence resumes, its KV-cache must be swapped back from CPU DRAM to GPU HBM over PCIe. During the swap, the decode kernel is also reading model weights from HBM. The PCIe bus saturates during the KV swap-in, stalling the HBM DMA engine. However, the true 8x slowdown is due to page-fault stalls if using demand paging. Fix: (1) Use asynchronous KV swap with double-buffering. (2) Reduce swap frequency by increasing HBM KV pool. (3) Use NVLink-attached CPU memory pools.'
+  common_mistake: |
+    **The Pitfall:** Attributing the slowdown to CPU-GPU synchronization overhead or Python scheduler latency.
+    **The Rationale:** Candidates often jump to software overheads when seeing latency spikes upon resuming a task, forgetting hardware data movement.
+    **The Consequence:** The real cause (PCIe bandwidth saturation or page faults) is ignored, leading to ineffective software-only fixes.
+  napkin_math: |
+    - **Normal Step Time:** `model_size / HBM_bw` = 140 GB / 3.35 TB/s = 41.8 ms.
+    - **PCIe Contention:** During swap-in (64 GB/s), effective HBM bandwidth for weights drops to ~2 TB/s. Step time becomes 140/2000 = 70 ms. Ratio: 70/41.8 = 1.67x.
+    - **Total Swap Penalty Window:** 192 MB KV for 2048-token sequence takes 3 ms to swap in.
+    - **First Token Overhead:** 3 ms + 41.8 ms vs normal 41.8 ms = 1.07x overhead.
+    - **The Real Mechanism:** Doesn't match 8x. The real cause is page-fault stalls if using demand paging. Full KV is not pre-fetched; each token decode triggers page faults for its own KV pages.
+    - **Stall per fault:** Stall per fault * 20 pages = **~8x overhead.**
 status: published
 provenance: imported
 requires_explanation: false

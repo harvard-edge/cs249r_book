@@ -8,36 +8,19 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Uncoalesced Memory Access in Gather Kernel
-scenario: A junior engineer implements a custom gather operation in CUDA for an A100
-  GPU (80 GB HBM2e, 2.0 TB/s bandwidth, 312 TFLOPS FP16). The kernel simply reads
-  FP16 values from a large array, but accesses them with a stride of 128 bytes. Despite
-  the kernel performing almost no math, the profiler shows the hardware HBM bandwidth
-  is fully saturated at 2.0 TB/s, yet the application's effective throughput of useful
-  data is only ~125 GB/s. Given that the GPU memory controller fetches data in 32-byte
-  minimum transactions, analyze why the effective bandwidth collapsed so drastically.
-question: Why does the strided gather saturate 2.0 TB/s HBM bandwidth but deliver
-  only about 125 GB/s of useful data?
+scenario: A junior engineer implements a custom gather operation in CUDA for an A100 GPU. The kernel simply reads FP16 values from a large array, but accesses them with a stride of 128 bytes. Despite the kernel performing almost no math, the profiler shows the hardware HBM bandwidth is fully saturated at 2.0 TB/s, yet the application's effective throughput of useful data is only ~125 GB/s. The GPU memory controller fetches data in 32-byte minimum transactions.
+question: Why does the strided gather saturate 2.0 TB/s HBM bandwidth but deliver only about 125 GB/s of useful data?
 details:
-  realistic_solution: The effective bandwidth collapsed due to completely uncoalesced
-    memory accesses. When the 32 threads in a warp request data separated by 128 bytes,
-    each request falls into a completely different 32-byte memory segment. The memory
-    controller is forced to issue 32 distinct 32-byte transactions to serve one warp's
-    instruction. The hardware is fetching 1024 bytes of data to satisfy just 64 bytes
-    of actual FP16 requests, meaning 93.75% of the memory bandwidth is wasted on discarded
-    neighboring bytes.
-  common_mistake: Candidates often assume the low throughput is due to a lack of parallel
-    threads (low occupancy), PCIe bottlenecks, or instruction fetch stalls. They might
-    incorrectly suggest the GPU is starved for compute, failing to identify that the
-    hardware is actually fully utilizing the HBM, but wasting the bulk of it on uncoalesced
-    memory fetches.
-  napkin_math: 'Useful data per warp = 32 threads * 2 bytes (FP16) = 64 bytes.
-
-    Data fetched per warp (uncoalesced) = 32 threads * 32-byte sector = 1024 bytes.
-
-    Bandwidth Efficiency = Useful Data / Fetched Data = 64 / 1024 = 1/16 (6.25%).
-
-    Effective Bandwidth = Peak Bandwidth * Efficiency = 2.0 TB/s * 0.0625 = 0.125
-    TB/s = 125 GB/s.'
+  realistic_solution: The effective bandwidth collapsed due to completely uncoalesced memory accesses. When the 32 threads in a warp request data separated by 128 bytes, each request falls into a completely different 32-byte memory segment. The memory controller is forced to issue 32 distinct 32-byte transactions to serve one warp's instruction. The hardware is fetching 1024 bytes of data to satisfy just 64 bytes of actual FP16 requests, meaning 93.75% of the memory bandwidth is wasted on discarded neighboring bytes.
+  common_mistake: |
+    **The Pitfall:** Assuming low throughput is due to compute starvation, PCIe bottlenecks, or low thread occupancy.
+    **The Rationale:** Candidates see low application throughput and guess standard CPU bottlenecks, ignoring how GPU memory controllers fetch cache lines.
+    **The Consequence:** Failing to identify that the hardware is actually fully utilizing the HBM, but wasting the bulk of it on uncoalesced memory fetches.
+  napkin_math: |
+    *   **Useful Data per Warp:** 32 threads $\times$ 2 bytes (FP16) = **64 bytes**.
+    *   **Data Fetched per Warp:** Because accesses stride by 128 bytes, each thread hits a different cache line. 32 threads $\times$ 32-byte sector = **1024 bytes fetched**.
+    *   **Bandwidth Efficiency:** 64 bytes useful / 1024 bytes fetched = 1/16 = **6.25% efficiency**.
+    *   **Effective Bandwidth:** 2.0 TB/s peak $\times$ 0.0625 = **0.125 TB/s (125 GB/s)**.
 status: published
 provenance: imported
 requires_explanation: false

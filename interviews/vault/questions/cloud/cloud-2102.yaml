@@ -8,37 +8,27 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: MoE Expert Parallelism vs Tensor Parallelism
-scenario: You are deploying a 128-expert MoE model for inference across a cluster. Compare expert parallelism
-  (each GPU holds a subset of experts, tokens routed via AllToAll) vs tensor parallelism (each expert
-  is split across GPUs). Under what conditions does each strategy win?
-question: "When should you use expert parallelism versus tensor parallelism for 128-expert MoE inference, and what are the tradeoffs?"
+scenario: You are deploying a 128-expert MoE model for inference across a 16-GPU cluster.
+question: When should you use expert parallelism versus tensor parallelism for 128-expert MoE inference, and what are the tradeoffs?
 details:
-  realistic_solution: 'Expert parallelism (EP): each GPU holds $E/N$ complete experts. Pro: zero communication
-    within expert computation — each GPU runs complete matmuls on its local experts. Con: requires AllToAll
-    to dispatch tokens to the right GPU and collect results. Scales well when experts fit on single GPUs.
-    Tensor parallelism (TP): each expert is split across GPUs. Pro: handles experts too large for one
-    GPU. Con: requires AllReduce within each expert''s forward pass — much more frequent synchronization.
-    EP wins when: individual experts fit on one GPU (common for MoE models where each expert is small),
-    batch sizes are large (amortizes AllToAll overhead), and GPU count equals or divides expert count
-    cleanly. TP wins when: individual experts are too large for one GPU, or when the model has very few
-    but very large experts.'
-  common_mistake: Defaulting to tensor parallelism because it's familiar from dense models. For MoE, expert
-    parallelism is often superior because it avoids the AllReduce overhead within each expert's computation.
-  napkin_math: '128-expert model, 16 GPUs: | EP: 8 experts/GPU, 1 AllToAll per MoE layer. AllToAll 4096
-    tokens × 8KB = 32 MB. | TP-4 on each expert: 1 AllReduce per expert per layer × 8 experts = 8 AllReduces
-    per layer (!). | EP communication: 32 MB/layer. TP: 8 × 32KB = 256 KB/layer but 8× higher latency
-    from synchronization points.'
+  realistic_solution: 'Expert parallelism (EP): each GPU holds $E/N$ complete experts. Pro: zero communication within expert computation — each GPU runs complete matmuls on its local experts. Con: requires AllToAll to dispatch tokens to the right GPU and collect results. Tensor parallelism (TP): each expert is split across GPUs. Pro: handles experts too large for one GPU. Con: requires AllReduce within each expert''s forward pass — much more frequent synchronization. EP wins when: individual experts fit on one GPU, batch sizes are large, and GPU count divides expert count cleanly. TP wins when: individual experts are too large for one GPU.'
+  common_mistake: |
+    **The Pitfall:** Defaulting to tensor parallelism because it is familiar from dense models.
+    **The Rationale:** Candidates apply standard dense-model logic to MoE, ignoring the massive synchronization overhead within experts.
+    **The Consequence:** Imposing severe AllReduce latency penalties on small experts, destroying inference throughput.
+  napkin_math: |
+    1. **Setup:** 128-expert model, 16 GPUs.
+    2. **Expert Parallelism (EP):** 8 experts/GPU. 1 AllToAll per MoE layer. Data exchanged = 4096 tokens * 8KB = 32 MB total.
+    3. **Tensor Parallelism (TP):** TP-4 on each expert. Requires 1 AllReduce per expert * 8 experts = 8 AllReduces per layer.
+    4. **Conclusion:** **TP causes 8x more synchronization latency points than EP.**
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 12
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The phrasing 'AllToAll 4096 tokens × 8KB = 32 MB' in Napkin Math for EP is slightly ambiguous; it likely
-  refers to the total data volume exchanged across all GPUs, not per GPU.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

@@ -8,24 +8,20 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: LLM Autoscaling and KV Cache Bottlenecks
-scenario: You manage an LLM inference service using vLLM serving Llama-3-8B on single L4 GPUs (24GB VRAM).
-  The Kubernetes HPA is configured to scale out when average GPU compute utilization exceeds 75%. During
-  traffic bursts, P99 Time-To-First-Token (TTFT) degrades from 200ms to over 4 seconds. Monitoring shows
-  GPU compute utilization peaks at 55% during these events, failing to trigger the autoscaler. Analyze
-  why the system saturates and requests queue up without hitting the compute scaling threshold.
-question: "Why does TTFT exceed 4 seconds when GPU compute utilization stays below 75%, and what metric should autoscaling use instead?"
+scenario: You manage an LLM inference service using vLLM serving Llama-3-8B on single L4 GPUs (24GB VRAM). The Kubernetes HPA scales out when average GPU compute utilization exceeds 75%. During traffic bursts, P99 Time-To-First-Token (TTFT) degrades from 200ms to over 4 seconds, but GPU compute utilization peaks at 55%.
+question: Why does TTFT exceed 4 seconds when GPU compute utilization stays below 75%, and what metric should autoscaling use instead?
 details:
-  realistic_solution: Reconfigure the autoscaler to trigger based on KV cache memory utilization (e.g.,
-    scaling at 75% KV cache usage) or the scheduler queue length (e.g., average waiting requests > 0)
-    to provision capacity before requests queue.
-  common_mistake: Relying on GPU compute utilization as the primary scaling metric for LLMs, failing to
-    realize that autoregressive generation is almost always memory-bound by KV cache capacity rather than
-    compute-bound.
-  napkin_math: L4 VRAM = 24GB. Llama-3 FP16 weights ≈ 16GB. Remaining for KV cache ≈ 6GB (after ~2GB CUDA/framework
-    overhead). KV cache per token = 2 bytes × 32 layers × 1024 KV_dim × 2 (K+V) = 128 KB. Max concurrent
-    tokens = 6GB / 128KB ≈ 49,152 tokens. For an average request length of 1,500 tokens, maximum concurrency
-    is ~32 requests. At 30 concurrent requests, the KV cache is 100% full and request queueing begins,
-    even if GPU compute utilization is only 55%.
+  realistic_solution: Reconfigure the autoscaler to trigger based on KV cache memory utilization (e.g., scaling at 75% KV cache usage) or the scheduler queue length (e.g., average waiting requests > 0) to provision capacity before requests queue.
+  common_mistake: |
+    **The Pitfall:** Relying on GPU compute utilization as the primary scaling metric for LLMs.
+    **The Rationale:** Many engineers port standard microservice scaling logic to LLMs, forgetting that autoregressive generation is overwhelmingly memory-bound by KV cache capacity, not compute-bound.
+    **The Consequence:** The autoscaler fails to trigger during high concurrency, causing catastrophic queueing delays and SLA breaches.
+  napkin_math: |
+    *   **VRAM Available:** 24GB total - 16GB weights - ~2GB overhead = ~6GB for KV cache.
+    *   **KV Cache per Token:** 2 bytes * 32 layers * 1024 dim * 2 (K+V) = 131,072 bytes (128 KB).
+    *   **Max Concurrent Tokens:** 6GB / 128KB ≈ 49,152 tokens.
+    *   **Max Concurrent Requests:** 49,152 tokens / 1,500 tokens (avg length) ≈ 32 requests.
+    *   **Final Result:** **At ~30 concurrent requests, the KV cache fills and requests queue up, long before compute utilization hits 75%.**
 status: published
 provenance: imported
 requires_explanation: false

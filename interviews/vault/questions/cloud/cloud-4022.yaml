@@ -8,35 +8,20 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: Victim Flow Starvation Under PFC
-scenario: On a 64-MI300X cluster, a checkpoint save operation writes 192GB from each
-  GPU to a remote NFS server over the same RoCE fabric used for training. During checkpointing,
-  AllReduce throughput drops by 70%, even though checkpoint traffic uses only 15%
-  of total fabric bandwidth. PFC is enabled on all ports. Diagnose why a 15% bandwidth
-  consumer causes 70% throughput degradation.
-question: Why does checkpoint traffic using only 15% of fabric bandwidth cause a 70%
-  AllReduce throughput drop with PFC enabled?
+scenario: On a 64-GPU cluster, a checkpoint save operation writes 192GB from each GPU to a remote NFS server over the same RoCE fabric used for training. During checkpointing, AllReduce throughput drops by 70%, even though checkpoint traffic uses only 15% of total fabric bandwidth. Priority Flow Control (PFC) is enabled on all ports.
+question: Why does checkpoint traffic using only 15% of fabric bandwidth cause a 70% AllReduce throughput drop with PFC enabled?
 details:
-  realistic_solution: 'The root cause is PFC''s per-priority granularity combined
-    with shared priority classes. Both checkpoint (storage) and AllReduce (training)
-    traffic use the same RoCE priority (default: priority 3). When checkpoint traffic
-    causes congestion at the NFS server''s ToR (192GB × 64 GPUs = 12.3TB total, flowing
-    through limited uplinks), PFC pause frames propagate backward. These pauses stop
-    ALL priority-3 traffic on the paused port, including AllReduce flows that have
-    nothing to do with the congestion. Fix: (1) Assign checkpoint traffic to a separate
-    PFC priority class (priority 5) with its own buffer pool. (2) Rate-limit checkpoint
-    traffic to 25% of link speed using NIC-level traffic shaping. (3) Use separate
-    VLANs: VLAN 100 for training (lossless, PFC-enabled) and VLAN 200 for storage
-    (lossy, TCP-based, no PFC). With MI300X''s 192GB HBM, checkpoint sizes are ~2×
-    larger than A100, making this separation critical.'
-  common_mistake: Assuming bandwidth is the only resource being contended. PFC operates
-    per-priority, not per-flow. If checkpoint traffic and AllReduce share the same
-    priority class, PFC pauses for checkpoint congestion will also pause AllReduce
-    flows on the same port — classic victim flow problem.
-  napkin_math: '64 MI300X × 192GB checkpoint = 12.3 TB total. Over 8 × 400G uplinks
-    to storage = 400 GB/s aggregate. Write time = 12.3TB / 400 GB/s = 30.7 seconds.
-    During this window, PFC pauses affect AllReduce on shared ports. At 70% throughput
-    loss for 30 seconds in a 100ms iteration cycle: ~300 iterations delayed = ~210
-    seconds of equivalent compute wasted.'
+  realistic_solution: 'The root cause is PFC''s per-priority granularity combined with shared priority classes. Both checkpoint (storage) and AllReduce (training) traffic use the same RoCE priority. When checkpoint traffic causes congestion at the NFS server''s ToR, PFC pause frames propagate backward. These pauses stop ALL priority traffic on the paused port, including AllReduce flows that have nothing to do with the congestion. Fix: (1) Assign checkpoint traffic to a separate PFC priority class. (2) Rate-limit checkpoint traffic. (3) Use separate VLANs.'
+  common_mistake: |
+    **The Pitfall:** Assuming bandwidth saturation is the only metric that causes network interference.
+    **The Rationale:** If a workload is only using 15% of link capacity, engineers assume there is plenty of room for other traffic.
+    **The Consequence:** Priority Flow Control acts per-priority, not per-flow. The shared priority class means congestion from storage traffic completely pauses unrelated training traffic, creating the classic "victim flow" starvation.
+  napkin_math: |
+    1. Calculate total checkpoint size: 64 GPUs * 192GB = 12.3 TB total.
+    2. Calculate transfer limits: Over 8 x 400G uplinks to storage (400 GB/s aggregate). Write time = 12.3TB / 400 GB/s = 30.7 seconds.
+    3. Analyze PFC impact: Because both traffic types share priority 3, PFC pause frames from the storage congestion halt AllReduce traffic.
+    4. Evaluate wasted compute: A 70% throughput loss for 30 seconds in a 100ms iteration cycle delays ~300 iterations.
+    5. Conclude: This is equivalent to **~210 seconds of pure compute wasted**.
 status: published
 provenance: imported
 requires_explanation: false

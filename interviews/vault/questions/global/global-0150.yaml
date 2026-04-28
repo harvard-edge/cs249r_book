@@ -8,23 +8,19 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: The Phantom Coherency Bug
-scenario: A sensor fusion model samples an IMU at 1kHz via DMA to a 4KB SRAM buffer to save power. Inference
-  runs every 100ms. The model periodically outputs random garbage. Adding a basic printf logging statement
-  to debug the input buffer magically fixes the accuracy.
+scenario: A sensor fusion model samples an IMU at 1kHz via DMA to a 4KB SRAM buffer to save power. Inference runs every 100ms. The model periodically outputs random garbage. Adding a basic printf logging statement to debug the input buffer magically fixes the accuracy.
 question: "Why does the IMU fusion model read garbage from the DMA buffer, and why does adding printf appear to fix it?"
 details:
-  realistic_solution: The root cause is a D-Cache coherency failure, a classic locality issue on Cortex-M7.
-    The DMA controller writes sensor data directly to the physical SRAM, bypassing the CPU's L1 Data Cache.
-    When the CPU runs inference, it reads stale data from the local D-Cache instead of the fresh DMA data.
-    Adding a printf introduces enough delay, stack activity, flushes I/O buffers, or causes context switches,
-    which naturally evict or sync the stale cache lines. The correct fix is to use SCB_InvalidateDCache_by_Addr()
-    before reading the buffer or placing the DMA buffer in a non-cacheable MPU memory region.
-  common_mistake: Assuming the DMA controller is dropping samples or that there is a timing race condition
-    in the interrupt handler.
-  napkin_math: 1kHz IMU sampling = 1ms/sample. In 100ms, 100 samples. Data size = 100 * 6 axes * 2B
-    = 1.2KB (easily fitting in the 4KB allocated SRAM buffer). Cortex-M7 has L1 data caches.
-    The DMA writes to SRAM asynchronously. The CPU reads stale cache if not invalidated. Adding printf
-    slows execution, flushes buffers, or calls memory fences, coincidentally syncing the buffer.
+  realistic_solution: The root cause is a D-Cache coherency failure, a classic locality issue on Cortex-M7. The DMA controller writes sensor data directly to the physical SRAM, bypassing the CPU's L1 Data Cache. When the CPU runs inference, it reads stale data from the local D-Cache instead of the fresh DMA data. Adding a printf introduces enough delay, stack activity, flushes I/O buffers, or causes context switches, which naturally evict or sync the stale cache lines. The correct fix is to use SCB_InvalidateDCache_by_Addr() before reading the buffer or placing the DMA buffer in a non-cacheable MPU memory region.
+  common_mistake: |
+    **The Pitfall:** Assuming the DMA controller is dropping samples or that there is a timing race condition in the interrupt handler.
+    **The Rationale:** Timing races are a common source of non-deterministic bugs in embedded systems.
+    **The Consequence:** Wasting hours debugging interrupt priorities and DMA configurations instead of looking at memory hierarchy and cache coherency.
+  napkin_math: |
+    - 1kHz IMU sampling = 1ms/sample.
+    - In 100ms, 100 samples. Data size = 100 * 6 axes * 2B = **1.2KB** (fits in 4KB SRAM).
+    - DMA writes to SRAM asynchronously, bypassing L1 cache.
+    - CPU reads stale cache if not invalidated. Adding printf flushes buffers, coincidentally syncing the buffer.
 status: published
 provenance: imported
 requires_explanation: false

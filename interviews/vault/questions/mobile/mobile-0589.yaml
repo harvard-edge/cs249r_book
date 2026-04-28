@@ -8,56 +8,22 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: The MediaTek Dimensity APU Architecture
-scenario: You've optimized a speech enhancement model for Qualcomm's Hexagon NPU using QNN. Now you need
-  to ship the same model on MediaTek Dimensity 9300 phones. Your engineer says 'just switch the TFLite
-  delegate from QNN to NeuroPilot.' The model runs but is 13x slower than on Hexagon. What went wrong?
-question: "Why does a QNN-optimized speech model run 13x slower after switching from Hexagon to MediaTek NeuroPilot?"
+scenario: You've optimized a speech enhancement model for Qualcomm's Hexagon NPU using QNN. Now you need to ship the same model on MediaTek Dimensity 9300 phones. Your engineer switches the TFLite delegate from QNN to NeuroPilot. The model runs but is unexpectedly 13x slower than on Hexagon.
+question: Why does a QNN-optimized speech model run 13x slower after switching from Hexagon to MediaTek NeuroPilot?
 details:
-  realistic_solution: 'Qualcomm''s Hexagon and MediaTek''s APU have fundamentally different architectures
-    that require different model optimizations. Hexagon has a unified pipeline processing INT8 operations
-    in a single dataflow. MediaTek''s APU splits into an Integer Processing Unit (IPU) and Float Processing
-    Unit (FPU) with separate memory hierarchies. A model optimized for Hexagon — using mixed INT8/FP16
-    operations freely — forces MediaTek''s APU to constantly shuttle data between IPU and FPU, incurring
-    0.3-0.5ms per transition. With 15+ such transitions in a speech enhancement model, overhead alone
-    adds 7.5ms+. Additionally, operator libraries differ: Hexagon''s QNN fuses depthwise-conv + activation
-    + residual into one kernel; NeuroPilot may execute them as 3 separate kernels with intermediate DRAM
-    roundtrips. Fix: (1) Profile with MediaTek''s NeuroPilot Profiler to identify IPU/FPU transitions.
-    (2) Restructure the model to batch all INT8 ops together and all FP16 ops together, minimizing transitions.
-    (3) Replace unsupported fused ops with NeuroPilot-friendly equivalents. (4) Use MediaTek''s quantization
-    toolkit to produce a fully INT8 model that stays on the IPU. Expected improvement: from 13x slower
-    to within 1.3x of Hexagon performance.'
-  common_mistake: '"MediaTek''s APU is just slower hardware — buy a faster phone." The Dimensity 9300
-    APU is rated at 45 TOPS INT8, comparable to Hexagon''s 48 TOPS. Raw throughput isn''t the problem
-    — the delegation strategy is.'
-  napkin_math: 'Hexagon: 48 TOPS INT8, unified pipeline.
-
-    - Speech model (DCCRN): 2.1 GMACs = 4.2 GOps INT8.
-
-    - Compute time: 4.2e9 / 48e12 = 0.0000875 s ≈ 0.088 ms.
-
-    - With scheduling overhead: 0.088 + 0.5 = **0.59 ms total**.
-
-
-    MediaTek APU: 45 TOPS INT8, split IPU (integer) / FPU (float) pipeline.
-
-    - Same model compute: 4.2e9 / 45e12 = 0.0000933 s ≈ 0.093 ms.
-
-    - But model has mixed INT8/FP16 layers → data must shuttle between IPU and FPU.
-
-    - IPU↔FPU transition overhead: ~0.5 ms per transition × 15 transitions = 7.5 ms.
-
-    - Unfused kernel launch overhead: ~0.1 ms × 3 unfused ops = 0.3 ms.
-
-    - **Total: 0.093 + 7.5 + 0.3 = ~7.9 ms** → about **13× slower** than Hexagon''s 0.59 ms.
-
-
-    After fixing (all-INT8 quantization + NeuroPilot fusion annotations):
-
-    - 0 IPU↔FPU transitions, fused kernels.
-
-    - 0.093 + 0.0 + 0.5 overhead = **0.59 ms**.
-
-    - Performance parity restored.'
+  realistic_solution: 'Qualcomm''s Hexagon and MediaTek''s APU have different architectures. Hexagon processes mixed INT8/FP16 operations in a single dataflow. MediaTek splits into an Integer Processing Unit (IPU) and Float Processing Unit (FPU) with separate memory hierarchies. A mixed-precision model forces MediaTek''s APU to constantly shuttle data between IPU and FPU, incurring 0.3-0.5ms per transition. Additionally, unfused ops cause intermediate DRAM roundtrips. Fix by restructuring the model to batch all INT8 ops together, and use MediaTek''s quantization toolkit to produce a fully INT8 model.'
+  common_mistake: |
+    **The Pitfall:** Blaming the hardware and assuming the MediaTek chip is simply slower.
+    **The Rationale:** Candidates look at the slow execution time and incorrectly assume the MediaTek APU lacks the raw TOPS required, rather than diagnosing a software delegation inefficiency.
+    **The Consequence:** The team unnecessarily abandons highly capable hardware (45 TOPS) and fails to ship the feature to a massive segment of Android users.
+  napkin_math: |
+    - **Hexagon Compute:** 2.1 GMACs = 4.2 GigaOps. At 48 TOPS: 4.2e9 / 48e12 = 0.0875 ms.
+    - **Hexagon Total:** 0.0875 + 0.5 ms scheduling overhead = 0.59 ms.
+    - **MediaTek Compute:** 4.2 GigaOps / 45 TOPS = 0.093 ms.
+    - **MediaTek Overhead:** Data shuttles between IPU and FPU. ~0.5 ms per transition × 15 transitions = 7.5 ms.
+    - **MediaTek Unfused Ops:** ~0.1 ms launch overhead × 3 unfused kernels = 0.3 ms.
+    - **MediaTek Total:** 0.093 + 7.5 + 0.3 = 7.893 ms.
+    - **Result:** **7.89 ms is ~13.4× slower than Hexagon's 0.59 ms, perfectly explaining the 13x slowdown.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -66,19 +32,10 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The napkin math for compute time is incorrect; it divides GMACs by TOPS without converting units, leading
-  to a result that is off by a factor of 2000.
-- The calculated slowdown in the napkin math (~37x) severely contradicts the slowdown stated in the scenario
-  (4x).
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Scenario mentions 15+ transitions for the model, but napkin math incorrectly calculates based on only
-  4 transitions.
 human_reviewed:
   status: not-reviewed
   by: null

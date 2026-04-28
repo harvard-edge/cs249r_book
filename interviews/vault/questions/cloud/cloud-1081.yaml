@@ -8,28 +8,18 @@ competency_area: data
 bloom_level: analyze
 phase: both
 title: Diagnosing Mutable Lineage Failures
-scenario: You are tasked with debugging a compliance failure for a deployed fraud detection model (XGBoost,
-  500 features). Following a highly publicized misclassified transaction, auditors demand the exact 10TB
-  dataset used to train the current model version. Your Airflow and MLflow infrastructure correctly tracked
-  the training script execution and logged the source Hive table name (`fraud_features_prod`) and execution
-  timestamp. However, when querying that table using the logged timestamp, the derived feature distributions
-  (e.g., `user_7d_txn_vol`) completely mismatch the descriptive statistics recorded by MLflow during the
-  original training run. Analyze the root cause of this lineage break.
-question: "Why do the reconstructed feature distributions mismatch the MLflow stats, and what lineage change ensures reproducibility?"
+scenario: You are tasked with debugging a compliance failure for a deployed fraud detection model (XGBoost, 500 features). Following a highly publicized misclassified transaction, auditors demand the exact 10TB dataset used to train the current model version. Your Airflow and MLflow infrastructure correctly tracked the training script execution and logged the source Hive table name and execution timestamp. However, when querying that table using the logged timestamp, the derived feature distributions completely mismatch the descriptive statistics recorded by MLflow.
+question: Why do the reconstructed feature distributions mismatch the MLflow stats, and what lineage change ensures reproducibility?
 details:
-  realistic_solution: The root cause is referencing a mutable data source where late-arriving events or
-    upstream data engineering backfills have silently overwritten or appended to historical partitions
-    after the training run concluded. True data lineage requires immutable references. The infrastructure
-    must be upgraded to a table format supporting time-travel (e.g., Apache Iceberg, Delta Lake), and
-    the training pipeline must explicitly query and log the exact `snapshot_id` to the model registry
-    to guarantee bit-for-bit reproducibility.
-  common_mistake: Assuming that logging the table locator (URI/name) alongside an execution timestamp
-    guarantees reproducibility, and attempting to debug by parsing Airflow execution logs or adding more
-    granular temporal filters to the SQL query.
-  napkin_math: If a 10TB table receives 50GB of late-arriving updates daily, a timestamp-based query executed
-    30 days after training will implicitly include 1.5TB of data that did not exist during the original
-    run. An explicit Iceberg snapshot ID isolates the exact historical state in O(1) time, eliminating
-    temporal ambiguity.
+  realistic_solution: The root cause is referencing a mutable data source where late-arriving events or upstream data engineering backfills have silently overwritten or appended to historical partitions after the training run concluded. True data lineage requires immutable references. The infrastructure must be upgraded to a table format supporting time-travel (e.g., Apache Iceberg, Delta Lake), and the training pipeline must explicitly query and log the exact `snapshot_id` to the model registry to guarantee bit-for-bit reproducibility.
+  common_mistake: |
+    **The Pitfall:** Relying exclusively on execution timestamps to query historical data states.
+    **The Rationale:** Engineers assume that filtering by `created_at < execution_time` safely isolates exactly what the model saw at training.
+    **The Consequence:** Total failure in compliance audits because late-arriving updates (backfills) inherently rewrite the "past," fundamentally breaking Bit-for-Bit reproducibility.
+  napkin_math: |
+    1. Assume a 10TB table receives 50GB of late-arriving backfills daily.
+    2. Querying 30 days post-training via timestamp includes 1.5TB of silently injected updates.
+    3. **Result: Explicit Iceberg/Delta snapshot IDs guarantee O(1) isolation of the exact historical state without temporal drift.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -45,9 +35,4 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
 created_at: '2026-03-23T21:43:47.432336'

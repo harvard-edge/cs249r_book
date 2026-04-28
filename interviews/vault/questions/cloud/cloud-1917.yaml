@@ -8,26 +8,20 @@ competency_area: data
 bloom_level: apply
 phase: training
 title: Calculating Effective Bandwidth Under Stochastic I/O
-scenario: 'You are training a vision model on an 8x H100 node capable of processing 16,000 images/sec.
-  The dataset contains 10 million individual 100KB JPEG files stored on a local PCIe Gen4 NVMe SSD (specs:
-  7,000 MB/s sequential read, 1.2M random IOPS). Using a standard DataLoader with fully random sampling,
-  GPU utilization drops to ~30%, and disk read throughput maxes out around 500 MB/s. Evaluate the storage
-  bottleneck caused by violating the operating system''s spatial and temporal locality assumptions, and
-  calculate the required I/O bandwidth improvement if the data is packed into 100MB contiguous chunks.'
-question: "How would you eliminate the 500 MB/s random-read bottleneck and reach the 1.6 GB/s needed for 16,000 100KB images/sec?"
+scenario: 'You are training a vision model on an 8x H100 node capable of processing 16,000 images/sec. The dataset contains 10 million individual 100KB JPEG files stored on a local PCIe Gen4 NVMe SSD. Using a standard DataLoader with fully random sampling, GPU utilization drops to ~30%, and disk read throughput maxes out around 500 MB/s.'
+question: 'How would you eliminate the 500 MB/s random-read bottleneck and reach the 1.6 GB/s needed for 16,000 100KB images/sec?'
 details:
-  realistic_solution: Serialize the individual images into large contiguous chunk files (e.g., 100MB WebDataset
-    or TFRecord files) to restore spatial locality. Shuffle chunks globally and elements locally, converting
-    IOPS-bound random reads into bandwidth-bound sequential reads.
-  common_mistake: Assuming NVMe SSDs will deliver their 7,000 MB/s sequential bandwidth regardless of
-    file size and access pattern, ignoring the OS file system overhead (open/close/stat ops) and read-ahead
-    cache thrashing caused by fully stochastic random sampling.
-  napkin_math: 'Required throughput: 16,000 imgs/s * 100 KB = 1.6 GB/s. Naive random reads require 16,000
-    file open/read/close operations per second. Due to FS metadata overhead and spatial locality violations,
-    effective throughput is capped at ~500 MB/s (causing 31% GPU utilization). Packed format: 100 MB chunk
-    = 1,000 images. To achieve 16,000 imgs/s, we only need to open and read 16 chunks/sec. 16 large sequential
-    I/O ops/sec triggers the OS read-ahead efficiently, safely delivering the required 1.6 GB/s (well
-    within the 7.0 GB/s SSD limit) and restoring GPU utilization to 100%.'
+  realistic_solution: 'Serialize the individual images into large contiguous chunk files (e.g., 100MB WebDataset or TFRecord files) to restore spatial locality. Shuffle chunks globally and elements locally, converting IOPS-bound random reads into bandwidth-bound sequential reads.'
+  common_mistake: |
+    **The Pitfall:** Assuming NVMe SSDs always deliver their maximum sequential bandwidth regardless of access patterns.
+    **The Rationale:** Engineers look at the spec sheet (7,000 MB/s) and assume the hardware handles any I/O pattern perfectly.
+    **The Consequence:** They ignore OS file system overhead (open/close/stat ops) and read-ahead cache thrashing caused by stochastic random sampling, failing to diagnose the deep storage bottleneck.
+  napkin_math: |
+    * **Required throughput:** 16,000 imgs/s * 100 KB = 1.6 GB/s.
+    * **Random read penalty:** 16,000 individual file ops/sec hits metadata overhead, capping throughput at ~500 MB/s.
+    * **Packed format resolution:** 100 MB chunk = 1,000 images.
+    * **New ops requirement:** To achieve 16,000 imgs/s, open and read just **16 chunks/sec**.
+    * **Conclusion:** 16 large sequential reads restore OS read-ahead efficiency, easily hitting the 1.6 GB/s target and restoring GPU utilization to 100%.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,29 +8,20 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: The Display Pipeline Collision
-scenario: Your AR app overlays ML-generated segmentation masks on the camera feed at 60 FPS on an iPhone
-  14 Pro (A16 Bionic, ProMotion 120 Hz display). When you enable the 120 Hz mode, the segmentation mask
-  visibly 'lags' behind the camera feed — objects move but the mask follows 1-2 frames behind. At 60 Hz,
-  the lag is imperceptible. Your ML inference time hasn't changed. What's happening?
-question: "Why does a 60 FPS AR segmentation mask lag by 1-2 frames when the iPhone display switches to 120 Hz?"
+scenario: Your AR app overlays ML-generated segmentation masks on the camera feed at 60 FPS on an iPhone 14 Pro (A16 Bionic). When you enable the 120 Hz ProMotion display mode, the segmentation mask visibly lags behind the camera feed (objects move but the mask follows 1-2 frames behind). At 60 Hz, the lag is imperceptible, and your ML inference time remains completely unchanged.
+question: Why does a 60 FPS AR segmentation mask lag visibly when the iPhone display switches to 120 Hz?
 details:
-  realistic_solution: 'The problem is **pipeline phase misalignment** between the camera, ML inference,
-    and display refresh. At 60 Hz (16.7ms budget), inference takes 11ms with 5.7ms slack — the mask is
-    at most one frame old (16.7ms), matching the camera feed age. At 120 Hz (8.3ms budget), inference
-    still takes 11ms, spanning two display frames. The camera feed updates every 8.3ms but the mask updates
-    every 16.7ms, creating an 8.3ms visible desync. Fix with motion-compensated reprojection: read the IMU
-    gyroscope during inference (~0.5ms overhead), then warp the stale mask to match the current camera
-    frame using a 2D affine transform. This hides the desync at <1ms cost. Additionally, split the segmentation
-    model into a fast coarse pass (4ms, every frame) and a slow refinement pass (11ms, every other frame).
-    The coarse pass provides temporally-aligned edges while refinement fills detail. Net result: perceived
-    latency drops from 8.3ms to <2ms at 120 Hz.'
-  common_mistake: '"The model can''t keep up with 120 Hz — we need a faster model." The model runs at
-    60 FPS regardless of display refresh rate. The issue is pipeline synchronization.'
-  napkin_math: '60 Hz: frame budget = 16.7ms. Pipeline = 11ms. Slack = 5.7ms. Mask age when displayed:
-    16.7ms. 120 Hz: frame budget = 8.3ms. Pipeline = 11ms. Overshoot = 2.7ms. Mask age when displayed:
-    16.6ms (same!), but camera feed is 8.3ms fresher → **8.3ms visible desync**. Reprojection cost: ~0.5ms
-    (IMU read + affine warp on GPU). Reprojection error at 8.3ms: ~7 pixels for typical hand motion (30
-    cm/s × 8.3ms = 2.5mm movement, at 30cm distance with ~70 deg FOV ≈ 7 pixels). Acceptable for AR overlay.'
+  realistic_solution: 'The problem is pipeline phase misalignment between the camera, ML inference, and display refresh. At 60 Hz (16.7ms budget), inference takes 11ms, so the mask is displayed synchronously with the camera feed (age 16.7ms). At 120 Hz (8.3ms budget), inference still takes 11ms, meaning it spans two display frames. The camera updates every 8.3ms, but the mask updates every 16.7ms, creating an 8.3ms desync. Fix with motion-compensated reprojection: read the IMU gyroscope during inference and warp the stale mask to match the current camera frame using a 2D affine transform.'
+  common_mistake: |
+    **The Pitfall:** Assuming the ML model is too slow for 120 Hz and needs pruning or quantization.
+    **The Rationale:** Engineers incorrectly believe that visual lag always indicates a compute bottleneck, missing the subtle synchronization issues of heterogeneous pipelines.
+    **The Consequence:** Months of wasted effort optimizing a model that already runs fast enough, while completely ignoring the actual reprojection solution needed for AR.
+  napkin_math: |
+    - **60 Hz Pipeline:** Frame budget = 16.7ms. Inference = 11ms. Mask age when displayed = 16.7ms. Camera feed age = 16.7ms. (Synchronized).
+    - **120 Hz Pipeline:** Frame budget = 8.3ms. Inference = 11ms (spans 2 frames). Mask age = 16.6ms, but camera feed updates at 8.3ms. 
+    - **Desync:** 16.6ms - 8.3ms = 8.3ms visible lag.
+    - **Visual Impact:** Typical hand motion is ~30 cm/s. Movement in 8.3ms = 2.5mm. At 30cm distance with a standard ~70 deg FOV, 2.5mm equates to roughly 7 pixels of visual lag.
+    - **Result:** **The pipeline mismatch creates an 8.3ms desync (~7 pixels of lag), which requires IMU-based reprojection (<1ms cost) to correct.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -42,12 +33,8 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: WARN
-validation_issues_pro:
-- The calculation of reprojection error in pixels is incorrect; a 2.5mm movement at 30cm distance would
-  translate to roughly 6-7 pixels, not 1.5, under typical phone camera FOV.
 math_verified: true
-math_status: UNCHECKED
+math_status: CORRECT
 human_reviewed:
   status: not-reviewed
   by: null

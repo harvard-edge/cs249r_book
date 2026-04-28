@@ -8,27 +8,19 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: Disaggregated Load Balancing for LLMs
-scenario: 'You are architecting the load balancing layer for a generative AI inference fleet of 128 A100
-  GPUs serving Llama-3-70B. Your traffic mix is highly bi-modal: 60% are short chat interactions (128
-  tokens in, 64 out) and 40% are long RAG queries (4096 tokens in, 256 out). Using standard Least-Connections
-  load balancing across homogeneous workers running continuous batching still yields poor P99 inter-token
-  latency (>300ms) for chat queries, as they are delayed by the massive compute spikes of RAG prefill
-  phases. Evaluate the trade-offs of migrating to a disaggregated architecture where the load balancer
-  routes prefill and decode traffic to dedicated compute pools, versus simply overprovisioning the cluster
-  size with traditional load balancing.'
-question: "Should you migrate to disaggregated prefill/decode serving or overprovision the cluster, and why?"
+scenario: You are architecting the load balancing layer for a generative AI inference fleet of 128 A100 GPUs serving Llama-3-70B. Your traffic mix is highly bi-modal: 60% are short chat interactions (128 tokens in, 64 out) and 40% are long RAG queries (4096 tokens in, 256 out). Using standard Least-Connections load balancing across homogeneous workers running continuous batching still yields poor P99 inter-token latency (>300ms) for chat queries, as they are delayed by the massive compute spikes of RAG prefill phases.
+question: Should you migrate to disaggregated prefill/decode serving or overprovision the cluster, and why?
 details:
-  realistic_solution: Implement a disaggregated serving architecture. The load balancer routes new requests
-    to a prefill-only GPU pool optimized for compute efficiency. Once the KV cache is generated, it is
-    transferred over the network to a decode-only GPU pool optimized for memory bandwidth, isolating decode
-    iterations from prefill compute stalls.
-  common_mistake: Candidates often assume that continuous batching (iteration-level scheduling) alone
-    solves head-of-line blocking, failing to recognize that massive prompt prefill operations monopolize
-    the GPU's compute capacity, stalling all active decoding generations on that node.
-  napkin_math: A 4096-token prefill on a 70B model requires ~573 TFLOPs (2 * 70B * 4096). On an 8xA100
-    node (2.5 PFLOPS FP16), this prefill takes ~230ms. During this 230ms, all concurrent decode tasks
-    on the node are stalled. Disaggregating prefill prevents this massive 230ms jitter from impacting
-    decode SLAs.
+  realistic_solution: Implement a disaggregated serving architecture. The load balancer routes new requests to a prefill-only GPU pool optimized for compute efficiency. Once the KV cache is generated, it is transferred over the network to a decode-only GPU pool optimized for memory bandwidth, isolating decode iterations from prefill compute stalls.
+  common_mistake: |
+    **The Pitfall:** Assuming that continuous batching (iteration-level scheduling) alone solves head-of-line blocking for LLMs.
+    **The Rationale:** Continuous batching solves the static timeout problem, so engineers trust it to manage all latency variances.
+    **The Consequence:** Failing to recognize that massive prompt prefill operations monopolize the GPU's compute capacity, causing severe P99 inter-token latency degradation for fast chat queries.
+  napkin_math: |
+    - **Prefill FLOPs (4096 tokens):** 2 * 70B * 4096 = **573 TFLOPs**.
+    - **Node Compute:** 8x A100 node provides ~2.5 PFLOPS FP16.
+    - **Prefill Latency:** 573 TFLOPs / 2.5 PFLOPS = **~230ms**.
+    - **Conclusion:** During this 230ms compute spike, all concurrent decode tasks on that node are completely stalled.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,19 +8,18 @@ competency_area: latency
 bloom_level: create
 phase: both
 title: Continuous Batching for LLM Queue Optimization
-scenario: 'An LLM service running on A100s already uses continuous batching but suffers
-  from prefix-cache collisions (50% of requests share a 4k-token system prompt and
-  the cache evicts the shared prefix unpredictably) AND a chunked-prefill design
-  decision - is it better to chunk a 4k prefill into 8 x 512 token chunks interleaved
-  with decode, or run prefill atomically at the cost of a long tail latency spike?'
-question: Design a scheduling policy that handles (a) prefix-cache collisions via
-  reference-counted block sharing and (b) chunked vs atomic prefill - trading tail
-  latency for inter-token latency. Identify the threshold prefill length at which
-  chunking pays off.
+scenario: 'An LLM service running on A100s already uses continuous batching but suffers from prefix-cache collisions (50% of requests share a 4k-token system prompt and the cache evicts the shared prefix unpredictably) AND a chunked-prefill design decision.'
+question: 'Design a scheduling policy that handles prefix-cache collisions via reference-counted block sharing and chunked prefill, and identify the threshold where chunking pays off.'
 details:
   realistic_solution: 'Implement PagedAttention with reference-counted prefix sharing to lock the 4k system prompt in the KV cache, preventing unpredictable evictions. For scheduling, use chunked prefill: instead of processing the entire 4k prefill atomically, split it into smaller chunks (e.g., 512 tokens). Interleave these prefill chunks with the decode steps of active requests. This converts a massive 100ms prefill latency spike into smaller ~12ms increments, slightly increasing average inter-token latency but completely eliminating the tail latency spike for ongoing generations.'
-  common_mistake: 'Assuming that prefill must be atomic to maximize GPU saturation. While atomic prefill maximizes pure prefill throughput, it causes severe head-of-line blocking for active decodes, destroying P99 inter-token latency. Another mistake is relying on a standard LRU cache for system prompts instead of explicit reference counting.'
-  napkin_math: 'If atomic prefill of 4k tokens takes 100ms, and inter-token decode latency is 15ms: a new request forces existing decodes to wait 100ms, creating a severe tail latency spike. By chunking prefill into 8x 512-token blocks (each taking ~12ms), decodes can interleave between chunks. The decode latency increases slightly (e.g., 15ms -> 27ms) but the 100ms tail spike is completely eliminated.'
+  common_mistake: |
+    **The Pitfall:** Assuming that prefill must be atomic to maximize GPU saturation.
+    **The Rationale:** Candidates focus purely on prefill throughput without considering the tail latency of ongoing requests.
+    **The Consequence:** A new request forces existing decodes to wait, creating a severe head-of-line blocking spike that destroys P99 inter-token latency.
+  napkin_math: |
+    - **Atomic Prefill:** 4k tokens takes 100 ms, creating a **100 ms tail latency spike** for active decodes.
+    - **Chunked Prefill:** Split into 8 × 512-token blocks (each taking ~12 ms).
+    - **Result:** Interleaving 12 ms chunks increases average decode latency slightly (e.g., 15 ms -> 27 ms) but **completely eliminates the 100 ms tail latency spike**.
 status: draft
 provenance: llm-draft
 expected_time_minutes: 10

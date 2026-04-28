@@ -8,30 +8,19 @@ competency_area: parallelism
 bloom_level: create
 phase: both
 title: Expert Parallelism All-to-All Overlap in Mixture-of-Experts Training
-scenario: You train a 1.8T Mixture-of-Experts model (128 experts, top-2 routing) across
-  128 H100 GPUs. Each MoE layer requires All-to-All communication to route tokens
-  to their assigned expert GPUs. The All-to-All takes 8ms per MoE layer, and expert
-  computation takes 6ms. With 32 MoE layers, communication dominates. Design an overlap
-  architecture.
-question: How would you overlap the 8 ms All-to-All routing with 6 ms expert compute
-  across 32 MoE layers?
+scenario: 'You train a 1.8T Mixture-of-Experts model (128 experts, top-2 routing) across 128 H100 GPUs. Each MoE layer requires All-to-All communication to route tokens to their assigned expert GPUs. The All-to-All takes 8ms per MoE layer, and expert computation takes 6ms. The model has 32 MoE layers.'
+question: How would you overlap the 8 ms All-to-All routing with 6 ms expert compute across 32 MoE layers?
 details:
-  realistic_solution: 'Inter-layer overlap (pipeline the communication): (1) Split
-    each MoE layer''s All-to-All into dispatch (tokens to experts) and combine (expert
-    outputs back). (2) While experts compute on layer L, start the dispatch All-to-All
-    for layer L+1 simultaneously. This requires knowing L+1''s routing decisions early
-    — run the gating network (tiny MLP, <0.1ms) for L+1 during L''s expert computation.
-    (3) Double-buffer token assignments: two sets of dispatch buffers, alternating
-    per layer. (4) Additionally, overlap the combine All-to-All of layer L with the
-    non-MoE layers (attention) between L and L+1. Architecture: gate(L+1) || expert_compute(L)
-    || dispatch_A2A(L+1) || combine_A2A(L). With 8ms A2A and 6ms compute + 0.1ms gate:
-    serial = 14ms/layer, pipelined = max(8, 6.1) = 8ms/layer. 1.75x speedup.'
-  common_mistake: Trying to overlap All-to-All with expert computation within the
-    same layer. The All-to-All output IS the expert input — they cannot overlap within
-    a single layer due to data dependency.
-  napkin_math: '32 MoE layers. Serial: 32 x (8+6) = 448ms. Pipelined: 32 x 8 = 256ms
-    + 6ms (last expert) = 262ms. Speedup: 448/262 = 1.71x. Time saved: 186ms per training
-    step. At 1000 steps: 186 seconds saved.'
+  realistic_solution: 'Inter-layer overlap (pipeline the communication): (1) Split each MoE layer''s All-to-All into dispatch (tokens to experts) and combine (expert outputs back). (2) While experts compute on layer L, start the dispatch All-to-All for layer L+1 simultaneously. This requires knowing L+1''s routing decisions early — run the gating network (tiny MLP, <0.1ms) for L+1 during L''s expert computation. (3) Double-buffer token assignments: two sets of dispatch buffers, alternating per layer. (4) Additionally, overlap the combine All-to-All of layer L with the non-MoE layers (attention) between L and L+1. Architecture: gate(L+1) || expert_compute(L) || dispatch_A2A(L+1) || combine_A2A(L). With 8ms A2A and 6ms compute + 0.1ms gate: serial = 14ms/layer, pipelined = max(8, 6.1) = 8ms/layer. 1.75x speedup.'
+  common_mistake: |
+    **The Pitfall:** Trying to overlap All-to-All with expert computation within the same layer.
+    **The Rationale:** Candidates recognize the need for overlap but fail to account for data dependencies (the All-to-All output IS the expert input).
+    **The Consequence:** The proposed architecture is logically impossible and fails to execute.
+  napkin_math: |
+    - **Calculate serial time:** 32 layers × (8ms + 6ms) = 448ms.
+    - **Calculate pipelined time:** Overlap L+1 dispatch with L compute. 32 layers × max(8ms, 6.1ms) = 32 × 8ms = 256ms, plus 6ms for the last expert = 262ms.
+    - **Calculate speedup:** 448ms / 262ms = **1.71x speedup**.
+    - **Calculate time saved:** 448ms - 262ms = 186ms per step. Over 1000 steps, this saves 186 seconds.
 status: published
 provenance: imported
 requires_explanation: true

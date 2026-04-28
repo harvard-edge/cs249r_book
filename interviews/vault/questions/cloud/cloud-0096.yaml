@@ -8,38 +8,24 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: The Memory Wall of Long Contexts
-scenario: You are running a multi-tenant LLM serving system on H100 GPUs (80 GB HBM3).
-  The system uses continuous batching and performs well with short user prompts. However,
-  when a few users start engaging in very long conversations (e.g., summarizing a
-  document with 16k tokens), you receive out-of-memory (OOM) errors and the entire
-  batch fails. Your manager asks why the system, which can handle 64 concurrent users
-  with short prompts, is failing with just a few users with long contexts. Using the
-  scaling rules, diagnose the problem.
-question: Why can a few 16k-token conversations OOM an H100 system that handles 64
-  users with short prompts?
+scenario: An H100 system (80 GB HBM3) serving LLMs handles 64 concurrent users with short prompts efficiently. However, when a few users submit 16k-token contexts, the system OOMs and the entire batch fails.
+question: Why can a few 16k-token conversations cause an OOM on an H100 system that comfortably handles 64 short-prompt users?
 details:
-  realistic_solution: The problem is the massive memory consumption of the KV cache
-    for long sequences. In a transformer, the key-value (KV) states for every token
-    in the context window must be stored in GPU memory to generate the next token.
-    This memory usage scales linearly with sequence length and batch size. While continuous
-    batching is efficient, it doesn't eliminate the fundamental memory requirement
-    of the KV cache. A few users with very long contexts can quickly exhaust the 80
-    GB of HBM on an H100, causing an OOM that kills the entire batch of users currently
-    being processed. The system needs KV cache compression (like quantization), paged
-    attention mechanisms, or a stricter limit on the maximum sequence length per user
-    to manage this.
-  common_mistake: Assuming memory usage is only for model weights. Many engineers
-    calculate the memory required for the model parameters (e.g., Llama-70B FP16 ≈
-    140GB) and forget that the KV cache for the context window is often a much larger
-    and more dynamic consumer of memory during inference.
-  napkin_math: '**Model:** Llama-70B class (80 layers, 8 KV heads via GQA, 128 head_dim, FP16) deployed on 2x H100 (TP=2). | **Weights per GPU:** 140 GB / 2 = 70 GB. **Available VRAM for KV-cache:** 80 GB - 70 GB = 10 GB per GPU. | **KV heads per GPU:** 8 / 2 = 4. | **KV-cache per token per GPU:** 2 (K&V) × 4 heads × 128 dim × 2 bytes × 80 layers = 163,840 bytes. | **Short prompt (512 tokens):** 163,840 bytes × 512 ≈ 83.89 MB per user. For 64 concurrent users = 5.37 GB KV-cache per GPU. This easily fits in the 10 GB budget. | **Long prompt (16k tokens):** 163,840 bytes × 16,384 ≈ 2.68 GB per user. | **Diagnosis:** Just 4 users at 16k tokens require 4 × 2.68 GB = 10.72 GB of KV-cache, which exceeds the 10 GB available VRAM per GPU, causing an OOM that kills the entire batch.'
+  realistic_solution: The problem is the massive memory consumption of the KV cache for long sequences. In a transformer, the key-value (KV) states for every token in the context window must be stored in GPU memory to generate the next token. This memory usage scales linearly with sequence length and batch size. While continuous batching is efficient, it doesn't eliminate the fundamental memory requirement of the KV cache. A few users with very long contexts can quickly exhaust the 80 GB of HBM on an H100, causing an OOM that kills the entire batch of users currently being processed. The system needs KV cache compression (like quantization), paged attention mechanisms, or a stricter limit on the maximum sequence length per user to manage this.
+  common_mistake: |
+    **The Pitfall:** Assuming memory usage is dictated entirely by model weights.
+    **The Rationale:** Engineers calculate static parameters but ignore the dynamic, linear scaling of the KV cache relative to context length.
+    **The Consequence:** The serving infrastructure is drastically under-provisioned for long-context generation, leading to catastrophic batch failures in production.
+  napkin_math: |
+    * **VRAM Budget:** 80 GB total - 70 GB weights = 10 GB available for KV cache.
+    * **Short Prompt KV Cost:** 163,840 bytes/token × 512 tokens ≈ 83.8 MB/user. 64 users = 5.37 GB (safely fits).
+    * **Long Prompt KV Cost:** 163,840 bytes/token × 16,384 tokens ≈ 2.68 GB/user.
+    * **Conclusion:** Just 4 users at 16k tokens consume 4 × 2.68 GB = **10.72 GB**, instantly exceeding the available 10 GB budget and crashing the system.
   options:
   - The OOM is caused by the model weights being loaded multiple times for each user.
-  - The KV cache for users with long sequence lengths is consuming all available HBM3
-    memory.
+  - The KV cache for users with long sequence lengths is consuming all available HBM3 memory.
   - The PCIe Gen5 bus is too slow to transfer the long prompts, causing a memory backlog.
-  - The continuous batching algorithm has a memory leak that gets worse with longer
-    sequences.
+  - The continuous batching algorithm has a memory leak that gets worse with longer sequences.
   correct_index: 1
 status: published
 provenance: imported

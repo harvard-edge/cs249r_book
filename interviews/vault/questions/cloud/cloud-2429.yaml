@@ -8,22 +8,21 @@ competency_area: compute
 bloom_level: evaluate
 phase: both
 title: The FP8 Autoregressive Decoding Fallacy
-scenario: Your team upgrades a Llama-3-70B inference service on 8x H100 GPUs (3.35 TB/s, 1979 TFLOPS FP8,
-  989 TFLOPS FP16 per GPU) from FP16 to FP8 weight-and-activation quantization. You expect a 2x latency
-  reduction for single-user autoregressive decoding (batch size 1) because FP8 TFLOPS are double FP16
-  TFLOPS. However, Time Per Output Token (TPOT) only improves from 45ms to 24ms (~1.8x), while prefill
-  latency improves by nearly 2x. Why did decoding not scale with the 2x compute increase?
-question: "Why did decoding not scale with the 2x compute increase?"
+scenario: Your team upgrades a Llama-3-70B inference service on 8x H100 GPUs (3.35 TB/s, 1979 TFLOPS FP8, 989 TFLOPS FP16 per GPU) from FP16 to FP8. You expect a 2x latency reduction for batch size 1 decoding because FP8 TFLOPS are double FP16. However, Time Per Output Token (TPOT) only improves from 45ms to 24ms (~1.8x).
+question: Why did decoding not scale directly with the 2x compute increase, and what explains the ~1.8x speedup?
 details:
-  realistic_solution: Autoregressive decoding at batch size 1 is strictly memory-bandwidth bound, meaning
-    it operates on the sloped portion of the roofline model. The doubling of the compute ceiling (TFLOPS)
-    from FP16 to FP8 is completely irrelevant because the GPUs are starved for data. The ~1.8x speedup
-    observed in decoding comes entirely from halving the weight memory footprint (from ~140GB to ~70GB),
-    which halves the memory load time across the HBM bandwidth. Prefill, however, uses large matrix multiplications
-    (Q x K^T) and is compute-bound, so it fully benefits from the doubled TFLOPS ceiling.
-  common_mistake: Assuming decoding latency is compute-bound and bottlenecked by the FP8 Tensor Core throughput
-    ceiling.
-  napkin_math: 'H100 Bandwidth = 3.35 TB/s per GPU x 8 = 26.8 TB/s total. FP16 weights = 140GB. Memory load time for the full model = 140GB / 26.8 TB/s = ~5.2ms per token (theoretical minimum, practically ~45ms end-to-end due to NVLink and kernel overheads). FP8 weights = 70GB. Memory load time = 70GB / 26.8 TB/s = ~2.6ms per token. Compute time for BS=1 is 140B FLOPs / (8 * 1979 TFLOPS) = ~0.008ms. Compute time (0.008ms) << Memory time (2.6ms).'
+  realistic_solution: |
+    Autoregressive decoding at batch size 1 is memory-bandwidth bound. The doubling of the compute ceiling (TFLOPS) is irrelevant because GPUs are starved for data. The ~1.8x speedup comes entirely from halving the weight memory footprint (from ~140GB to ~70GB), which halves the memory load time across the HBM bandwidth.
+  common_mistake: |
+    **The Pitfall:** Assuming decoding latency is compute-bound.
+    **The Rationale:** Engineers associate quantization primarily with faster Tensor Cores rather than reduced memory transfer times.
+    **The Consequence:** Mispredicting performance gains and optimizing the wrong parts of the inference stack.
+  napkin_math: |
+    - H100 total bandwidth = 3.35 TB/s * 8 = 26.8 TB/s.
+    - FP16 weights: 140GB. Memory load time = 140GB / 26.8 TB/s = ~5.2ms per token.
+    - FP8 weights: 70GB. Memory load time = 70GB / 26.8 TB/s = ~2.6ms per token.
+    - Compute time: 140B FLOPs / (8 * 1979 TFLOPS) = ~0.008ms.
+    - **Compute time (0.008ms) << Memory time (2.6ms), proving the speedup is from bandwidth savings, not TFLOPS.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,24 +8,19 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: Diagnosing CPU Bottlenecks in Batch-1 Inference
-scenario: A team is serving a large 70B parameter transformer model on 4x A100 GPUs using PyTorch. For
-  batch size 32, GPU utilization is 90% and throughput is excellent. However, for real-time batch size
-  1 requests, the service misses its 30ms latency SLA, averaging 45ms. Profiling reveals the GPUs are
-  idle 60% of the time, while the CPU thread running the PyTorch event loop is pegged at 100%. The model
-  execution trace shows thousands of small sequential operations like LayerNorm, GeLU, and element-wise
-  additions.
+scenario: A team is serving a large 70B parameter transformer model on 4x A100 GPUs using PyTorch. For batch size 32, GPU utilization is 90% and throughput is excellent. However, for real-time batch size 1 requests, the service misses its 30ms latency SLA, averaging 45ms. Profiling reveals the GPUs are idle 60% of the time, while the CPU thread running the PyTorch event loop is pegged at 100%. The model execution trace shows thousands of small sequential operations like LayerNorm, GeLU, and element-wise additions.
 question: "Why does batch-size-1 serving miss the 30ms SLA despite high batch-32 utilization, and how would you fix it?"
 details:
-  realistic_solution: Identify that the CPU cannot dispatch kernels fast enough to keep the GPU fed (kernel
-    launch overhead). Apply CUDA Graphs or torch.compile to trace the operations and replay them with
-    a single CPU launch, or use fused kernels (e.g., FlashAttention, fused MLP) to drastically reduce
-    the total number of kernel launches.
-  common_mistake: Assuming the issue is memory bandwidth (since batch size 1 is often memory bound) or
-    compute latency, and attempting to fix it with tensor parallelism or weight quantization while ignoring
-    the CPU-side bottleneck.
-  napkin_math: If the model has 2,500 distinct operations and each CPU-to-GPU kernel launch takes ~10µs,
-    the total launch overhead alone is 2,500 * 10µs = 25ms. If the actual GPU execution takes 15ms, the
-    total latency is 40ms, meaning over 60% of the time is just CPU dispatch overhead.
+  realistic_solution: Identify that the CPU cannot dispatch kernels fast enough to keep the GPU fed (kernel launch overhead). Apply CUDA Graphs or torch.compile to trace the operations and replay them with a single CPU launch, or use fused kernels (e.g., FlashAttention, fused MLP) to drastically reduce the total number of kernel launches.
+  common_mistake: |
+    **The Pitfall:** Assuming the issue is memory bandwidth or compute latency.
+    **The Rationale:** Because batch size 1 is typically memory-bound, candidates try to fix it with tensor parallelism or weight quantization.
+    **The Consequence:** Completely ignoring the CPU-side bottleneck, resulting in zero latency improvement.
+  napkin_math: |
+    - **Kernel Launch Overhead:** 2,500 distinct operations * 10 \mu s per launch = 25 ms.
+    - **GPU Execution Time:** ~15 ms.
+    - **Total Latency:** 25 ms + 15 ms = 40 ms.
+    - **Result:** **Over 60% of the latency (25 ms / 40 ms) is purely CPU dispatch overhead, explaining the missed 30ms SLA.**
 status: published
 provenance: imported
 requires_explanation: false

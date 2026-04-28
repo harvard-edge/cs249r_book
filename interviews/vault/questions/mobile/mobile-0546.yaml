@@ -8,17 +8,23 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The AI Keyboard Jank
-scenario: You are the lead ML engineer for a new AI keyboard on a flagship smartphone. The keyboard uses an on-device LLM to generate predictive text. Profiling on an Apple A17 Pro (35 TOPS NPU) shows that for a single, isolated request, the Time-To-First-Token (TTFT) is 80ms and the Time-Per-Output-Token (TPOT) is 50ms.
-question: "Why does static batching make the AI keyboard freeze even though single-request TTFT and TPOT are known?"
+scenario: 'You are the lead ML engineer for a new AI keyboard on a flagship smartphone. The keyboard uses an on-device LLM to generate predictive text. Profiling on an Apple A17 Pro (35 TOPS NPU) shows that for a single, isolated request, the Time-To-First-Token (TTFT) is 80ms and the Time-Per-Output-Token (TPOT) is 50ms.'
+question: 'Why does static batching make the AI keyboard freeze even though single-request TTFT and TPOT are known?'
 details:
-  realistic_solution: 'The problem is **head-of-line blocking** caused by the static batching policy. The entire batch, including very short requests, must wait for the single longest request to complete. This creates an unacceptable tail latency. The P99 latency for a new request is the processing time of a full batch, which is dictated by the longest job: `TTFT + (TPOT * longest_sequence)`. This calculates to `80ms + (50ms/token * 10 tokens) = 580ms`. This 580ms delay is over 36x the standard 16ms budget to avoid UI jank on a mobile device, causing the main thread to stall and the keyboard to freeze. The correct fix is to implement **continuous batching** (or in-flight batching), where completed sequences are immediately evicted from the batch and new requests are swapped in, preventing short jobs from getting stuck behind long ones.'
-  common_mistake: Engineers often misdiagnose the bottleneck. They either blame the hardware (NPU is saturated) because utilization is high, or they focus on the average case latency, completely missing the impact of tail latency caused by head-of-line blocking. They forget that in a UI, the P99 latency, not the average, is what the user feels as 'jank'.
-  napkin_math: '1. **Calculate time for the longest request:** The total time is the prompt processing (TTFT) plus the token generation time (TPOT * sequence_length). For a 10-token sequence: 80ms + (50ms/token * 10) = 580ms. 2. **Identify Tail Latency:** Under static batching, all requests wait 580ms. 580ms is >36x the 16ms budget for 60Hz UI, causing severe jank.'
+  realistic_solution: 'The problem is head-of-line blocking caused by the static batching policy. The entire batch, including very short requests, must wait for the single longest request to complete. This creates an unacceptable tail latency. The correct fix is to implement continuous (in-flight) batching, where completed sequences are evicted and new requests swap in immediately.'
+  common_mistake: |
+    **The Pitfall:** Focusing on average latency and ignoring the P99 tail latency introduced by batch scheduling policies.
+    **The Rationale:** Engineers misdiagnose the bottleneck as hardware saturation or memory bandwidth limits because they don't trace the request lifecycle through the batching queue.
+    **The Consequence:** The UI thread blocks waiting for long sequences to finish, causing severe interface jank and a terrible user experience.
+  napkin_math: |
+    1. **Longest Request Delay:** For a 10-token sequence in the batch, processing time is TTFT + (TPOT × 9) = 80ms + (50ms × 9) = 530ms.
+    2. **Head-of-Line Blocking:** Under static batching, all shorter requests in that same batch are blocked for the full 530ms.
+    3. **UI Jank Threshold:** 530ms is over 33x the **16ms UI budget** (60Hz display), causing severe main thread stalling and freezing the keyboard.
   options:
-  - The NPU is saturated. The latency is the sum of all operations, roughly (80ms + 50ms) * 4 = 520ms. The batch size must be reduced.
-  - The 80ms TTFT is too slow for a real-time UI. This initial delay is the primary cause of the jank, and prompt processing must be optimized.
-  - The latency is ~580ms due to head-of-line blocking, where short requests are stuck waiting for the longest (10-token) request to finish in the static batch.
-  - The average latency is 80ms + (50ms * 5 tokens) = 330ms. This is too slow and indicates a memory bandwidth bottleneck on the SoC.
+  - 'The NPU is saturated. The latency is the sum of all operations, roughly (80ms + 50ms) * 4 = 520ms. The batch size must be reduced.'
+  - 'The 80ms TTFT is too slow for a real-time UI. This initial delay is the primary cause of the jank, and prompt processing must be optimized.'
+  - 'The latency is ~530ms due to head-of-line blocking, where short requests are stuck waiting for the longest (10-token) request to finish in the static batch.'
+  - 'The average latency is 80ms + (50ms * 5 tokens) = 330ms. This is too slow and indicates a memory bandwidth bottleneck on the SoC.'
   correct_index: 2
 status: published
 provenance: imported

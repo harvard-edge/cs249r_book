@@ -8,24 +8,19 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Diagnosing DLRM Load Imbalance
-scenario: You are training a Deep Learning Recommendation Model (DLRM) with a 400GB embedding table partitioned
-  across an 8x 80GB A100 node using table-wise sharding. During profiling, you notice severe throughput
-  bottlenecks. GPU 0 shows 95% utilization during the sparse lookup phase, while GPUs 1-7 idle at <10%
-  utilization. The subsequent All-to-All communication phase stalls waiting for GPU 0 to finish its lookups.
-  What is the root cause of this bottleneck and how do you resolve it?
-question: "What is the root cause of this bottleneck and how do you resolve it?"
+scenario: You are training a Deep Learning Recommendation Model (DLRM) with a 400GB embedding table partitioned across an 8x 80GB A100 node using table-wise sharding. During profiling, you notice severe throughput bottlenecks. GPU 0 shows 95% utilization during the sparse lookup phase, while GPUs 1-7 idle at <10% utilization. The subsequent All-to-All communication phase stalls waiting for GPU 0 to finish its lookups.
+question: What is the root cause of this bottleneck and how do you resolve it?
 details:
-  realistic_solution: Diagnose the power-law (Zipfian) access skew where a highly queried feature (e.g.,
-    'user_id') on GPU 0 dominates lookup traffic. Migrate from naive table-wise sharding to row-wise or
-    hybrid sharding, distributing the 'hot' table's rows evenly across all 8 GPUs to balance the workload.
-  common_mistake: Assuming the issue is purely interconnect bandwidth (All-to-All bottleneck) and spending
-    time optimizing network topology, or attempting to use Data Parallelism for the embeddings which immediately
-    results in an Out-of-Memory (OOM) error.
-  napkin_math: With table-wise sharding on an 8x A100 node, extreme power-law distributions bottleneck
-    the system. In a global batch of 2048, if one heavily accessed embedding table on GPU 0 processes
-    85% of queries (1740 lookups), the other 7 GPUs process just 15% combined (~44 lookups each). GPU
-    0 performs 40x more work. Because each batch synchronizes, peak cluster utilization drops to 1 / (8
-    * 0.85) = 14.7%.
+  realistic_solution: Diagnose the power-law (Zipfian) access skew where a highly queried feature (e.g., 'user_id') on GPU 0 dominates lookup traffic. Migrate from naive table-wise sharding to row-wise or hybrid sharding, distributing the 'hot' table's rows evenly across all 8 GPUs to balance the workload.
+  common_mistake: |
+    **The Pitfall:** Assuming the issue is purely an interconnect bandwidth bottleneck during the All-to-All phase.
+    **The Rationale:** Candidates see communication stalling and mistakenly try to optimize network topology or apply pure Data Parallelism.
+    **The Consequence:** Data Parallelism immediately causes an Out-of-Memory (OOM) error, and network optimizations fail to fix the fundamental access skew.
+  napkin_math: |
+    - **Analyze power-law access:** In a global batch of 2048, if a 'hot' table on GPU 0 processes 85% of queries, it performs `2048 * 0.85 = 1740` lookups.
+    - **Analyze idle GPUs:** The other 7 GPUs process just 15% combined, averaging `(2048 * 0.15) / 7 \u2248 44` lookups each.
+    - **Compare workloads:** GPU 0 performs nearly **40x more work** than the others.
+    - **Calculate peak utilization:** Because each batch must synchronize, peak cluster utilization drops to `1 / (8 * 0.85) = 14.7%`.
 status: published
 provenance: imported
 requires_explanation: false

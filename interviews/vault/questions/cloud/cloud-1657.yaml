@@ -8,25 +8,19 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing OOM in DLRM Online Learning
-scenario: A real-time ad CTR prediction system uses a DLRM continuously updated via online learning to
-  adapt to concept drift. Training workers run on single NVIDIA A10G (24GB VRAM) instances, processing
-  a continuous stream of 2,000 events/sec. Initially, VRAM usage is a stable 10GB. However, after running
-  for 48 hours, VRAM usage gradually creeps up to 24GB, triggering an OOM crash. The event volume, batch
-  size, and model architecture (MLP size) remain strictly constant. Diagnostic logs show the deep learning
-  framework's computation graph is perfectly cleared after each step. Diagnose the root cause of this
-  memory exhaustion.
-question: "What is causing VRAM to grow from 10GB to 24GB over 48 hours despite constant event volume and cleared computation graphs?"
+scenario: A real-time ad CTR prediction system uses a DLRM continuously updated via online learning to adapt to concept drift. Training workers run on single NVIDIA A10G instances, processing a continuous stream of 2,000 events/sec. Initially, VRAM usage is a stable 10GB. However, after running for 48 hours, VRAM usage gradually creeps up to 24GB, triggering an OOM crash. The event volume, batch size, and model architecture remain strictly constant. Diagnostic logs show the deep learning framework's computation graph is perfectly cleared after each step.
+question: What is causing VRAM to grow from 10GB to 24GB over 48 hours despite constant event volume and cleared computation graphs?
 details:
-  realistic_solution: The dynamic embedding tables are allocating new rows for continuously arriving novel
-    sparse IDs (e.g., new user or ad IDs) without an eviction policy. Implement an LRU/LFU eviction strategy
-    for stale IDs or switch to a fixed-size hashed embedding table.
-  common_mistake: Blaming standard deep learning memory leaks (like unreleased tensors in the autograd
-    graph or data loader issues) instead of recognizing the stateful unbounded growth of dynamic embedding
-    tables.
-  napkin_math: 'At 2,000 events/sec, assume 5% contain newly seen categorical IDs = 100 novel IDs/sec.
-    Each ID needs a 128-dim FP32 embedding + Adam optimizer state (momentum, variance) = 3 * 128 * 4 bytes
-    = 1.5 KB per ID. Over 48 hours (172,800 seconds): 172,800 * 100 * 1.5 KB = 25.92 GB of accumulated
-    embedding state, exceeding the remaining VRAM.'
+  realistic_solution: The dynamic embedding tables are allocating new rows for continuously arriving novel sparse IDs (e.g., new user or ad IDs) without an eviction policy. Implement an LRU/LFU eviction strategy for stale IDs or switch to a fixed-size hashed embedding table.
+  common_mistake: |
+    **The Pitfall:** Blaming standard deep learning memory leaks.
+    **The Rationale:** Engineers often suspect unreleased tensors in the autograd graph or data loader issues instead of recognizing stateful unbounded growth.
+    **The Consequence:** Time wasted debugging framework internals while the dynamic embedding tables continue to OOM the system.
+  napkin_math: |
+    1. **Estimate Novel IDs:** At 2,000 events/sec, assume 5% contain newly seen categorical IDs = 100 novel IDs/sec.
+    2. **Calculate Memory per ID:** Each ID needs a 128-dim FP32 embedding + Adam optimizer state = 3 × 128 × 4 bytes = 1.5 KB per ID.
+    3. **Calculate Total Accumulation:** Over 48 hours (172,800 seconds): 172,800 × 100 × 1.5 KB = 25.92 GB.
+    **Final Result: 25.92 GB of accumulated embedding state exceeds the remaining VRAM, causing the OOM.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,21 +8,20 @@ competency_area: data
 bloom_level: create
 phase: both
 title: H100 Multimodal Pipeline Pre-fetching
-scenario: An 8x H100 SXM cluster trains a multimodal MoE model. The H100s ingest uncompressed
-  4K video batches. Each GPU has 3.35 TB/s HBM bandwidth but shares a PCIe Gen5 x16
-  (64 GB/s) host connection.
-question: Design a data loading and staging pipeline to prevent the 989 TFLOP/s compute
-  units from starving while handling the heavy video IO footprint.
+scenario: An 8x H100 SXM cluster trains a multimodal MoE model. The H100s ingest uncompressed 4K video batches. Each GPU has 3.35 TB/s HBM bandwidth but shares a PCIe Gen5 x16 (64 GB/s) host connection.
+question: How do you design a data loading and staging pipeline to prevent the compute units from starving while handling massive video IO?
 details:
-  realistic_solution: The design must decouple host decoding from GPU memory ingress.
-    It requires a dedicated host process using NVDEC on the GPU to decode compressed
-    video streams directly in VRAM, bypassing the uncompressed PCIe bottleneck. A
-    double-buffered pre-fetching queue inside the HBM ensures that while step N is
-    executing using the 3.35 TB/s bandwidth, step N+1 is trickling in over the 64
-    GB/s PCIe bus and being hardware-decoded.
-  common_mistake: Designing a pipeline that decodes uncompressed video on the CPU
-    and sends it over PCIe, immediately saturating the 64 GB/s link.
-  napkin_math: 8 GPUs * 64 GB/s = 512 GB/s limit, far below HBM speeds.
+  realistic_solution: The design must decouple host decoding from GPU memory ingress. It requires a dedicated host process using NVDEC on the GPU to decode compressed video streams directly in VRAM, bypassing the uncompressed PCIe bottleneck. A double-buffered pre-fetching queue inside the HBM ensures that while step N is executing using the 3.35 TB/s bandwidth, step N+1 is trickling in over the 64 GB/s PCIe bus and being hardware-decoded.
+  common_mistake: |
+    **The Pitfall:** Designing a pipeline that decodes uncompressed video on the CPU and sends it over PCIe.
+    **The Rationale:** Candidates follow standard image-training paradigms (CPU decoding) and fail to realize raw 4K video bandwidth vastly exceeds PCIe Gen5 limits.
+    **The Consequence:** The PCIe bus instantly saturates, starving the GPUs and dropping cluster utilization to near zero.
+  napkin_math: |
+    1. 8 GPUs sharing a PCIe Gen5 link = 64 GB/s limit.
+    2. Uncompressed 4K video batch bandwidth massively exceeds this 64 GB/s ceiling.
+    3. Hardware decoding on-GPU bypasses the PCIe bottleneck.
+    4. HBM bandwidth (3.35 TB/s) easily absorbs the uncompressed frames internally.
+    **The 64 GB/s PCIe bus is the absolute bottleneck and must be bypassed using compressed transfers.**
 status: published
 provenance: llm-draft
 expected_time_minutes: 15

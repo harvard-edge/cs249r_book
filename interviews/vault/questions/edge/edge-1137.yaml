@@ -8,28 +8,25 @@ competency_area: compute
 bloom_level: apply
 phase: both
 title: 'Edge Systolic Array Implement: Depthwise Convolution Throughput Calculation'
-scenario: Calculate the throughput and latency for a depthwise separable convolution
-  block (DW 3x3 + PW 1x1) for MobileNetV3 at the 28x28 stage (80 DW channels, 480
-  PW output channels, INT8) on Hailo-8 (26 TOPS INT8, 6GB/s internal BW). Show the
-  memory access calculation and whether DW or PW is the bottleneck.
-question: For the MobileNetV3 28x28 DW+PW block on Hailo-8, what are the memory accesses,
-  latency, throughput, and bottleneck?
+scenario: >-
+  You are analyzing a depthwise separable convolution block (DW 3x3 + PW 1x1) for MobileNetV3 at the 28x28 spatial stage (80 input channels, 480 PW output channels, INT8) on a Hailo-8 accelerator (26 TOPS INT8, 6GB/s internal bandwidth).
+question: For the MobileNetV3 28x28 DW+PW block on Hailo-8, what are the memory accesses, latency, throughput, and bottleneck?
 details:
-  realistic_solution: 'DW conv: 80ch, 3x3, 28x28. FLOPs=2*80*28^2*9=1.13M. BW: in=80*28^2=62.7KB,
-    weights=80*9=720B, out=62.7KB. Total=126KB. AI=1.13M/126KB=8.96 FLOPs/byte. Memory
-    bound (ridge=4333). Time=126KB/6GB/s=0.021ms. PW conv: (80->480), 28x28. FLOPs=2*480*28^2*80=60.2M.
-    BW: in=62.7KB, weights=80*480=38.4KB, out=480*28^2=376KB. Total=477KB. AI=60.2M/477KB=126
-    FLOPs/byte. Memory bound but better. Time=477KB/6GB/s=0.0795ms. Bottleneck: PW
-    (3.8x more time than DW). Total: 0.1ms per DSConv block.'
-  common_mistake: Not separating the analysis of depthwise vs pointwise convolutions,
-    which have very different arithmetic intensities and bottlenecks even within the
-    same block.
-  napkin_math: 'DW: FLOPs=2*80*784*9=1.13M. BW=2*62.7KB+720B=126KB. AI=9. Time=126/6e6=0.021ms.
-    PW: FLOPs=2*480*784*80=60.2M. Wait: 480 out, 80 in, 28*28 spatial. FLOPs=2*28^2*80*480=60.2M.
-    BW=62.7K+80*480+480*784*1=62.7K+38.4K+376.3K=477.4KB. AI=60.2M/477.4K=126. Time=477.4K/6G=0.0796ms.
-    Ratio PW/DW=3.8x. PW is bottleneck. Optimization: fuse DW+PW into single kernel,
-    keep intermediate 80ch activations on-chip. Hailo-8 dataflow does this natively
-    -> eliminates 62.7KB DW output write and PW input read = saves 125KB = 0.021ms.'
+  realistic_solution: 'Analyze the depthwise and pointwise convolutions separately. The DW conv has very low operations but moves moderate data. The PW conv has high operations and moves more data. Both are memory-bound on the 6GB/s internal bus, but the PW convolution takes ~3.8x longer, making it the bottleneck of the block.'
+  common_mistake: |
+    **The Pitfall:** Treating the DW+PW block as a single monolithic operation.
+    **The Rationale:** Candidates calculate total FLOPs and total memory for the whole block and average the arithmetic intensity.
+    **The Consequence:** They miss that the Pointwise and Depthwise convolutions have drastically different arithmetic intensities and memory access patterns, obscuring the true performance bottleneck.
+  napkin_math: |
+    1. **DW Conv:**
+       - FLOPs: `2 * 80 * (28 * 28) * 9 = 1.13M`.
+       - Bandwidth: Input (80 * 784 = 62.7 KB) + Weights (80 * 9 = 720 B) + Output (80 * 784 = 62.7 KB) = 126 KB.
+       - Time: `126 KB / 6 GB/s = 0.021 ms`.
+    2. **PW Conv:**
+       - FLOPs: `2 * 480 * 80 * (28 * 28) = 60.2M`.
+       - Bandwidth: Input (62.7 KB) + Weights (80 * 480 = 38.4 KB) + Output (480 * 784 = 376.3 KB) = 477.4 KB.
+       - Time: `477.4 KB / 6 GB/s = 0.0795 ms`.
+    3. **Result:** The **PW convolution is the bottleneck** (taking 3.8x longer than the DW). Total time is ~0.1 ms.
 status: published
 provenance: imported
 requires_explanation: false

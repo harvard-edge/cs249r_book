@@ -8,26 +8,21 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The QAT Shadow Weight OOM
-scenario: You initiate Quantization-Aware Training (QAT) for a 15B parameter vision-language model on
-  an 8x80GB A100 node. Standard FP16 fine-tuning takes 45GB VRAM per GPU. When you enable INT8 QAT, you
-  expect memory to drop or stay constant, but it spikes to 82GB per GPU, causing an Out-Of-Memory (OOM)
-  error. What is causing this massive memory inflation?
-question: "What is causing this massive memory inflation?"
+scenario: You initiate Quantization-Aware Training (QAT) for a 15B parameter vision-language model on an 8x80GB A100 node. Standard FP16 fine-tuning takes 45GB VRAM per GPU. When you enable INT8 QAT, you expect memory to drop or stay constant, but it spikes to 82GB per GPU, causing an Out-Of-Memory (OOM) error.
+question: What is causing this massive memory inflation?
 details:
-  realistic_solution: The root cause is the maintenance of FP32 'shadow weights' alongside the fake-quantization
-    graph. In QAT, gradients cannot flow through discrete INT8 steps (due to zero derivatives), so the
-    Straight-Through Estimator (STE) is used. This requires keeping the continuous FP32 weights to accumulate
-    small gradient updates. During the forward pass, the framework must store both the FP32 weights AND
-    the simulated INT8 weights (FakeQuant), plus the FP32 optimizer states (Adam requires two FP32 tensors
-    per parameter — momentum and variance — totaling 120GB for 15B parameters). Furthermore, FakeQuant
-    nodes inject additional activation tensors into the computation graph that must be saved for the backward
-    pass, dramatically increasing the activation memory footprint.
-  common_mistake: Believing that QAT actually stores the model in INT8 during training, and attributing
-    the OOM to a memory leak in the data loader.
-  napkin_math: '15B params. Standard FP16 FT: Weights 30GB + Adam (FP32) 120GB = 150GB (usually sharded
-    via FSDP to ~18.75GB/GPU) + 30GB activations = ~45GB per GPU after sharding. QAT adds: FP32 shadow
-    weights (60GB total, ~7.5GB/GPU sharded) + INT8 fake weights (15GB total, ~2GB/GPU) + FakeQuant activation
-    copies (~25GB/GPU overhead). Total per GPU: 45GB + 7.5GB + 2GB + 25GB = ~79.5GB -> OOM.'
+  realistic_solution: The root cause is the maintenance of FP32 'shadow weights' alongside the fake-quantization graph. In QAT, gradients cannot flow through discrete INT8 steps (due to zero derivatives), so the Straight-Through Estimator (STE) is used. This requires keeping the continuous FP32 weights to accumulate small gradient updates. During the forward pass, the framework must store both the FP32 weights AND the simulated INT8 weights (FakeQuant), plus the FP32 optimizer states (Adam requires two FP32 tensors per parameter — momentum and variance — totaling 120GB for 15B parameters). Furthermore, FakeQuant nodes inject additional activation tensors into the computation graph that must be saved for the backward pass, dramatically increasing the activation memory footprint.
+  common_mistake: |
+    **The Pitfall:** Believing that QAT actually stores the model in INT8 during training, and attributing the OOM to a memory leak.
+    **The Rationale:** "Quantization" implies smaller memory, causing practitioners to forget the complex forward/backward graph needed by the Straight-Through Estimator.
+    **The Consequence:** Failing to provision enough memory for QAT, causing infrastructure crashes and blocking the deployment of efficient INT8 models.
+  napkin_math: |
+    - 15B params FP16 Fine-Tuning: Weights (30GB) + Adam states (120GB) = 150GB (sharded to ~18.75GB/GPU).
+    - With activations (30GB/GPU), base memory = ~45GB/GPU.
+    - QAT additions: FP32 shadow weights (60GB total, +7.5GB/GPU).
+    - INT8 fake weights (15GB total, +2GB/GPU).
+    - FakeQuant activation copies (+25GB/GPU overhead).
+    - **Total memory = 45GB + 7.5GB + 2GB + 25GB = 79.5GB/GPU (Spikes near 80GB limit, causing OOM).**
 status: published
 provenance: imported
 requires_explanation: false
@@ -41,8 +36,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- 'For 15B parameters, standard FP32 Adam state requires at least 120GB (two states of 4 bytes each: momentum
-  and variance), not 60GB.'
+- 'For 15B parameters, standard FP32 Adam state requires at least 120GB (two states of 4 bytes each: momentum and variance), not 60GB.'
 human_reviewed:
   status: not-reviewed
   by: null

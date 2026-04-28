@@ -8,35 +8,20 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Ethos-U55 Delegation and Shared SRAM Optimization
-scenario: You are deploying a custom hybrid CNN-Transformer keyword spotting model
-  to an ARM Cortex-M7 + Ethos-U55 (Corstone-300) system. The system runs at 480 MHz
-  with only 512 KB of shared SRAM for both the CPU and NPU. During TFLite Micro conversion,
-  the Vela compiler successfully maps all Conv2D ops to the Ethos-U55, but the custom
-  attention mechanism operators fall back to the Cortex-M7. Design a model conversion
-  and runtime delegation strategy to maximize inference throughput while preventing
-  SRAM exhaustion during CPU-NPU context switches.
-question: How would you design a model conversion and runtime delegation strategy
-  to maximize inference throughput while preventing SRAM exhaustion during CPU-NPU
-  context switches?
+scenario: You are deploying a custom hybrid CNN-Transformer keyword spotting model to an ARM Cortex-M7 + Ethos-U55 (Corstone-300) system. The system runs at 480 MHz with only 512 KB of shared SRAM for both the CPU and NPU. During TFLite Micro conversion, the Vela compiler successfully maps all Conv2D ops to the Ethos-U55, but the custom attention mechanism operators fall back to the Cortex-M7.
+question: How would you design a model conversion and runtime delegation strategy to maximize inference throughput while preventing SRAM exhaustion during CPU-NPU context switches?
 details:
-  realistic_solution: The optimal solution is to refactor the custom attention mechanism
-    at the graph level into standard operations (e.g., standard FullyConnected and
-    Softmax) that the Vela compiler can natively map to the Ethos-U55, avoiding fallback
-    completely. If fallback is mathematically unavoidable, the deployment strategy
-    must involve custom memory planning to pin fallback input/output tensors in the
-    M7's Tightly Coupled Memory (TCM) to prevent NPU DMA stalls and bus contention.
-  common_mistake: Candidates often suggest writing custom NPU microcode, which is
-    unsupported by the closed-source Vela compiler, or they ignore the memory ping-pong
-    overhead entirely. They frequently assume the 512 KB SRAM is fully available to
-    each core independently rather than treating it as a shared resource that bottlenecks
-    the AHB bus during NPU-to-CPU fallback transitions.
-  napkin_math: Assuming the Ethos-U55 is configured for 256 MACs/cycle, it achieves
-    ~122.8 GMAC/s at 480 MHz. Falling back to the M7 (which performs 2 MACs/cycle
-    via DSP instructions) plummets compute to ~0.96 GMAC/s. If a 128 KB intermediate
-    tensor must be passed between the NPU and CPU, moving it across a 32-bit AHB bus
-    takes (131,072 bytes / 4 bytes) = 32,768 cycles. At 480 MHz, this transfer alone
-    consumes ~68.2 microseconds per context switch, rapidly draining a strict 1-2
-    ms real-time inference budget if the graph bounces between cores multiple times.
+  realistic_solution: The optimal solution is to refactor the custom attention mechanism at the graph level into standard operations (e.g., standard FullyConnected and Softmax) that the Vela compiler can natively map to the Ethos-U55, avoiding fallback completely. If fallback is mathematically unavoidable, the deployment strategy must involve custom memory planning to pin fallback input/output tensors in the M7's Tightly Coupled Memory (TCM) to prevent NPU DMA stalls and bus contention.
+  common_mistake: |
+    **The Pitfall:** Suggesting writing custom NPU microcode or ignoring the massive memory ping-pong overhead of hardware fallbacks.
+    **The Rationale:** Developers accustomed to programmable GPUs assume NPU kernels can be freely customized, rather than understanding the Vela compiler is closed-source.
+    **The Consequence:** The team attempts an impossible compilation path, or successfully deploys a fallback model that crashes due to severe AHB bus contention starving the shared 512 KB SRAM.
+  napkin_math: |
+    - Ethos-U55 (256 MACs/cycle @ 480 MHz) compute: **~122.8 GMAC/s**.
+    - Cortex-M7 fallback (2 MACs/cycle via DSP) compute: **~0.96 GMAC/s**.
+    - 128 KB intermediate tensor transfer over a 32-bit AHB bus: 131,072 bytes / 4 bytes/cycle = **32,768 cycles**.
+    - Context switch latency at 480 MHz: 32,768 cycles / 480 MHz = **68.2 microseconds** per direction.
+    - Repeated graph bouncing completely drains a strict 1-2 ms real-time inference budget simply via memory traffic.
 status: published
 provenance: imported
 requires_explanation: true

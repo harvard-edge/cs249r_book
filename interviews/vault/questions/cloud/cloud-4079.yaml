@@ -8,42 +8,18 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: RDMA Error Recovery in Long-Running Training Jobs
-scenario: 'A 90-day training run on 1024 H100s will inevitably experience RDMA transport
-  errors: QP failures, path migration events, HCA resets, and cable disconnections.
-  Specify the error recovery architecture that allows training to continue with minimal
-  interruption, including error detection, automatic QP re-establishment, and checkpoint-based
-  rollback criteria.'
-question: What RDMA error recovery architecture would keep a 90-day, 1024-H100 training
-  run going through QP failures, path changes, and node loss?
+scenario: A 90-day training run on 1024 H100s will inevitably experience RDMA transport errors: QP failures, path migration events, HCA resets, and cable disconnections.
+question: What RDMA error recovery architecture allows a 90-day, 1024-H100 training run to continue with minimal interruption during QP failures?
 details:
-  realistic_solution: 'Multi-tier error recovery specification: Tier 1 — Transient
-    errors (QP error, retransmission timeout, ~10/day): Detection: CQE with error
-    status from ibv_poll_cq(). Recovery: (1) Reset the affected QP (RESET→INIT→RTR→RTS
-    transition, ~1ms). (2) Re-register memory regions if MR was invalidated. (3) Retry
-    the failed AllReduce from the current chunk. (4) Time budget: <100ms. No checkpoint
-    rollback. NCCL handles this transparently via NCCL_IB_RETRY_CNT=7. Tier 2 — Path
-    failures (cable disconnect, switch port failure, ~1/day): Detection: multiple
-    QP timeouts on the same rail. Recovery: (1) Detect via IB subnet manager trap
-    notifications. (2) Activate alternate path via APM (Automatic Path Migration)
-    on InfiniBand — pre-configured during QP setup. (3) If no alternate path: redistribute
-    traffic across remaining 7 rails (12.5% throughput loss). (4) Time budget: <5
-    seconds. (5) Alert ops team for cable replacement. Tier 3 — Node failure (GPU
-    crash, HCA reset, ~1/week): Detection: NCCL timeout (NCCL_TIMEOUT=1800 seconds).
-    Recovery: (1) Exclude failed node. (2) Load checkpoint on a spare node. (3) Re-establish
-    all QP connections for the replacement node. (4) Resume training from last checkpoint.
-    Time budget: <10 minutes. Checkpoint frequency: every 30 minutes (2GB checkpoint
-    save takes ~40ms with GPUDirect Storage). Monitoring: per-QP error counters (ibv_query_qp),
-    per-port symbol_error and link_downed counters, MTBF tracking per node.'
-  common_mistake: Treating RDMA errors as fatal and restarting the entire job. At
-    1024 GPUs running for 90 days, the mean time between any RDMA error is ~4 hours
-    (based on production data). Restarting from checkpoint on every error would spend
-    more time restarting than training.
-  napkin_math: '90 days × 1024 GPUs: Tier 1 events: ~900. Recovery: 900 × 100ms =
-    90 seconds total. Tier 2 events: ~90. Recovery: 90 × 5s = 450 seconds = 7.5 minutes
-    total. Tier 3 events: ~13. Recovery: 13 × 10min = 130 minutes. Total downtime:
-    139 minutes / 129,600 minutes = 0.11% — 99.89% uptime. Without tiered recovery
-    (restart on every error): ~1003 restarts × 10 minutes = 167 hours of downtime
-    = 7.7% — 8× worse.'
+  realistic_solution: 'Multi-tier error recovery specification: Tier 1 — Transient errors: Reset the affected QP and retry the failed AllReduce without checkpoint rollback. Tier 2 — Path failures: Activate alternate path via APM on InfiniBand. Tier 3 — Node failure: Exclude failed node, load checkpoint on a spare node, re-establish all QP connections.'
+  common_mistake: |
+    **The Pitfall:** Treating all RDMA errors as fatal and restarting the entire job.
+    **The Rationale:** It's the simplest recovery method.
+    **The Consequence:** At 1024 GPUs, the mean time between errors is ~4 hours; restarting on every error spends more time restarting than training.
+  napkin_math: |
+    - 1. **Total Events (90 days):** ~900 Tier 1 (transient), ~90 Tier 2 (path), ~13 Tier 3 (node).
+    - 2. **Tiered Recovery Time:** (900 × 100ms) + (90 × 5s) + (13 × 10min) = 90s + 450s + 130m = **~139 minutes downtime (99.89% uptime)**.
+    - 3. **Restart Recovery Time:** ~1003 restarts × 10 minutes = **167 hours downtime (7.7%)**.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,27 +8,21 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Tensor Parallelism Communication Bottleneck on Multi-Node Cluster
-scenario: A 175B model (GPT-3 scale) is trained with TP=16 on MI300X (192GB HBM3,
-  5.3TB/s) nodes (8 GPUs/node). With TP=16, tensor parallelism spans 2 nodes connected
-  by InfiniBand HDR (200Gbps = 25GB/s). Training MFU is 22% vs expected 45%. Profiling
-  shows 60% of step time is in all-reduce operations.
-question: How would you change the TP=16 training setup to remove cross-node tensor-parallel
-  all-reduces and recover MFU?
+scenario: A 175B model (GPT-3 scale) is trained with TP=16 on MI300X (192GB HBM3, 5.3TB/s) nodes (8 GPUs/node). With TP=16, tensor parallelism spans 2 nodes connected by InfiniBand HDR (200Gbps = 25GB/s). Training MFU is 22% vs expected 45%. Profiling shows 60% of step time is in all-reduce operations.
+question: "How would you change the TP=16 training setup to remove cross-node tensor-parallel all-reduces and recover MFU?"
 details:
-  realistic_solution: 'Reduce TP degree to 8 (within a single node, NVLink only) and
-    compensate with pipeline parallelism (PP) across nodes. TP=8 within node uses
-    NVLink 900GB/s; PP across nodes uses InfiniBand but only sends activations (not
-    weight gradients), reducing inter-node communication. Reconfigure as TP=8, PP=2
-    (2 pipeline stages, 1 node each). Expected MFU improvement: 22% → ~45%.'
-  common_mistake: Increasing batch size to 'amortize' communication overhead. All-reduce
-    latency in tensor parallelism is on the critical path and does not scale with
-    batch size — it occurs once per layer per forward/backward pass regardless of
-    batch dimension.
-  napkin_math: 'TP=16 cross-node all-reduce: each transformer layer has 2 all-reduces
-    (attention + MLP). Actual activation tensor [B, seq, hidden] BF16: B=1, seq=2048,
-    hidden=12288 = 48MB. Cross-node all-reduce volume per GPU = 2 * 15/16 * 48MB = 90MB.
-    Time per all-reduce: 90MB / 25GB/s = 3.6ms. Total comm time per step: 3.6ms * 96 layers * 2 = 691ms.
-    Compare with ~200ms compute: 691 / (691+200) = 77% comm overhead — matches observed degradation.'
+  realistic_solution: 'Reduce TP degree to 8 (within a single node, NVLink only) and compensate with pipeline parallelism (PP) across nodes. TP=8 within node uses NVLink 900GB/s; PP across nodes uses InfiniBand but only sends activations (not weight gradients), reducing inter-node communication. Reconfigure as TP=8, PP=2 (2 pipeline stages, 1 node each). Expected MFU improvement: 22% → ~45%.'
+  common_mistake: |
+    **The Pitfall:** Increasing batch size to 'amortize' communication overhead.
+    **The Rationale:** Batch size increases generally improve utilization in data parallel setups.
+    **The Consequence:** Fails because all-reduce latency in tensor parallelism is on the critical path and does not scale with batch size — it occurs once per layer per forward/backward pass regardless of batch dimension.
+  napkin_math: |
+    - TP=16 cross-node all-reduce: each transformer layer has 2 all-reduces (attention + MLP).
+    - Actual activation tensor [B, seq, hidden] BF16: B=1, seq=2048, hidden=12288 = 48MB.
+    - Cross-node all-reduce volume per GPU = 2 * 15/16 * 48MB = 90MB.
+    - Time per all-reduce: 90MB / 25GB/s = **3.6ms**.
+    - Total comm time per step: 3.6ms * 96 layers * 2 = **691ms**.
+    - Compare with ~200ms compute: 691 / (691+200) = **77% comm overhead**, matching the observed degradation.
 status: published
 provenance: imported
 requires_explanation: false

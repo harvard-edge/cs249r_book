@@ -8,24 +8,20 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: Validation Loop Memory Leak
-scenario: During a validation loop on a 16GB V100 GPU, an engineer forgets to use the `torch.no_grad()`
-  context manager. They accumulate the validation loss across batches using `val_loss += loss` to compute
-  the epoch average. The model's forward pass generates 100MB of intermediate activations per batch. If
-  the validation set has 200 batches, calculate the memory footprint consumed by the reverse-linked graph
-  and predict the system's behavior.
-question: "How much memory will the retained validation graph consume over 200 batches, and what failure or fix should you expect?"
+scenario: During a validation loop on a 16GB GPU, an engineer forgets to use the `torch.no_grad()` context manager. They accumulate the validation loss across batches using `val_loss += loss` to compute the epoch average. The model's forward pass generates 100MB of intermediate activations per batch.
+question: How much memory will the retained validation graph consume over 200 batches, and what failure or fix should you expect?
 details:
-  realistic_solution: Recognize that the `val_loss += loss` operation links the current batch's computational
-    graph to the overall `val_loss` tensor. This prevents the Python garbage collector from freeing the
-    100MB of intermediate activations per batch. The accumulated reverse-linked graph will eventually
-    cause an Out Of Memory (OOM) error. The fix is to use `torch.no_grad()` to prevent graph construction
-    or accumulate using `val_loss += loss.item()`.
-  common_mistake: Assuming the memory footprint is negligible (e.g., just 4 bytes per batch for the scalar
-    loss), failing to realize that without `torch.no_grad()`, each accumulated `loss` tensor retains a
-    reverse-linked graph holding all intermediate activations.
-  napkin_math: Memory footprint per batch = 100 MB. Total retained memory footprint for the reverse-linked
-    graph = 200 batches * 100 MB/batch = 20,000 MB = 20 GB. Since 20 GB > 16 GB (V100 memory capacity),
-    the GPU will trigger an OOM error around batch 160.
+  realistic_solution: Recognize that the `val_loss += loss` operation links the current batch's computational graph to the overall `val_loss` tensor. This prevents the Python garbage collector from freeing the 100MB of intermediate activations per batch. The accumulated reverse-linked graph will eventually cause an Out Of Memory (OOM) error. The fix is to use `torch.no_grad()` to prevent graph construction or accumulate using `val_loss += loss.item()`.
+  common_mistake: |
+    **The Pitfall:** Assuming the memory footprint of `val_loss += loss` is negligible.
+    **The Rationale:** Candidates think only the scalar float value (4 bytes) is stored, failing to realize that without `torch.no_grad()`, each tensor retains a reference to its entire computational graph and activations.
+    **The Consequence:** The system will inevitably hit an Out Of Memory (OOM) error during validation.
+  napkin_math: |
+    1. **Memory Per Batch:** 100 MB of intermediate activations.
+    2. **Accumulated Graph:** `val_loss += loss` links the current batch graph to the master tensor.
+    3. **Total Retained Memory:** 200 batches * 100 MB/batch = 20,000 MB = 20 GB.
+    4. **Capacity Check:** 20 GB > 16 GB VRAM.
+    5. **Conclusion:** **The GPU will OOM around batch 160.**
 status: published
 provenance: imported
 requires_explanation: false

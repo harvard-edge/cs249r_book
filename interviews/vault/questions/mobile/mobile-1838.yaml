@@ -8,12 +8,18 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Efficient gradient-based hyperparameter search within 8GB on Snapdragon
-scenario: You are implementing DARTS (Differentiable Architecture Search) on Snapdragon 8 Gen 3 (45 TOPS, 8GB) to find the optimal neural architecture for a task-specific model. DARTS requires maintaining architecture parameters α alongside model weights and differentiating through the architecture sampling. Standard DARTS implementation on this hardware OOMs at every configuration.
-question: How would you make DARTS architecture search fit in 8GB on Snapdragon without running the full supernet?
+scenario: 'You are implementing DARTS (Differentiable Architecture Search) on Snapdragon 8 Gen 3 (45 TOPS, 8GB) to find the optimal neural architecture for a task-specific model. DARTS requires maintaining architecture parameters alongside model weights and differentiating through the architecture sampling.'
+question: 'How would you make DARTS architecture search fit in 8GB on Snapdragon without running the full supernet?'
 details:
-  realistic_solution: 'Use PC-DARTS (Partial Channel DARTS) which samples a fraction (1/K) of channels per operation, reducing memory by K×. With K=4: 4× memory reduction. Alternatively, use single-path one-shot NAS (SPOS) which samples one operation per edge per step, requiring only 1/8 the memory of full DARTS. For Snapdragon: use a tiny supernet (4 nodes, 4 operations per edge) and perform search for 50 epochs, then retrain from scratch.'
-  common_mistake: Running full DARTS with a supernet containing all candidate operations simultaneously. The supernet for a 8-node DARTS cell with 8 operations per edge has 8×7/2×8 = 224 candidate operations running simultaneously. Memory scales linearly with number of candidates and batch size.
-  napkin_math: 'Full DARTS supernet (14 edges, 8 ops per edge, d=128): activations memory per sample ≈ 14 edges × 8 ops × feature_map(128, 32, 32) = 14 × 8 × 0.5MB = 56MB. For a typical batch size of 64: 56MB × 64 = 3.58GB. Training requires saving activations for backward pass: 3.58GB × 2 = ~7.1GB. Plus weights and Adam states (several hundred MBs), this easily exceeds the 8GB limit (with OS overhead). PC-DARTS K=4 reduces the 7.1GB activation memory by 4× to ~1.8GB, which comfortably fits in the 8GB mobile budget alongside weights.'
+  realistic_solution: 'Use PC-DARTS (Partial Channel DARTS) which samples a fraction of channels per operation, reducing memory proportionally. Alternatively, use Single-Path One-Shot (SPOS) NAS which samples one operation per edge per step. Combining this with a tiny supernet prevents OOM on mobile hardware.'
+  common_mistake: |
+    **The Pitfall:** Running the full continuous relaxation of the DARTS supernet concurrently.
+    **The Rationale:** Candidates directly port server-side code without realizing the activation memory scales linearly with the number of candidate operations per edge.
+    **The Consequence:** The device immediately OOMs because the backward pass requires storing activations for hundreds of simultaneous candidate operations.
+  napkin_math: |
+    1. **Full Supernet:** 14 edges, 8 ops/edge, batch 64, map 128×32×32 (0.5MB float32). Activations per sample = 14 × 8 × 0.5MB = 56 MB.
+    2. **OOM Math:** 56 MB × batch 64 = 3.58 GB forward. Backward pass saves require 3.58 GB × 2 = **~7.1 GB**. Adding OS overhead and weights guarantees an 8GB crash.
+    3. **Solution:** PC-DARTS (K=4) drops activation memory by 4x to **~1.8 GB**, easily fitting the mobile budget.
 status: published
 provenance: imported
 requires_explanation: false

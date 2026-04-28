@@ -8,39 +8,25 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Optimizing a Vision Model with Operator Fusion on Google Coral Edge TPU
-scenario: 'You are deploying a custom vision model onto a Google Coral Edge TPU (4
-  TOPS INT8, 2W power budget, INT8 only). Your initial profiling reveals that a significant
-  portion of inference time is spent on a sequence of memory-bound operations: `Conv2D
-  (INT8) -> ReLU (INT8) -> BatchNorm (INT8) -> Quantize (INT8)`. Each of these is
-  currently executed as a separate kernel. The `Conv2D` layer produces an output tensor
-  of shape `(1, 64, 64, 128)` in `NHWC` format. Each kernel launch incurs an overhead.
-  The ReLU, BatchNorm, and Quantize operations are element-wise and memory-bound.'
-question: How would you fuse ReLU, BatchNorm, and Quantize after the 1x64x64x128 INT8
-  Conv2D output to reduce Coral TPU memory I/O and launch overhead?
+scenario: >-
+  You are deploying a custom vision model onto a Google Coral Edge TPU (4 TOPS INT8, 2W power budget). Initial profiling reveals significant inference time spent on a sequence of memory-bound operations: `Conv2D (INT8) -> ReLU (INT8) -> BatchNorm (INT8) -> Quantize (INT8)`. Each executes as a separate kernel. The Conv2D layer produces an output tensor of shape `(1, 64, 64, 128)` in `NHWC` format.
+question: How would you fuse ReLU, BatchNorm, and Quantize after the 1x64x64x128 INT8 Conv2D output to reduce Coral TPU memory I/O and launch overhead?
 details:
-  realistic_solution: 'The most realistic solution involves fusing these sequential,
-    memory-bound, element-wise operations (`ReLU`, `BatchNorm`, `Quantize`) into a
-    single custom kernel that directly consumes the output of the `Conv2D` layer.
-    This drastically reduces kernel launch overhead and improves data locality by
-    keeping intermediate results in on-chip memory (registers or shared memory), avoiding
-    costly global memory accesses between these operations. This approach maximizes
-    throughput and energy efficiency by minimizing memory I/O, which is often the
-    bottleneck on edge devices.'
-  common_mistake: 'A common mistake is to only optimize individual kernel implementations
-    without considering the overall data flow and the significant overhead of multiple
-    global memory accesses and kernel launches on a resource-constrained device like
-    the Coral TPU. Overlooking the INT8-only constraint or the tight power budget
-    (2W) can lead to solutions that are theoretically efficient but impractical or
-    energy-inefficient for the target hardware.'
-  napkin_math: 'Tensor size = 1 * 64 * 64 * 128 * 1 byte = 524,288 bytes (512 KB).
-    1. Unfused I/O:
-    - ReLU: Read 512 KB, Write 512 KB (1024 KB total)
-    - BatchNorm: Read 512 KB, Write 512 KB (1024 KB total)
-    - Quantize: Read 512 KB, Write 512 KB (1024 KB total)
-    Total unfused I/O = 3072 KB (3 MB).
-    2. Fused I/O: Read 512 KB (Conv2D out), process in registers, Write 512 KB.
-    Total fused I/O = 1024 KB (1 MB).
-    3. Savings = 3072 KB - 1024 KB = 2048 KB (2 MB) saved per inference.'
+  realistic_solution: 'Fuse these sequential, memory-bound, element-wise operations into a single custom kernel that directly consumes the output of the Conv2D layer. This drastically reduces kernel launch overhead and improves data locality by keeping intermediate results in on-chip memory (registers or shared memory), avoiding costly global memory accesses.'
+  common_mistake: |
+    **The Pitfall:** Optimizing individual kernels in isolation without considering the data flow.
+    **The Rationale:** Candidates focus on making the ReLU or BatchNorm math faster.
+    **The Consequence:** They miss the massive overhead of multiple global memory accesses and kernel launches on a resource-constrained device, failing to relieve the actual memory I/O bottleneck.
+  napkin_math: |
+    1. **Tensor Size:** `1 * 64 * 64 * 128 * 1 byte = 524,288 bytes` (512 KB).
+    2. **Unfused I/O:**
+       - ReLU: Read 512 KB, Write 512 KB
+       - BatchNorm: Read 512 KB, Write 512 KB
+       - Quantize: Read 512 KB, Write 512 KB
+       - Total unfused I/O = 3072 KB (3 MB).
+    3. **Fused I/O:** Read 512 KB (Conv2D out), process entirely in registers, Write 512 KB.
+       - Total fused I/O = 1024 KB (1 MB).
+    4. **Result:** Fusing the operations saves **2 MB of global memory I/O** per inference.
 status: published
 provenance: imported
 requires_explanation: false

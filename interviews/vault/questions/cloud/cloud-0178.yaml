@@ -8,36 +8,21 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: The High-Priority Queue Stall
-scenario: 'Your team runs a real-time LLM-based agent for a financial services client. The agent must
-  respond to urgent market events with a strict P99 Time-To-First-Token (TTFT) SLA of 100ms. To maximize
-  hardware utilization, your team implemented a state-of-the-art continuous batching inference server.
-  The server''s dashboard looks great: GPU utilization is consistently high, and the aggregate throughput
-  (tokens per second) is near the hardware''s peak. However, the client is reporting that during periods
-  of high background traffic, the agent is missing its 100ms deadline for critical alerts. You dig into
-  the logs and confirm: a high-priority request that arrived when the system was under load had a TTFT
-  of nearly 150ms. Evaluate the current system design. Why does an optimization designed to increase throughput
-  lead to a catastrophic failure in latency, and what do you predict is the primary cause of the excessive
-  delay?'
-question: "Why does an optimization designed to increase throughput lead to a catastrophic failure in latency, and what do you predict is the primary cause of the excessive delay?"
+scenario: Your team runs a real-time LLM-based agent for a financial services client. The agent must respond to urgent market events with a strict P99 Time-To-First-Token (TTFT) SLA of 100ms. To maximize hardware utilization, your team implemented a state-of-the-art continuous batching inference server. The server's dashboard looks great: GPU utilization is consistently high, and the aggregate throughput (tokens per second) is near the hardware's peak. However, the client is reporting that during periods of high background traffic, the agent is missing its 100ms deadline for critical alerts. You dig into the logs and confirm: a high-priority request that arrived when the system was under load had a TTFT of nearly 150ms.
+question: Why does an optimization designed to increase throughput lead to a catastrophic failure in latency, and what is the primary cause of the excessive delay?
 details:
-  realistic_solution: 'The continuous batching server, in its quest to maximize throughput, has introduced
-    a classic queueing theory problem: **Head-of-Line Blocking**. The server assembles a large batch of
-    requests to maximize arithmetic intensity and saturate the GPU. When the high-priority request arrives,
-    the server has likely just started processing a large, already-formed batch (e.g., 32 or 64 other
-    requests). The new request must wait in the queue for the *entire ongoing batch* to complete at least
-    one forward pass (the generation of one token). This wait time, not the execution of the request itself,
-    is the dominant factor in the total TTFT and the cause of the SLA violation. The system is optimized
-    for average throughput (TPOT) at the expense of worst-case latency (P99 TTFT). A real-time system
-    requires priority-based preemption or dynamic batch splitting to pause or finish the low-priority
-    work and immediately service the high-priority request.'
-  common_mistake: The most common mistake is to blame the model size or the hardware ('the H100 is too
-    slow for the prefill'). This focuses only on the execution time of the priority request itself, ignoring
-    the time it spent waiting. Another incorrect path is to say 'Python overhead' or 'network latency',
-    which are orders of magnitude too small to account for a ~50ms regression.
-  napkin_math: 'Assume a 70B model on an H100 (3.35 TB/s) with a continuous batch size of 32. Reading
-    the 140GB model weights for one decode step takes 140GB / 3.35TB/s = 41.8ms. If an urgent request
-    arrives, it waits for the current step. If the server is prefilling 1000 tokens for a batch: 2 * 70B
-    * 1000 = 140 TFLOPs -> 141ms. Head-of-line blocking eats the 100ms budget instantly.'
+  realistic_solution: 'The continuous batching server, in its quest to maximize throughput, has introduced a classic queueing theory problem: **Head-of-Line Blocking**. The server assembles a large batch of requests to maximize arithmetic intensity and saturate the GPU. When the high-priority request arrives, the server has likely just started processing a large, already-formed batch (e.g., 32 or 64 other requests). The new request must wait in the queue for the *entire ongoing batch* to complete at least one forward pass (the generation of one token). This wait time, not the execution of the request itself, is the dominant factor in the total TTFT and the cause of the SLA violation. The system is optimized for average throughput (TPOT) at the expense of worst-case latency (P99 TTFT). A real-time system requires priority-based preemption or dynamic batch splitting to pause or finish the low-priority work and immediately service the high-priority request.'
+  common_mistake: |
+    **The Pitfall:** Blaming the model size or hardware performance for the latency spike.
+    **The Rationale:** Engineers often focus solely on the execution time of the priority request itself, ignoring the queueing time and structural limitations of continuous batching.
+    **The Consequence:** Chasing hardware upgrades or model shrinking optimizations that do not solve the fundamental head-of-line blocking problem.
+  napkin_math: |
+    * Assume a 70B model on an H100 (3.35 TB/s memory bandwidth).
+    * Continuous batch size of 32.
+    * Reading the 140GB model weights for one decode step takes 140GB / 3.35TB/s = 41.8ms.
+    * If the server is prefilling 1000 tokens for a batch: 2 × 70B parameters × 1000 tokens = 140 TFLOPs.
+    * At H100 sparse compute rates (~1000 TFLOPS realistic), this prefill takes ~140ms.
+    * **Conclusion: Head-of-line blocking from a single large batch prefill or decode step instantly eats the 100ms budget.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -51,8 +36,7 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_status_pro: WARN
 validation_issues_pro:
-- The Napkin Math section is incomplete; it describes a scenario with a large batch but does not calculate
-  the prefill time for that batch, which is the crucial number.
+- The Napkin Math section is incomplete; it describes a scenario with a large batch but does not calculate the prefill time for that batch, which is the crucial number.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

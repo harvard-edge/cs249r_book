@@ -8,39 +8,22 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: Stochastic Input Variance and P99 Latency on Jetson Orin Vision Pipelines
-scenario: A Jetson Orin AGX running a real-time object detection pipeline (YOLO-v8l,
-  TensorRT FP16) achieves p50 = 18ms and p99 = 67ms at 30fps input. Profiling reveals
-  that 1% of frames are 'complex' (crowded scenes) that trigger full-resolution processing
-  at 52ms, while 99% of frames use an early-exit fast path at 17ms. The downstream
-  system requires p99 < 40ms. Evaluate whether the current architecture can meet the
-  SLA and propose modifications.
-question: Can the current Jetson YOLO-v8l architecture meet the p99 < 40ms SLA, and
-  what changes would bring it under the deadline?
+scenario: A Jetson Orin AGX running a real-time object detection pipeline achieves p50 = 18ms and p99 = 67ms. Profiling reveals 1% of frames are 'complex' and trigger full-resolution processing at 52ms, while 99% use an early-exit fast path at 17ms. The downstream system requires p99 < 40ms.
+question: Can the current Jetson YOLO-v8l architecture meet the p99 < 40ms SLA, and what changes would bring it under the deadline?
 details:
-  realistic_solution: 'Current p99 = 67ms > 40ms SLA. Gap: 27ms. Sources beyond 52ms
-    compute: DMA buffer synchronization (~3ms), Jetson DLA vs CUDA scheduling decision
-    (~2ms), ISP preprocessing (~4ms), power state transition if GPU idle between frames
-    (~6ms in sustained mode, 0ms if held at max clocks). To close 27ms gap: (1) Enable
-    MAXN power mode and pin GPU clocks via sudo jetson_clocks to eliminate power state
-    transitions: saves ~6ms. New overhead is ~9ms.
-    (2) Redesign early-exit threshold: tune confidence threshold to reduce complex-frame
-    rate from 1% to 0.5%—because complex frames are now <1% of total frames, the 99th percentile
-    frame is now a fast frame (17ms). (3) Use CUDA streams with pre-allocated DMA buffers
-    to eliminate allocation latency: saves ~3ms. Net overhead = 6ms. Combined p99: 17ms compute + 6ms overhead = 23ms.
-    Meets SLA easily.'
-  common_mistake: Assuming p99 = the worst-case frame latency (52ms). In practice,
-    p99 in a streaming pipeline also accumulates jitter from DMA transfers, ISP processing,
-    and power state transitions on Jetson. The measured 67ms p99 exceeds the 52ms
-    worst-case computation time because of system-level overheads layered on top.
-  napkin_math: 'Current p99 = 67ms. p99 = 52ms compute + system overhead = 52 + 15ms = 67ms.
-    System overhead sources: 3 (DMA) + 2 (scheduler) + 4 (ISP) + 6 (power transition) = 15ms.
-    With jetson_clocks + pinned clocks: 3 + 2 + 4 + 0 = 9ms overhead.
-    New p99 = 52 + 9 = 61ms. Still over SLA.
-    Reduce complex frames to 0.5%: Since complex frames are now less than 1% of the total,
-    the 99th percentile frame is a fast frame (17ms).
-    With 9ms overhead, new p99 = 17ms + 9ms = 26ms.
-    With pre-allocated DMA buffers, overhead drops to 6ms, making p99 = 17ms + 6ms = 23ms.
-    SLA of 40ms is met.'
+  realistic_solution: 'Current p99 = 67ms > 40ms SLA. Gap: 27ms. The p99 exceeds 52ms because of system overheads (DMA, scheduler, ISP, power state transitions). To close the gap: (1) Enable MAXN and pin GPU clocks (saves 6ms). (2) Redesign early-exit threshold to reduce complex-frame rate to 0.5%, meaning the 99th percentile frame is now a 17ms fast frame. (3) Use CUDA streams with pre-allocated DMA buffers (saves 3ms). Combined p99: 17ms compute + 6ms overhead = 23ms. Meets SLA.'
+  common_mistake: |
+    **The Pitfall:** Assuming p99 latency equals the worst-case model computation time.
+    **The Rationale:** Candidates forget that streaming pipelines accumulate jitter from power state transitions, OS scheduling, and DMA transfers.
+    **The Consequence:** The deployed system suffers sudden tail latency spikes that violate downstream SLAs.
+  napkin_math: |
+    - Current p99: 67ms (52ms compute + 15ms system overhead).
+    - Target SLA: 40ms.
+    - Step 1: Pin GPU clocks to eliminate power transition overhead (saves 6ms -> 9ms overhead).
+    - Step 2: Reduce complex frames to <1% via threshold tuning.
+    - New p99 compute frame: 17ms (fast path now dominates the 99th percentile).
+    - Step 3: Pre-allocate DMA buffers (saves 3ms -> 6ms overhead).
+    - Final p99: 17ms compute + 6ms overhead = **23ms (Meets 40ms SLA)**.
 status: published
 provenance: imported
 requires_explanation: false

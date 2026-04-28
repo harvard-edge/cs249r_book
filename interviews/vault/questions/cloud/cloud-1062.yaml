@@ -8,24 +8,19 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: CPU Bottleneck in PII Anonymization
-scenario: A healthcare LLM (Llama-3-8B) is deployed on a single AWS g5.4xlarge instance (1x A10G GPU,
-  24GB VRAM, 16 vCPUs). To ensure HIPAA compliance, a Data Anonymization Layer (DAL) using a BERT-base
-  NER model (110M parameters) intercepts all incoming prompts to mask PII before passing them to the LLM.
-  The DAL is configured to run on the CPU to reserve all GPU VRAM for the LLM's KV cache. At a peak load
-  of 40 requests/sec (average prompt length of 512 tokens), the end-to-end P99 latency spikes from 300ms
-  to over 2.5 seconds, even though GPU utilization never exceeds 45%. Root cause the bottleneck.
-question: "What is causing the 2.5s P99 latency spike despite 45% GPU utilization, and how should the DAL be deployed?"
+scenario: A healthcare LLM (Llama-3-8B) is deployed on a single AWS g5.4xlarge instance (1x A10G GPU, 24GB VRAM, 16 vCPUs). A Data Anonymization Layer (DAL) using a BERT-base NER model (110M parameters) intercepts prompts to mask PII, running strictly on CPU to save VRAM. At 40 requests/sec, P99 latency spikes from 300ms to 2.5s, despite GPU utilization never exceeding 45%.
+question: What is causing the 2.5s P99 latency spike despite 45% GPU utilization, and how should the DAL be deployed?
 details:
-  realistic_solution: Co-locate the DAL model on the GPU using an optimized execution provider (e.g.,
-    ONNX Runtime with CUDA) or switch to a lighter weight anonymizer (e.g., regex + small SpaCy pipeline).
-    Allocating just 500MB of VRAM to BERT-base enables it to process 40 req/sec in under 30ms.
-  common_mistake: Assuming the LLM generation phase or tokenization is the bottleneck, and attempting
-    to optimize the LLM with quantization or larger batch sizes, ignoring the immense compute required
-    by the CPU-bound BERT model.
-  napkin_math: 'BERT-base forward pass compute: 2 * 110M parameters * 512 tokens = 112.6 GFLOPs per request.
-    At 40 requests/sec, the target compute demand is 40 * 112.6 = 4.5 TFLOPs. A standard 16 vCPU instance
-    delivers roughly 0.5 TFLOPs of FP32 compute. The required 4.5 TFLOPs demand exceeds the CPU''s maximum
-    capacity by 9x, leading to massive queue buildup and violating the real-time latency requirements.'
+  realistic_solution: 'Co-locate the DAL model on the GPU using an optimized execution provider (e.g., ONNX Runtime) or switch to a lightweight regex+SpaCy pipeline. Allocating just 500MB of VRAM to BERT-base enables it to process 40 req/sec in under 30ms, eliminating the massive CPU queuing delay.'
+  common_mistake: |
+    **The Pitfall:** Assuming the LLM generation or tokenization is the bottleneck because it is the "largest" model.
+    **The Rationale:** Engineers obsess over GPU metrics and ignore CPU overhead when architecting multi-stage pipelines.
+    **The Consequence:** Wasting engineering cycles attempting to quantize the LLM or increase batch sizes, completely ignoring the CPU-bound BERT model crippling the pipeline.
+  napkin_math: |
+    1. BERT-base forward compute: $2 \times 110\text{M parameters} \times 512\text{ tokens} = 112.6\text{ GFLOPs per request}$.
+    2. At 40 requests/sec, target compute demand is $40 \times 112.6 = 4.5\text{ TFLOPs}$.
+    3. A standard 16 vCPU instance delivers roughly $0.5\text{ TFLOPs}$ of FP32 compute.
+    4. **The required 4.5 TFLOPs demand exceeds CPU capacity by 9x, leading to massive queue buildup.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -43,4 +38,3 @@ human_reviewed:
   by: null
   date: null
   notes: null
-created_at: '2026-03-23T21:38:47.665303'

@@ -8,29 +8,22 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: PagedAttention Overhead on Memory-Constrained Edge
-scenario: You deployed PagedAttention on Jetson Orin (32GB LPDDR5) for a 7B model.
-  With block_size=16 and max 8 concurrent requests at seq_len=2048, you observe 3%
-  higher latency than contiguous KV allocation despite better memory utilization.
-  Diagnose why PagedAttention's overhead is proportionally larger on edge devices.
-question: Why does PagedAttention add 3% latency on Jetson Orin at block_size=16 and
-  8×2048-token requests despite better memory use?
+scenario: You deployed PagedAttention on Jetson Orin (32GB LPDDR5) for a 7B model. With block_size=16 and max 8 concurrent requests at seq_len=2048, you observe 3% higher latency than contiguous KV allocation despite better memory utilization.
+question: Why does PagedAttention add 3% latency on Jetson Orin at block_size=16 and 8x2048-token requests despite better memory use?
 details:
-  realistic_solution: 'PagedAttention adds: (1) block table lookup per attention operation:
-    2048/16 = 128 table entries per request. (2) Gather operation to assemble contiguous
-    tiles from scattered blocks before FlashAttention can process them. On H100 at
-    3.35 TB/s, the gather is negligible (128 x 320KB reads scatter/gather at ~3TB/s
-    effective). On Orin at 102 GB/s with simpler memory controller, gather achieves
-    only ~60 GB/s effective due to limited outstanding memory requests (fewer MSHRs).
-    Gather cost: 128 blocks x 32 layers x 2 x 16 x 128 x 2B = 128 x 128KB = 16MB at
-    60 GB/s = 0.27ms. Total decode: ~9ms. Overhead: 3%. On H100, same gather: 16MB
-    at 3 TB/s = 0.005ms out of 2ms decode = 0.25%. For edge: consider contiguous allocation
-    with defragmentation instead of PagedAttention when concurrency is low (<16 requests).'
-  common_mistake: Assuming PagedAttention overhead is the same percentage on edge
-    as cloud. Edge devices have lower memory bandwidth and less sophisticated memory
-    controllers, making the block table indirection penalty proportionally larger.
-  napkin_math: 'Gather: 16MB. Orin effective BW: 60 GB/s = 0.27ms. Decode total: ~9ms.
-    Overhead: 3%. H100: 0.005ms / 2ms = 0.25%. Edge has 12x proportionally higher
-    PagedAttention overhead.'
+  realistic_solution: 'PagedAttention adds: (1) block table lookup per attention operation: 2048/16 = 128 table entries per request. (2) Gather operation to assemble contiguous tiles from scattered blocks before FlashAttention can process them. On H100 at 3.35 TB/s, the gather is negligible (128 x 320KB reads scatter/gather at ~3TB/s effective). On Orin at 102 GB/s with simpler memory controller, gather achieves only ~60 GB/s effective due to limited outstanding memory requests (fewer MSHRs). Gather cost: 128 blocks x 32 layers x 2 x 16 x 128 x 2B = 128 x 128KB = 16MB at 60 GB/s = 0.27ms. Total decode: ~9ms. Overhead: 3%. On H100, same gather: 16MB at 3 TB/s = 0.005ms out of 2ms decode = 0.25%. For edge: consider contiguous allocation with defragmentation instead of PagedAttention when concurrency is low (<16 requests).'
+  common_mistake: |
+    **The Pitfall:** Assuming PagedAttention overhead is the same percentage on edge as in the cloud.
+    **The Rationale:** Candidates ignore that edge devices have much lower memory bandwidth and simpler memory controllers (fewer MSHRs).
+    **The Consequence:** They blindly deploy PagedAttention, incurring a significant latency penalty for minimal concurrency benefits.
+  napkin_math: |
+    * Gather data size: 128 blocks x 32 layers x 2 x 16 x 128 x 2B = 16MB
+    * Orin effective gather bandwidth: 60 GB/s
+    * Orin gather time: 16MB / 60 GB/s = 0.27ms
+    * Total decode time: ~9ms
+    * Overhead: 0.27ms / 9ms = 3%
+    * H100 gather time: 16MB / 3 TB/s = 0.005ms (0.25% of 2ms decode)
+    * **Edge devices have ~12x proportionally higher PagedAttention overhead due to slower memory controllers.**
 status: deleted
 provenance: imported
 requires_explanation: false

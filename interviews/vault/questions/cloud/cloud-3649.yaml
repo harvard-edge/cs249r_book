@@ -8,26 +8,21 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Multi-Query Attention Memory Savings vs Flash Attention
-scenario: A team is choosing between standard MHA with Flash Attention, Multi-Query
-  Attention (MQA), and Grouped-Query Attention (GQA) for a 70B inference model on
-  MI300X (192GB HBM3, 5.3TB/s). Decode latency is the primary concern at batch=1.
-question: For batch-1 decode on MI300X, should you use MHA with Flash Attention, MQA,
-  or GQA, and why?
+scenario: A team is choosing between standard MHA with Flash Attention, Multi-Query Attention (MQA), and Grouped-Query Attention (GQA) for a 70B inference model on a GPU with 5.3 TB/s memory bandwidth. Decode latency is the primary concern at batch=1.
+question: "For batch-1 decode, should you use MHA with Flash Attention, MQA, or GQA to minimize latency, and why?"
 details:
-  realistic_solution: For decode latency at batch=1, the bottleneck is KV cache bandwidth,
-    not attention computation. MQA reduces KV cache size by num_heads factor (e.g.
-    8x for 64 heads → 8 KV heads). GQA (4 groups) gives 16x reduction. On MI300X with
-    5.3TB/s, KV cache bandwidth becomes the limiting factor — reduce KV heads to maximize
-    token throughput.
-  common_mistake: Applying Flash Attention to decode (autoregressive generation) and
-    expecting a speedup. Flash Attention's tiling benefit is for prefill (full sequence
-    attention). During decode, the KV cache for each new token is fetched from HBM
-    — this is a different access pattern not benefited by Flash Attention's tiling.
-  napkin_math: '70B model, 80 layers, 64 heads, d=128, FP16. MHA KV cache per token:
-    80 * 2 * 64 * 128 * 2 = 2.62MB/token. At 2048 context: 5.37GB KV cache. Decode:
-    load full KV cache per step. MHA: 5.37GB / 5.3TB/s = 1ms/token = 1000 tok/s. GQA-8
-    (8 KV heads): 5.37GB/8 = 671MB → 671MB/5.3TB/s = 0.13ms/token = 7700 tok/s. MI300X''s
-    5.3TB/s makes GQA especially impactful.'
+  realistic_solution: For decode latency at batch=1, the bottleneck is KV cache bandwidth, not attention computation. MQA reduces KV cache size by num_heads factor (e.g. 8x for 64 heads → 8 KV heads). GQA (4 groups) gives 16x reduction. On MI300X with 5.3TB/s, KV cache bandwidth becomes the limiting factor — reduce KV heads to maximize token throughput.
+  common_mistake: |
+    **The Pitfall:** Applying Flash Attention to autoregressive decode generation to speed it up.
+    **The Rationale:** Candidates know Flash Attention optimizes memory accesses, but forget its tiling benefit only applies to the prefill phase (full sequence attention).
+    **The Consequence:** Architectural decisions prioritize Flash Attention support over GQA/MQA, failing to improve the actual decode latency bottleneck.
+  napkin_math: |
+    - MHA KV-cache per token (64 heads, d=128, FP16, 80 layers): 80 * 2 * 64 * 128 * 2 bytes ≈ 2.62 MB.
+    - MHA KV-cache at 2048 context: 2.62 MB * 2048 ≈ 5.37 GB.
+    - MHA Decode time per token: 5.37 GB / 5.3 TB/s ≈ 1.0 ms/token.
+    - GQA-8 (8 KV heads, an 8x reduction): 5.37 GB / 8 = 671 MB.
+    - GQA-8 Decode time per token: 671 MB / 5.3 TB/s ≈ 0.13 ms/token.
+    - **Result: GQA drastically cuts the KV-cache read volume, which is the primary bottleneck for batch-1 decode.**
 status: published
 provenance: imported
 requires_explanation: false

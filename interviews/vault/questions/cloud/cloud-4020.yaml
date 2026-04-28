@@ -8,32 +8,19 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: Congestion Control for Pipeline-Parallel Microbatches
-scenario: A 128-H100 pipeline-parallel training job uses 16 pipeline stages across
-  16 nodes. Each stage sends activation tensors (8MB per microbatch) to the next stage
-  every 2ms. Unlike AllReduce, this is a point-to-point flow that must maintain strict
-  ordering and low latency. Design the congestion control approach that minimizes
-  pipeline bubble time.
-question: How would you design congestion control for 8MB activation transfers every
-  2ms to minimize 16-stage pipeline bubble time?
+scenario: 'A 128-GPU pipeline-parallel training job uses 16 pipeline stages across 16 nodes. Each stage sends activation tensors (8MB per microbatch) to the next stage every 2ms. Unlike AllReduce, this is a point-to-point flow that must maintain strict ordering and low latency.'
+question: 'How would you design congestion control for 8MB activation transfers every 2ms to minimize 16-stage pipeline bubble time?'
 details:
-  realistic_solution: 'Design a two-tier congestion control scheme: (1) Assign pipeline-parallel
-    activation transfers to a high-priority traffic class (TC6) with strict priority
-    scheduling over AllReduce traffic (TC0). (2) For TC6, use minimal ECN marking
-    — set Kmin = 60% of allocated buffer since these flows are short-lived and self-limiting.
-    (3) Enable DCQCN with aggressive rate recovery: alpha increase factor = 1/4 (instead
-    of 1/16), so rate recovers 4× faster after congestion clears. (4) Set NCCL NCCL_IB_TIMEOUT=22
-    and NCCL_IB_RETRY_CNT=7 to handle transient congestion without aborting. (5) Pin
-    pipeline communication to a dedicated rail (Rail 0) separate from AllReduce rails
-    (Rails 1-7). Expected result: activation transfer latency of 8MB / 50GB/s = 160μs
-    + 5μs network RTT = 165μs, well within the 2ms microbatch budget.'
-  common_mistake: Applying the same DCQCN parameters designed for AllReduce elephant
-    flows. Pipeline-parallel activations are latency-sensitive mice flows — DCQCN's
-    rate reduction on the first CNP can over-throttle these small transfers and inflate
-    the pipeline bubble.
-  napkin_math: 'Pipeline bubble time per iteration = (stages - 1) × microbatch_time
-    = 15 × 2ms = 30ms. If congestion adds 200μs per stage transfer: 15 × 200μs = 3ms
-    additional bubble = 10% throughput loss. With priority scheduling keeping activation
-    latency to <50μs overhead: 15 × 50μs = 750μs = 2.5% bubble increase — acceptable.'
+  realistic_solution: 'Design a two-tier congestion control scheme: (1) Assign pipeline-parallel activation transfers to a high-priority traffic class (TC6) with strict priority scheduling over AllReduce traffic (TC0). (2) For TC6, use minimal ECN marking — set Kmin = 60% of allocated buffer since these flows are short-lived and self-limiting. (3) Enable DCQCN with aggressive rate recovery: alpha increase factor = 1/4 (instead of 1/16), so rate recovers 4× faster after congestion clears. (4) Set NCCL NCCL_IB_TIMEOUT=22 and NCCL_IB_RETRY_CNT=7 to handle transient congestion without aborting. (5) Pin pipeline communication to a dedicated rail (Rail 0) separate from AllReduce rails (Rails 1-7). Expected result: activation transfer latency of 8MB / 50GB/s = 160μs + 5μs network RTT = 165μs, well within the 2ms microbatch budget.'
+  common_mistake: |
+    **The Pitfall:** Applying standard DCQCN parameters designed for massive AllReduce elephant flows to pipeline parallelism.
+    **The Rationale:** Engineers reuse global congestion control tuning without distinguishing between bandwidth-heavy AllReduce operations and latency-sensitive point-to-point microbatch transfers.
+    **The Consequence:** DCQCN's aggressive rate reduction on the first congestion notification over-throttles these small "mice" flows, drastically inflating the pipeline bubble and degrading throughput.
+  napkin_math: |
+    - **Base Pipeline Bubble:** 15 stages * 2ms = 30ms.
+    - **Congestion Impact:** If congestion adds 200μs per stage, extra bubble = 15 * 200μs = 3ms (10% throughput loss).
+    - **Optimized Impact:** With priority scheduling, keep activation latency <50μs. 15 * 50μs = 750μs.
+    - **Result:** **2.5% bubble increase**, which is highly acceptable.
 status: published
 provenance: imported
 requires_explanation: true

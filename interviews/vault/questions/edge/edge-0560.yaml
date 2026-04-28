@@ -8,38 +8,27 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: The Resolution-Accuracy Pareto
-scenario: Your edge camera system needs to detect people at distances from 5m to 100m. Your 4K camera
-  (3840×2160) feeds a YOLOv8-M detector, but running at full 4K resolution takes 85ms — far over your
-  33ms budget. Your colleague says 'just resize to 640×640.' What critical information does resizing destroy,
-  and how do you design a system that meets the deadline while preserving long-range detection?
-question: "What critical information does resizing destroy, and how do you design a system that meets the deadline while preserving long-range detection?"
+scenario: Your edge camera system needs to detect people at distances from 5m to 100m. Your 4K camera (3840x2160) feeds a YOLOv8-M detector, but running at full 4K resolution takes 85ms — far over your 33ms budget. Your colleague says 'just resize to 640x640'.
+question: What critical information does resizing destroy, and how do you design a system that meets the deadline while preserving long-range detection?
 details:
-  realistic_solution: 'Resizing 4K to 640×640 is a 6× downscale. A person at 100m occupies roughly 20
-    pixels tall in 4K. After resizing: 20/6 ≈ 3 pixels — below the minimum receptive field for any detector.
-    You''ve made long-range detection physically impossible. The fix is a **multi-scale tiling strategy**:
-    (1) run a lightweight classifier on the full 4K frame at low resolution to identify regions of interest
-    (ROIs), (2) crop and run the full detector only on the ROIs at native resolution. For a scene with
-    3 ROIs: 3 × 640×640 crops × 20ms each = 60ms sequential, but you can batch them: 3 crops in one batch
-    = ~25ms on TensorRT. Alternative: use a fixed tiling scheme — divide 4K into 9 1280×720 tiles, run
-    detection on each, merge with NMS. At 12ms per tile (smaller than full 4K): 9 × 12ms = 108ms sequential.
-    The real solution: run tiles on the DLA and GPU in parallel — 4 tiles on DLA (48ms) + 5 tiles on GPU
-    (60ms) = 60ms total with full parallelism. Add a temporal skip: only re-tile every 3rd frame, using
-    tracking to interpolate. Effective rate: 60ms / 3 = 20ms amortized → 50 FPS equivalent.'
-  common_mistake: '"Resize to 640×640 and accept the accuracy loss." This treats resolution as a single
-    knob when it''s actually a spatial information budget.'
-  napkin_math: 'Person at 100m in 4K: ~20 pixels tall. After 6× resize: ~3 pixels → undetectable. With
-    tiling (9 × 1280×720): person stays at ~10 pixels in each tile → detectable. Compute: 9 tiles × 12ms
-    = 108ms sequential. With DLA+GPU parallel: 60ms. With temporal skip (every 3rd frame): 20ms amortized.
-    Accuracy: ~95% of full-4K detection at a fraction of the compute.'
+  realistic_solution: Resizing 4K to 640x640 is a 6x downscale. A person at 100m occupies roughly 20 pixels tall in 4K. After resizing: 20/6 ~ 3 pixels — below the minimum receptive field for any detector. You've made long-range detection physically impossible. The fix is a multi-scale tiling strategy: (1) run a lightweight classifier on the full 4K frame at low resolution to identify regions of interest (ROIs), (2) crop and run the full detector only on the ROIs at native resolution. Alternatively, use a fixed tiling scheme running on the DLA and GPU in parallel, with a temporal skip.
+  common_mistake: |
+    **The Pitfall:** Resizing to 640x640 and accepting the accuracy loss.
+    **The Rationale:** Candidates treat resolution as a single knob to turn down for speed, failing to realize it is actually a spatial information budget directly tied to physical object detection limits.
+    **The Consequence:** The autonomous system completely loses the ability to detect distant objects, creating a massive safety hazard.
+  napkin_math: |
+    - Person at 100m in 4K: ~20 pixels tall.
+    - After 6x resize: ~3 pixels -> undetectable.
+    - With tiling (9 x 1280x720): person stays at ~10 pixels in each tile -> detectable.
+    - Compute: 9 tiles * 12ms = 108ms sequential.
+    - With DLA+GPU parallel: 60ms.
+    - With temporal skip (every 3rd frame): 20ms amortized.
+    **Conclusion: Accuracy stays at ~95% of full-4K detection at a fraction of the compute cost.**
   options:
-  - 'Resizing 4K to 640×640 is a 6× downscale. A person at 100m occupies roughly 20 pixels tall in 4K.
-    After resizing: 20/6 ≈ 3 pixels — below the minimum receptive field for any detector.'
-  - The accuracy degradation is caused by numerical instability in the framework's matrix multiplication
-    kernels, not by the model or data.
-  - Resize to 640×640 and accept the accuracy loss.. This treats resolution as a single knob when it's
-    actually a spatial information budget.
-  - The memory leak is in the framework's autograd graph; disabling gradient computation with torch.no_grad()
-    will fix it.
+  - Resizing 4K to 640x640 destroys small object features (e.g., a person becomes 3 pixels tall), making detection impossible. Use a multi-scale ROI tiling strategy to run detection on high-res crops.
+  - The accuracy degradation is caused by numerical instability in the framework's matrix multiplication kernels, not by the model or data.
+  - Resize to 640x640 and accept the accuracy loss. This treats resolution as a single knob when it's actually a spatial information budget.
+  - The memory leak is in the framework's autograd graph; disabling gradient computation with torch.no_grad() will fix it.
   correct_index: 0
 status: published
 provenance: imported

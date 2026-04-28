@@ -8,28 +8,20 @@ competency_area: optimization
 bloom_level: apply
 phase: training
 title: The Framework Dispatch Overhead
-scenario: You profile a small transformer model (125M parameters) doing inference with batch size 1 in
-  PyTorch eager mode. The nsys trace shows that GPU kernels occupy only 35% of the wall-clock time — the
-  rest is CPU-side overhead between kernel launches. Your colleague says 'the model is too small to saturate
-  the GPU.' Is that the whole story? What specifically is happening in the 65% of time the GPU is idle,
-  and what are your options to fix it?
-question: "What specifically is happening in the 65% of time the GPU is idle, and what are your options to fix it?"
+scenario: You profile a small transformer model (125M parameters) doing inference with batch size 1 in PyTorch eager mode. The nsys trace shows that GPU kernels occupy only 35% of the wall-clock time — the rest is CPU-side overhead between kernel launches. Your colleague says 'the model is too small to saturate the GPU.'
+question: What specifically causes the 65% CPU-side idle time during inference, and how can you fix it?
 details:
-  realistic_solution: 'The 65% idle time is the PyTorch dispatch overhead: (1) Python interpreter overhead
-    per operator call (~10-20μs), (2) PyTorch''s dispatcher traverses multiple dispatch keys (autograd,
-    autocast, batched, vmap) even in inference mode (~5-15μs), (3) operator selection and argument marshaling
-    (~5μs), (4) CUDA kernel launch latency (~5-10μs). For a 125M model with ~100 operators per forward
-    pass, each taking ~20μs of GPU compute, the CPU overhead of ~40μs per operator dominates. Fixes: (1)
-    `torch.compile()` to trace and fuse the graph, eliminating per-operator dispatch, (2) CUDA graphs
-    to replay a captured kernel sequence with zero dispatch overhead, (3) TorchScript or export to remove
-    Python entirely, (4) `torch.inference_mode()` to skip autograd dispatch keys.'
-  common_mistake: 'Blaming ''Python overhead'' generically. The real issue is the framework dispatch stack:
-    Python → PyTorch dispatcher → ATen operator selection → cuBLAS/cuDNN call → CUDA driver → kernel launch.
-    Each hop adds latency, and with small/fast kernels, this overhead dominates.'
-  napkin_math: '100 operators × 20μs GPU each = 2ms of GPU compute. 100 operators × 40μs CPU dispatch
-    = 4ms overhead. Total = 6ms, GPU utilization = 2/6 = 33%. With torch.compile: CPU overhead drops to
-    ~0.5ms (graph dispatch once). Total = 2.5ms, GPU utilization = 80%. With CUDA Graphs: CPU overhead
-    ≈ 0. Total ≈ 2.1ms, GPU utilization ≈ 95%.'
+  realistic_solution: 'The 65% idle time is the PyTorch dispatch overhead: (1) Python interpreter overhead per operator call (~10-20μs), (2) PyTorch''s dispatcher traverses multiple dispatch keys (autograd, autocast, batched, vmap) even in inference mode (~5-15μs), (3) operator selection and argument marshaling (~5μs), (4) CUDA kernel launch latency (~5-10μs). For a 125M model with ~100 operators per forward pass, each taking ~20μs of GPU compute, the CPU overhead of ~40μs per operator dominates. Fixes: (1) `torch.compile()` to trace and fuse the graph, eliminating per-operator dispatch, (2) CUDA graphs to replay a captured kernel sequence with zero dispatch overhead, (3) TorchScript or export to remove Python entirely, (4) `torch.inference_mode()` to skip autograd dispatch keys.'
+  common_mistake: |
+    **The Pitfall:** Generically blaming "Python overhead" or passively accepting low utilization as unavoidable.
+    **The Rationale:** Candidates fail to distinguish between the Python runtime and the deep underlying C++ framework dispatch layers (autograd checks, tensor shape validation, CUDA launches).
+    **The Consequence:** The team leaves massive performance on the table for small, fast models because they fail to utilize tracing solutions like CUDA Graphs or `torch.compile()`.
+  napkin_math: |
+    1. **Baseline Overhead:** 100 operators × 20 $\mu$s GPU compute = 2 ms of GPU work.
+    2. **Dispatch Overhead:** 100 operators × 40 $\mu$s CPU dispatch = 4 ms CPU overhead.
+    3. **Baseline Utilization:** Total time = 6 ms. GPU utilization = $2 / 6 =$ **33%**.
+    4. **torch.compile:** Traces the graph, dropping CPU overhead to ~0.5 ms. Total = 2.5 ms (GPU utilization **80%**).
+    5. **CUDA Graphs:** Replays kernel sequence with zero CPU overhead. Total $\approx$ 2.1 ms (GPU utilization **95%**).
 status: published
 provenance: imported
 requires_explanation: false

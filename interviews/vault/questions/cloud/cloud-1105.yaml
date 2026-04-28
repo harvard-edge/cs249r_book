@@ -8,27 +8,20 @@ competency_area: data
 bloom_level: evaluate
 phase: training
 title: Evaluating Data Compilation Strategies
-scenario: You are training a large multimodal model on a cluster of 64 H100 GPUs. The training data consists
-  of 500 million raw 5MB JPEG images and separate JSON metadata files stored in object storage (S3). The
-  target training throughput is 2,000 samples/sec per GPU. The current data pipeline fetches individual
-  JPEGs and JSONs, decodes them, resizes them to 224x224, and applies augmentations on the host CPUs (96
-  cores per node). Currently, GPU utilization is stuck at 30% while host CPUs are pinned at 100%. The
-  team proposes upgrading to 192-core CPU nodes to alleviate the bottleneck. Evaluate this proposal against
-  an offline 'dataset compilation' approach and justify your architectural decision.
-question: "Should you upgrade to 192-core CPU nodes or use offline dataset compilation for the 64-GPU image pipeline, and why?"
+scenario: You are training a large multimodal model on a cluster of 64 H100 GPUs. The training data consists of 500 million raw 5MB JPEG images and separate JSON metadata files stored in object storage (S3). The target training throughput is 2,000 samples/sec per GPU. The current data pipeline fetches individual JPEGs and JSONs, decodes them, resizes them to 224x224, and applies augmentations on the host CPUs (96 cores per node). Currently, GPU utilization is stuck at 30% while host CPUs are pinned at 100%. The team proposes upgrading to 192-core CPU nodes to alleviate the bottleneck.
+question: Should you upgrade to 192-core CPU nodes or use offline dataset compilation for the 64-GPU image pipeline, and why?
 details:
-  realistic_solution: 'Reject the CPU upgrade. Instead, introduce an offline data compilation phase: pre-resize
-    images to the target 224x224 resolution (~150KB each) and serialize them alongside metadata into large
-    contiguous sharded formats (e.g., WebDataset tarballs). This reduces per-image I/O from 5MB to 150KB
-    (33x reduction) and eliminates millions of small-file HTTP GET requests, cutting required bandwidth
-    from 640 GB/s to 19.2 GB/s — easily achievable with standard cloud networking.'
-  common_mistake: Focusing purely on compute bottlenecks by suggesting CPU upgrades or moving augmentations
-    to the GPU without addressing the catastrophic network I/O amplification from fetching 5MB raw images
-    when only 150KB of preprocessed data is needed.
-  napkin_math: 'Current Target: 64 GPUs * 2,000 imgs/sec = 128,000 imgs/sec. Raw I/O req: 128,000 * 5MB
-    = 640 GB/sec (saturates network, massive IOPS). Compiled I/O req: Pre-resized 224x224 JPEG is ~150KB.
-    128,000 * 150KB = 19.2 GB/sec. Packing into 1GB shards reduces HTTP GET requests by >6000x, easily
-    hitting target throughput.'
+  realistic_solution: 'Reject the CPU upgrade. Instead, introduce an offline data compilation phase: pre-resize images to the target 224x224 resolution (~150KB each) and serialize them alongside metadata into large contiguous sharded formats (e.g., WebDataset tarballs). This reduces per-image I/O from 5MB to 150KB (33x reduction) and eliminates millions of small-file HTTP GET requests, cutting required bandwidth from 640 GB/s to 19.2 GB/s — easily achievable with standard cloud networking.'
+  common_mistake: |
+    **The Pitfall:** Focusing purely on compute bottlenecks and suggesting CPU upgrades.
+    **The Rationale:** Candidates often jump to scaling up CPU cores or moving augmentations to the GPU without analyzing the catastrophic network I/O amplification.
+    **The Consequence:** The system remains severely network and I/O bound from fetching 5MB raw images when only 150KB of data is actually needed, wasting money on CPU upgrades.
+  napkin_math: |
+    * Target throughput: 64 GPUs * 2,000 imgs/sec = 128,000 imgs/sec.
+    * Raw I/O requirement: 128,000 * 5 MB = 640 GB/sec (saturates network, massive IOPS).
+    * Compiled I/O requirement: Pre-resized 224x224 JPEG is ~150 KB.
+    * New I/O requirement: 128,000 * 150 KB = **19.2 GB/sec**.
+    * **Result:** Packing into 1GB shards reduces HTTP GET requests by >6000x, easily hitting the target throughput without a CPU upgrade.
 status: published
 provenance: imported
 requires_explanation: true

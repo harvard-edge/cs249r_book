@@ -8,32 +8,19 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: MoE Prefill vs Decode Phase Routing Differences
-scenario: Your MoE serving system disaggregates prefill and decode onto separate GPU
-  pools. During prefill, batches of 512 tokens hit all experts evenly. During decode,
-  batches of 128 requests generate 1 token each, and only 4 of 8 experts see significant
-  traffic. Design different parallelism strategies for each phase.
-question: What parallelism layouts should you use for MoE prefill and decode, and
-  why should they differ?
+scenario: Your MoE serving system disaggregates prefill and decode onto separate GPU pools. During prefill, batches of 512 tokens hit all experts evenly. During decode, batches of 128 requests generate 1 token each, and only 4 of 8 experts see significant traffic.
+question: What parallelism layouts should you use for MoE prefill and decode, and why should they differ?
 details:
-  realistic_solution: 'Prefill pool: Use EP=8 (1 expert per GPU). With 512 tokens
-    and uniform routing, each expert processes ~128 tokens — large enough for efficient
-    matmuls. All-to-all communication is amortized over the large batch. Compute-bound:
-    H100 Tensor Core utilization >70%. Decode pool: EP=8 wastes 4 GPUs that receive
-    near-zero traffic. Instead, use EP=4 (2 experts per GPU), consolidating the 4
-    hot experts across 4 GPUs. This halves the GPU count while maintaining throughput
-    for decode (which is memory-BW-bound anyway — fewer GPUs means less aggregate
-    BW, but each GPU has enough BW for 1-token matmuls). Alternatively, replicate
-    hot experts and use EP=4 with selective expert placement. The key insight: MoE
-    decode is memory-bandwidth-bound (loading expert weights for single-token matmuls),
-    so consolidating experts on fewer GPUs with higher utilization is better than
-    spreading across many underutilized GPUs.'
-  common_mistake: Using the same expert parallelism layout for both prefill and decode.
-    Prefill is compute-bound with uniform expert utilization; decode is memory-bandwidth-bound
-    with skewed expert utilization.
-  napkin_math: 'Prefill: 512 tokens / 8 experts × 2 (top-2) = 128 tokens/expert. Matmul
-    size: [128, 4096] × [4096, 14336] — compute-bound. Decode: 128 tokens / 8 experts
-    × 2 = 32 tokens/expert, but skewed: 4 hot experts get ~48 each, 4 cold get ~8.
-    Matmul [8, 4096] × [4096, 14336] at batch=8: deeply memory-bound.'
+  realistic_solution: 'Prefill pool: Use EP=8 (1 expert per GPU). With 512 tokens and uniform routing, each expert processes ~128 tokens — large enough for efficient matmuls. All-to-all communication is amortized over the large batch. Compute-bound: H100 Tensor Core utilization >70%. Decode pool: EP=8 wastes 4 GPUs that receive near-zero traffic. Instead, use EP=4 (2 experts per GPU), consolidating the 4 hot experts across 4 GPUs. This halves the GPU count while maintaining throughput for decode (which is memory-BW-bound anyway — fewer GPUs means less aggregate BW, but each GPU has enough BW for 1-token matmuls). Alternatively, replicate hot experts and use EP=4 with selective expert placement. The key insight: MoE decode is memory-bandwidth-bound (loading expert weights for single-token matmuls), so consolidating experts on fewer GPUs with higher utilization is better than spreading across many underutilized GPUs.'
+  common_mistake: |
+    **The Pitfall:** Using the exact same expert parallelism (EP) layout for both prefill and decode phases.
+    **The Rationale:** It's architecturally simpler to maintain a homogeneous deployment topology.
+    **The Consequence:** Severely underutilizing GPUs during decode, wasting expensive memory bandwidth on cold experts while hot experts bottleneck.
+  napkin_math: |
+    - **Prefill (Compute-Bound)**: 512 tokens / 8 experts × 2 (top-2) = 128 tokens/expert. Matmuls are large enough to be highly efficient.
+    - **Decode (Memory-Bound)**: 128 tokens / 8 experts × 2 = 32 tokens/expert on average.
+    - **Decode Skew**: 4 hot experts get ~48 tokens, 4 cold get ~8 tokens.
+    - **Conclusion**: Decode matmuls are deeply memory-bandwidth-bound, making EP=8 inefficient due to stranded bandwidth on cold GPUs.
 status: published
 provenance: imported
 requires_explanation: true

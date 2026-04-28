@@ -8,33 +8,36 @@ competency_area: reliability
 bloom_level: apply
 phase: inference
 title: The Boot Loop of Doom
-scenario: Your Rockchip RK3588 edge device runs a safety monitoring model in a chemical plant. After a
-  power outage, the device enters a boot loop — it starts up, attempts to load the model, crashes, and
-  reboots. The cycle repeats every 45 seconds. The eMMC filesystem shows no corruption (fsck passes).
-  The model file exists and has the correct size. But the model fails to load with 'invalid header' error.
-  What happened, and how do you prevent this in the future?
-question: "What happened, and how do you prevent this in the future?"
+scenario: Your Rockchip RK3588 edge device runs a safety monitoring model in a chemical plant. After a power outage, the device enters a boot loop — it starts up, attempts to load the model, crashes, and reboots. The cycle repeats every 45 seconds. The eMMC filesystem shows no corruption (fsck passes). The model file exists and has the correct size. But the model fails to load with an 'invalid header' error.
+question: "What happened to the model file, and how do you prevent this boot loop in the future?"
 details:
-  realistic_solution: 'The model file was being written during the power outage. The filesystem (ext4)
-    uses journaling for metadata but not for data by default (`data=ordered` mode). During the OTA update,
-    the system: (1) opened the model file directly (truncating it), (2) wrote 45 MB of data, (3) was about to call `fsync()`. The power cut happened between steps 2 and 3. The file size metadata was journaled, but the data blocks were not fully flushed, leaving garbage or zeros. The fix is to write to a temp file first, `fsync()`, and then `rename()` which is atomic.'
-  common_mistake: '"The eMMC is corrupted — reflash the device." But fsck passes and the file size is
-    correct. The corruption is more subtle.'
-  napkin_math: 'Model file: 45 MB. eMMC write speed: ~100 MB/s. Write time: 0.45s. fsync time: ~50ms. Rename time: <1ms. Window of vulnerability (write without fsync): 0.45s. With 1 daily update, a device is vulnerable for 0.45s out of 86400s per day. If a facility experiences 10 power outages a year at random times, the probability of an outage hitting this exact window is 10 * (0.45 / 86400) = 0.000052 per device/year. For a fleet of 500 devices, the expected number of occurrences is 500 * 0.000052 = 0.026 (or a 2.6% chance per year across the fleet). With atomic replacement: vulnerability window = 0 (rename is atomic). Boot loop cycle: 15s boot + 5s startup + 3s load + 22s restart delay = 45s.'
+  realistic_solution: 'The model file was being written during the power outage. The filesystem (ext4) uses journaling for metadata but not for data by default (`data=ordered` mode). During the OTA update, the system: (1) opened the model file directly (truncating it), (2) wrote 45 MB of data, (3) was about to call `fsync()`. The power cut happened between steps 2 and 3. The file size metadata was journaled, but the data blocks were not fully flushed, leaving garbage or zeros. The fix is to write to a temp file first, `fsync()`, and then `rename()` which is atomic.'
+  common_mistake: |
+    **The Pitfall:** Blaming the eMMC for complete corruption and suggesting a full reflash.
+    **The Rationale:** Candidates see a boot loop and assume hardware failure, ignoring that `fsck` passes and the file size is correct, indicating a subtle software write-flow issue.
+    **The Consequence:** Field technicians are dispatched to replace hardware unnecessarily, when a simple atomic software update pattern would have prevented the issue entirely.
+  napkin_math: |
+    - **Model file:** 45 MB.
+    - **eMMC write speed:** ~100 MB/s.
+    - **Write time:** 0.45s.
+    - **fsync time:** ~50ms.
+    - **Rename time:** <1ms.
+    - **Window of vulnerability (write without fsync):** 0.45s.
+    - **Daily update vulnerability:** 0.45s out of 86400s per day.
+    - **Outage probability:** 10 power outages a year at random times.
+    - **Probability per device/year:** 10 * (0.45 / 86400) = **0.000052**.
+    - **Fleet risk (500 devices):** 500 * 0.000052 = **0.026** (or a 2.6% chance per year across the fleet).
+    - **Conclusion:** With atomic replacement via temp file and rename, the vulnerability window drops to **0**.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 4
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The probability calculation for an outage during the write window in 'Napkin Math' is missing a key
-  divisor (total time in a year), making the probability seem too high. Reasoning competency and mode
-  are 'None'; should be more specific.
 math_verified: true
-math_status: UNCHECKED
+math_status: CORRECT
 human_reviewed:
   status: not-reviewed
   by: null

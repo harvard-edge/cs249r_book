@@ -8,37 +8,20 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: GPUDirect RDMA Page Table Alignment
-scenario: Your GPUDirect RDMA transfers on MI300X achieve only 35 GB/s instead of
-  the expected 50 GB/s (400Gbps line rate). The GPU memory buffer starts at an address
-  that is 2KB-aligned rather than 64KB-aligned. PCIe performance counters show excessive
-  TLP (Transaction Layer Packet) splitting. Diagnose the alignment issue and its impact
-  on RDMA throughput.
-question: Why does 2KB alignment hurt MI300X GPUDirect RDMA throughput, and how much
-  loss comes from PCIe TLP splitting?
+scenario: Your GPUDirect RDMA transfers on MI300X achieve only 35 GB/s instead of the expected 50 GB/s (400Gbps line rate). The GPU memory buffer starts at an address that is 2KB-aligned rather than 64KB-aligned. PCIe performance counters show excessive TLP (Transaction Layer Packet) splitting.
+question: Why does 2KB alignment hurt MI300X GPUDirect RDMA throughput, and how much loss comes from PCIe TLP splitting?
 details:
-  realistic_solution: 'Root cause: MI300X uses 64KB base page size for GPU VRAM. When
-    the RDMA buffer is 2KB-aligned (not 64KB-aligned), the first 62KB of the first
-    page and the last portion of the buffer span partial pages. The HCA''s DMA engine
-    can only issue TLPs that don''t cross page boundaries (PCIe spec requirement).
-    A 4KB MTU packet that crosses a 64KB page boundary is split into two TLPs: one
-    for the data before the boundary and one for the data after. Each TLP has 12-20
-    bytes of overhead. With 2KB alignment: every 64KB, one 4KB packet gets split into
-    two TLPs. Impact: 4KB/64KB = 6.25% of packets are split, each incurring an extra
-    TLP header (16 bytes) plus PCIe link layer overhead (2 bytes DLLP + 8 bytes framing).
-    But the real cost is PCIe transaction ordering: split TLPs can''t be reordered,
-    creating pipeline bubbles in the HCA''s DMA engine. Each bubble ≈ 100ns at PCIe
-    Gen5. With 12.2M packets/sec × 6.25% × 100ns = 76.3ms of bubbles per second =
-    7.6% throughput loss. Fix: allocate RDMA buffers with cuMemAlloc aligned to 2MB
-    (huge page size) using cudaMemAllocManaged with cudaMemAdvise for preferred location.'
-  common_mistake: Ignoring memory alignment for DMA transfers. PCIe and HCA DMA engines
-    work most efficiently with page-aligned buffers (typically 4KB or 64KB pages).
-    Misaligned buffers cause TLP splitting at page boundaries, where a single logical
-    transfer generates multiple smaller PCIe transactions.
-  napkin_math: 'Expected: 50 GB/s. Observed: 35 GB/s. Loss: 30%. Alignment-caused
-    TLP splitting: 6.25% of packets. But each split adds ~100ns bubble → 7.6% direct
-    loss. Remaining 22.4% loss likely from: IOMMU address translation overhead (if
-    IOMMU is enabled) + PCIe replay from CRC errors on long traces. Fix alignment:
-    35 → 46 GB/s (+31%). Disable IOMMU pass-through: 46 → 50 GB/s.'
+  realistic_solution: 'Root cause: MI300X uses 64KB base page size for GPU VRAM. When the RDMA buffer is 2KB-aligned (not 64KB-aligned), the first 62KB of the first page and the last portion of the buffer span partial pages. The HCA''s DMA engine can only issue TLPs that don''t cross page boundaries (PCIe spec requirement). A 4KB MTU packet that crosses a 64KB page boundary is split into two TLPs: one for the data before the boundary and one for the data after. Each TLP has 12-20 bytes of overhead. With 2KB alignment: every 64KB, one 4KB packet gets split into two TLPs. Impact: 4KB/64KB = 6.25% of packets are split, each incurring an extra TLP header (16 bytes) plus PCIe link layer overhead (2 bytes DLLP + 8 bytes framing). But the real cost is PCIe transaction ordering: split TLPs can''t be reordered, creating pipeline bubbles in the HCA''s DMA engine. Each bubble ≈ 100ns at PCIe Gen5. With 12.2M packets/sec × 6.25% × 100ns = 76.3ms of bubbles per second = 7.6% throughput loss. Fix: allocate RDMA buffers with cuMemAlloc aligned to 2MB (huge page size) using cudaMemAllocManaged with cudaMemAdvise for preferred location.'
+  common_mistake: |
+    **The Pitfall:** Ignoring memory alignment for DMA transfers.
+    **The Rationale:** Candidates assume DMA engines handle any buffer address equally efficiently.
+    **The Consequence:** Misaligned buffers cause TLP splitting at page boundaries, generating multiple smaller PCIe transactions and severely reducing throughput.
+  napkin_math: |
+    - Expected: 50 GB/s. Observed: 35 GB/s. Loss: 30%.
+    - Alignment-caused TLP splitting: 6.25% of packets.
+    - Each split adds ~100ns bubble → 7.6% direct loss.
+    - Fix alignment: 35 → 46 GB/s (+31%).
+    - Disable IOMMU pass-through: 46 → **50 GB/s**.
 status: published
 provenance: imported
 requires_explanation: false

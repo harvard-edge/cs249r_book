@@ -8,27 +8,18 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: The GPU-Bound Inference Stall
-scenario: You are tasked with optimizing a small but critical DLRM-style recommendation model for production
-  inference. The model has hundreds of tiny, sequential layers (embeddings, MLPs). When you profile it
-  on an H100 GPU, `nvidia-smi` shows less than 15% Tensor Core utilization, yet latency is much higher
-  than expected for the model's low FLOP count. A deep profiler reveals thousands of tiny CUDA kernel
-  launches, each taking only a few microseconds. What is the most likely cause of this poor performance?
-question: "What is the most likely cause of this poor performance?"
+scenario: You are tasked with optimizing a small but critical DLRM-style recommendation model for production inference. The model has hundreds of tiny, sequential layers. When you profile it on an H100 GPU, `nvidia-smi` shows less than 15% Tensor Core utilization, yet latency is much higher than expected for the model's low FLOP count. A deep profiler reveals thousands of tiny CUDA kernel launches, each taking only a few microseconds.
+question: What is the most likely cause of this poor performance?
 details:
-  realistic_solution: The model is 'dispatch-bound' or 'launch-bound'. The GPU spends more time launching
-    the thousands of tiny kernels than it spends on actual computation. Each kernel launch has a fixed
-    overhead (~5 µs), and each tiny kernel must read from and write back to slow HBM3 memory (~300 ns).
-    The solution is to apply operator fusion, compiling sequences of small layers into a single, larger
-    CUDA kernel. This pays the launch overhead only once and allows intermediate results to stay in fast
-    on-chip SRAM/registers, avoiding round trips to HBM.
-  common_mistake: Blaming the model size ('it's too small to saturate the GPU') or data transfer ('PCIe
-    is the bottleneck'). While the model is small, that doesn't explain why it's slow. The issue isn't
-    the total compute, but how it's structured. Blaming PCIe is also common, but in this scenario, the
-    issue persists even after data is on the GPU.
-  napkin_math: 'Assume the model has 100 small layers, each taking 2µs of compute.
-    The launch overhead per kernel is ~5µs. Without fusion, total time = 100 × (5µs + 2µs) = 700µs,
-    and actual compute is only 200µs (28% utilization). With fusion into a single kernel, launch
-    overhead is paid once: 5µs + 200µs = 205µs. This is a 3.4x speedup just from reducing launch overhead.'
+  realistic_solution: The model is dispatch-bound or launch-bound. The GPU spends more time launching the thousands of tiny kernels than it spends on actual computation. Operator fusion is required to compile sequences of small layers into a single kernel.
+  common_mistake: |
+    **The Pitfall:** Blaming the model size or data transfer speeds directly.
+    **The Rationale:** Engineers see low FLOPs and assume the model is too small to saturate the GPU, ignoring the massive overhead of individual kernel dispatches.
+    **The Consequence:** Attempting to solve the issue by upgrading hardware rather than applying software-level kernel fusion.
+  napkin_math: |
+    1. **Analyze Unfused Time:** Assume 100 small layers, each taking 2µs of compute. Launch overhead is ~5µs per kernel. Total time = 100 × (5µs + 2µs) = 700µs. Actual compute is 200µs (28% util).
+    2. **Analyze Fused Time:** Fusing into a single kernel pays launch overhead once: 5µs + 200µs = 205µs.
+    **Final Result: Fusing kernels provides a 3.4x speedup solely by eliminating dispatch overhead.**
   options:
   - The model is too small to saturate the GPU's arithmetic units.
   - The PCIe Gen5 bus is a bottleneck, preventing data from reaching the GPU quickly enough.

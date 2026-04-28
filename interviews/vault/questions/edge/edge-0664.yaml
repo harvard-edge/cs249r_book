@@ -8,25 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The eMMC Cold Start
-scenario: Your edge device loads a 200 MB model from eMMC flash into DRAM at boot. The eMMC spec says
-  300 MB/s sequential read, so you expect a 0.67-second load time. In practice, first inference takes
-  over 3 seconds. Where did the other 2.3 seconds go?
-question: "Where did the other 2.3 seconds go?"
+scenario: Your edge device loads a 200 MB model from eMMC flash into DRAM at boot. The eMMC spec says 300 MB/s sequential read, so you expect a 0.67-second load time. In practice, the first inference takes over 3 seconds.
+question: "Why does the first inference take 2.3 seconds longer than the theoretical eMMC transfer time?"
 details:
-  realistic_solution: 'The 300 MB/s spec is for large sequential reads. Model loading involves: (1) the
-    model file is fragmented on a well-used eMMC and filesystem overhead adds ~500ms, (2) TensorRT engine
-    deserialization — parsing the serialized engine, allocating CUDA memory, and building the execution
-    context takes ~1.5s for a 200 MB engine, (3) CUDA context initialization on first use adds ~300ms.
-    Total overhead: ~2.3s. The fix: (a) store the model on a dedicated, defragmented partition, (b)
-    use `mmap()` to map the weight file so pages load on demand during the first inference rather than
-    all at once, (c) keep a lightweight fallback model (~20 MB, loads in <200ms) that serves immediately
-    while the full model loads in a background thread.'
-  common_mistake: '"The eMMC is slower than spec." The raw bandwidth is fine — the overhead is elsewhere.'
-  napkin_math: 'Sequential read: 200MB / 300MB/s = 0.67s. The missing 2.3s is execution overhead. TensorRT
-    deserialization on a Cortex-M4 or Orin CPU involves memory allocation and PCIe/system bus transfers.
-    Moving 200MB to Orin''s DRAM at 204.8 GB/s is instant (0.001s). But CUDA context initialization takes
-    ~300ms. JIT compiling/optimizing un-cached engine layers easily eats 1.5s. Flash fragmentation and
-    filesystem overhead adds the remaining 0.5s.'
+  realistic_solution: 'The 300 MB/s spec is for large sequential reads. Model loading involves: (1) the model file is fragmented on a well-used eMMC and filesystem overhead adds ~500ms, (2) TensorRT engine deserialization — parsing the serialized engine, allocating CUDA memory, and building the execution context takes ~1.5s for a 200 MB engine, (3) CUDA context initialization on first use adds ~300ms. Total overhead: ~2.3s.'
+  common_mistake: |
+    **The Pitfall:** Blaming the storage hardware by claiming "the eMMC is slower than spec."
+    **The Rationale:** Candidates assume that because I/O is notoriously slow, hardware spec inflation is the sole culprit.
+    **The Consequence:** Time is wasted sourcing faster, more expensive eMMC components when the actual bottleneck is runtime software execution overhead (JIT compilation, deserialization, context init).
+  napkin_math: |
+    1. Sequential read: 200MB / 300MB/s = 0.67s.
+    2. Flash fragmentation and filesystem overhead: ~0.5s.
+    3. CUDA context initialization (first use): ~0.3s.
+    4. TensorRT deserialization (JIT compiling un-cached layers, PCIe allocations): ~1.5s.
+    5. **Total missing time: 0.5s + 0.3s + 1.5s = 2.3s execution overhead.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,41 +8,23 @@ competency_area: precision
 bloom_level: create
 phase: inference
 title: Mixed-Precision Audio Keyword Spotting on ESP32-S3
-scenario: You are deploying a continuous keyword spotting (KWS) model on an ESP32-S3
-  (240 MHz dual-core Xtensa, 512 KB SRAM, 8 MB PSRAM, vector extensions for INT8).
-  The model initially uses standard INT8 per-tensor PTQ but exhibits unacceptable
-  accuracy drops on a critical subset of keywords. To fit within the tight 512 KB
-  SRAM constraints and meet real-time latency requirements, you must design a mixed-precision
-  (INT4/INT8/INT16) quantization strategy from scratch. How do you architect the calibration
-  pipeline, partition the network layers for different precisions, and ensure the
-  vector extensions are maximally utilized despite the mixed bit-widths?
-question: How do you architect the calibration pipeline, partition the network layers
-  for different precisions, and ensure the vector extensions are maximally utilized
-  despite the mixed bit-widths?
+scenario: >
+  You are deploying a continuous keyword spotting (KWS) model on an ESP32-S3 (240 MHz dual-core Xtensa, 512 KB SRAM, 8 MB PSRAM, vector extensions for INT8). The model initially uses standard INT8 per-tensor PTQ but exhibits unacceptable accuracy drops on a critical subset of keywords. To fit within the tight 512 KB SRAM constraints and meet real-time latency requirements, you must design a mixed-precision (INT4/INT8/INT16) quantization strategy from scratch.
+question: >
+  How do you architect the calibration pipeline, partition the network layers for different precisions, and ensure the vector extensions are maximally utilized despite the mixed bit-widths?
 details:
-  realistic_solution: Design a hybrid Quantization-Aware Training (QAT) pipeline.
-    Keep the feature extraction and final classifier layers in INT16 or high-granularity
-    INT8 to preserve dynamic range. Compress the heavy intermediate convolutional/dense
-    layers to INT4 weights with INT8 activations. At runtime, the ESP32-S3 can unpack
-    INT4 weights to INT8 on-the-fly (or via LUT) into the 512 KB SRAM and feed them
-    into the INT8 vector instructions. This keeps the active working set entirely
-    in fast SRAM while leveraging hardware acceleration for the bulk of the MAC operations.
-  common_mistake: Candidates often suggest placing the entire model in PSRAM to solve
-    memory issues without realizing the massive latency penalty of PSRAM cache misses,
-    completely breaking real-time KWS. They might also incorrectly propose per-channel
-    INT4 quantization across all layers, ignoring that the ESP32-S3's vector extensions
-    are optimized for INT8 MAC operations, leading to software emulation overhead
-    for INT4.
-  napkin_math: 'Let the model have 1M parameters. At INT8, weights take 1MB (doesn''t
-    fit in 512KB SRAM, forcing PSRAM usage). By quantizing 90% of parameters to INT4
-    (0.45MB) and 10% to INT8 (0.1MB), total weights are 0.55MB. By streaming weights
-    from PSRAM to SRAM in chunks (double buffering), we fit within SRAM. Assuming
-    a 10 MMAC inference requirement: ESP32-S3 with INT8 vector extensions at 240
-    MHz can theoretically achieve ~1-2 GMACs/sec. Even with a 20% efficiency due to
-    memory bandwidth and INT4-to-INT8 unpacking overhead, we get ~200 MMACs/sec. The
-    10 MMAC inference completes in 10 MMACs / 200 MMACs/sec = 50 ms, leaving margin
-    within a 100ms budget but requiring careful scheduling to preserve CPU sleep time
-    for power savings.'
+  realistic_solution: >
+    Design a hybrid Quantization-Aware Training (QAT) pipeline. Keep the feature extraction and final classifier layers in INT16 or high-granularity INT8 to preserve dynamic range. Compress the heavy intermediate convolutional/dense layers to INT4 weights with INT8 activations. At runtime, the ESP32-S3 can unpack INT4 weights to INT8 on-the-fly (or via LUT) into the 512 KB SRAM and feed them into the INT8 vector instructions. This keeps the active working set entirely in fast SRAM while leveraging hardware acceleration for the bulk of the MAC operations.
+  common_mistake: |
+    **The Pitfall:** Suggesting placing the entire model in PSRAM to solve memory issues.
+    **The Rationale:** Candidates fail to realize the massive latency penalty of PSRAM cache misses. They might also incorrectly propose per-channel INT4 quantization across all layers, ignoring that the ESP32-S3's vector extensions are optimized for INT8 MAC operations.
+    **The Consequence:** Software emulation overhead for INT4 and PSRAM latency completely break real-time KWS.
+  napkin_math: |
+    - **Memory constraint:** Let the model have 1M parameters. At INT8, weights take 1MB (forces PSRAM usage).
+    - **Mixed precision:** Quantizing 90% to INT4 (0.45MB) and 10% to INT8 (0.1MB) = Total weights of 0.55MB.
+    - **Throughput:** ESP32-S3 INT8 vector extensions at 240 MHz achieve ~1-2 GMACs/sec.
+    - **Efficiency penalty:** Assuming 20% efficiency due to memory bandwidth and INT4-to-INT8 unpacking, throughput is ~200 MMACs/sec.
+    - **Conclusion:** A 10 MMAC inference completes in 10M / 200M = **50 ms**, leaving safety margin within a 100ms budget.
 status: published
 provenance: imported
 requires_explanation: true

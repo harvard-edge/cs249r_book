@@ -8,27 +8,20 @@ competency_area: parallelism
 bloom_level: remember
 phase: both
 title: Overlapping Backward Pass with AllReduce in Data-Parallel Training
-scenario: In distributed data-parallel training of a ResNet-50 across 8 H100 GPUs,
-  gradients are ready layer-by-layer during the backward pass, starting from the last
-  layer. Explain why we do not wait for the entire backward pass to finish before
-  starting AllReduce.
+scenario: In distributed data-parallel training of a ResNet-50 across 8 H100 GPUs, gradients are ready layer-by-layer during the backward pass, starting from the last layer.
 question: Why does DDP start AllReduce before the entire backward pass finishes?
 details:
-  realistic_solution: 'Gradient bucketing enables overlap: PyTorch DDP groups gradients
-    into 25MB buckets (default). As soon as all gradients in a bucket are computed
-    during the backward pass, AllReduce for that bucket starts immediately on a separate
-    NCCL stream while the backward pass continues computing gradients for earlier
-    layers. Since the backward pass proceeds from the last layer to the first, and
-    AllReduce starts with the last layer''s bucket, by the time the backward pass
-    finishes, most AllReduce operations are already complete or in progress. This
-    overlap can hide 60-80% of communication latency behind computation.'
-  common_mistake: Thinking AllReduce must operate on the entire gradient tensor at
-    once. This would serialize communication after computation, wasting half the training
-    time on idle network bandwidth.
-  napkin_math: 'ResNet-50: 25.6M params x 4 bytes = 102.4MB gradients. Backward pass:
-    ~20ms on H100. AllReduce (ring, 8 GPUs, NVLink 900 GB/s): ~0.5ms. Without overlap:
-    20 + 0.5 = 20.5ms. With overlap: ~20.1ms (AllReduce mostly hidden). Overlap savings:
-    2% here, but for larger models it is massive.'
+  realistic_solution: 'Gradient bucketing enables overlap: PyTorch DDP groups gradients into 25MB buckets (default). As soon as all gradients in a bucket are computed during the backward pass, AllReduce for that bucket starts immediately on a separate NCCL stream while the backward pass continues computing gradients for earlier layers. Since the backward pass proceeds from the last layer to the first, and AllReduce starts with the last layer''s bucket, by the time the backward pass finishes, most AllReduce operations are already complete or in progress. This overlap can hide 60-80% of communication latency behind computation.'
+  common_mistake: |
+    **The Pitfall:** Thinking AllReduce must operate on the entire gradient tensor at once.
+    **The Rationale:** Candidates assume network communication only begins after all gradients are computed.
+    **The Consequence:** This would serialize communication after computation, wasting half the training time on idle network bandwidth instead of overlapping them.
+  napkin_math: |
+    - **Calculate gradient size:** ResNet-50 has 25.6M parameters * 4 bytes = 102.4 MB of gradients.
+    - **Calculate backward pass time:** ~20 ms on an H100.
+    - **Calculate AllReduce time:** 8 GPUs over NVLink (900 GB/s) takes ~0.5 ms.
+    - **Compare strategies:** Without overlap, time is `20 + 0.5 = 20.5 ms`. With overlap (AllReduce hidden behind compute), time is **~20.1 ms**.
+    - **Evaluate impact:** Overlap saves a small amount here but yields massive savings for larger models.
 status: published
 provenance: imported
 requires_explanation: false

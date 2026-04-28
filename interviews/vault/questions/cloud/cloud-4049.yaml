@@ -8,30 +8,32 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: AllReduce Bandwidth Efficiency on NVLink vs RoCE
-scenario: An 8-GPU H100 node uses NVLink at 900 GB/s bisection bandwidth for intra-node
-  AllReduce and 400Gbps (50 GB/s) RoCE for inter-node. Calculate the AllReduce time
-  for a 2GB gradient at each level and determine the crossover message size where
-  NVLink's advantage diminishes relative to the \u03b1 (latency) overhead.
-question: For a 2GB gradient, what are the intra-node NVLink and inter-node RoCE AllReduce
-  times, and where is the latency crossover?
+scenario: 'An 8-GPU node uses NVLink at 900 GB/s bisection bandwidth for intra-node AllReduce and 50 GB/s RoCE for inter-node.'
+question: "For a 2GB gradient, what are the intra-node NVLink and inter-node RoCE AllReduce times, and where is the latency crossover?"
 details:
-  realistic_solution: 'Intra-node (8 GPUs, NVLink 900 GB/s): T_nvlink = 2 \u00d7 7/8 \u00d7
-    2GB / 900GB/s = 3.89ms. Per-step overhead: 2\u00d77 steps \u00d7 1\u00b5s = 14\u00b5s. Total: 3.9ms.
-    Inter-node (8 nodes, RoCE 50 GB/s): T_roce = 2 \u00d7 7/8 \u00d7 2GB / 50GB/s = 70ms. Per-step
-    overhead: 2\u00d77 steps \u00d7 5\u00b5s = 70\u00b5s. Total: 70.07ms. NVLink is 18\u00d7 faster for 2GB
-    messages (dominated by bandwidth ratio: 900/50 = 18\u00d7). Crossover where \u03b1 matters:
-    when message size D satisfies 2(N-1)/N \u00d7 D/B \u2248 2(N-1) \u00d7 \u03b1. Solving for D: D \u2248
-    N \u00d7 B \u00d7 \u03b1. NVLink: D = 8 \u00d7 900GB/s \u00d7 1\u00b5s = 7.2MB. RoCE: D = 8 \u00d7 50GB/s \u00d7 5\u00b5s =
-    2MB. For messages < 7.2MB, NVLink AllReduce is latency-bound. For messages < 2MB,
-    RoCE AllReduce is latency-bound. For small parameter server updates (<1MB), NVLink
-    is ~5\u00d7 faster (latency ratio) rather than 18\u00d7 (bandwidth ratio).'
-  common_mistake: Comparing only bandwidth and ignoring that NVLink and RoCE have
-    different latency characteristics. NVLink \u03b1 \u2248 1\u00b5s (direct GPU-to-GPU), RoCE \u03b1
-    \u2248 5\u00b5s (NIC + switch + NIC). For small messages, this 5\u00d7 latency difference dominates.
-  napkin_math: 'NVLink \u03b1-dominated region: < 7.2MB. RoCE \u03b1-dominated region: < 2MB.
-    For a 64KB gradient tensor: NVLink = 2\u00d77\u00d71\u00b5s + 2\u00d77/8\u00d764KB/900GB/s = 14\u00b5s + 0.12\u00b5s
-    = 14.12\u00b5s. RoCE = 2\u00d77\u00d75\u00b5s + 2\u00d77/8\u00d764KB/50GB/s = 70\u00b5s + 2.24\u00b5s = 72.24\u00b5s. Ratio:
-    72/14 \u2248 5\u00d7 (closer to latency ratio than bandwidth ratio).'
+  realistic_solution: 'Ring AllReduce on N=8 GPUs requires 2*(N-1)=14 steps. Intra-node (NVLink 900 GB/s, latency α ≈ 1µs): Time = 14×1µs + 1.75×2GB/900GB/s = 14µs + 3.89ms = 3.90ms. Inter-node (RoCE 50 GB/s, latency α ≈ 5µs): Time = 14×5µs + 1.75×2GB/50GB/s = 70µs + 70ms = 70.07ms. NVLink is ~18× faster for 2GB messages (dominated by bandwidth ratio). Crossover where latency matters: when message size S satisfies the condition that the bandwidth advantage equals the latency disadvantage. S = 14 × (5µs - 1µs) / (1.75 × (1/50 - 1/900)) ≈ 1.69 MB. For messages < 1.69MB, the latency difference dictates performance. For small parameter server updates, NVLink is ~5× faster (latency ratio) rather than 18× (bandwidth ratio).'
+  common_mistake: |
+    **The Pitfall:** Comparing only bandwidth and ignoring network latency characteristics.
+    **The Rationale:** Engineers look at the 900 GB/s vs 50 GB/s spec and assume an 18x speedup universally.
+    **The Consequence:** Overestimating performance for small tensor synchronizations, where the 5x latency difference (5µs vs 1µs) completely dominates.
+  napkin_math: |
+    1. **Ring AllReduce Formula (N=8):** 
+       - Steps = 2(N-1) = 14.
+       - Bandwidth Multiplier = 2(N-1)/N = 1.75.
+    2. **NVLink (900 GB/s, α = 1µs) for 64KB:**
+       - Latency term = 14 × 1µs = 14µs.
+       - Bandwidth term = 1.75 × 64KB / 900GB/s ≈ 0.12µs.
+       - Total = 14.12µs.
+    3. **RoCE (50 GB/s, α = 5µs) for 64KB:**
+       - Latency term = 14 × 5µs = 70µs.
+       - Bandwidth term = 1.75 × 64KB / 50GB/s ≈ 2.24µs.
+       - Total = 72.24µs.
+    4. **Crossover Calculation:**
+       - 14 × 4µs = 1.75 × S × (1/50 - 1/900) GB/s.
+       - 56µs = 1.75 × S × 0.01888 GB/s.
+       - S = 56 / 0.03305 ≈ 1.69 MB.
+       
+    **Final Result: For a 64KB tensor, NVLink is ~5x faster (72µs vs 14µs) due to latency. The crossover point is ~1.69 MB.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -44,10 +46,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Missing factor of 2 for Ring AllReduce latency/bandwidth formula (requires both
-  reduce-scatter and all-gather phases, so 14 steps, not 7). Arithmetic errors: 7/8
-  * 64KB / 50GB/s is ~1.12\u00b5s, not 1.4\u00b5s.'
 human_reviewed:
   status: not-reviewed
   by: null

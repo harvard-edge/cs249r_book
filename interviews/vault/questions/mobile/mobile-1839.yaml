@@ -8,30 +8,22 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Profiling and eliminating unnecessary tensor copies in mobile autograd pipeline
-scenario: A PyTorch Mobile model on A17 Pro (35 TOPS, 8GB) processes images from the
-  camera in real-time. Profiling shows 60% of inference time (12ms out of 20ms) is
-  spent on memory operations, not compute. The model is a MobileNetV2 (3.4M params)
-  which should be compute-bound at 300M FLOPs.
-question: How would you profile and remove unnecessary tensor copies in a PyTorch
-  Mobile image pipeline on A17 Pro?
+scenario: A PyTorch Mobile model on A17 Pro (35 TOPS, 8GB) processes images from the camera in real-time. Profiling shows 60% of inference time (12ms out of 20ms) is spent on memory operations, not compute. The model is a MobileNetV2 (3.4M params) which should be perfectly compute-bound.
+question: How would you profile and remove unnecessary tensor copies in a PyTorch Mobile image pipeline on A17 Pro?
 details:
-  realistic_solution: 'Convert to channels-last memory format: model = model.to(memory_format=torch.channels_last).
-    Process input in NHWC natively. Fuse the uint8→float32 conversion and normalization
-    into a single operation. Eliminate unnecessary .contiguous() calls by ensuring
-    all operations support non-contiguous tensors or by using channels-last throughout.
-    Result: memory ops should drop from 12ms to ~2ms.'
-  common_mistake: Not realizing that camera frame data arrives in NHWC format (common
-    in mobile frameworks) while PyTorch expects NCHW. The implicit format conversion
-    during preprocessing creates a non-contiguous tensor, and subsequent operations
-    call .contiguous() internally, creating large copies. Additionally, converting
-    from uint8 to float32 and normalizing as separate operations creates intermediate
-    tensors.
-  napkin_math: 'Camera frame: 1×3×720×1280 = 2.76MB. uint8→float32 copy: 2.76MB →
-    11MB. Format conversion NHWC→NCHW: 11MB copy = 22MB total intermediate. At A17
-    Pro memory bandwidth ~50GB/s: 22MB / 50GB/s = 0.44ms per conversion ideally. But
-    with cache misses on non-contiguous access (like NHWC to NCHW stride jumping):
-    20-30× penalty → ~10-12ms. Channels-last format: ~0.44ms without cache penalties.
-    Savings: ~10-11ms per frame, matching the 12ms observed memory time dropping to ~1-2ms.'
+  realistic_solution: 'Convert to channels-last memory format: model = model.to(memory_format=torch.channels_last). Process input in NHWC natively. Fuse the uint8->float32 conversion and normalization into a single operation. Eliminate unnecessary .contiguous() calls by ensuring all operations support non-contiguous tensors or by using channels-last throughout. Result: memory ops should drop from 12ms to ~2ms.'
+  common_mistake: |
+    **The Pitfall:** Overlooking implicit tensor format conversions.
+    **The Rationale:** Engineers forget that mobile camera frames arrive in NHWC format, while PyTorch expects NCHW, leading to implicit, non-contiguous memory copies when `.contiguous()` is called.
+    **The Consequence:** The model becomes severely memory-bound, spending the majority of its execution time copying data rather than computing.
+  napkin_math: |
+    - **Camera frame:** 1 x 3 x 720 x 1280 = 2.76 MB (uint8)
+    - **uint8 to float32 cast:** 2.76 MB * 4 = 11 MB
+    - **NHWC to NCHW conversion:** 11 MB copied
+    - **Total intermediate memory:** 22 MB
+    - **Ideal transfer time at 50 GB/s:** 22 MB / 50 GB/s = 0.44 ms
+    - **Actual time with non-contiguous cache misses (20-30x penalty):** **10-12 ms**
+    - **Channels-last savings:** Drops memory time back to **~1-2 ms**
 status: published
 provenance: imported
 requires_explanation: false

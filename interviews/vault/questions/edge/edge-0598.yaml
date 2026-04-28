@@ -8,34 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: The Fusion Priority Inversion
-scenario: 'You are optimizing a multi-task perception system on a Jetson AGX Orin for an autonomous vehicle.
-  The system runs two models concurrently on separate, prioritized CUDA streams: a high-priority `PedestrianDetector`
-  (20ms hard real-time deadline) and a low-priority `SignClassifier` (100ms deadline). To reduce kernel
-  launch overhead, your team fuses their identical YOLO-style backbones into a single, large kernel, leaving
-  the detection/classification heads separate. After deployment, `ncu` profiling shows the average latency
-  across both tasks has dropped by 5%. However, the vehicle''s safety monitor starts logging critical
-  faults: the `PedestrianDetector` is now missing its 20ms deadline in 1% of frames. Evaluate the team''s
-  design decision. Why would an optimization that improved average performance cause a catastrophic failure
-  in the system''s P99 latency?'
-question: "Why would an optimization that improved average performance cause a catastrophic failure in the system's P99 latency?"
+scenario: You are optimizing a multi-task perception system on a Jetson AGX Orin for an autonomous vehicle. The system runs two models concurrently on separate, prioritized CUDA streams: a high-priority PedestrianDetector (20ms deadline) and a low-priority SignClassifier (100ms deadline). To reduce kernel launch overhead, your team fuses their identical YOLO-style backbones into a single kernel, leaving the heads separate. Post-deployment profiling shows average latency dropped by 5%. However, the PedestrianDetector is now missing its 20ms deadline in 1% of frames.
+question: Why would operator fusion that improved average performance cause a catastrophic failure in the system's P99 latency?
 details:
-  realistic_solution: This is a classic **Priority Inversion** failure in a real-time system, created
-    by the operator fusion. Before fusion, the device's scheduler could ensure the high-priority `PedestrianDetector`
-    stream preempted or ran ahead of the low-priority `SignClassifier` stream, guaranteeing its deadline.
-    By creating a single, monolithic, non-preemptible fused kernel, you destroyed this fine-grained scheduling.
-    In the P99 worst-case scenario, the low-priority stream gets scheduled first and launches the giant
-    fused kernel. The high-priority stream, even with its camera frame ready, is now blocked. It must
-    wait for the *entire* fused kernel to complete its run for the low-priority task before it can even
-    begin its own work. The optimization saved microseconds on kernel launch overhead on average, but
-    introduced tens of milliseconds of blocking latency at the tail, violating the safety-critical deadline.
-  common_mistake: The fused kernel is too large and is causing L2 cache misses or register spilling. While
-    a valid concern, this would likely increase *average* latency as well by making the kernel memory-bound.
-    The key to this problem is the *divergence* between the average (mean) and the tail (P99) latency,
-    which points to a systemic scheduling conflict, not just a microarchitectural bottleneck.
-  napkin_math: PedDetector takes 0.5 TFLOPs / 137 = 3.6ms. SignClassifier takes 2.0 TFLOPs / 137 = 14.6ms.
-    Operator fusion compiles SignClassifier into a monolithic 14.6ms kernel. GPUs execute kernels non-preemptively.
-    If Sign starts at t=0, Ped (arriving t=1ms) waits until t=14.6ms. Total Ped latency = 14.6 + 3.6 =
-    18.2ms.
+  realistic_solution: This is a classic **Priority Inversion** failure in a real-time system, created by the operator fusion. Before fusion, the device's scheduler could ensure the high-priority `PedestrianDetector` stream preempted or ran ahead of the low-priority `SignClassifier` stream, guaranteeing its deadline. By creating a single, monolithic, non-preemptible fused kernel, you destroyed this fine-grained scheduling. In the P99 worst-case scenario, the low-priority stream gets scheduled first and launches the giant fused kernel. The high-priority stream, even with its camera frame ready, is now blocked. It must wait for the *entire* fused kernel to complete its run for the low-priority task before it can even begin its own work. The optimization saved microseconds on kernel launch overhead on average, but introduced tens of milliseconds of blocking latency at the tail, violating the safety-critical deadline.
+  common_mistake: |
+    **The Pitfall:** Blaming L2 cache misses or register spilling.
+    **The Rationale:** Candidates assume large kernels degrade performance due to memory bottlenecks.
+    **The Consequence:** They miss the systemic scheduling conflict causing priority inversion, which affects the tail (P99) latency without hurting average latency.
+  napkin_math: |
+    - **PedDetector Compute Time:** 3.6ms.
+    - **SignClassifier Compute Time:** 14.6ms.
+    - **Fused Execution:** Operator fusion compiles them into a monolithic 14.6ms kernel that cannot be preempted.
+    - **Priority Inversion Delay:** If the low-priority stream schedules first at t=0, the high-priority PedDetector (arriving at t=1ms) is blocked.
+    - **Total Pedestrian Latency:** 14.6ms (wait) + 3.6ms (compute) = **18.2ms** (dangerously close to the 20ms deadline, causing intermittent drops).
 status: published
 provenance: imported
 requires_explanation: true

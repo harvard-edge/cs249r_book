@@ -8,25 +8,21 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing Preemption Throughput Collapse
-scenario: You are serving a 70B parameter LLM on an 8x A100 80GB node for a mix of short chat queries
-  and long document summarizations (up to 32K tokens). To prevent long requests from blocking short ones,
-  you implement preemptive scheduling by swapping the KV cache of paused requests to CPU memory via PCIe
-  Gen4 x16. Under heavy mixed load, P99 latency for chat queries improves significantly, but overall system
-  throughput drops by 60% and GPU utilization falls below 40%. Diagnose the root cause of this throughput
-  collapse.
-question: "Why did preemptive KV-cache swapping over PCIe improve chat P99 latency but collapse throughput and GPU utilization?"
+scenario: You are serving a 70B parameter LLM on an 8x A100 80GB node for a mix of short chat queries and long document summarizations (up to 32K tokens). To prevent long requests from blocking short ones, you implement preemptive scheduling by swapping the KV cache of paused requests to CPU memory via PCIe Gen4 x16. Under heavy load, P99 latency for chat improves, but system throughput drops 60% and GPU utilization falls below 40%.
+question: "What causes the throughput collapse and GPU starvation when preemptively swapping 32K token KV caches over PCIe?"
 details:
-  realistic_solution: Diagnose PCIe bandwidth saturation caused by moving massive KV caches. The solution
-    is to switch to prompt recomputation for long contexts, where the compute time to recalculate the
-    KV cache is lower than the PCIe transfer time, or to implement block-level swapping (like PagedAttention)
-    to move only active pages.
-  common_mistake: Assuming CPU memory access latency or OS-level page faulting is the primary bottleneck,
-    while ignoring the massive data transfer constraints of the PCIe bus during state swapping.
-  napkin_math: For a 70B model, KV cache is roughly 320KB per token. A 32K token request requires ~10.5GB
-    of KV cache. Swapping this request out to CPU and back in requires 21GB of PCIe transfer. With PCIe
-    Gen4 x16 (effective bandwidth ~26GB/s), a single swap cycle takes ~800ms. If the scheduler preempts
-    just 2 long requests per second, it demands >42GB/s, completely saturating the bus and stalling the
-    GPUs while they wait for memory transfers.
+  realistic_solution: Diagnose PCIe bandwidth saturation caused by moving massive KV caches. The solution is to switch to prompt recomputation for long contexts, where the compute time to recalculate the KV cache is lower than the PCIe transfer time, or to implement block-level swapping (like PagedAttention) to move only active pages.
+  common_mistake: |
+    **The Pitfall:** Assuming CPU memory access latency or OS-level page faulting is the bottleneck.
+    **The Rationale:** Candidates fail to calculate the absolute data volume of a long-context KV cache and ignore the hard bandwidth limits of the PCIe bus.
+    **The Consequence:** The system is misdiagnosed, and efforts to optimize OS paging completely fail to resolve the hardware bus saturation.
+  napkin_math: |
+    - 70B model KV cache size: ~320 KB per token.
+    - 32K token request: 32,768 * 320 KB ≈ 10.5 GB.
+    - Swapping out and back requires 21 GB of PCIe transfer per request.
+    - PCIe Gen4 x16 effective bandwidth: ~26 GB/s.
+    - Single swap cycle time: 21 GB / 26 GB/s ≈ 800 ms.
+    - **Result: Preempting just 2 long requests per second demands >42 GB/s, saturating the bus and stalling GPUs.**
 status: published
 provenance: imported
 requires_explanation: false

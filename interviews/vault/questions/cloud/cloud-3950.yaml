@@ -8,26 +8,20 @@ competency_area: parallelism
 bloom_level: apply
 phase: both
 title: Async Checkpointing Overlap with Training Computation
-scenario: Checkpointing a 70B model every 100 steps takes 45 seconds (copying 280GB
-  of model + optimizer states from GPU to CPU to disk). During this time, training
-  pauses. With 3-minute step cycles, checkpointing adds 25% overhead. Design an async
-  checkpointing strategy.
-question: How would you make 70B model checkpoints asynchronous so the 45-second save
-  every 100 steps does not pause training?
+scenario: Checkpointing a 70B model every 100 steps takes 45 seconds (copying 280GB of model + optimizer states from GPU to CPU to disk).
+question: How would you make 70B model checkpoints asynchronous so the 45-second save every 100 steps does not pause training?
 details:
-  realistic_solution: 'Async checkpointing pipeline: (1) At checkpoint step: copy
-    model state_dict from GPU to a pre-allocated pinned memory buffer on a separate
-    CUDA stream (D2H async, ~4s for 280GB at 64 GB/s PCIe). (2) Once D2H completes
-    (event signal), launch a background CPU thread to serialize and write to NVMe
-    SSD (280GB at 5 GB/s = 56s). (3) Training continues immediately after the D2H
-    copy starts — the 56s disk write happens in the background, overlapped with the
-    next ~3 training steps. (4) Use a double-buffer for pinned memory to avoid blocking
-    if the next checkpoint arrives before disk write finishes. PyTorch''s torch.distributed.checkpoint
-    provides async_save() for this pattern.'
-  common_mistake: Using torch.save() synchronously, which blocks the GPU while the
-    CPU serializes and writes to disk. Even if the GPU is not involved in disk I/O,
-    torch.save() holds the Python GIL and blocks the training loop.
-  napkin_math: 'Sync checkpoint: 45s pause every 100 steps (180s compute cycle). Overhead: 45/180 = 25%. Async: 4s D2H stall + 0s disk (background). Overhead: 4/180 = 2.2%. ~11x reduction in checkpoint overhead. Training throughput increase: 225 / 184 ≈ 1.22 (22%).'
+  realistic_solution: 'Async checkpointing pipeline: (1) At checkpoint step: copy model state_dict from GPU to a pre-allocated pinned memory buffer on a separate CUDA stream (D2H async, ~4s for 280GB at 64 GB/s PCIe). (2) Once D2H completes (event signal), launch a background CPU thread to serialize and write to NVMe SSD (280GB at 5 GB/s = 56s). (3) Training continues immediately after the D2H copy starts — the 56s disk write happens in the background, overlapped with the next ~3 training steps. (4) Use a double-buffer for pinned memory to avoid blocking if the next checkpoint arrives before disk write finishes. PyTorch''s torch.distributed.checkpoint provides async_save() for this pattern.'
+  common_mistake: |
+    **The Pitfall:** Using `torch.save()` synchronously.
+    **The Rationale:** Assuming the GPU is not involved in disk I/O, developers use `torch.save()`, failing to realize it holds the Python GIL and blocks the training loop.
+    **The Consequence:** The training loop is completely blocked while the CPU serializes and writes to disk, causing significant overhead.
+  napkin_math: |
+    1. Sync checkpoint overhead: 45s pause every 100 steps (180s compute cycle) = 45/180 = 25%.
+    2. Async checkpoint overhead: 4s D2H stall + 0s disk (happens in background) = 4/180 = 2.2%.
+    3. Reduction in overhead: ~11x reduction.
+    4. Training throughput increase: 225 / 184 ≈ 1.22.
+    **Final Result: 22% increase in throughput.**
 status: published
 provenance: imported
 requires_explanation: false

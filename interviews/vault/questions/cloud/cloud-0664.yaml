@@ -8,24 +8,19 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: The CPU-Bound Generation Loop
-scenario: Your PyTorch LLM inference script runs `model.generate()`. The GPU is extremely powerful (H100),
-  but your Time-Per-Output-Token is hovering around 10ms. You want it to be 2ms. You look at `nvtop` and
-  see the GPU utilization is only 15%. The GPU isn't doing much work. What part of the Python `generate`
-  loop is physically preventing the GPU from running faster?
-question: "What part of the Python `generate` loop is physically preventing the GPU from running faster?"
+scenario: Your PyTorch LLM inference script runs `model.generate()`. The GPU is extremely powerful (H100), but your Time-Per-Output-Token is hovering around 10ms. You want it to be 2ms. You look at `nvtop` and see the GPU utilization is only 15%. The GPU isn't doing much work.
+question: What part of the Python `generate` loop is physically preventing the GPU from running faster?
 details:
-  realistic_solution: 'The GPU is starved by Python''s per-layer launch overhead. The `model.generate()`
-    loop is autoregressive: for each token, Python iterates through all 80 layers, launching a GPU kernel
-    for each. Each kernel launch requires Python interpreter overhead (~20-50 microseconds) to call into
-    PyTorch, which calls into CUDA. With 80 layers, that''s 1.6-4ms of CPU overhead per token where the
-    GPU sits completely idle. The fix: use CUDA Graphs to capture the entire forward pass as a single
-    GPU-side replay, or use a C++ inference engine (like vLLM or TensorRT-LLM) that eliminates the Python
-    loop entirely.'
-  common_mistake: '"The memory bandwidth is saturated." If memory bandwidth was the only issue, GPU utilization
-    (specifically memory controller utilization) would be high. 15% means the GPU is sleeping.'
-  napkin_math: H100 kernel execution = ~100 microseconds. Python interpreter overhead to launch a kernel
-    = ~20-50 microseconds. If the model has 80 layers, Python overhead alone adds 4ms per token of pure
-    idle time where the GPU is waiting for instructions.
+  realistic_solution: 'The GPU is starved by Python''s per-layer launch overhead. The `model.generate()` loop is autoregressive: for each token, Python iterates through all 80 layers, launching a GPU kernel for each. Each kernel launch requires Python interpreter overhead (~20-50 microseconds) to call into PyTorch, which calls into CUDA. With 80 layers, that''s 1.6-4ms of CPU overhead per token where the GPU sits completely idle. The fix: use CUDA Graphs to capture the entire forward pass as a single GPU-side replay, or use a C++ inference engine (like vLLM or TensorRT-LLM) that eliminates the Python loop entirely.'
+  common_mistake: |
+    **The Pitfall:** Assuming low utilization means memory bandwidth is saturated.
+    **The Rationale:** Candidates conflate memory bound limits (which still show high memory controller utilization) with a fully starved idle GPU.
+    **The Consequence:** Wasting time optimizing GPU kernels when the bottleneck is actually the CPU host's ability to dispatch instructions.
+  napkin_math: |
+    - H100 kernel execution time: ~100 microseconds.
+    - Python interpreter overhead per kernel launch: ~20-50 microseconds.
+    - Overhead compounding: If the model has 80 layers, Python overhead adds 80 * 50µs = 4ms of pure overhead per token.
+    - **Conclusion: The CPU Python loop physically cannot launch kernels fast enough to keep the H100 busy, resulting in 4ms of idle time per token.**
 status: published
 provenance: imported
 requires_explanation: false

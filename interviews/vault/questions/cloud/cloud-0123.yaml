@@ -8,39 +8,24 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The Chatbot's Silent Wait
-scenario: You are an ML Systems Engineer optimizing a real-time LLM chatbot service built on an H100 GPU.
-  The service has a strict P99 Time-To-First-Token (TTFT) SLO of 500ms. Under a moderate, spiky load averaging
-  20 RPS, you observe that the P99 TTFT is spiking to ~800ms, yet `nvidia-smi` shows the GPU is only 60%
-  utilized on average. Your serving stack uses a static batching strategy with a fixed batching timeout
-  of 200ms. Given this data, use the provided metrics to diagnose the most likely cause of the SLO miss.
-question: "What is most likely causing the 800ms P99 TTFT when the GPU is only 60% utilized and static batching uses a 200ms timeout?"
+scenario: You are an ML Systems Engineer optimizing a real-time LLM chatbot service. The service has a strict P99 Time-To-First-Token (TTFT) SLO of 500ms. Under a moderate, spiky load averaging 20 RPS, you observe that the P99 TTFT is spiking to ~800ms, yet the GPU is only 60% utilized on average. Your serving stack uses a static batching strategy with a fixed batching timeout of 200ms.
+question: What is most likely causing the 800ms P99 TTFT when the GPU is only 60% utilized and static batching uses a 200ms timeout?
 details:
-  realistic_solution: 'The primary bottleneck is queueing delay introduced by the static batching scheduler.
-    The fixed 200ms timeout forces requests that arrive early in the window to sit idle, accumulating
-    latency before computation even begins. The 60% average GPU utilization is the key signal: the GPU
-    is spending a significant fraction of its time waiting for the next batch window to close. The P99
-    latency spike to 800ms can be explained by a cascade of these delays under load. The correct architectural
-    solution is to replace the static batcher with a continuous batching scheduler (as used in systems
-    like vLLM or TGI), which dispatches a new batch as soon as the GPU is free, minimizing idle time and
-    drastically reducing queueing latency.'
-  common_mistake: Blaming the GPU hardware or the model itself. Engineers often default to thinking 'high
-    latency means the GPU is too slow' or 'the model is too big.' This leads them to suggest expensive
-    hardware upgrades or premature optimization (like quantization) while ignoring the clear signal from
-    the low GPU utilization metric that the bottleneck is elsewhere. They fail to see latency as a system-wide
-    property, much of which can be pure wait time.
-  napkin_math: We can diagnose this by working backwards. Average GPU utilization is 60%, meaning the
-    GPU is idle 400ms every second. A fixed batching timeout of 200ms means a request arriving early waits
-    up to 200ms doing nothing. TTFT = T_wait + T_compute. If P99 TTFT = 800ms, and max batch wait is 200ms,
-    queueing delay plus compute is 600ms. The artificial 200ms delay ruins the SLO.
+  realistic_solution: 'The primary bottleneck is queueing delay introduced by the static batching scheduler. The fixed 200ms timeout forces requests that arrive early in the window to sit idle, accumulating latency before computation even begins. The 60% average GPU utilization is the key signal: the GPU is spending a significant fraction of its time waiting for the next batch window to close. The P99 latency spike to 800ms can be explained by a cascade of these delays under load. The correct architectural solution is to replace the static batcher with a continuous batching scheduler (as used in systems like vLLM or TGI), which dispatches a new batch as soon as the GPU is free, minimizing idle time and drastically reducing queueing latency.'
+  common_mistake: |
+    **The Pitfall:** Blaming the GPU hardware or the model itself when latency spikes.
+    **The Rationale:** Engineers default to assuming "high latency means the compute is too slow" without analyzing utilization metrics.
+    **The Consequence:** Teams undertake expensive hardware upgrades or premature optimization (like quantization) while ignoring the real bottleneck: wait time induced by the batching scheduler.
+  napkin_math: |
+    1. **Utilization Gap:** Average GPU utilization is 60%, meaning the GPU is idle for 400ms every second.
+    2. **Queueing Delay:** A fixed batching timeout of 200ms means a request arriving early in the window waits up to 200ms doing absolutely nothing.
+    3. **Latency Breakdown:** TTFT = Time_Wait + Time_Compute. If P99 TTFT is 800ms, and max wait is 200ms, the queueing delay across multiple backed-up static batches plus compute equals 800ms.
+    4. **Conclusion:** The artificial **200ms timeout** delays early requests and causes cascading queueing delays during traffic spikes, ruining the 500ms SLO.
   options:
-  - The H100 GPU is not powerful enough for this load. We should upgrade to a B200 to reduce the per-batch
-    compute time.
-  - The model's prefill computation is the bottleneck. We should apply INT8 quantization to reduce the
-    TFLOPs required.
-  - The fixed 200ms batching timeout is causing excessive queueing delay; requests wait idly instead of
-    being processed.
-  - The bottleneck is network I/O from fetching user data for each request, causing the serving process
-    to block before batching.
+  - The H100 GPU is not powerful enough for this load. We should upgrade to a B200 to reduce the per-batch compute time.
+  - The model's prefill computation is the bottleneck. We should apply INT8 quantization to reduce the TFLOPs required.
+  - The fixed 200ms batching timeout is causing excessive queueing delay; requests wait idly instead of being processed.
+  - The bottleneck is network I/O from fetching user data for each request, causing the serving process to block before batching.
   correct_index: 2
 status: published
 provenance: imported

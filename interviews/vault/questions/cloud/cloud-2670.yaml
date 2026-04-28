@@ -8,12 +8,19 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: Model Caching Strategy Under Cost Constraints
-scenario: 'Your platform serves 100 models. Traffic is highly skewed: 95% goes to the top 15 models, and 99.5% to the top 20. Option A: 2× A100-80GB ($30K/month) keeping top 20 models hot. Option B: 1× A100-80GB + 1TB NVMe SSD ($18K/month), using the SSD as a warm cache tier (1s load time). Option C: 4× A10-24GB ($16K/month, 96GB total VRAM) for more models but slower per-model inference. Which minimizes cost while maintaining p99 < 200ms?'
-question: "Which minimizes cost while maintaining p99 < 200ms?"
+scenario: Your platform serves 100 models. Traffic is skewed: 95% goes to the top 15 models, and 99.5% to the top 20. Option A uses 2× A100-80GB ($30K/month) to keep the top 20 hot. Option B uses 1× A100-80GB + 1TB NVMe SSD ($18K/month), using the SSD as a warm tier (1s load time). Option C uses 4× A10-24GB ($16K/month, 96GB total VRAM) for more models but slower per-model inference.
+question: Which architecture minimizes cost while maintaining a strict p99 < 200ms SLA?
 details:
   realistic_solution: 'Option A: 160GB VRAM, top 20 models fit. Hit rate: 99.5%. Since misses are 0.5%, p99 falls in the hot cache. p99 ≈ 50ms (GPU inference). Cost: $30K/month. Option B: 80GB VRAM (top 15) + SSD warm tier. VRAM hit rate: 95%. This means 5% of requests miss VRAM and take >= 1s (SSD load time). Therefore, the p99 latency is ~1s, which violates the 200ms SLA. Option C: 96GB total but split across 4 GPUs — each holds ~24GB of models. With model replication overhead, ~20 models fit. Hit rate is 99.5% (same as A), so p99 is a hot cache hit. However, A10 inference is ~3x slower than A100 (50ms * 3 = 150ms). Since 150ms < 200ms SLA, Option C meets the performance requirements. Cost: $16K/month. Option C wins on cost while safely meeting the p99 SLA.'
-  common_mistake: Optimizing for cache hit rate alone or median latency. A 95% hit rate sounds good, but implies 5% of requests incur the cache miss penalty. This completely dominates the 99th percentile (p99) latency, making Option B fail the SLA.
-  napkin_math: 'A: 99.5% VRAM hit, p99~50ms, $30K. B: 95% VRAM hit, p99 falls in the 5% misses -> ~1s (SLA fail). C: 99.5% VRAM hit, p99~150ms (within SLA), $16K. C is cheapest viable option.'
+  common_mistake: |
+    **The Pitfall:** Optimizing purely for hit rate or median latency while ignoring tail latency (p99).
+    **The Rationale:** A 95% hit rate sounds excellent until you realize that if 5% of requests hit a 1-second SSD load penalty, your 99th percentile latency is strictly bounded by that 1-second penalty.
+    **The Consequence:** The architecture fails the strict 200ms p99 SLA, resulting in an unusable system despite looking cost-effective on paper.
+  napkin_math: |
+    - **Option A ($30K):** 160GB VRAM fits top 20. 99.5% hit rate. p99 $\approx 50\text{ms}$. (Passes SLA, High Cost).
+    - **Option B ($18K):** 80GB VRAM fits top 15. 95% hit rate. 5% miss $\rightarrow$ 1s load. p99 $\ge 1\text{s}$. (Fails SLA).
+    - **Option C ($16K):** 96GB VRAM. 99.5% hit rate. Inference is 3x slower ($150\text{ms}$). p99 $\approx 150\text{ms}$. (Passes SLA).
+    - **Conclusion:** **Option C is the cheapest ($16K) viable option** that meets the <200ms p99 SLA.
 status: published
 provenance: imported
 requires_explanation: false

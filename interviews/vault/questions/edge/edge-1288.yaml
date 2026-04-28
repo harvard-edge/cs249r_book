@@ -8,34 +8,20 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Hailo-8 Host Bandwidth Exceeded Error Diagnosis
-scenario: You are deploying a custom 15-million parameter object detection model to
-  a Hailo-8 accelerator (26 TOPS INT8, 2.5W) connected via PCIe Gen3 x2. While the
-  model's total compute requirement easily fits the 26 TOPS budget, the system crashes
-  during high-load inference with a host-device timeout error. You observe the host
-  CPU memory bandwidth is saturated, despite the model weights only taking up 15MB
-  in INT8. Given the Hailo-8 architecture, diagnose why the host memory bandwidth
-  is being exhausted.
-question: Why is host memory bandwidth exhausted and causing Hailo-8 timeouts even
-  though the INT8 weights are only 15 MB?
+scenario: You are deploying a custom 15-million parameter object detection model to a Hailo-8 accelerator (26 TOPS INT8, 2.5W) connected via PCIe Gen3 x2. While the model's total compute requirement easily fits the 26 TOPS budget, the system crashes during high-load inference with a host-device timeout error. You observe the host CPU memory bandwidth is saturated, despite the model weights only taking up 15MB in INT8. Given the Hailo-8 architecture, diagnose why the host memory bandwidth is being exhausted.
+question: Why is host memory bandwidth exhausted and causing Hailo-8 timeouts even though the INT8 weights are only 15 MB?
 details:
-  realistic_solution: The root cause is the spilling of large intermediate feature
-    maps to host memory. Because the Hailo-8 relies on host DRAM, any intermediate
-    activation that exceeds the internal SRAM must be passed back to the host over
-    the PCIe bus and read back for the next layer. The candidate should identify that
-    early layers with high-resolution inputs (e.g., large spatial dimensions before
-    downsampling) are generating activations that exceed the PCIe bandwidth limits,
-    necessitating architectural changes like earlier pooling or channel reduction.
-  common_mistake: Candidates often assume that since the 15MB weights are small and
-    the 26 TOPS compute is sufficient, the bottleneck must be a driver issue or CPU
-    overhead. They frequently forget that the Hailo-8 has no local DRAM and relies
-    entirely on streaming data from host memory.
-  napkin_math: Assume an early layer produces a 1920x1080 feature map with 32 channels
-    in INT8 (1 byte per value). The activation size is 1920 * 1080 * 32 * 1B = 66.3
-    MB. If this must be spilled to host memory and read back, it requires 132.6 MB
-    of transfer per frame. At 30 FPS, this single layer swap demands 132.6 MB * 30
-    = 3.98 GB/s of PCIe bandwidth. A PCIe Gen3 x2 link has a practical limit of around
-    1.9 GB/s. This single activation swap alone exceeds the connection's bandwidth
-    by over 2x, leading to the observed timeout.
+  realistic_solution: The root cause is the spilling of large intermediate feature maps to host memory. Because the Hailo-8 relies on host DRAM, any intermediate activation that exceeds the internal SRAM must be passed back to the host over the PCIe bus and read back for the next layer. The candidate should identify that early layers with high-resolution inputs (e.g., large spatial dimensions before downsampling) are generating activations that exceed the PCIe bandwidth limits, necessitating architectural changes like earlier pooling or channel reduction.
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is a driver issue or CPU overhead because the weights are small and compute is sufficient.
+    **The Rationale:** Candidates forget that the Hailo-8 has no local DRAM and relies entirely on streaming data to and from host memory.
+    **The Consequence:** They fail to realize that spilling large intermediate feature maps to host memory exceeds the PCIe bandwidth, causing the timeout.
+  napkin_math: |
+    * Early layer activation size: 1920 × 1080 × 32 channels × 1 byte (INT8) = 66.3 MB.
+    * Spill and read back per frame = 66.3 MB × 2 = 132.6 MB.
+    * Bandwidth at 30 FPS = 132.6 MB × 30 = 3.98 GB/s.
+    * PCIe Gen3 x2 practical limit ≈ 1.9 GB/s.
+    * **Spilling a single large activation requires 3.98 GB/s, which exceeds the 1.9 GB/s PCIe Gen3 x2 limit by over 2x.**
 status: published
 provenance: imported
 requires_explanation: false

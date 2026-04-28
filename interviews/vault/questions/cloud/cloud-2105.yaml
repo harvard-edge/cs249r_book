@@ -8,28 +8,19 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: DLRM Training Pipeline End-to-End Design
-scenario: 'Design the training infrastructure for a production DLRM at social scale: 12 embedding tables
-  totaling 4 TB, an MLP bottom/top network of 50M parameters, training on 10B examples/day. The system
-  must support hourly model updates. Identify the three most critical systems bottlenecks and how architecture
-  choices address each.'
-question: "What are the three critical systems bottlenecks for social-scale DLRM training with hourly updates, and how should the architecture address them?"
+scenario: You must design the training infrastructure for a production DLRM at social scale: 12 embedding tables totaling 4 TB, and an MLP bottom/top network of 50M parameters, training on 10B examples/day. The system must support hourly model updates.
+question: What are the three critical systems bottlenecks for social-scale DLRM training with hourly updates, and how should the architecture address them?
 details:
-  realistic_solution: 'Bottleneck 1 — Embedding table memory (4 TB): Cannot fit on any single node. Must
-    use model-parallel embedding sharding across ~64+ GPUs (80 GB each). Table-wise sharding with row-wise
-    sharding for oversized tables. AllToAll for cross-table feature interaction. Bottleneck 2 — Sparse
-    gradient communication: Embedding gradients are extremely sparse (only rows accessed in the batch
-    get gradients). Standard AllReduce is wasteful. Use sparse AllReduce or parameter-server-style gradient
-    aggregation. At 10B examples/day with 50 lookups each: ~500B sparse updates/day. Bottleneck 3 — Data
-    pipeline I/O: 10B examples × ~1 KB each = 10 TB/day = 115 MB/s sustained. Must pre-shuffle and pre-batch
-    on distributed storage. Hourly refresh requires training pipeline to process ~420M examples/hour.
-    Architecture: Model-parallel embeddings + data-parallel MLPs (ZeRO-1). Dedicated parameter server
-    nodes for embedding update aggregation. RDMA-capable interconnect for AllToAll.'
-  common_mistake: Treating DLRM like a dense model training problem. The embedding tables dominate memory
-    (4 TB vs 200 MB for MLPs) and create fundamentally different parallelism and communication requirements.
-  napkin_math: '4 TB embeddings / 80 GB per GPU = 50 GPUs minimum just for embeddings. | Data-parallel
-    MLPs: 50M × 16B (BF16 + optimizer) = 800 MB — fits on 1 GPU. | AllToAll per step: batch_size × (12
-    tables × 128 dim × 2B) = batch_size × 3 KB. At batch 64K: 192 MB AllToAll per step. | 10B examples
-    / 86400s = 115K examples/s throughput requirement.'
+  realistic_solution: 'Bottleneck 1 — Embedding table memory (4 TB): Cannot fit on any single node. Must use model-parallel embedding sharding across ~64+ GPUs (80 GB each). Table-wise sharding with row-wise sharding for oversized tables. AllToAll for cross-table feature interaction. Bottleneck 2 — Sparse gradient communication: Embedding gradients are extremely sparse (only rows accessed in the batch get gradients). Standard AllReduce is wasteful. Use sparse AllReduce or parameter-server-style gradient aggregation. At 10B examples/day with 50 lookups each: ~500B sparse updates/day. Bottleneck 3 — Data pipeline I/O: 10B examples × ~1 KB each = 10 TB/day = 115 MB/s sustained. Must pre-shuffle and pre-batch on distributed storage. Hourly refresh requires training pipeline to process ~420M examples/hour. Architecture: Model-parallel embeddings + data-parallel MLPs (ZeRO-1). Dedicated parameter server nodes for embedding update aggregation. RDMA-capable interconnect for AllToAll.'
+  common_mistake: |
+    **The Pitfall:** Treating DLRM training like standard dense LLM training.
+    **The Rationale:** Deep learning infrastructure is heavily biased toward dense transformers.
+    **The Consequence:** Attempting to use standard Pipeline or Tensor parallelism, which fails because DLRMs are bottlenecked by embedding memory and sparse AllToAll communication, not compute.
+  napkin_math: |
+    - **Memory Bottleneck**: 4 TB embeddings / 80 GB per GPU = 50 GPUs minimum purely for embeddings.
+    - **MLP Sizing**: 50M parameters × 16 bytes (BF16 + optimizer) = 800 MB, easily fitting on 1 GPU.
+    - **Communication**: AllToAll per step ≈ batch_size × (12 tables × 128 dim × 2 bytes). At batch 64K: 192 MB per step.
+    - **I/O Bottleneck**: 10B examples/day × 1 KB/example = 10 TB/day = **115 MB/s sustained ingestion**.
 status: published
 provenance: imported
 requires_explanation: true

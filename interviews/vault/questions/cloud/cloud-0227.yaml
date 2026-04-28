@@ -8,36 +8,21 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: The Speculative Decoding Speedup
-scenario: Our 70B model serves chat completions with a P50 time-to-first-token of 200 ms and a P50 inter-token
-  latency of 45 ms on H100. Product wants 2× faster decoding without changing the model. Someone suggests
-  speculative decoding with a 1B draft model. Walk me through the systems math — when does this help,
-  and when does it backfire?
-question: "Walk me through the systems math — when does this help, and when does it backfire?"
+scenario: Our 70B model serves chat completions with a P50 time-to-first-token of 200 ms and inter-token latency of 45 ms on H100. Product wants 2x faster decoding without changing the model. Someone suggests speculative decoding with a 1B draft model.
+question: Walk me through the systems math for speculative decoding — when does it help, and when does it backfire?
 details:
-  realistic_solution: 'Speculative decoding works in three steps: (1) the draft model generates $K$ candidate
-    tokens autoregressively (cheap, ~1 ms/token for a 1B model); (2) the target 70B model verifies all
-    $K$ tokens in a single forward pass (parallel verification — same cost as generating 1 token, since
-    decode is memory-bandwidth-bound and the extra compute for $K$ tokens is negligible); (3) the target
-    accepts the first $n \leq K$ tokens where the draft model''s distribution matches, and resamples the
-    $(n+1)$-th token. The speedup depends critically on the **acceptance rate** $\alpha$ — the probability
-    the draft model''s token matches the target''s. If $\alpha = 0.8$ and $K = 5$, the expected accepted
-    tokens per verification step is $(1 - \alpha^{K+1})/(1-\alpha) = (1 - 0.8^6)/0.2 \approx 3.69$ tokens
-    per target forward pass (the $1/(1-\alpha) = 5$ formula only applies in the limit as $K \to \infty$).
-    But you also pay for the draft model''s memory and compute. If the draft model''s memory displaces
-    KV-cache space, your maximum batch size drops, reducing throughput even as per-request latency improves.'
-  common_mistake: '"The draft model is 70× smaller, so it generates tokens 70× faster, and we just verify
-    them in parallel — easy 5-10× speedup." This ignores the acceptance rate, the memory overhead of running
-    two models, and the verification cost.'
-  napkin_math: '**Without speculation:** 70B decode = 45 ms/token (bandwidth-bound: 140 GB weights / 3.35
-    TB/s ≈ 42 ms + overhead). **With speculation (K=5, α=0.8):** Draft generates 5 tokens: 5 × 1 ms =
-    **5 ms**. Target verifies: **45 ms** (one forward pass). Expected accepted tokens: $(1 - 0.8^6)/0.2
-    \approx 3.69$ tokens. Effective per-token latency: $(5 + 45) / 3.69 = $ **13.6 ms/token** — a **3.3×
-    speedup**. Memory cost: 1B draft model = 2 GB + its KV-cache ≈ 2.5 GB. On 80 GB H100 with 70B model
-    (140 GB sharded TP=2 → 70 GB/GPU), free memory drops from 10 GB to 7.5 GB — **max batch drops from
-    ~9 to ~7 requests**. **When it backfires:** If $\alpha$ drops to 0.4 (e.g., code generation where
-    the draft model is weak), expected accepted = $(1 - 0.4^6)/0.6 \approx 1.66$ tokens per step. Effective
-    latency: $(5 + 45) / 1.66 = $ **30 ms/token** — only 1.5× speedup, and you''ve lost 25% of your batch
-    capacity for it.'
+  realistic_solution: |
+    Speculative decoding works in three steps: (1) the draft model generates K candidate tokens autoregressively (cheap, ~1 ms/token); (2) the target 70B model verifies all K tokens in a single forward pass; (3) the target accepts matching tokens and resamples the next. The speedup depends on the acceptance rate α. If α is high, you gain massive throughput. However, the draft model's memory displaces KV-cache space, potentially reducing maximum batch sizes.
+  common_mistake: |
+    **The Pitfall:** Assuming the speedup scales linearly with the draft model's generation speed.
+    **The Rationale:** Candidates ignore the probabilistic acceptance rate and the memory overhead of holding two models simultaneously.
+    **The Consequence:** Grossly overestimating the speedup and causing OOM errors in production by reducing available KV-cache.
+  napkin_math: |
+    - **Baseline Latency**: 70B decode = 45 ms/token.
+    - **With Speculation (K=5, α=0.8)**: Draft = 5 ms. Verify = 45 ms. Expected tokens = 3.69.
+    - **Effective Latency**: (5 + 45) / 3.69 = **13.6 ms/token (3.3x speedup).**
+    - **When it backfires (α=0.4)**: Expected tokens = 1.66. Latency = (5 + 45) / 1.66 = 30 ms/token.
+    - **Conclusion**: **With low acceptance rates, you only gain a 1.5x speedup while simultaneously losing ~25% of your batch capacity to memory overhead.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -46,11 +31,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- Napkin Math is truncated, preventing a full analysis of memory overhead and potential backfiring scenarios
-  due to memory constraints.
-- Realistic Solution is truncated, cutting off the full explanation of how speculative decoding might
-  backfire.
 validation_status_pro: OK
 math_verified: true
 math_status: CORRECT

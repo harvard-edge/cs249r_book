@@ -8,27 +8,23 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: The SRAM Bank Conflict Slowdown
-scenario: Your audio classification model on a Cortex-M7 (STM32H7, 480 MHz, 1 MB SRAM split into DTCM
-  + AXI SRAM) runs a depthwise separable Conv2D layer. When the input channels are 64, inference takes
-  2.1 ms. When you increase to 128 channels (2× compute), inference takes 5.8 ms — a 2.76× slowdown instead
-  of the expected 2×. Profiling shows the MAC throughput drops from 1.8 GMAC/s to 1.3 GMAC/s. What's the
-  architectural cause?
-question: "Why does doubling STM32H7 depthwise channels from 64 to 128 cause a 2.76x slowdown instead of 2x?"
+scenario: Your audio classification model on a Cortex-M7 (STM32H7, 480 MHz, 1 MB SRAM split into DTCM + AXI SRAM) runs a depthwise separable Conv2D layer. When the input channels are 64, inference takes 2.1 ms. When you increase to 128 channels (2x compute), inference takes 5.8 ms — a 2.76x slowdown instead of the expected 2x. Profiling shows the MAC throughput drops from 1.8 GMAC/s to 1.3 GMAC/s.
+question: Why does doubling STM32H7 depthwise channels from 64 to 128 cause a 2.76x slowdown instead of 2x?
 details:
-  realistic_solution: "The STM32H7's 1 MB SRAM is split into multiple banks:\n  - DTCM: 128 KB (2 × 64\
-    \ KB banks, single-cycle access, interleaved at 32-bit word boundaries)\n  - AXI SRAM: 512 KB (on\
-    \ the AXI bus, 1-2 cycle access depending on contention)\n  - SRAM1-3: additional banks on AHB"
-  common_mistake: '"The data doesn''t fit in cache anymore — it''s a capacity miss." The Cortex-M7''s
-    DTCM (Data Tightly Coupled Memory) has no cache — it''s single-cycle SRAM. There are no cache misses
-    in DTCM. The slowdown is from a different microarchitectural effect.'
-  napkin_math: 'DTCM banks: 2 × 64 KB, interleaved at 4-byte granularity. For 64 channels, the memory
-    allocation happened to offset the tensors by an odd number of words, causing simultaneous reads to
-    alternate banks (Bank 0 and Bank 1). Conflict rate: ~0%. For 128 channels, the sizes are multiples
-    of 32 words, meaning tensors perfectly align to the same bank (e.g., both pointers hit Bank 0 simultaneously).
-    Conflict rate: ~50%. Pipeline stall cost: 50% × 40% memory-bound fraction = 20% raw overhead. With
-    M7 dual-issue stall propagation: 20% × 1.9 = 38% effective overhead. Total: 2.0 × 1.38 = 2.76×. Fix:
-    pad allocations by 4 bytes (1 word) so tensors start on different banks. Expected time: 2.1 × 2.0
-    = 4.2 ms.'
+  realistic_solution: "The STM32H7's 1 MB SRAM is split into multiple banks:\n  - DTCM: 128 KB (2 x 64\ KB banks, single-cycle access, interleaved at 32-bit word boundaries)\n  - AXI SRAM: 512 KB (on\ the AXI bus, 1-2 cycle access depending on contention)\n  - SRAM1-3: additional banks on AHB"
+  common_mistake: |
+    **The Pitfall:** Blaming the slowdown on a "cache miss" or capacity limit.
+    **The Rationale:** Developers accustomed to application processors assume any non-linear scaling is a cache effect.
+    **The Consequence:** Wasting time trying to optimize loops for cache locality when the DTCM has no cache; it is single-cycle SRAM that suffers from architectural bank conflicts.
+  napkin_math: |
+    - **DTCM Structure:** 2 * 64 KB banks, interleaved at 4-byte words.
+    - **Conflict at 64 Channels:** Tensors are offset by an odd number of words. Bank 0 and Bank 1 are read alternately (0% conflict).
+    - **Conflict at 128 Channels:** Sizes are multiples of 32 words. Tensors align perfectly to the same bank. Both pointers hit Bank 0 simultaneously (~50% conflict rate).
+    - **Stall Overhead:** 50% conflict * 40% memory-bound fraction = 20% raw overhead.
+    - **M7 Dual-Issue Penalty:** 20% * 1.9 = 38% effective overhead.
+    - **Calculated Scaling:** 2.0 (compute scaling) * 1.38 = 2.76x slowdown.
+    - **Expected Time:** 2.1 ms * 2.0 = 4.2 ms (not 5.8 ms).
+    - **Conclusion:** **Padding allocations by 4 bytes misaligns the pointers, resolving the bank conflict and restoring the expected 4.2 ms execution time.**
 status: published
 provenance: imported
 requires_explanation: true

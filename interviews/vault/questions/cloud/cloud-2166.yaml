@@ -8,28 +8,25 @@ competency_area: compute
 bloom_level: understand
 phase: both
 title: The Memory Coalescing Penalty
-scenario: Two CUDA kernels process the same 2D matrix stored in row-major order. Kernel A has each thread
+scenario: >-
+  Two CUDA kernels process the same 2D matrix stored in row-major order. Kernel A has each thread
   in a warp access consecutive elements in the same row (thread $i$ accesses `M[row][i]`). Kernel B has
   each thread access elements in the same column (thread $i$ accesses `M[i][col]`). Both kernels perform
   the same arithmetic. On an H100 with 3.35 TB/s HBM bandwidth, Kernel A runs 8x faster than Kernel B.
-  Why?
-question: "Why?"
+question: >-
+  Why does Kernel A run significantly faster than Kernel B on the H100?
 details:
-  realistic_solution: GPU memory controllers coalesce memory requests from threads within the same warp
-    into a minimum number of cache-line-sized transactions (128 bytes on modern GPUs). In Kernel A, 32
-    consecutive threads access 32 consecutive 4-byte floats = 128 bytes, which is exactly one cache line
-    transaction. In Kernel B, 32 threads access elements separated by a full row stride, causing up to
-    32 separate cache line fetches for the same warp. Each fetch loads 128 bytes but only uses 4 bytes,
-    wasting 124/128 = 97% of bandwidth. The effective bandwidth drops from 3.35 TB/s to roughly 3.35 TB/s
-    / 32 = ~105 GB/s.
-  common_mistake: Assuming both access patterns are equivalent because they access the same total number
-    of elements. Engineers from CPU backgrounds may not realize that GPU memory transactions are coalesced
-    at the warp level.
-  napkin_math: 'Coalesced (Kernel A): 32 threads x 4 bytes = 128 bytes per transaction. 1 transaction
-    per warp. Strided (Kernel B): 32 threads x 1 cache line (128 bytes) = 4,096 bytes fetched but only
-    128 bytes used. Bandwidth waste ratio: 4096/128 = 32x. Effective bandwidth: 3.35 TB/s / 32 = ~105
-    GB/s. Speedup of A over B: ~32x theoretical, ~8x in practice due to L2 cache partially mitigating
-    strided accesses.'
+  realistic_solution: 'GPU memory controllers coalesce memory requests from threads within the same warp into a minimum number of cache-line-sized transactions (128 bytes on modern GPUs). In Kernel A, 32 consecutive threads access 32 consecutive 4-byte floats = 128 bytes, which is exactly one cache line transaction. In Kernel B, 32 threads access elements separated by a full row stride, causing up to 32 separate cache line fetches for the same warp. Each fetch loads 128 bytes but only uses 4 bytes, wasting 124/128 = 97% of bandwidth. The effective bandwidth drops from 3.35 TB/s to roughly 3.35 TB/s / 32 = ~105 GB/s.'
+  common_mistake: |
+    **The Pitfall:** Assuming both access patterns are equivalent because they access the same total elements.
+    **The Rationale:** Engineers from CPU backgrounds may not realize that GPU memory transactions are coalesced at the warp level, making memory layout crucial.
+    **The Consequence:** Wasting up to 97% of memory bandwidth by fetching unneeded cache lines.
+  napkin_math: |
+    1. **Kernel A (Coalesced):** 32 threads × 4 bytes = 128 bytes per transaction. 1 transaction per warp.
+    2. **Kernel B (Strided):** 32 threads × 1 cache line (128 bytes) = 4,096 bytes fetched but only 128 bytes used.
+    3. **Bandwidth waste:** 4096 / 128 = 32x.
+    4. **Effective bandwidth (Kernel B):** 3.35 TB/s / 32 = ~105 GB/s.
+    5. **Result:** Speedup of A over B is theoretically ~32x, practically **~8x** due to L2 cache mitigating some strided accesses.
   options:
   - Kernel A is compute-bound, while Kernel B is memory-bound due to different arithmetic intensities.
   - Kernel B causes warp divergence, forcing threads to execute sequentially instead of in parallel.

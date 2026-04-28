@@ -8,28 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Evaluating Framework Execution Overhead
-scenario: You are evaluating execution frameworks for a real-time anomaly detection pipeline running on
-  NVIDIA A100 GPUs. The model, a deep MLP with 200 narrow layers, processes batch size 1 to meet a strict
-  2ms latency SLA. Currently, the forward pass takes 4.5ms in PyTorch eager mode. Nsight Systems profiling
-  reveals the GPU is only active for 0.5ms per pass, with massive gaps between kernel executions. Evaluate
-  the architectural trade-offs between implementing custom monolithic CUDA kernels via C++ extensions
-  versus using a JIT graph compiler (e.g., TorchDynamo) to eliminate the host-side dispatch tax, and justify
-  your design decision.
-question: "Should you build a custom monolithic CUDA kernel or use a JIT graph compiler to meet the 2ms batch-1 SLA, and why?"
+scenario: 'You are evaluating execution frameworks for a real-time anomaly detection pipeline on GPUs. The deep MLP model with 200 narrow layers processes batch size 1 to meet a strict 2ms latency SLA. The forward pass takes 4.5ms in PyTorch eager mode. Profiling reveals the GPU is only active for 0.5ms per pass, with massive gaps between kernel executions.'
+question: 'Should you build a custom monolithic CUDA kernel or use a JIT graph compiler to meet the 2ms batch-1 SLA, and why?'
 details:
-  realistic_solution: Identify that the CPU interpreter overhead is dominating execution. While a custom
-    CUDA kernel eliminates dispatch tax entirely (reducing dispatch to 1 launch), it requires massive
-    engineering effort to maintain. A JIT compiler (like torch.compile) automatically fuses operations
-    into larger sub-graphs, reducing kernel launches significantly with minimal code changes, comfortably
-    hitting the SLA while maintaining Pythonic flexibility.
-  common_mistake: Candidates often misdiagnose the 4.5ms latency as a GPU memory bandwidth issue or suggest
-    increasing the batch size (which violates the strict 1-batch 2ms SLA) instead of recognizing the CPU-bound
-    dispatch tax bottleneck.
-  napkin_math: 'Eager step = 4.5ms. GPU time = 0.5ms. Because GPU execution is asynchronous, the total
-    time is max(CPU dispatch, GPU compute). CPU dispatch time is 4.5ms for 200 ops (avg 22.5us per op
-    dispatch tax), dominating execution. Custom CUDA: 1 kernel launch = 22.5us dispatch, GPU = 0.5ms.
-    Total = max(0.02, 0.5) = 0.5ms. Graph Compiler: Fuses to 10 kernels = 10 * 22.5us = 0.225ms dispatch.
-    Total = max(0.225, 0.5) = 0.5ms. 0.5ms comfortably meets the 2.0ms SLA.'
+  realistic_solution: 'Identify that the CPU interpreter overhead is dominating execution. While a custom CUDA kernel eliminates dispatch tax entirely (reducing dispatch to 1 launch), it requires massive engineering effort to maintain. A JIT compiler (like torch.compile) automatically fuses operations into larger sub-graphs, reducing kernel launches significantly with minimal code changes, comfortably hitting the SLA while maintaining Pythonic flexibility.'
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing the latency as a GPU memory bandwidth issue.
+    **The Rationale:** Because large MLPs are typically memory-bound, candidates assume the GPU is struggling to fetch weights fast enough.
+    **The Consequence:** They might suggest increasing the batch size (which violates the strict 1-batch SLA) instead of recognizing the actual bottleneck is the CPU-bound Python dispatch tax.
+  napkin_math: |
+    * **Eager execution profile:** 4.5ms total. GPU time = 0.5ms.
+    * **CPU dispatch tax:** 4.5ms for 200 ops = ~22.5µs dispatch tax per op.
+    * **Custom CUDA Kernel:** 1 kernel launch (22.5µs dispatch) + 0.5ms compute = 0.5ms total.
+    * **JIT Graph Compiler (torch.compile):** Fuses to ~10 kernels (10 * 22.5µs = 0.225ms dispatch) + 0.5ms compute.
+    * **Conclusion:** The JIT compiler achieves **~0.5ms total latency**, comfortably beating the 2.0ms SLA without writing custom C++.
 status: published
 provenance: imported
 requires_explanation: true

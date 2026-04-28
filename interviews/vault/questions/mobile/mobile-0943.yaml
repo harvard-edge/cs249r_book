@@ -8,18 +8,22 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: 'KV-Cache: Diagnose KV Cache Overflow Causing Mobile App Crashes'
-scenario: Your 3B LLM app on Tensor G3 (7.5 TOPS, 12GB) crashes after ~30 minutes
-  of conversation when context reaches ~3000 tokens. Users report SIGKILL from Android
-  memory pressure (LMKD). Diagnose the KV cache memory leak and propose a fix.
-question: Why does a Tensor G3 3B LLM app crash near 3000 tokens after 30 minutes,
-  and how should the KV cache be fixed?
+scenario: Your 3B LLM app on Tensor G3 (7.5 TOPS, 12GB) crashes after ~30 minutes of conversation when context reaches ~3000 tokens. Users report SIGKILL from Android memory pressure (LMKD).
+question: Why does a Tensor G3 3B LLM app crash near 3000 tokens, and how should the KV cache be fixed?
 details:
-  realistic_solution: KV cache grows O(n) with conversation length. At 3000 tokens,
-    KV cache size exceeds available RAM threshold, triggering OS memory pressure and
-    SIGKILL.
-  common_mistake: Blaming the model size without computing the actual KV cache memory
-    growth; not tracking cumulative memory allocation per conversation turn.
-  napkin_math: '3B model (INT4 quantized): 1.5GB. KV per token: 32 layers × 2 × 16 × 128 × 2B = 262KB per token (fp16). At 3000 tokens: 3000 × 262KB = 786MB. OS: ~4GB. Model: 1.5GB. KV: 786MB. Activations + framework: 500MB. Total: 6.78GB. Available on 12GB device... but Tensor G3 shares memory with system. Android apps typically get 5-6GB before memory pressure warnings, 7-8GB for SIGKILL. App at 6.78GB: likely to crash. Fix: (1) Use INT8 KV: 393MB. (2) Limit context to 2048: 2048 × 131KB (INT8) = 268MB. (3) Clear completed conversation KV on new conversation start. Total memory at 2048 INT8: 1.5GB + 268MB + 500MB = 2.26GB — stable.'
+  realistic_solution: KV cache grows O(n) with conversation length. At 3000 tokens, KV cache size exceeds available RAM threshold, triggering OS memory pressure and SIGKILL.
+  common_mistake: |
+    **The Pitfall:** Blaming the model size without tracking cumulative memory allocation per conversation turn.
+    
+    **The Rationale:** Engineers assume the 3B model easily fits into 12GB RAM, forgetting that the KV cache grows linearly O(n) as the conversation continues.
+    
+    **The Consequence:** The expanding cache slowly triggers OS memory pressure, resulting in an ungraceful SIGKILL during prolonged user sessions.
+  napkin_math: |
+    1. **Calculate Base Context Memory:** FP16 KV cache for 1 token: 32 layers × 2 (K,V) × 16 heads × 128 dim × 2 bytes = 262 KB.
+    2. **Calculate 3000 Tokens:** 3000 tokens × 262 KB = 786 MB.
+    3. **Calculate Total App Memory:** 1.5 GB (INT4 model) + 786 MB (KV) + 500 MB (activations/framework) = 2.78 GB. 
+    4. **Assess Memory Pressure:** While 2.78 GB fits, OS memory + background apps can push the system past the 7-8 GB LMKD threshold on a shared 12 GB SoC.
+    5. **Result:** Fix by quantizing KV to **INT8 (saving ~393 MB)**, limiting context to 2048, and aggressively clearing cache on new sessions.
 status: published
 provenance: imported
 requires_explanation: false

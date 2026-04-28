@@ -8,29 +8,21 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: The NPU Context-Switching Tax
-scenario: 'A cloud-managed edge gateway in a smart retail store processes camera streams by running 3
-  models sequentially per frame: Detection (10ms), Tracking (5ms), and Pose Estimation (15ms). The sum
-  of individual model latencies is 30ms. All three models are perfectly compiled for the edge NPU. However,
-  the measured end-to-end pipeline latency per frame is 80ms, limiting throughput to 12 FPS instead of
-  the expected 33 FPS.'
-question: "Why is the three-model edge pipeline 80ms instead of 30ms, and how would you restructure serving to improve throughput?"
+scenario: A cloud-managed edge gateway in a smart retail store processes camera streams by running 3 models sequentially per frame: Detection (10ms), Tracking (5ms), and Pose Estimation (15ms). The sum of individual model latencies is 30ms. All three models are perfectly compiled for the edge NPU. However, the measured end-to-end pipeline latency per frame is 80ms, limiting throughput to 12 FPS instead of the expected 33 FPS.
+question: Why is the three-model edge pipeline 80ms instead of 30ms, and how would you restructure serving to improve throughput?
 details:
-  realistic_solution: "The hidden latency comes from NPU SRAM weight swapping (Context Switching). Edge\
-    \ NPUs typically have very small on-chip SRAM (e.g., 4MB to 8MB) to save power and die area. \n\n\
-    If the combined weights of the 3 models (e.g., 15MB total) exceed the NPU's SRAM capacity, the NPU\
-    \ driver must constantly swap model weights in and out of main DRAM for every single frame. This requires\
-    \ tearing down the NPU context, flushing SRAM, copying new weights over the memory bus, and initializing\
-    \ the next model. The hardware-algorithm tradeoff requires restructuring the serving pattern: instead\
-    \ of running the pipeline sequentially per frame (D -> T -> P -> D -> T -> P), you should batch frames\
-    \ per model (e.g., run Detection on 5 frames, then Tracking on 5 frames). This amortizes the context-switching\
-    \ overhead over multiple frames, increasing throughput at the cost of slightly higher pipeline latency\
-    \ for the first frame."
-  common_mistake: Blaming Python GIL overhead, image preprocessing, or PCIe transfer times for the camera
-    frames.
-  napkin_math: Let Model sizes be 5MB each. NPU SRAM = 6MB. Swapping a model requires reading 5MB from
-    DRAM. Memory bus bandwidth = 4 GB/s. Transfer time = 5MB / 4GB/s = 1.25ms. However, NPU driver overhead
-    (kernel interrupts, context teardown/setup) typically adds ~15ms per swap. 3 swaps per frame * (1.25ms
-    + 15ms) = ~49ms of pure overhead. 30ms compute + 49ms overhead = 79ms total latency per frame.
+  realistic_solution: "The hidden latency comes from NPU SRAM weight swapping (Context Switching). Edge NPUs typically have very small on-chip SRAM (e.g., 4MB to 8MB) to save power and die area. \n\nIf the combined weights of the 3 models (e.g., 15MB total) exceed the NPU's SRAM capacity, the NPU driver must constantly swap model weights in and out of main DRAM for every single frame. This requires tearing down the NPU context, flushing SRAM, copying new weights over the memory bus, and initializing the next model. The hardware-algorithm tradeoff requires restructuring the serving pattern: instead of running the pipeline sequentially per frame (D -> T -> P -> D -> T -> P), you should batch frames per model (e.g., run Detection on 5 frames, then Tracking on 5 frames). This amortizes the context-switching overhead over multiple frames, increasing throughput at the cost of slightly higher pipeline latency for the first frame."
+  common_mistake: |
+    **The Pitfall:** Blaming Python GIL overhead, image preprocessing, or PCIe transfer times for the camera frames.
+    **The Rationale:** Candidates often default to system-level software overheads without considering the hardware realities of accelerator memory hierarchies.
+    **The Consequence:** Proposing software-level optimizations that completely fail to address the fundamental hardware bottleneck, leaving throughput constrained.
+  napkin_math: |
+    *   **Model Size:** Let each model be 5MB.
+    *   **Transfer Time:** Swapping requires reading 5MB from DRAM at 4 GB/s = 5MB / 4GB/s = 1.25ms.
+    *   **Driver Overhead:** NPU driver teardown/setup adds ~15ms per swap.
+    *   **Total Swap Cost:** 1.25ms + 15ms = 16.25ms.
+    *   **Per Frame Overhead:** 3 swaps * 16.25ms = 48.75ms.
+    *   **Total Latency:** 30ms compute + 48.75ms overhead = **78.75ms total latency per frame** (approx 80ms).
 status: published
 provenance: imported
 requires_explanation: false

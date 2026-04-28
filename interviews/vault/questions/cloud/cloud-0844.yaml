@@ -8,20 +8,20 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Diagnosing Latency Spikes after GELU Replacement
-scenario: A production CPU inference fleet serves a 7B parameter LLM using an engine optimized for dynamic
-  activation sparsity. By using ReLU, the engine dynamically skips loading weights for downstream neurons
-  when the input activation is zero. A recent model update replaces ReLU with GELU. While downstream accuracy
-  improves, inference latency spikes from 75ms to 140ms per token, and server power draw increases by
-  40%. Diagnose the root cause of the regression.
-question: "Why did replacing ReLU with GELU spike token latency from 75ms to 140ms and increase server power by 40%?"
+scenario: A production CPU inference fleet serves a 7B parameter LLM using an engine optimized for dynamic activation sparsity. By using ReLU, the engine dynamically skips loading weights for downstream neurons when the input activation is zero. A recent model update replaces ReLU with GELU. While downstream accuracy improves, inference latency spikes from 75ms to 140ms per token, and server power draw increases by 40%.
+question: Why did replacing ReLU with GELU spike token latency from 75ms to 140ms and increase server power by 40%?
 details:
-  realistic_solution: Identify that GELU rarely outputs exact zeros, entirely destroying activation sparsity.
-    The inference engine can no longer dynamically skip weight memory loads for inactive neurons, forcing
-    dense execution. This massive increase in DRAM reads bottlenecks the memory bandwidth and drives up
-    energy usage.
-  common_mistake: Attributing the latency and power spike to the increased arithmetic complexity (e.g.,
-    computing the error function) of GELU compared to the simpler max(0, x) of ReLU.
-  napkin_math: 'A 7B model in FP16 has ~14GB of weights. Roughly 2/3 of these (~9.5GB) are in the FFN layers, and 1/3 (~4.5GB) in attention. With ReLU''s ~70% activation sparsity, only 30% of FFN weights (2.85GB) are fetched per token. Total memory read per token is 4.5GB + 2.85GB = 7.35GB. At 100 GB/s bandwidth, this takes ~73.5ms (explaining the ~75ms baseline with some overhead). With GELU (0% sparsity), the full 14GB is fetched, pushing the memory-bound latency to 140ms (14GB / 100 GB/s).'
+  realistic_solution: Identify that GELU rarely outputs exact zeros, entirely destroying activation sparsity. The inference engine can no longer dynamically skip weight memory loads for inactive neurons, forcing dense execution. This massive increase in DRAM reads bottlenecks the memory bandwidth and drives up energy usage.
+  common_mistake: |
+    **The Pitfall:** Attributing the latency and power spike to the increased arithmetic complexity of GELU.
+    **The Rationale:** Candidates see a more complex function (error function vs. max(0,x)) and assume compute is the bottleneck, forgetting that LLM inference is heavily memory-bandwidth bound.
+    **The Consequence:** Misdiagnosing the bottleneck leads to useless optimization efforts on compute rather than addressing memory loads.
+  napkin_math: |
+    - 1. Calculate total FP16 weight memory: 7B parameters * 2 bytes = 14 GB.
+    - 2. Calculate FFN and attention breakdown: ~9.5 GB (FFN) and ~4.5 GB (Attention).
+    - 3. Calculate memory reads with ReLU (70% sparsity): 4.5 GB + (9.5 GB * 0.3) = 7.35 GB.
+    - 4. Calculate expected latency with ReLU at 100 GB/s: 7.35 GB / 100 GB/s = 73.5 ms.
+    - 5. Calculate expected latency with GELU (0% sparsity): 14 GB / 100 GB/s = **140 ms**.
 status: published
 provenance: imported
 requires_explanation: false

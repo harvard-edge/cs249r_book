@@ -8,37 +8,19 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: Persistent Kernels for Continuous Batching
-scenario: Traditional CUDA kernels launch, execute, and exit for each batch. For continuous
-  batching inference on MI300X, you want a persistent kernel that stays resident on
-  all 304 CUs, processing new requests as they arrive without kernel launch overhead.
-  Design the persistent kernel architecture, including work distribution, synchronization,
-  and how you handle variable batch sizes without wasting CU cycles.
-question: How would you design a persistent MI300X kernel for continuous batching,
-  including work queues, synchronization, and variable batch sizes?
+scenario: Traditional CUDA kernels launch, execute, and exit for each batch. For continuous batching inference on MI300X, you want a persistent kernel that stays resident on all 304 CUs, processing new requests as they arrive without kernel launch overhead.
+question: How would you design a persistent MI300X kernel for continuous batching, handling work queues and variable batch sizes?
 details:
-  realistic_solution: 'Architecture: (1) Launch one persistent kernel with 304 blocks
-    (one per CU). Kernel enters an infinite loop, checking a work queue in pinned
-    host memory via unified memory. (2) Work queue: circular buffer in PCIe BAR1-mapped
-    memory. Host enqueues {request_id, input_ptr, output_ptr, seq_len}. Device polls
-    with `__threadfence_system()` for coherency. (3) Dynamic work distribution: each
-    CU atomically increments a consumer index, grabs work items. Variable batch: CU
-    0-63 process batch slot 0 (a 64-CU matmul), CU 64-127 process batch slot 1, etc.
-    If only 2 requests: only 128 CUs active, others spin-wait (acceptable overhead
-    at 200ns per poll). (4) Synchronization: use `cooperative_groups::grid_group::sync()`
-    for AllReduce across CUs (needed for LayerNorm). (5) MI300X advantage: Infinity
-    Fabric allows CUs on different XCDs to synchronize via shared HBM atomics at <200ns.
-    Benefits: eliminates kernel launch latency (5-10µs per kernel × 6 kernels × 80 layers
-    = 2.4-4.8ms per token). At an 80ms/token decode baseline, saves ~6%.'
-  common_mistake: Implementing a persistent kernel with global memory polling (spin-loop
-    on a flag). This wastes memory bandwidth and creates contention. Use device-side
-    enqueue or cooperative groups with grid-level synchronization.
-  napkin_math: 'Kernel launch overhead: 5-10µs × 6 kernels per transformer block ×
-    80 blocks = 2.4-4.8ms per forward pass. Persistent kernel: 0 launch overhead.
-    Savings: 4.8ms / 80ms decode = 6% throughput improvement. Poll overhead: 200ns
-    per poll. At a polling rate of 1 MHz (1,000,000 polls/s) between requests: 1M
-    × 200ns = 200ms wall-clock time per second (20% overhead). Break-even: persistent
-    kernel wins when request rate is high enough (e.g., >100 req/s) so queue is rarely
-    empty.'
+  realistic_solution: 'Architecture: (1) Launch one persistent kernel with 304 blocks (one per CU). Kernel enters an infinite loop, checking a work queue in pinned host memory via unified memory. (2) Work queue: circular buffer in PCIe BAR1-mapped memory. Host enqueues {request_id, input_ptr, output_ptr, seq_len}. Device polls with `__threadfence_system()` for coherency. (3) Dynamic work distribution: each CU atomically increments a consumer index, grabs work items. Variable batch: CU 0-63 process batch slot 0 (a 64-CU matmul), CU 64-127 process batch slot 1, etc. If only 2 requests: only 128 CUs active, others spin-wait (acceptable overhead at 200ns per poll). (4) Synchronization: use `cooperative_groups::grid_group::sync()` for AllReduce across CUs (needed for LayerNorm). (5) MI300X advantage: Infinity Fabric allows CUs on different XCDs to synchronize via shared HBM atomics at <200ns. Benefits: eliminates kernel launch latency (5-10µs per kernel × 6 kernels × 80 layers = 2.4-4.8ms per token). At an 80ms/token decode baseline, saves ~6%.'
+  common_mistake: |
+    **The Pitfall:** Implementing a persistent kernel with a spin-loop on a global memory flag.
+    **The Rationale:** It is the simplest way to implement polling, but engineers fail to account for the memory bandwidth saturation and cache contention this causes across 300+ CUs.
+    **The Consequence:** The spin-loop consumes massive power and memory bandwidth, ironically degrading the inference performance it was designed to improve.
+  napkin_math: |
+    - **Launch Overhead:** $5-10\text{\mu s} \times 6\text{ kernels/block} \times 80\text{ blocks} = 2.4-4.8\text{ms}$ per forward pass.
+    - **Persistent Kernel Savings:** Eliminates the $4.8\text{ms}$ overhead. On an $80\text{ms/token}$ decode baseline, this is a **~6% throughput improvement**.
+    - **Polling Cost:** $200\text{ns}$ per poll. Polling at $1\text{ MHz}$ between requests = $200\text{ms}$ overhead per second (20%).
+    - **Conclusion:** Persistent kernels win only when request rates are high enough (>100 req/s) that the queue is rarely empty.
 status: published
 provenance: imported
 requires_explanation: false

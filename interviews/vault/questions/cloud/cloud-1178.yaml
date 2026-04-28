@@ -8,28 +8,20 @@ competency_area: power
 bloom_level: analyze
 phase: both
 title: Diagnosing DVFS Stragglers in AllReduce
-scenario: You are training a 65B parameter model on a cluster of 64 NVIDIA A100-80GB GPUs (400W TDP).
-  Despite perfectly balanced data parallel batches, your training step time intermittently spikes from
-  850ms to over 1200ms. Metrics reveal no network congestion, but `nvidia-smi dmon` shows that right before
-  a spike, a few GPUs hit their 85°C thermal limit and their SM clocks dynamically drop from the boost
-  frequency of 1410 MHz to 1050 MHz. Analyze the root cause of the step time spikes and propose a systems-level
-  mitigation.
-question: "What is causing intermittent 1200ms training steps, and what system-level mitigation would stabilize iteration time?"
+scenario: 'You are training a 65B parameter model on a cluster of 64 NVIDIA A100-80GB GPUs (400W TDP). Despite perfectly balanced data parallel batches, your training step time intermittently spikes from 850ms to over 1200ms. Metrics reveal no network congestion, but `nvidia-smi dmon` shows that right before a spike, a few GPUs hit their 85°C thermal limit and their SM clocks dynamically drop from the boost frequency of 1410 MHz to 1050 MHz.'
+question: 'What is causing intermittent 1200ms training steps, and what system-level mitigation would stabilize iteration time?'
 details:
-  realistic_solution: The root cause is Dynamic Voltage and Frequency Scaling (DVFS) reacting to thermal
-    limits, reducing the clock speed of hot GPUs to prevent damage. In a synchronous distributed setup,
-    the AllReduce collective waits for the slowest GPU (the straggler). The standard mitigation is to
-    use `nvidia-smi -lgc 1200,1200` to lock the application clock of all GPUs to a sustainable, stable
-    frequency slightly below the max boost. This sacrifices peak theoretical TFLOPs to guarantee predictable
-    step times and eliminate the straggler effect.
-  common_mistake: Candidates often suggest improving physical cooling or reducing the global batch size
-    to lower temperatures, missing the critical insight that DVFS creates unpredictable stragglers which
-    block synchronous operations, and that application clock locking is the standard software mitigation.
-  napkin_math: At 1410 MHz, assume the compute phase takes 800ms. If one GPU throttles to 1050 MHz via
-    DVFS, its compute time becomes 800ms * (1410 / 1050) = ~1074ms. Because AllReduce is a strict barrier,
-    the entire 64-GPU cluster wastes 274ms waiting. Locking all GPUs to 1200 MHz makes the compute phase
-    consistently 800ms * (1410 / 1200) = ~940ms. Consistent 940ms iterations yield significantly higher
-    overall training throughput than 800ms iterations frequently interrupted by 1074ms straggler spikes.
+  realistic_solution: 'The root cause is Dynamic Voltage and Frequency Scaling (DVFS) reacting to thermal limits, reducing the clock speed of hot GPUs to prevent damage. In a synchronous distributed setup, the AllReduce collective waits for the slowest GPU (the straggler). The standard mitigation is to use `nvidia-smi -lgc 1200,1200` to lock the application clock of all GPUs to a sustainable, stable frequency slightly below the max boost. This sacrifices peak theoretical TFLOPs to guarantee predictable step times and eliminate the straggler effect.'
+  common_mistake: |
+    **The Pitfall:** Suggesting to improve physical cooling or reduce the global batch size.
+    **The Rationale:** Candidates correctly identify heat as the trigger but miss the architectural reality of synchronous collectives.
+    **The Consequence:** Ignoring that DVFS creates unpredictable stragglers which block synchronous operations, failing to apply the standard software mitigation (application clock locking).
+  napkin_math: |
+    - **Compute Time at Boost:** Assume compute takes 800 ms at 1410 MHz.
+    - **Throttled Compute Time:** A GPU dropping to 1050 MHz takes 800 ms × (1410 / 1050) = ~1,074 ms.
+    - **Straggler Penalty:** Since AllReduce is a strict barrier, all 64 GPUs wait for the 1,074 ms straggler, wasting 274 ms per iteration.
+    - **Mitigation (Locked Clocks):** Locking all GPUs to 1200 MHz yields a consistent compute time of 800 ms × (1410 / 1200) = **~940 ms**.
+    - **Result:** A consistent **940 ms iteration is much faster** than 800 ms iterations frequently bottlenecked by 1,074 ms spikes.
 status: published
 provenance: imported
 requires_explanation: false

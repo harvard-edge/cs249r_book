@@ -8,28 +8,20 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Evaluating NCHW vs NHWC Layouts
-scenario: 'You are optimizing a large computer vision model (ResNet-101 architecture) for inference on
-  an NVIDIA A100 GPU (2000 GB/s memory bandwidth). The activation tensor $X$ at a critical layer has the
-  shape `[N=64, C=512, H=112, W=112]` and is stored in FP16. By default, PyTorch uses contiguous NCHW
-  format `(stride: C*H*W, H*W, W, 1)`. However, cuDNN requires `channels_last` NHWC format `(stride: H*W*C,
-  W*C, C, 1)` to utilize FP16 Tensor Cores for convolutions. Evaluate the memory bandwidth trade-offs
-  and performance implications of A) keeping the tensor in NCHW and letting cuDNN implicitly transpose
-  it for each of the 50 convolutional layers, versus B) explicitly casting the entire model and inputs
-  to NHWC format globally.'
+scenario: 'You are optimizing a large computer vision model (ResNet-101 architecture) for inference on an NVIDIA A100 GPU (2000 GB/s memory bandwidth). The activation tensor $X$ at a critical layer has the shape `[N=64, C=512, H=112, W=112]` and is stored in FP16. By default, PyTorch uses contiguous NCHW format `(stride: C*H*W, H*W, W, 1)`. However, cuDNN requires `channels_last` NHWC format `(stride: H*W*C, W*C, C, 1)` to utilize FP16 Tensor Cores for convolutions.'
 question: "Should you leave the ResNet-101 in NCHW with implicit cuDNN transposes, or switch globally to NHWC, and why?"
 details:
-  realistic_solution: Adopt the NHWC (channels_last) format globally. While a single explicit transposition
-    incurs a bandwidth cost, leaving the model in NCHW forces the cuDNN backend to silently allocate workspace
-    memory and perform a strided memory copy (NCHW -> NHWC) before the computation, and then convert back
-    (NHWC -> NCHW) to return the expected output layout for every single layer.
-  common_mistake: Candidates often assume that implicit framework conversions are 'zero-cost' or highly
-    fused, or they mistakenly argue that NCHW is better for cache locality on modern GPUs, ignoring that
-    Ampere/Hopper Tensor Cores structurally demand channel-contiguous memory layouts for dot products.
-  napkin_math: "Tensor size: 64 * 512 * 112 * 112 * 2 bytes = 822 MB. \nImplicit transpose overhead per\
-    \ layer: Read NCHW (822 MB) + Write NHWC (822 MB) = ~1.64 GB of wasted bandwidth.\nOver 50 layers,\
-    \ cuDNN burns 50 * 1.64 GB = 82 GB of memory traffic purely on layout conversions. \nAt 2000 GB/s\
-    \ (A100), this invisible striding tax costs ~41ms per forward pass, whereas a single global conversion\
-    \ at the pipeline boundary costs <1ms."
+  realistic_solution: Adopt the NHWC (channels_last) format globally. While a single explicit transposition incurs a bandwidth cost, leaving the model in NCHW forces the cuDNN backend to silently allocate workspace memory and perform a strided memory copy (NCHW -> NHWC) before the computation, and then convert back (NHWC -> NCHW) to return the expected output layout for every single layer.
+  common_mistake: |
+    **The Pitfall:** Arguing that NCHW is better for cache locality on modern GPUs.
+    **The Rationale:** Candidates incorrectly assume implicit framework conversions are "zero-cost", ignoring that Ampere/Hopper Tensor Cores structurally demand channel-contiguous (NHWC) memory layouts for dot products.
+    **The Consequence:** Burning massive memory bandwidth on invisible data striding, drastically slowing down inference.
+  napkin_math: |
+    - **Tensor Size:** 64 * 512 * 112 * 112 * 2 bytes = 822 MB.
+    - **Implicit Transpose Overhead:** Read NCHW (822 MB) + Write NHWC (822 MB) = 1.64 GB per layer.
+    - **Total Bandwidth Waste:** 50 layers * 1.64 GB = 82 GB per forward pass.
+    - **Latency Penalty:** 82 GB / 2000 GB/s = **~41 ms of invisible latency per pass.**
+    - **Result:** A single global NHWC conversion upfront costs <1 ms.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,34 +8,19 @@ competency_area: reliability
 bloom_level: create
 phase: inference
 title: ESP32-S3 ASIL-B Fallback Architecture
-scenario: You are designing an emergency anomaly detection system for an industrial
-  robot using an ESP32-S3, which must meet ISO 26262 ASIL-B requirements despite not
-  being a natively safety-rated MCU. The system runs an INT8 neural network using
-  vector extensions to analyze vibration data, while concurrently managing a fail-safe
-  brake actuator. Design a dual-core software architecture, memory partitioning strategy
-  between SRAM and PSRAM, and a deterministic watchdog mechanism to guarantee a safe
-  state within a 50ms Fault Tolerant Time Interval (FTTI).
-question: How should ESP32-S3 partition safety and ML work to satisfy an ASIL-B 50
-  ms fault-tolerant interval?
+scenario: You are designing an emergency anomaly detection system for an industrial robot using an ESP32-S3, which must meet ISO 26262 ASIL-B requirements despite not being a natively safety-rated MCU. The system runs an INT8 neural network using vector extensions to analyze vibration data, while concurrently managing a fail-safe brake actuator.
+question: How should ESP32-S3 partition safety and ML work to satisfy an ASIL-B 50 ms fault-tolerant interval?
 details:
-  realistic_solution: Implement Asymmetric Multiprocessing (AMP). Dedicate Core 0
-    entirely to the safety critical path (sensor polling, watchdog, and brake actuation)
-    and lock its code/data into the 512 KB internal SRAM to guarantee deterministic
-    execution. Dedicate Core 1 to the INT8 ML inference and WiFi telemetry, placing
-    model weights in the 8 MB PSRAM. Core 0 monitors Core 1 via a shared memory heartbeat
-    and hardware timer; if Core 1 hangs or misses its deadline, Core 0 independently
-    triggers the safe state.
-  common_mistake: Candidates often run both the ML model and safety checks on the
-    same core under an RTOS, which risks the non-safety ML workload starving the safety
-    tasks. They also frequently fail to account for the non-deterministic latency
-    of fetching instructions or data from the 8 MB SPI PSRAM compared to the 512 KB
-    internal SRAM.
-  napkin_math: The INT8 model requires 10 million MACs. On the 240 MHz Xtensa core
-    with vector extensions (assuming ~4 effective MACs/cycle), inference takes ~10.4ms
-    compute + ~4.6ms PSRAM latency = 15ms total. With a 50ms FTTI, Core 0 polls a
-    shared SRAM flag every 5ms. If Core 1 misses two expected 15ms deadlines (30ms
-    elapsed), Core 0 detects the timeout at 35ms. Core 0 has 15ms remaining to actuate
-    the brake (takes 1ms), leaving a 14ms safety margin.
+  realistic_solution: Implement Asymmetric Multiprocessing (AMP). Dedicate Core 0 entirely to the safety critical path (sensor polling, watchdog, and brake actuation) and lock its code/data into the 512 KB internal SRAM to guarantee deterministic execution. Dedicate Core 1 to the INT8 ML inference and WiFi telemetry, placing model weights in the 8 MB PSRAM. Core 0 monitors Core 1 via a shared memory heartbeat and hardware timer; if Core 1 hangs or misses its deadline, Core 0 independently triggers the safe state.
+  common_mistake: |
+    **The Pitfall:** Running ML and safety checks on the same core under a standard RTOS.
+    **The Rationale:** Candidates assume RTOS priorities are sufficient, failing to account for non-deterministic latency from SPI PSRAM fetches.
+    **The Consequence:** Non-safety ML workloads stall the safety tasks, violating the hard 50ms Fault Tolerant Time Interval (FTTI).
+  napkin_math: |
+    - **Inference Compute:** 10M MACs / (240 MHz * 4 MACs/cycle) = ~10.4 ms.
+    - **Total Latency:** ~10.4 ms + ~4.6 ms (PSRAM latency) = 15 ms.
+    - **Fault Detection:** Core 0 checks every 5 ms. 2 missed deadlines (30 ms) + 5 ms polling = 35 ms detection time.
+    - **Safety Margin:** 50 ms (FTTI) - 35 ms - 1 ms (brake actuation) = **14 ms margin**.
 status: published
 provenance: imported
 requires_explanation: true

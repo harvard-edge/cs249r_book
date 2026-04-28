@@ -8,57 +8,27 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: The Streaming Sensor Fusion Dilemma
-scenario: 'You are the technical lead for a new autonomous drone project. The drone uses a low-cost Cortex-M7
-  microcontroller (1MB Flash, 256KB SRAM) for its flight controller. A new requirement has come down:
-  add a ''situational awareness'' feature that fuses data from three high-frequency sensors (IMU, barometer,
-  microphone) in real-time to predict flight instability. The research team has proposed a small, transformer-like
-  model with 16 layers, embedding dimension 128, using FP16 precision. It requires a 512-token KV-cache
-  to maintain temporal context. Your constraints are a hard real-time deadline of 1ms per inference and
-  the existing MCU. The junior team''s initial analysis concludes it''s impossible, as the KV-cache alone
-  (2 * 512 tokens * 16 layers * 128 embed_dim * 2 bytes = 4 MB) is 16x larger than the available SRAM.
-  Design a system architecture that makes this model feasible. What are your first three architectural
-  decisions, and justify them with quantitative analysis?'
-question: "What are your first three architectural decisions, and justify them with quantitative analysis?"
+scenario: You are the technical lead for a new autonomous drone project. The drone uses a low-cost Cortex-M7 microcontroller (1MB Flash, 256KB SRAM) for its flight controller. A new requirement has come down to add a 'situational awareness' feature that fuses data from three high-frequency sensors (IMU, barometer, microphone) in real-time to predict flight instability. The research team has proposed a small, transformer-like model with 16 layers, embedding dimension 128, using FP16 precision. It requires a 512-token KV-cache to maintain temporal context. Your constraints are a hard real-time deadline of 1ms per inference and the existing MCU. The junior team's initial analysis concludes it's impossible, as the KV-cache alone (2 * 512 tokens * 16 layers * 128 embed_dim * 2 bytes = 4 MB) is 16x larger than the available SRAM.
+question: What are your first three architectural decisions, and justify them with quantitative analysis?
 details:
-  realistic_solution: 'The problem requires abandoning the monolithic ''all-in-SRAM'' memory model and
-    designing a dataflow architecture that treats memory as a multi-level hierarchy managed explicitly
-    in software. Three key decisions: (1) Reduce the context window from 512 to 64 tokens using a sliding
-    window with learned summarization, cutting KV-cache by 8x. (2) Implement layer-by-layer DMA tiling:
-    only one layer''s KV-cache resides in SRAM at a time (~16 KB in INT8), while the next layer is prefetched
-    from Flash via DMA double-buffering. (3) Quantize the KV-cache to INT8, halving per-layer transfer
-    size and fitting within the 1ms latency budget when combined with a reduced 4-layer model. The final
-    SRAM footprint is ~96 KB (16 KB active cache + 16 KB DMA buffer + 64 KB for activations and weights),
-    leaving headroom for the RTOS and sensor buffers.'
-  common_mistake: Applying virtual memory or mobile-style memory management concepts. A common mistake
-    is to assume you can just 'offload' to Flash like it's slow RAM or a swap file, without accounting
-    for the physical realities of Flash (erase/write cycles, block-based access) and the lack of an MMU.
-    Another error is focusing solely on model quantization, which shrinks weights but doesn't solve the
-    fundamental KV-cache state size problem.
-  napkin_math: '1. **Verify Impossibility of Naive Approach:** KV-cache = 2 (K+V) * 512 tokens * 16 layers
-    * 128 embed_dim * 2 bytes (FP16) = 4,194,304 bytes = 4 MB. Available SRAM = 256 KB. Ratio: 4 MB /
-    256 KB = 16x oversubscribed. Even INT8 quantization of the cache (halving to 2 MB) still leaves an
-    8x gap. 2. **Streaming/Sliding Window:** Use a sliding window of 64 tokens instead of 512, reducing
-    KV-cache to 2 * 64 * 16 * 128 * 2 = 524,288 bytes ≈ 512 KB. Still 2x SRAM. 3. **Layer-by-layer DMA
-    Tiling:** Only keep 1 layer''s KV-cache in SRAM at a time: 2 * 64 * 128 * 2 = 32,768 bytes = 32 KB
-    per layer. Stream remaining layers from Flash via DMA double-buffering. SRAM budget: 32 KB active
-    + 32 KB prefetch + ~64 KB activations + ~128 KB weights = ~256 KB. Fits within SRAM. 4. **Latency
-    Check:** Flash read at 100 MB/s for 32 KB = 0.32 ms per layer. 16 layers = 5.12 ms. Exceeds 1ms deadline.
-    Must reduce to 4 layers or use INT8 cache (16 KB/layer, 0.16 ms/layer, 4 layers = 0.64 ms). Feasible
-    with architectural co-design.'
+  realistic_solution: 'The problem requires abandoning the monolithic ''all-in-SRAM'' memory model and designing a dataflow architecture that treats memory as a multi-level hierarchy managed explicitly in software. Three key decisions: (1) Reduce the context window from 512 to 64 tokens using a sliding window with learned summarization, cutting KV-cache by 8x. (2) Implement layer-by-layer DMA tiling: only one layer''s KV-cache resides in SRAM at a time (~16 KB in INT8), while the next layer is prefetched from Flash via DMA double-buffering. (3) Quantize the KV-cache to INT8, halving per-layer transfer size and fitting within the 1ms latency budget when combined with a reduced 4-layer model. The final SRAM footprint is ~96 KB (16 KB active cache + 16 KB DMA buffer + 64 KB for activations and weights), leaving headroom for the RTOS and sensor buffers.'
+  common_mistake: |
+    **The Pitfall:** Applying virtual memory or mobile-style memory management concepts.
+    **The Rationale:** Engineers assume you can just "offload" to Flash like it's slow RAM or a swap file, without accounting for the physical realities of Flash (erase/write cycles, block-based access) and the lack of an MMU.
+    **The Consequence:** Proposing architectures that are fundamentally impossible to implement on a microcontroller, failing to solve the KV-cache state size problem.
+  napkin_math: |
+    1. **Verify Impossibility of Naive Approach:** KV-cache = 2 (K+V) * 512 tokens * 16 layers * 128 embed_dim * 2 bytes (FP16) = 4,194,304 bytes = 4 MB.
+    2. **Available SRAM:** 256 KB. Ratio: 4 MB / 256 KB = 16x oversubscribed. Even INT8 quantization of the cache (halving to 2 MB) still leaves an 8x gap.
+    3. **Streaming/Sliding Window:** Use a sliding window of 64 tokens instead of 512, reducing KV-cache to 2 * 64 * 16 * 128 * 2 = 524,288 bytes ≈ 512 KB. Still 2x SRAM.
+    4. **Layer-by-layer DMA Tiling:** Only keep 1 layer's KV-cache in SRAM at a time: 2 * 64 * 128 * 2 = 32,768 bytes = 32 KB per layer. Stream remaining layers from Flash via DMA double-buffering.
+    5. **SRAM Budget:** 32 KB active + 32 KB prefetch + ~64 KB activations + ~128 KB weights = ~256 KB. Fits within SRAM.
+    6. **Latency Check:** Flash read at 100 MB/s for 32 KB = 0.32 ms per layer. 16 layers = 5.12 ms. Exceeds 1ms deadline.
+    7. **Final Adjustments:** Must reduce to 4 layers or use INT8 cache (16 KB/layer, 0.16 ms/layer, 4 layers = 0.64 ms). **Feasible with architectural co-design.**
   options:
-  - Apply virtual memory by using external flash as swap space, paging KV-cache layers in and out as needed,
-    similar to how mobile operating systems handle memory pressure.
-  - 'Three architectural decisions: (1) Reduce context from 512 to 64 tokens via sliding window (8x KV-cache
-    reduction). (2) Layer-by-layer DMA tiling: keep only 1 layer''s INT8 KV-cache in SRAM (~16 KB) while
-    prefetching the next layer from flash via double-buffered DMA. (3) Reduce to 4 layers + INT8 cache
-    to meet the 1ms deadline (0.16ms/layer x 4 = 0.64ms). Final SRAM: ~96 KB (16 KB DMA + 64 KB activations/weights
-    + 16 KB working). The key: treat flash as a managed memory tier with explicit software-controlled
-    streaming.'
-  - Quantize the entire model from FP16 to INT4, reducing the KV-cache from 4 MB to 1 MB. Then use aggressive
-    structured pruning to remove 75% of attention heads, bringing it to 256 KB.
-  - The junior team is correct — it's impossible. A transformer with 16 layers and 512-token KV-cache
-    fundamentally cannot run on a 256 KB SRAM MCU. The requirement should be changed to a simpler RNN-based
-    model.
+  - Apply virtual memory by using external flash as swap space, paging KV-cache layers in and out as needed, similar to how mobile operating systems handle memory pressure.
+  - 'Three architectural decisions: (1) Reduce context from 512 to 64 tokens via sliding window (8x KV-cache reduction). (2) Layer-by-layer DMA tiling: keep only 1 layer''s INT8 KV-cache in SRAM (~16 KB) while prefetching the next layer from flash via double-buffered DMA. (3) Reduce to 4 layers + INT8 cache to meet the 1ms deadline (0.16ms/layer x 4 = 0.64ms). Final SRAM: ~96 KB (16 KB DMA + 64 KB activations/weights + 16 KB working). The key: treat flash as a managed memory tier with explicit software-controlled streaming.'
+  - Quantize the entire model from FP16 to INT4, reducing the KV-cache from 4 MB to 1 MB. Then use aggressive structured pruning to remove 75% of attention heads, bringing it to 256 KB.
+  - The junior team is correct — it's impossible. A transformer with 16 layers and 512-token KV-cache fundamentally cannot run on a 256 KB SRAM MCU. The requirement should be changed to a simpler RNN-based model.
   correct_index: 1
 status: published
 provenance: imported

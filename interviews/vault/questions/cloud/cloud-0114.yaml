@@ -8,28 +8,24 @@ competency_area: latency
 bloom_level: apply
 phase: both
 title: The Throughput Collapse
-scenario: You are managing an LLM serving endpoint that uses a 13B model on an H100 for document summarization.
-  Your goal is to maximize throughput (summaries per minute). You observe that as you increase the server's
-  batch size, throughput increases, but at a batch size of 64, P99 latency skyrockets and the effective
-  throughput starts to *decrease*. An engineer suggests the GPU is running out of VRAM. Using queueing
-  theory, demonstrate a more likely cause for this throughput collapse.
+scenario: "You are managing an LLM serving endpoint that uses a 13B model on an H100 for document summarization. Your goal is to maximize throughput (summaries per minute). You observe that as you increase the server's batch size, throughput increases, but at a batch size of 64, P99 latency skyrockets and the effective throughput starts to decrease. An engineer suggests the GPU is running out of VRAM."
 question: "If VRAM is not the issue, what queueing effect explains why batch size 64 makes P99 latency skyrocket and effective throughput decrease?"
 details:
-  realistic_solution: This is a classic case of head-of-line blocking explained by queueing theory. Throughput
-    is the number of requests completed over time. As the batch size increases, the time to process one
-    batch (`T_batch`) also increases. A new request arriving just after a large batch has started must
-    wait in the queue for the entire `T_batch` to finish before it can even be processed. When the request
-    arrival rate (`λ`) approaches the batch service rate, the queue length and wait times
-    grow exponentially. The P99 latency skyrockets because some requests get very unlucky, and the 'goodput'
-    (useful work) of the system collapses as it spends more time managing a massive queue.
-  common_mistake: Immediately assuming a hardware limit like VRAM capacity (OOM) or memory bandwidth has
-    been hit. While these are physical limits, a throughput collapse often happens before a hard OOM due
-    to queueing dynamics. Blaming VRAM doesn't explain why a *lower* batch size worked better.
-  napkin_math: 'At small batch sizes, T_batch is short (e.g., 10ms for BS=32), allowing a theoretical service rate μ = 100 batches/s, or 3200 req/s. If the arrival rate is λ = 2560 req/s, utilization ρ = 2560/3200 = 0.8. Queue delay scales with ρ / (1-ρ) = 4x T_batch (40ms). At BS=64, memory-bandwidth bottlenecks or compute saturation might increase T_batch non-linearly to 30ms (capacity drops to μ = 33.3 batches/s, or 2133 req/s). If the arrival rate remains high at λ = 2560 req/s, utilization ρ = 2560 / 2133 > 1. The system is mathematically overloaded. Queue delay approaches infinity, causing massive head-of-line blocking, SLA timeouts, and a collapse in effective goodput.'
+  realistic_solution: "This is a classic case of head-of-line blocking explained by queueing theory. Throughput is the number of requests completed over time. As the batch size increases, the time to process one batch (`T_batch`) also increases. A new request arriving just after a large batch has started must wait in the queue for the entire `T_batch` to finish before it can even be processed. When the request arrival rate (`λ`) approaches the batch service rate, the queue length and wait times grow exponentially. The P99 latency skyrockets because some requests get very unlucky, and the 'goodput' (useful work) of the system collapses as it spends more time managing a massive queue."
+  common_mistake: |
+    **The Pitfall:** Immediately assuming a hardware limit like VRAM capacity (OOM) or memory bandwidth has been hit.
+    **The Rationale:** While these are physical limits, a throughput collapse often happens before a hard OOM due to queueing dynamics. Blaming VRAM doesn't explain why a lower batch size worked better.
+    **The Consequence:** Engineers might provision larger GPUs unnecessarily or prematurely truncate sequences, rather than properly tuning maximum batch sizes to keep ρ < 1.
+  napkin_math: |
+    *   **Small Batch (BS=32):** `T_batch` = 10ms. Theoretical capacity `μ` = 100 batches/s (3200 req/s).
+    *   **Arrival Rate:** If `λ` = 2560 req/s, utilization `ρ` = 2560/3200 = 0.8. Queue delay scales with `ρ / (1-ρ)` = 4x `T_batch` (40ms).
+    *   **Large Batch (BS=64):** Compute saturation or bandwidth limits increase `T_batch` non-linearly to 30ms.
+    *   **Capacity Drop:** New capacity `μ` = 33.3 batches/s (2133 req/s).
+    *   **Overload:** With `λ` = 2560 req/s, `ρ` = 2560 / 2133 = 1.2 (>1).
+    *   **Result:** **The system is mathematically overloaded (ρ > 1). Queue lengths explode, SLA timeouts discard valid requests, causing effective throughput (goodput) to collapse.**
   options:
   - The GPU has run out of VRAM to store the KV caches for a batch of 64.
-  - The system is experiencing head-of-line blocking, where queue wait times explode as arrival rate nears
-    the batch service time.
+  - The system is experiencing head-of-line blocking, where queue wait times explode as arrival rate nears the batch service time.
   - The H100's memory bandwidth (3.35 TB/s) is saturated, making larger batches less efficient.
   - The CPU is bottlenecking on preparing batches, starving the GPU.
   correct_index: 1
@@ -38,13 +34,9 @@ provenance: imported
 requires_explanation: false
 expected_time_minutes: 6
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The napkin math focuses on memory-bound decode throughput and compute-bound prefill, but doesn't explicitly
-  calculate how queueing dynamics cause the effective throughput to decrease at large batch sizes, which
-  is central to the realistic solution's explanation of throughput collapse.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

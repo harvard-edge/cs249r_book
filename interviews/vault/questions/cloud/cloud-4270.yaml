@@ -8,25 +8,20 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: Model Parallelism Partitioning for XCD Locality
-scenario: You are deploying a 70B parameter model on a single MI300X (192 GB). Design
-  the parallelism partitioning strategy that maximizes XCD-local memory access.
-question: How would you partition a 70B model across MI300X's 8 XCDs to maximize local
-  memory access?
+scenario: You are deploying a 70B parameter model on a single MI300X containing 8 independent XCD dies (192 GB total).
+question: How would you partition the 70B model across the 8 XCDs to maximize local memory access?
 details:
-  realistic_solution: 'Partition by layer groups: assign consecutive transformer layers
-    (e.g., layers 0-9) to XCDs 0-1, layers 10-19 to XCDs 2-3, etc. Within each layer
-    group, keep both weight matrices and activation buffers on the same XCD pair.
-    Use pipeline parallelism between XCD groups rather than FSDP/ZeRO-3 across all
-    8. Cross-XCD traffic is then only activation tensors at pipeline stage boundaries
-    (much smaller than weights).'
-  common_mistake: Round-robin distributing weight shards across all XCDs. This maximizes
-    memory utilization but ensures every forward pass requires massive cross-XCD
-    fabric reads (weight all-gathers in FSDP or activation all-reduces in TP).
-  napkin_math: '70B params FP16 = 140 GB. 8 XCDs x 24 GB = 192 GB. Per XCD: 140/8
-    = 17.5 GB weights. Layer-local strategy (Pipeline): ~2 GB activations cross-XCD
-    per pipeline boundary. Pipeline boundary traffic: 2 GB x 7 boundaries = 14 GB.
-    FSDP strategy: 17.5 GB shard per XCD means gathering the other 1.53 GB per layer.
-    Total fabric traffic: 122.5 GB per forward pass.'
+  realistic_solution: 'Partition by layer groups: assign consecutive transformer layers (e.g., layers 0-9) to XCDs 0-1, layers 10-19 to XCDs 2-3, etc. Within each layer group, keep both weight matrices and activation buffers on the same XCD pair. Use pipeline parallelism between XCD groups rather than FSDP/ZeRO-3 across all 8. Cross-XCD traffic is then only activation tensors at pipeline stage boundaries (much smaller than weights).'
+  common_mistake: |
+    **The Pitfall:** Round-robin distributing weight shards across all XCDs (e.g., using FSDP indiscriminately).
+    **The Rationale:** Maximizing memory capacity utilization without considering the severe penalty of cross-XCD fabric bandwidth.
+    **The Consequence:** Every forward pass requires massive cross-XCD data movement, bottlenecking the unified package.
+  napkin_math: |
+    - 70B params FP16 = 140 GB.
+    - 8 XCDs × 24 GB = 192 GB. Per XCD requirement: 140/8 = 17.5 GB weights.
+    - **FSDP strategy:** 17.5 GB shard per XCD means gathering the other 122.5 GB per layer across the internal fabric.
+    - **Pipeline strategy (Layer-local):** Assign groups of layers to specific XCDs. The only cross-XCD traffic is the activation tensor (~2 GB) at pipeline boundaries (14 GB total).
+    - **Pipeline parallelism minimizes cross-die traffic by orders of magnitude.**
 status: published
 provenance: imported
 requires_explanation: true

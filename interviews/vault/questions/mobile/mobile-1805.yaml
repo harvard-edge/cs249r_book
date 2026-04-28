@@ -8,37 +8,19 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Shared Mmap vs Heap Allocation for Multi-Process Edge LLM
-scenario: You are designing a local AI assistant on a Jetson Orin (32 GB LPDDR5) that
-  requires three independent processes to concurrently run inference on the same 8
-  GB INT8 quantized LLM. The OS and base vision stack continuously consume 6 GB of
-  RAM. You must choose between Architecture A, where each process individually reads
-  the 8 GB weights into its own heap using standard file I/O, and Architecture B,
-  where the processes access the weights via a shared memory-mapped file (mmap with
-  MAP_SHARED). Evaluate the tradeoffs of both approaches regarding total memory consumption
-  and page cache behavior, and determine which architecture is required for this system.
-question: How would you evaluate the tradeoffs of both approaches regarding total
-  memory consumption and page cache behavior, and determine which architecture is
-  required for this system?
+scenario: You are designing a local AI assistant on a Jetson Orin (32 GB LPDDR5) that requires three independent processes to concurrently run inference on the same 8 GB INT8 quantized LLM. The OS and base vision stack continuously consume 6 GB of RAM.
+question: Evaluate the tradeoffs between heap allocation and shared memory-mapped (mmap) file access, and determine which architecture is required for this system.
 details:
-  realistic_solution: Architecture B is strictly required to prevent Out-Of-Memory
-    (OOM) crashes on the Jetson Orin. By using mmap with MAP_SHARED, the 8 GB weights
-    are loaded into the OS page cache exactly once, and all three processes share
-    the same physical memory pages mapped into their virtual address spaces. Architecture
-    A duplicates the 8 GB model into each process's private memory, leaving almost
-    zero room for the KV cache or activations. To handle cold-start latency in Architecture
-    B, use MAP_POPULATE or sequentially read the mmap region during initialization
-    to force page faults early.
-  common_mistake: Candidates often incorrectly assume that heap allocation (Architecture
-    A) strictly consumes 24 GB without realizing the OS page cache might also cache
-    the 8 GB file, causing even worse memory pressure. They may also choose Architecture
-    B but fail to mention the latency spikes caused by major page faults during cold
-    starts if the memory is not pre-faulted.
-  napkin_math: 'Total RAM available: 32 GB. Architecture A memory cost = 6 GB (OS)
-    + (3 processes * 8 GB heap allocation) = 30 GB base (leaves only 2 GB for KV cache/activations,
-    high OOM risk). Architecture B memory cost = 6 GB (OS) + 8 GB (shared mmap weights
-    in page cache) = 14 GB base. Free memory in Architecture B = 32 GB - 14 GB = 18
-    GB remaining, which safely provides 6 GB per process for KV cache and dynamic
-    activations.'
+  realistic_solution: Architecture B is strictly required to prevent Out-Of-Memory (OOM) crashes on the Jetson Orin. By using mmap with MAP_SHARED, the 8 GB weights are loaded into the OS page cache exactly once, and all three processes share the same physical memory pages mapped into their virtual address spaces. Architecture A duplicates the 8 GB model into each process's private memory, leaving almost zero room for the KV cache or activations. To handle cold-start latency in Architecture B, use MAP_POPULATE or sequentially read the mmap region during initialization to force page faults early.
+  common_mistake: |
+    **The Pitfall:** Assuming heap allocation strictly consumes 24 GB without realizing OS page cache implications.
+    **The Rationale:** Engineers forget that standard file I/O operations also populate the OS page cache, meaning the memory pressure is functionally doubled if not managed via shared mmap.
+    **The Consequence:** Extreme memory starvation, severe major page faults, and catastrophic Out-Of-Memory (OOM) crashes.
+  napkin_math: |
+    - **Total RAM Available:** 32 GB.
+    - **Architecture A (Heap):** 6 GB (OS) + (3 * 8 GB allocations) = 30 GB base memory. Leaves only 2 GB for KV cache (High OOM risk).
+    - **Architecture B (Shared Mmap):** 6 GB (OS) + 8 GB (shared weights mapped directly from page cache) = 14 GB base memory.
+    - **Conclusion:** Architecture B leaves **18 GB remaining** (6 GB per process for KV cache), making it strictly required to prevent crashes.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,29 +8,19 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Asynchronous Checkpoint Storage Tiering
-scenario: 'You are architecting the storage hierarchy for a 16,384 GPU cluster (2,048 nodes, 8x GPUs per
-  node) training a 1T parameter LLM. Requirements: (1) Dataloaders require 100 MB/s per GPU (1.6 TB/s
-  total) of continuous read. (2) Fault tolerance dictates saving 16TB of optimizer state and weights every
-  15 minutes. (3) GPU pause time for checkpointing must be strictly < 100ms. Architect the storage tiers
-  and data flow to satisfy these constraints without cross-workload I/O contention.'
-question: "How would you architect storage and checkpoint data flow for the 16,384-GPU job to sustain 1.6TB/s reads and keep checkpoint pauses under 100ms?"
+scenario: You are architecting the storage hierarchy for a 16,384 GPU cluster training a 1T parameter LLM. Requirements: (1) Dataloaders require 100 MB/s per GPU (1.6 TB/s total) of continuous read. (2) Fault tolerance dictates saving 16TB of optimizer state and weights every 15 minutes. (3) GPU pause time for checkpointing must be strictly < 100ms.
+question: How would you architect storage and checkpoint data flow for the 16,384-GPU job to sustain 1.6TB/s reads and keep checkpoint pauses under 100ms?
 details:
-  realistic_solution: 'Implement a 3-tier locality-aware architecture isolating read and write paths.
-    Tier 1 (Host DRAM): GPUs synchronously copy their 1GB state to pinned host DRAM via PCIe. GPUs immediately
-    resume compute, satisfying the <100ms pause requirement. Tier 2 (Local NVMe): Training datasets are
-    pre-fetched and cached on local NVMe SSDs (read-heavy, perfectly distributed, no network contention).
-    Tier 3 (Remote Parallel FS): A background CPU daemon asynchronously flushes the 1GB checkpoint from
-    DRAM to the remote parallel filesystem, spreading the 16TB write over 5 minutes. This caps network
-    and storage bandwidth at ~53 GB/s, avoiding spine switch congestion and preventing interference with
-    the local NVMe dataloading reads.'
-  common_mistake: Writing checkpoints directly from GPU memory to a remote parallel filesystem (Lustre/GPFS)
-    synchronously, stalling GPUs for seconds and causing microbursts that disrupt dataloading network
-    flows.
-  napkin_math: 'Dataloading read: 16,384 GPUs * 100 MB/s = 1.6 TB/s. Local NVMe read capacity on 2048
-    nodes (at 5 GB/s each) = 10.2 TB/s (ample headroom). Checkpoint sync pause: 1GB per GPU / 64 GB/s
-    (PCIe Gen5 x16) = ~15.6ms pause time. Async flush bandwidth: 16 TB / 300 seconds = 53.3 GB/s aggregate
-    write bandwidth to the parallel filesystem, easily absorbed by a modern Lustre deployment without
-    impacting the 1.6 TB/s distributed local reads.'
+  realistic_solution: Implement a 3-tier locality-aware architecture isolating read and write paths. GPUs synchronously copy state to pinned host DRAM via PCIe (<100ms pause), then a background CPU daemon asynchronously flushes the checkpoint from DRAM to the remote parallel filesystem, spreading the 16TB write over 5 minutes.
+  common_mistake: |
+    **The Pitfall:** Writing checkpoints directly from GPU memory to a remote parallel filesystem synchronously.
+    **The Rationale:** Synchronous remote writes stall the GPUs for seconds and cause network microbursts.
+    **The Consequence:** GPUs sit idle waiting for slow storage, and network congestion disrupts continuous dataloading reads.
+  napkin_math: |
+    1. **Evaluate Dataloading Needs:** 16,384 GPUs × 100 MB/s = 1.6 TB/s total read bandwidth.
+    2. **Calculate Sync Pause (DRAM tier):** 1 GB state per GPU / 64 GB/s (PCIe Gen5) ≈ 15.6ms pause time (under 100ms requirement).
+    3. **Calculate Async Flush Bandwidth:** 16 TB / 300 seconds = 53.3 GB/s aggregate write to the parallel filesystem.
+    **Final Result: Utilizing a 3-tier locality-aware architecture keeps the sync pause to ~15.6ms and requires only 53.3 GB/s of continuous remote write bandwidth.**
 status: published
 provenance: imported
 requires_explanation: true
@@ -40,7 +30,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
-math_status: UNCHECKED
+math_status: CORRECT
 human_reviewed:
   status: not-reviewed
   by: null

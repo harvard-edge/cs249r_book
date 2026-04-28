@@ -8,12 +8,21 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: 'KV-Cache: Fluency — Decode Throughput vs Context Length Trade-off on A17 Pro'
-scenario: For a 1B INT4 LLM on A17 Pro (35 TOPS, 8GB, 68 GB/s unified memory), compute decode throughput at context lengths 256, 1024, 4096. The model has 24 layers, 8 KV heads, head_dim=128. Show the KV bandwidth contribution at each context length.
-question: How does KV cache bandwidth affect decode throughput at 256, 1024, and 4096 tokens on A17 Pro?
+scenario: 'For a 1B INT4 LLM on A17 Pro (35 TOPS, 8GB, 68 GB/s unified memory), you are evaluating decode throughput at context lengths 256, 1024, and 4096. The model has 24 layers, 8 KV heads, and a head_dim of 128.'
+question: 'How does KV cache bandwidth affect decode throughput at 256, 1024, and 4096 tokens on A17 Pro?'
 details:
-  realistic_solution: Decode time per token = weight_load_time + KV_read_time + compute_time. Weight load is constant. KV read grows linearly. Find crossover where KV > weight load.
-  common_mistake: Computing only KV bandwidth without including weight loading bandwidth; not identifying which term dominates at different context lengths.
-  napkin_math: 'INT4 model: 1B × 0.5B = 500MB. Weight load per decode step: 500MB / 68 GB/s = 7.35ms. KV per token: 24 × 2 × 8 × 128 × 2B (bf16, even if weights INT4) = 98.3KB. At 256 tokens: KV = 256 × 98.3KB = 25.2MB, KV time = 0.37ms. Compute: 1B × 2 FLOPs / 35 TOPS = ~0.06ms. Total: 7.35 + 0.37 + 0.06 = 7.78ms → 128 tok/sec. At 1024 tokens: KV = 100.7MB, time = 1.48ms. Total: 7.35 + 1.48 + 0.06 = 8.89ms → 112 tok/sec. At 4096 tokens: KV = 402MB, time = 5.91ms. Total: 7.35 + 5.91 + 0.06 = 13.32ms → 75 tok/sec. KV crossover (KV time = weight time): tokens = 500MB / 98.3KB = 5086 tokens. At 5K tokens, KV read equals weight read. Beyond 5K, KV dominates.'
+  realistic_solution: 'Decode time per token is dominated by memory bandwidth (weight load time + KV read time). Weight load is constant, but KV read grows linearly with context length until it overtakes weight loading entirely.'
+  common_mistake: |
+    **The Pitfall:** Only calculating KV cache bandwidth and omitting the static model weight loading overhead.
+    **The Rationale:** Candidates laser-focus on the scaling context variable and forget the baseline cost of autoregressive generation.
+    **The Consequence:** Wildly overestimating decode throughput for short contexts and failing to identify the exact crossover point where KV cache dominates.
+  napkin_math: |
+    1. **Weight Load Cost:** 1B INT4 model = 500MB. Per decode step: 500MB / 68 GB/s = 7.35ms.
+    2. **KV Cache Footprint:** 24 layers × 2 (K,V) × 8 heads × 128 dim × 2 bytes = 98.3 KB per token.
+    3. **Context 256:** KV = 25.2 MB -> 0.37ms. Compute = ~0.06ms. Total = 7.35 + 0.37 + 0.06 = 7.78ms (**128 tokens/sec**).
+    4. **Context 1024:** KV = 100.7 MB -> 1.48ms. Total = 7.35 + 1.48 + 0.06 = 8.89ms (**112 tokens/sec**).
+    5. **Context 4096:** KV = 402 MB -> 5.91ms. Total = 7.35 + 5.91 + 0.06 = 13.32ms (**75 tokens/sec**).
+    6. **Crossover Point:** KV equals weight read when 500MB / 98.3KB = **5086 tokens**. Beyond ~5K tokens, KV read fully dominates.
 status: published
 provenance: imported
 requires_explanation: false

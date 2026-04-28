@@ -8,44 +8,24 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: The Real-Time Queue Collapse
-scenario: You run an LLM-based system for a hedge fund that analyzes market news in real time. Each request
-  has a hard 150ms P99 deadline from the moment it's sent; if a response takes longer, it's useless. The
-  service runs on H100s with continuous batching. During a market volatility event, the request rate triples.
-  The on-call engineer reports that the rate of dropped requests (those missing the deadline) has skyrocketed.
-  More alarmingly, the absolute number of *successful* requests served *within* the deadline has fallen
-  below the pre-surge baseline. The system hasn't crashed, but its useful throughput has collapsed. Explain
-  this phenomenon and critique the existing system's lack of a critical feature.
-question: "Why did useful throughput fall below baseline during the 3x surge, and what critical deadline-aware feature is missing?"
+scenario: You run an LLM-based system that analyzes market news in real time. Each request has a hard 150ms P99 deadline from the moment it's sent; if a response takes longer, it's useless. The service uses continuous batching. During a market volatility event, the request rate triples. The rate of dropped requests skyrockets, and the absolute number of successful requests served within the deadline falls below the pre-surge baseline. The system hasn't crashed.
+question: Why did useful throughput fall below baseline during the 3x surge, and what critical deadline-aware feature is missing?
 details:
-  realistic_solution: 'The system is experiencing a ''death spiral'' caused by processing stale requests.
-    When the arrival rate exceeds the system''s capacity, a queue forms. Without deadline awareness, the
-    server continues to pull from the head of the queue in a FIFO manner. A request might wait 120ms in
-    the queue, then get processed by the GPU for 50ms. The total time is 170ms, which misses the 150ms
-    deadline. The critical failure is that the system spent 50ms of valuable H100 time on a request that
-    was already doomed. This wasted work prevents the GPU from serving a newer request that *could* have
-    met the deadline. As the queue grows, the system spends more and more of its capacity on expired work,
-    causing the useful throughput to plummet. The critical missing feature is **deadline-aware load shedding**.
-    The system must:
+  realistic_solution: 'The system is experiencing a ''death spiral'' caused by processing stale requests. When the arrival rate exceeds the system''s capacity, a queue forms. Without deadline awareness, the server continues to pull from the head of the queue in a FIFO manner. A request might wait 120ms in the queue, then get processed by the GPU for 50ms. The total time is 170ms, which misses the 150ms deadline. The critical failure is that the system spent 50ms of valuable H100 time on a request that was already doomed. This wasted work prevents the GPU from serving a newer request that *could* have met the deadline. As the queue grows, the system spends more and more of its capacity on expired work, causing the useful throughput to plummet. The critical missing feature is **deadline-aware load shedding**. The system must:
 
-    1. **Check at Admission:** When a request arrives, estimate the current wait time. If `estimated_wait
-    + processing_time > deadline`, reject it immediately (e.g., HTTP 503).
+    1. **Check at Admission:** When a request arrives, estimate the current wait time. If `estimated_wait + processing_time > deadline`, reject it immediately (e.g., HTTP 503).
 
-    2. **Cancel in Queue:** Actively prune requests from the waiting queue if their time-in-system has
-    already exceeded the deadline. This stops the death spiral by ensuring GPU cycles are only spent on
-    viable work.'
-  common_mistake: 'The brute-force answer: ''We need more GPUs.'' While adding capacity would help, it
-    doesn''t explain why the system''s useful throughput *decreased*. A well-designed system should plateau,
-    not collapse. Another incorrect diagnosis is ''network saturation,'' as the core failure mechanism
-    is within the serving logic itself.'
-  napkin_math: Let's assume the H100 can process a batch of 32 requests with an average per-request processing
-    time of 50ms. The system's maximum capacity, μ, is `32 requests / 50ms = 640 req/s`. The baseline
-    arrival rate, λ, is `300 req/s`. Utilization ρ is `300/640 ≈ 47%`, and queueing is minimal. During
-    the surge, λ triples to `900 req/s`. Now ρ is `900/640 ≈ 140%`. The system is overloaded and the queue
-    grows. After just one second of the surge, there are `900 - 640 = 260` requests backlogged. A new
-    request arriving at t=1.0s will have to wait for those 260 requests to be processed. The wait time
-    will be at least `260 requests / 640 req/s ≈ 400ms`. This is far beyond the 150ms deadline. The server,
-    however, will dutifully process these 260 stale requests before even starting the new one, guaranteeing
-    that all of them miss their deadline and waste capacity.
+    2. **Cancel in Queue:** Actively prune requests from the waiting queue if their time-in-system has already exceeded the deadline. This stops the death spiral by ensuring GPU cycles are only spent on viable work.'
+  common_mistake: |
+    **The Pitfall:** Prescribing hardware scale-out as the primary fix.
+    **The Rationale:** "If throughput is too low, we need more GPUs." Engineers fail to analyze why useful throughput *decreased* rather than plateaued.
+    **The Consequence:** A "death spiral" occurs during spikes because the system lacks deadline-aware load shedding, wasting immensely expensive GPU cycles on expired work.
+  napkin_math: |
+    1. **Baseline Load:** Max capacity = 640 req/s. Arrival = 300 req/s. Utilization = 47%. Queueing is minimal.
+    2. **Surge Load:** Arrival jumps to 900 req/s. Utilization = 140%.
+    3. **Queue Growth:** Backlog grows by 260 requests per second (900 - 640).
+    4. **Wait Time:** A request arriving at t=1.0s waits behind 260 requests. Wait = 260 / 640 = 400ms.
+    5. **Conclusion:** 400ms > 150ms deadline. The server spends 100% of its compute processing stale, guaranteed-to-fail requests, plunging **useful throughput to zero**.
 status: published
 provenance: imported
 requires_explanation: false

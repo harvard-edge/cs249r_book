@@ -8,33 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing Low SM Utilization in LLM Inference
-scenario: You are profiling an autoregressive LLM inference service running on a single
-  A100 GPU (40GB HBM2, 2.0 TB/s peak bandwidth). The model has 15 billion parameters
-  loaded in FP16. When serving a single user request (batch size = 1), the service
-  generates 25 tokens per second, but the profiler shows that the GPU's compute units
-  (SMs) are at less than 5% utilization. An engineer suggests upgrading to the latest
-  cuBLAS library to optimize the matrix multiplication kernels and boost token throughput.
-  Analyze the root cause of this low compute utilization and determine why the proposed
-  solution will not work.
-question: Why is the A100 at <5% SM utilization for batch-1 decoding, and why won't
-  a cuBLAS upgrade materially improve tokens/sec?
+scenario: You are profiling an autoregressive LLM inference service running on a single GPU (40GB memory, 2.0 TB/s peak bandwidth). The model has 15 billion parameters loaded in FP16. When serving a single user request (batch size = 1), the service generates 25 tokens per second, but the profiler shows that the GPU's compute units (SMs) are at less than 5% utilization. An engineer suggests upgrading to the latest cuBLAS library to optimize matrix multiplication kernels.
+question: Why is the GPU at <5% SM utilization for batch-1 decoding, and why won't a cuBLAS upgrade materially improve tokens/sec?
 details:
-  realistic_solution: The compute units are starved for data due to the memory wall.
-    In autoregressive generation at batch=1, each token requires streaming the entire
-    30GB of model weights from HBM to SRAM. The theoretical maximum throughput is
-    2000 GB/s / 30 GB = 66.6 tokens/s. The observed 25 tokens/s represents ~37.5%
-    effective bandwidth utilization (realistic given access pattern overhead), confirming
-    the system is strictly HBM-bound. Increasing batch size is the primary lever to
-    amortize weight loads.
-  common_mistake: Assuming that low SM utilization indicates inefficient compute kernels
-    or a CPU-to-GPU data transfer bottleneck, failing to recognize that batch-size-1
-    autoregressive generation is fundamentally memory-bandwidth-bound with no way
-    to increase compute utilization without batching.
-  napkin_math: 15B params in FP16 = 30GB of weights. A100 Peak HBM Bandwidth = 2.0
-    TB/s. Theoretical max throughput = 2,000 GB/s / 30 GB/token = 66.6 tokens/second.
-    The observed 25 tokens/s represents ~37.5% effective memory bandwidth utilization
-    (typical for real-world memory access patterns), confirming the system is strictly
-    HBM-bound.
+  realistic_solution: The compute units are starved for data due to the memory wall. In autoregressive generation at batch=1, each token requires streaming the entire 30GB of model weights from HBM to SRAM. The observed 25 tokens/s represents ~37.5% effective bandwidth utilization, confirming the system is strictly HBM-bound. Increasing batch size is the primary lever to amortize weight loads.
+  common_mistake: |
+    **The Pitfall:** Assuming low SM utilization indicates inefficient compute kernels or CPU bottleneck.
+    **The Rationale:** Standard profiling wisdom dictates that low compute utilization means the compute logic itself needs optimization.
+    **The Consequence:** Engineering hours are wasted trying to squeeze cycle counts out of math operations that are already completely starved for data.
+  napkin_math: |
+    1. Calculate memory footprint: 15B params in FP16 = 30 GB of weights.
+    2. Identify memory wall: At batch size 1, autoregressive generation requires streaming the entire 30 GB of weights from memory for every single token.
+    3. Calculate theoretical max throughput: 2,000 GB/s bandwidth / 30 GB/token = 66.6 tokens/second.
+    4. Evaluate current performance: Generating 25 tokens/s represents 25 / 66.6 = **37.5% effective bandwidth utilization**, which is typical.
+    5. Conclude: The system is strictly memory-bandwidth bound, meaning compute optimizations (like cuBLAS) yield zero improvement.
 status: published
 provenance: imported
 requires_explanation: false

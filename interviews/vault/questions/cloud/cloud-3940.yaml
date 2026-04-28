@@ -8,26 +8,19 @@ competency_area: parallelism
 bloom_level: analyze
 phase: both
 title: 'Diagnosing Failed Overlap: NCCL Blocking on Compute Stream'
-scenario: You set up DDP with gradient bucketing and NCCL on a separate CUDA stream.
-  Nsight Systems profiling shows that the AllReduce kernels run sequentially with
-  backward computation — no overlap. Both the compute and NCCL kernels appear on the
-  same stream in the timeline. What went wrong?
-question: What went wrong?
+scenario: You set up DDP with gradient bucketing and NCCL on a separate CUDA stream. Nsight Systems profiling shows that the AllReduce kernels run sequentially with backward computation. Both the compute and NCCL kernels appear on the same stream in the timeline.
+question: Why are the NCCL AllReduce kernels failing to overlap with the backward computation, running sequentially instead?
 details:
-  realistic_solution: 'Check NCCL_LAUNCH_MODE environment variable. Before NCCL 2.19:
-    default is ''PARALLEL'', which uses separate streams. In some configurations,
-    it can be ''GROUP'', which serializes NCCL calls. Set NCCL_LAUNCH_MODE=PARALLEL
-    explicitly. Also check: (1) Is the CUDA device set correctly before NCCL initialization?
-    (2) Are backward hooks registered correctly? (3) Is there an implicit cudaStreamSynchronize()
-    between backward and AllReduce? In PyTorch DDP, gradient_as_bucket_view=True can
-    sometimes force synchronization. Also verify with NCCL_DEBUG=INFO that NCCL is
-    using the expected transport (NVLink vs PCIe) — PCIe fallback can serialize operations.'
-  common_mistake: Assuming PyTorch DDP always creates a separate NCCL stream. Depending
-    on the NCCL version and configuration, NCCL may run on the default stream if NCCL_LAUNCH_MODE
-    is not set correctly.
-  napkin_math: 'Serialized: 200ms backward + 50ms AllReduce = 250ms per step. Overlapped
-    (expected): max(200, 50) = 200ms. The missing overlap costs 50/250 = 20% throughput.
-    Fixing NCCL_LAUNCH_MODE recovers this entire 20%.'
+  realistic_solution: 'Check NCCL_LAUNCH_MODE environment variable. Before NCCL 2.19: default is PARALLEL, which uses separate streams. In some configurations, it can be GROUP, which serializes NCCL calls. Set NCCL_LAUNCH_MODE=PARALLEL explicitly. Also verify backward hooks and whether an implicit cudaStreamSynchronize() exists.'
+  common_mistake: |
+    **The Pitfall:** Assuming PyTorch DDP always creates a separate NCCL stream by default.
+    **The Rationale:** Depending on the NCCL version and environment, `NCCL_LAUNCH_MODE` may serialize calls if not explicitly set to `PARALLEL`.
+    **The Consequence:** Missing communication-computation overlap, leading to a significant drop in training throughput.
+  napkin_math: |
+    - **Serialized Execution:** 200ms backward + 50ms AllReduce = 250ms per step.
+    - **Overlapped Execution (expected):** max(200, 50) = 200ms per step.
+    - **Throughput Loss:** The missing overlap costs 50ms / 250ms = 20% throughput.
+    - **Result:** Fixing the launch mode recovers the entire **20% throughput loss**.
 status: published
 provenance: imported
 requires_explanation: false

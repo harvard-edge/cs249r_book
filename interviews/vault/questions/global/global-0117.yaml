@@ -8,18 +8,21 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Massive Context KV Cache Paging
-scenario: You are designing an inference engine to serve a 1-million context window Llama-3 8B model.
-  The hardware is a single node with 1x H100 (80GB) GPU, 2TB Host DRAM, and 4x Gen5 NVMe drives. The
-  KV cache for a single request exceeds the available HBM. Design a paging architecture to stream KV cache
-  across the memory hierarchy while maintaining at least 10 tokens/sec decoding speed.
-question: "How would you page the 1M-token KV cache across HBM, host DRAM, and NVMe while sustaining 10 tokens/sec?"
+scenario: You are designing an inference engine to serve a 1-million context window Llama-3 8B model. The hardware is a single node with 1x H100 (80GB) GPU, 2TB Host DRAM, and 4x Gen5 NVMe drives. The KV cache for a single request exceeds the available HBM.
+question: How would you page the 1M-token KV cache across HBM, host DRAM, and NVMe while sustaining 10 tokens/sec decoding speed?
 details:
   realistic_solution: To sustain 10 tokens/sec, full attention is physically impossible because reading the 71GB of paged KV cache over PCIe takes >1 second per token. We must design an explicit, software-managed 3-tier memory hierarchy and apply Sparse Attention or a Sliding Window. Divide the KV cache into fixed-size block chunks. Pin a sliding window of the most recent blocks and heavy-hitter tokens in HBM. As generation proceeds, fetch only the necessary sparse blocks from Host DRAM via PCIe in background streams. Use Host DRAM as an L2 cache, pulling from NVMe asynchronously to bypass OS page cache overhead. Compute and I/O must be perfectly overlapped within the 6.4GB/step PCIe limit.
-  common_mistake: Relying on OS-level Unified Memory (UVM) or mmap to automatically page the KV cache
-    from NVMe to HBM, which causes severe thread blocking and unpredictable latency spikes.
-  napkin_math: 1M tokens KV cache = 1M * 32 layers * 8 KV heads * 128 dim * 4 bytes (FP16 K+V) = 131GB.
-    Model weights ~16GB. With 80GB HBM, ~60GB is available for KV cache. We must page ~71GB to host memory.
-    To sustain 10 tokens/sec, we have 100ms per token. PCIe Gen5 x16 bandwidth = 64GB/s. We can transfer a maximum of 6.4GB per 100ms step. Since 71GB >> 6.4GB, we cannot fetch the entire paged KV cache per token. Therefore, strict full attention cannot run at 10 tokens/sec. We must use a sparse attention algorithm that fetches <6.4GB of critical KV blocks from Host DRAM per decoding step.
+  common_mistake: |
+    **The Pitfall:** Relying on OS-level Unified Memory (UVM) or mmap to automatically page the KV cache.
+    **The Rationale:** Treating the GPU memory extension as a generic software problem without checking bandwidth limits.
+    **The Consequence:** Unpredictable latency spikes and severe thread blocking, completely missing the 10 tokens/sec target.
+  napkin_math: |
+    - KV cache size: 1M tokens × 32 layers × 8 KV heads × 128 dim × 4 bytes = ~131 GB.
+    - Available HBM for KV: 80 GB total - 16 GB weights - 4 GB overhead ≈ 60 GB.
+    - Paged KV size: 131 GB - 60 GB = 71 GB residing in Host DRAM.
+    - Target speed: 10 tokens/sec = 100ms per step.
+    - Max PCIe transfer per step: 64 GB/s × 0.1s = **6.4 GB**.
+    - **Conclusion:** 71 GB > 6.4 GB, so full attention is physically impossible. Sparse attention is required.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,55 +8,24 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: The CMSIS-NN Dimension Limit
-scenario: You are porting an anomaly detection Autoencoder to an STM32. The input is a very long 1D time-series
-  signal of shape `(1, 1, 100000, 1)`. When you run this through TFLite Micro using CMSIS-NN kernels,
-  the convolution layer produces completely random garbage outputs, but it doesn't crash. What mathematical
-  assumption of the DSP library did you violate?
-question: "Why does a 100,000-sample 1D input produce garbage outputs in CMSIS-NN on STM32 without crashing?"
+scenario: You are porting an anomaly detection Autoencoder to an STM32. The input is a very long 1D time-series signal of shape `(1, 1, 100000, 1)`. When you run this through TFLite Micro using CMSIS-NN kernels, the convolution layer produces completely random garbage outputs, but it doesn't crash.
+question: Why does a 100,000-sample 1D input produce garbage outputs in CMSIS-NN on STM32 without crashing?
 details:
-  realistic_solution: 'CMSIS-NN uses int16_t for dimension variables internally. Your input dimension
-    of 100,000 exceeds INT16_MAX (32,767). The dimension wraps: 100,000 % 65,536 = 34,464, interpreted
-    as signed = -31,072. The convolution loop iterates ''for(i=0; i < -31072; i++)'' which immediately
-    exits, leaving the output buffer uninitialized with garbage. No crash because the loop simply doesn''t
-    execute — silent data corruption. Fix: split the 100K time series into chunks of 30,000 or fewer,
-    process sequentially, and concatenate results. Or use a version of TFLite Micro with int32 dimension
-    support.'
-  common_mistake: '"The MCU doesn''t have enough RAM for 100,000 floats." If it OOM''d, it would crash.
-    It didn''t crash; the math is just wrong.'
-  napkin_math: '`int16_t max = 32,767`. `100,000 % 65,536 = 34,464`. Since it''s signed, it wraps to `-31,072`.
-    The loop says `for(int i=0; i < -31072; i++)`, immediately fails, and leaves the uninitialized scratch
-    buffer as the "output".'
+  realistic_solution: 'CMSIS-NN uses int16_t for dimension variables internally. Your input dimension of 100,000 exceeds INT16_MAX (32,767). The dimension wraps: 100,000 % 65,536 = 34,464, interpreted as signed = -31,072. The convolution loop iterates `for(i=0; i < -31072; i++)` which immediately exits, leaving the output buffer uninitialized with garbage. No crash because the loop simply doesn''t execute — silent data corruption. Fix: split the 100K time series into chunks of 30,000 or fewer, process sequentially, and concatenate results. Or use a version of TFLite Micro with int32 dimension support.'
+  common_mistake: |
+    **The Pitfall:** Assuming the issue is an Out-Of-Memory (OOM) error.
+    **The Rationale:** Candidates assume "The MCU doesn't have enough RAM for 100,000 floats."
+    **The Consequence:** They miss the true root cause, because if it OOM'd, the framework would throw an explicit error or hard fault, not silently corrupt data.
+  napkin_math: |
+    1. Maximum value of signed 16-bit integer: `int16_t max = 32,767`.
+    2. Input dimension: `100,000`.
+    3. Integer overflow math: `100,000 % 65,536 = 34,464`.
+    4. Two's complement signed interpretation of 34,464: **`-31,072`**.
+    5. Result: The loop `for(int i=0; i < -31072; i++)` immediately terminates, leaving uninitialized memory.
   options:
-  - The 100,000-sample input exceeds the Cortex-M's maximum DMA transfer size, causing the DMA controller
-    to silently truncate the tensor and fill the remainder with zeros.
-  - 'CMSIS-NN uses int16_t for internal dimension variables. Input dimension 100,000 exceeds INT16_MAX
-    (32,767), wrapping to -31,072 (signed). The convolution loop ''for(i=0; i < -31072; i++)'' immediately
-    exits, leaving the output buffer uninitialized — silent data corruption, no crash. Fix: split into
-    chunks of <=30,000 samples, or use a TFLite Micro build with int32 dimension support.'
-  - The input tensor exceeds the MCU's maximum contiguous SRAM allocation, causing TFLite Micro to silently
-    fall back to a zero-padded smaller buffer.
-  - The STM32's memory protection unit (MPU) triggers a bus fault on the large allocation, which the TFLite
-    Micro error handler silently catches and returns a zero-filled buffer.
+  - The 100,000-sample input exceeds the Cortex-M's maximum DMA transfer size, causing the DMA controller to silently truncate the tensor and fill the remainder with zeros.
+  - CMSIS-NN uses int16_t for internal dimension variables. Input dimension 100,000 exceeds INT16_MAX (32,767), wrapping to -31,072 (signed). The convolution loop `for(i=0; i < -31072; i++)` immediately exits, leaving the output buffer uninitialized — silent data corruption, no crash. Fix: split into chunks of <=30,000 samples, or use a TFLite Micro build with int32 dimension support.
+  - The input tensor exceeds the MCU's maximum contiguous SRAM allocation, causing TFLite Micro to silently fall back to a zero-padded smaller buffer.
+  - The STM32's memory protection unit (MPU) triggers a bus fault on the large allocation, which the TFLite Micro error handler silently catches and returns a zero-filled buffer.
   correct_index: 1
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 6
-chains:
-- id: tinyml-chain-029
-  position: 0
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-validation_issues:
-- The question is missing 'reasoning_competency' and 'reasoning_mode' classifications.
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

@@ -8,46 +8,19 @@ competency_area: networking
 bloom_level: apply
 phase: inference
 title: The Laggy Generative Uncrop
-scenario: You are a mobile ML engineer diagnosing a new 'Generative Uncrop' feature. It feels sluggish,
-  taking about 1.5 seconds to return a result from the backend. Your mobile app sends a 1MB image, and
-  you've measured the device-to-cloud network time (RTT) as only 80ms. The backend ML team tells you they
-  are using a 10B parameter model with 40 layers, sharded across 4 H100 GPUs using tensor parallelism.
-  Your backend profiler shows the pure GPU compute time is only 150ms, but it also reveals that each of
-  the 40 layers requires synchronizing a 250MB tensor across all 4 GPUs. Given this data, apply napkin
-  math to diagnose the most likely performance bottleneck.
-question: "What inter-GPU communication bottleneck explains the 1.5s latency of the Generative Uncrop backend?"
+scenario: You are diagnosing a Generative Uncrop feature taking 1.5 seconds. Mobile network RTT is 80ms. The backend 10B parameter model is sharded across 4 H100 GPUs using tensor parallelism. Pure GPU compute is 150ms. Each of the 40 layers synchronizes a 250MB tensor across all 4 GPUs.
+question: What inter-GPU communication bottleneck explains the 1.5s latency of the Generative Uncrop backend?
 details:
-  realistic_solution: The primary bottleneck is the interconnect bandwidth between the GPUs. The total
-    time spent in communication overhead must be calculated and then used to find the system's effective
-    bandwidth. A massive discrepancy between the calculated effective bandwidth and the expected bandwidth
-    of a proper interconnect (like NVLink) points directly to an architectural problem, such as GPUs being
-    in different chassis connected by slow networking.
-  common_mistake: Engineers often fixate on the most familiar domain. A mobile engineer might blame the
-    mobile network latency, while a modeler might blame the model size. This fails to quantitatively isolate
-    the *overhead* component of the total latency (Total - Compute), which is the key to diagnosing system-level
-    bottlenecks. They fail to reason that 1.35s of non-compute time on the backend is the real issue.
-  napkin_math: "1. **Isolate Communication Time:** The total time spent on the backend is 1.5s (1500ms).\
-    \ The pure compute time is 150ms. Therefore, the time spent on communication and other overhead is\
-    \ `1500ms - 150ms = 1350ms` or `1.35s`.\n2. **Calculate Total Data Moved:** Each of the 40 layers\
-    \ synchronizes a 250MB tensor across 4 GPUs (an AllReduce). Total data moved = 40 layers × 250 MB\
-    \ = **10,000 MB = 10 GB**.\n3. **Calculate Effective Bandwidth:** Effective BW = Total Data / Communication\
-    \ Time = 10 GB / 1.35s = **7.4 GB/s**.\n4. **Compare to Expected Bandwidth:**\n   - NVLink (intra-node):\
-    \ 900 GB/s → would take 10 GB / 900 GB/s = **11 ms** (not 1350 ms)\n   - InfiniBand HDR (inter-node):\
-    \ ~25 GB/s → would take 10 GB / 25 GB/s = **400 ms**\n   - PCIe Gen4 x16: ~25 GB/s → would take **400\
-    \ ms**\n   - Ethernet 10 GbE: ~1.2 GB/s → would take 10 GB / 1.2 GB/s = **8.3s** (too slow)\n   -\
-    \ Ethernet 100 GbE: ~12 GB/s → would take **833 ms**\n5. **Diagnosis:** The effective bandwidth of\
-    \ 7.4 GB/s is consistent with GPUs connected over ~50-100 GbE networking, NOT NVLink. The 4 GPUs are\
-    \ likely spread across multiple chassis connected by datacenter Ethernet, not within a single node\
-    \ with NVLink. Moving to a single 4-GPU node with NVLink would reduce communication overhead from\
-    \ 1350ms to ~11ms, cutting total latency from 1.5s to ~240ms."
-  options:
-  - The model is too large for the H100s; the workload is compute-bound.
-  - The 80ms mobile network round-trip time is the dominant factor in the 1.5s latency.
-  - The GPUs are connected by a slow network fabric (~7.4 GB/s effective bandwidth), not NVLink, making
-    inter-GPU synchronization the bottleneck.
-  - The model weights are being re-loaded from NVMe SSD over PCIe for every request, causing a data loading
-    bottleneck.
-  correct_index: 2
+  realistic_solution: The primary bottleneck is the interconnect bandwidth between the GPUs. The total time spent in communication overhead must be calculated and then used to find the system's effective bandwidth. A massive discrepancy between the calculated effective bandwidth and the expected bandwidth of a proper interconnect (like NVLink) points directly to an architectural problem, such as GPUs being in different chassis connected by slow networking.
+  common_mistake: |
+    **The Pitfall:** Fixating on familiar domains like mobile network latency or model size.
+    **The Rationale:** Candidates fail to quantitatively isolate the overhead component (Total - Compute) to diagnose system-level bottlenecks.
+    **The Consequence:** Recommending irrelevant optimizations while ignoring the massive inter-GPU communication bottleneck.
+  napkin_math: |
+    * Non-compute backend time: 1.5s - 0.15s (compute) = 1.35s communication overhead.
+    * Total data moved: 40 layers × 250 MB = 10,000 MB (10 GB).
+    * Effective Bandwidth: 10 GB / 1.35s = 7.4 GB/s.
+    * **7.4 GB/s is consistent with Ethernet, proving the GPUs are not connected via high-speed NVLink (900 GB/s), which is the root cause of the delay.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -56,11 +29,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_status_pro: ERROR
-validation_issues_pro:
-- The scenario description is cut off mid-sentence ('each o').
-- The 'Napkin Math' section is incomplete; it calculates communication time but doesn't proceed to calculate
-  the effective bandwidth as described in the solution.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

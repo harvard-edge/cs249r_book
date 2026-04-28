@@ -8,37 +8,22 @@ competency_area: data
 bloom_level: analyze
 phase: training
 title: The Distributed Join Strategy Selection
-scenario: 'You need to enrich a 50 TB training dataset with metadata from three lookup tables: a 5 GB
-  language-detection table, a 200 GB domain-quality table, and a 2 TB URL-to-category mapping. Each join
-  is on a different key. You have a 500-node Spark cluster with 64 GB RAM per executor. For each of the
-  three joins, determine the optimal join strategy (broadcast, shuffle hash, or sort-merge) and calculate
-  the total network I/O across all three joins.'
-question: "Which join strategy should you use for the 5 GB, 200 GB, and 2 TB lookup joins, and what is the total network I/O?"
+scenario: You need to enrich a 50 TB training dataset with metadata from three lookup tables: a 5 GB language-detection table, a 200 GB domain-quality table, and a 2 TB URL-to-category mapping. Each join is on a different key. You have a 500-node Spark cluster with 64 GB RAM per executor.
+question: Which join strategy should you use for the 5 GB, 200 GB, and 2 TB lookup joins, and what is the total network I/O?
 details:
-  realistic_solution: 'Join 1 (50 TB \u00d7 5 GB on language key): Broadcast the 5 GB table.
-    Each of the 500 executors receives a copy: 5 GB \u00d7 500 = 2.5 TB network I/O, but
-    the 50 TB table stays put (zero shuffle). Total: 2.5 TB. Join 2 (50 TB \u00d7 200 GB
-    on domain key): The 200 GB table does NOT fit in the 64 GB executor memory, so it
-    cannot be broadcast. Use shuffle hash join or sort-merge join: shuffle both sides
-    by domain key. Network I/O: 50 TB + 200 GB \u2248 50.2 TB. Join 3 (50 TB \u00d7 2 TB on
-    URL key): Both tables are large. Sort-merge join: shuffle both sides by URL.
-    Network I/O: 50 TB + 2 TB = 52 TB. Total across all 3 joins: 2.5 + 50.2 + 52 =
-    104.7 TB. Optimization: if you order the joins so that Join 1 (broadcast) happens
-    first, the output is still ~50 TB. Then chain Join 2 and Join 3 \u2014 but with careful
-    co-partitioning, you can make Join 2''s output already partitioned by URL for Join
-    3, saving one shuffle.'
-  common_mistake: '"Use sort-merge join for everything because the tables are large." This ignores that
-    broadcast join is dramatically more efficient when one side fits in executor memory, and that join
-    strategy choice depends on the size ratio between the two tables.'
-  napkin_math: 'Broadcast breakeven point: broadcast costs R \u00d7 N (where R = small
-    table size, N = number of nodes). Shuffle costs L + R (both tables shuffled).
-    Broadcast wins when R \u00d7 N < L + R, i.e., R < L / (N - 1). For N=500, L=50 TB: R
-    < 50 TB / 499 \u2248 100 GB. However, broadcast requires R < Executor Memory (64 GB).
-    So tables under 64 GB should be broadcast. 5 GB: broadcast. 200 GB: shuffle (200
-    > 64). 2 TB: shuffle.'
+  realistic_solution: 'Join 1 (50 TB × 5 GB on language key): Broadcast the 5 GB table. Each of the 500 executors receives a copy: 5 GB × 500 = 2.5 TB network I/O, but the 50 TB table stays put (zero shuffle). Total: 2.5 TB. Join 2 (50 TB × 200 GB on domain key): The 200 GB table does NOT fit in the 64 GB executor memory, so it cannot be broadcast. Use shuffle hash join or sort-merge join: shuffle both sides by domain key. Network I/O: 50 TB + 200 GB ≈ 50.2 TB. Join 3 (50 TB × 2 TB on URL key): Both tables are large. Sort-merge join: shuffle both sides by URL. Network I/O: 50 TB + 2 TB = 52 TB. Total across all 3 joins: 2.5 + 50.2 + 52 = 104.7 TB. Optimization: if you order the joins so that Join 1 (broadcast) happens first, the output is still ~50 TB. Then chain Join 2 and Join 3 — but with careful co-partitioning, you can make Join 2''s output already partitioned by URL for Join 3, saving one shuffle.'
+  common_mistake: |
+    **The Pitfall:** Using Sort-Merge join for everything.
+    **The Rationale:** Candidates assume that because the main table is massive (50 TB), all joins must be heavily shuffled.
+    **The Consequence:** The candidate generates 50 TB of completely unnecessary shuffle network I/O for a tiny 5 GB table that could have simply been broadcasted.
+  napkin_math: |
+    *   **Join 1 (50 TB × 5 GB):** Broadcast the 5 GB table (fits in 64 GB). Network I/O = 5 GB × 500 nodes = 2.5 TB.
+    *   **Join 2 (50 TB × 200 GB):** 200 GB > 64 GB (cannot broadcast). Shuffle both. Network I/O = 50 TB + 200 GB = 50.2 TB.
+    *   **Join 3 (50 TB × 2 TB):** Shuffle both. Network I/O = 50 TB + 2 TB = 52 TB.
+    *   **Result:** Total network I/O = 2.5 + 50.2 + 52 = **104.7 TB**.
   options:
   - "Use Broadcast join for all three tables since Spark can spill broadcast variables to disk. Total network I/O is 2.5 TB."
-  - "Use Sort-Merge join for all three tables to avoid memory errors. Total network I/O is 50 TB + 5 GB + 200 GB + 2 TB \u2248 52.2 TB."
+  - "Use Sort-Merge join for all three tables to avoid memory errors. Total network I/O is 50 TB + 5 GB + 200 GB + 2 TB ≈ 52.2 TB."
   - "Use Broadcast join for the 5 GB table, and Sort-Merge or Shuffle Hash join for the 200 GB and 2 TB tables. Total network I/O is roughly 2.5 TB (broadcast) + 50.2 TB (shuffle 2) + 52 TB (shuffle 3) = 104.7 TB."
   - "Use Shuffle Hash join for the 5 GB and 200 GB tables, and Sort-Merge join for the 2 TB table. Total network I/O is 154 TB."
   correct_index: 2

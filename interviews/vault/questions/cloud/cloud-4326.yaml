@@ -8,12 +8,19 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: Two-Tower Model vs. DLRM for Retrieval
-scenario: 'Compare two-tower (dual encoder) models and DLRM for the retrieval stage of a recommendation pipeline (1B candidates → 10k). Evaluate on: (1) serving latency at 1M QPS, (2) ability to support feature interactions at retrieval, (3) storage cost for precomputed item embeddings. Which is appropriate for retrieval vs. ranking?'
+scenario: 'Compare two-tower (dual encoder) models and DLRM for the retrieval stage of a recommendation pipeline (1B candidates → 10k). Evaluate on: (1) serving latency at 1M QPS, (2) ability to support feature interactions at retrieval, (3) storage cost for precomputed item embeddings.'
 question: Which is appropriate for retrieval vs. ranking?
 details:
   realistic_solution: 'Two-tower: user tower and item tower compute independent embeddings. Item embeddings precomputed and indexed (e.g., FAISS). At serving: compute user embedding (1 tower forward pass, ~1 ms) + ANN search over 1B items (~10 ms with HNSW/FAISS). Total: ~11 ms per request regardless of catalog size. Storage: 1B items × 64-dim × 4 bytes = 256 GB for item index. Feature interactions: only between user and item via dot product/cosine similarity — no cross-feature interactions within a request. DLRM at retrieval: requires full forward pass for each candidate pair (user, item). 1B candidates × 1 μs per candidate = 1000 seconds — completely infeasible. Conclusion: two-tower is mandatory for retrieval due to O(1) serving cost via precomputed item embeddings. DLRM is appropriate only for ranking (1k candidates) where full pairwise computation is feasible within latency budget.'
-  common_mistake: Proposing DLRM for retrieval because it captures feature interactions. DLRM requires both user and item features simultaneously — it cannot precompute item representations, making it O(candidates × model_cost) at inference, infeasible for 1B candidates.
-  napkin_math: 'Two-tower retrieval: user tower = 10M-param MLP → ~1 ms. FAISS HNSW search over 1B items: ~10 ms at 95% recall. Total: 11 ms. DLRM retrieval (1B candidates): 1B × (10 μs per DLRM forward pass) = 10,000 s. Not feasible. Storage: 1B × 64 × 4 = 256 GB for FP32 item embeddings. With INT8: 64 GB — fits in cluster HBM. ANN index overhead (HNSW): typically ~10× base embedding size, so ~2.5 TB for FP32 / 640 GB for INT8.'
+  common_mistake: |
+    **The Pitfall:** Proposing DLRM for the retrieval stage because it captures rich feature interactions.
+    **The Rationale:** Engineers correctly recognize DLRM's superior expressive power but ignore the algorithmic complexity constraints of retrieval.
+    **The Consequence:** Proposing an architecture that requires O(candidates × model_cost) at inference, which is completely computationally infeasible for 1 billion candidates.
+  napkin_math: |
+    * **Two-tower retrieval:** User tower forward pass (~1 ms) + FAISS HNSW search over 1B items (~10 ms). Total: 11 ms.
+    * **DLRM retrieval:** Requires full forward pass for each user-item pair. 1B candidates × 10 µs per pass = 10,000 seconds per request.
+    * **Storage (Two-tower):** 1B items × 64-dim × 4 bytes (FP32) = 256 GB.
+    * **With an HNSW index overhead of ~10×, the total index size is ~2.5 TB, making Two-Tower the only feasible choice for retrieval.**
 status: published
 provenance: imported
 requires_explanation: false

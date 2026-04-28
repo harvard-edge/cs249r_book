@@ -8,35 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: Edge TPU Operator Fusion Tradeoff
-scenario: You are deploying a custom CNN-based vision model to a Google Coral Edge
-  TPU (4 TOPS INT8, 2W power budget) via a USB 3.0 connection. The model utilizes
-  a novel activation function, Swish, which is not natively supported by the Edge
-  TPU compiler and causes the execution graph to partition. You must choose between
-  maintaining the exact model accuracy by executing Swish on the host CPU between
-  TPU subgraphs, or replacing Swish with ReLU6 to enable full operator fusion into
-  a single INT8 TPU execution. Evaluate the system-level tradeoffs of these two alternatives.
-question: Should you keep Swish on the host CPU or replace it with ReLU6 for full
-  INT8 TPU execution, and why?
+scenario: You are deploying a custom CNN-based vision model to a Google Coral Edge TPU (4 TOPS INT8, 2W power budget) via a USB 3.0 connection. The model utilizes a novel activation function, Swish, which is not natively supported by the Edge TPU compiler and causes the execution graph to partition.
+question: Should you keep Swish on the host CPU or replace it with ReLU6 for full INT8 TPU execution, and why?
 details:
-  realistic_solution: Replacing the unsupported activation with ReLU6 (and subsequently
-    fine-tuning) is the vastly superior approach. The Edge TPU compiler requires fully
-    supported, quantized INT8 operations to fuse the network into a single execution
-    context. Graph partitioning forces intermediate tensors off the Edge TPU to the
-    host and back, incurring severe memory transfer latency and breaking the 2W power
-    efficiency goal by heavily taxing the host CPU.
-  common_mistake: Candidates often over-index on the slight accuracy drop from swapping
-    the activation function and propose keeping Swish on the host CPU. They fail to
-    recognize the devastating latency and power impact of graph partitioning, where
-    transferring intermediate feature maps back and forth over USB becomes the primary
-    bottleneck.
-  napkin_math: Assume an intermediate tensor size at the activation layer of 1x64x120x120.
-    In INT8, this is roughly 921 KB. A partitioned graph requires writing this tensor
-    to the host and reading the result back for the next TPU subgraph, totaling ~1.84
-    MB of transfer per frame. Over a practical USB 3.0 link (effective ~300 MB/s throughput),
-    this transfer alone takes ~6.1ms. Given a 30 FPS target (33.3ms budget per frame),
-    this USB transfer consumes 18% of the latency budget. Meanwhile, the 4 TOPS Edge
-    TPU could execute billions of INT8 operations in those 6.1ms, making full fusion
-    via ReLU6 mandatory for efficiency.
+  realistic_solution: Replacing the unsupported activation with ReLU6 (and subsequently fine-tuning) is the vastly superior approach. The Edge TPU compiler requires fully supported, quantized INT8 operations to fuse the network into a single execution context. Graph partitioning forces intermediate tensors off the Edge TPU to the host and back, incurring severe memory transfer latency and breaking the 2W power efficiency goal by heavily taxing the host CPU.
+  common_mistake: |
+    **The Pitfall:** Keeping the unsupported Swish activation on the host CPU to preserve a slight accuracy advantage.
+    **The Rationale:** Candidates over-index on model accuracy metrics and fail to recognize the severe latency penalty of moving intermediate feature maps across the USB bus.
+    **The Consequence:** Graph partitioning causes massive data movement overhead, breaking the latency budget and drastically increasing host CPU power consumption.
+  napkin_math: |
+    1. Calculate intermediate tensor size: 1x64x120x120 in INT8 = 921,600 bytes (~921.6 KB).
+    2. Calculate total transfer size per frame (read + write): 921.6 KB * 2 = ~1.84 MB.
+    3. Estimate USB 3.0 transfer latency: 1.84 MB / 300 MB/s = ~6.1ms.
+    4. Compare to frame budget: Target 30 FPS = 33.3ms budget. 6.1ms is ~18% of the total budget.
+    **The 6.1ms spent purely on USB transfer latency is devastating; full fusion via ReLU6 is mandatory to keep the operations on the 4 TOPS Edge TPU.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,40 +8,24 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: IoT Vibration Dynamic Range
-scenario: A Cortex-M7 microcontroller (512KB SRAM) monitors turbine vibrations via a 20M parameter 1D-ResNet.
-  Input signals have a massive dynamic range, from 0.01g (micro-fractures) to 100g (normal heavy load).
-  The NPU only supports symmetric INT8. Standard PTQ drops anomaly detection recall from 99% to 45%.
-question: "How would you preserve 0.01g turbine anomalies on a symmetric INT8 Cortex-M7 NPU with signals ranging up to 100g?"
+scenario: 'A Cortex-M7 microcontroller (512KB SRAM) monitors turbine vibrations via a 20M parameter 1D-ResNet. Input signals have a massive dynamic range, from 0.01g (micro-fractures) to 100g (normal heavy load). The NPU only supports symmetric INT8. Standard PTQ drops anomaly detection recall from 99% to 45%.'
+question: How would you preserve 0.01g turbine anomalies on a symmetric INT8 Cortex-M7 NPU with signals ranging up to 100g?
 details:
-  realistic_solution: 'Standard linear quantization fails here because the dynamic range (10^4) exceeds
-    the representational capacity of linear INT8. To fix this without upgrading the hardware, the system
-    architecture must incorporate non-linear signal compression before NPU execution.
-
-
-    Implement a log2 companding layer (similar to mu-law algorithm in audio) in the DSP/software before
-    passing the signal to the NPU. The 1D-ResNet must be retrained (QAT) to operate on these logarithmically
-    scaled inputs. Alternatively, if the model cannot be retrained on log inputs, use QAT with Parameterized
-    Clipping Activation (PACT). PACT learns a clipping threshold during training, deliberately clipping
-    the uninformative 100g outliers (e.g., clipping at 2g) to allocate all 256 INT8 bins to the critical
-    0-2g range where micro-fracture anomalies appear.'
-  common_mistake: Using standard min-max calibration over the whole dataset, which maps the 100g peaks
-    to 127 and completely crushes the critical 0.01g micro-fracture signatures into the 0 bin.
-  napkin_math: "Dynamic Range = [-100g, 100g]. Symmetric INT8 provides 255 bins. \nLinear Min-Max Bin\
-    \ size = 200 / 255 = 0.78g/bin. A 0.01g micro-fracture signal is 1/78th of a bin, so it rounds to\
-    \ exactly 0 (information destroyed).\nIf we use PACT and clip at [-2g, 2g], Bin size = 4 / 255 = 0.015g/bin.\
-    \ A 0.01g signal now registers in the first bin.\nIf we use Log2 companding: Log2(100) = ~6.6. Log2(0.01)\
-    \ = -6.6. Range is [-6.6, 6.6]. Bin size = 13.2 / 255 = 0.05. This perfectly preserves relative amplitude\
-    \ across the entire 10^4 range."
+  realistic_solution: 'Standard linear quantization fails because the dynamic range (10^4) exceeds the capacity of linear INT8. Implement a log2 companding layer (similar to mu-law) in the DSP before passing the signal to the NPU, and retrain the 1D-ResNet (QAT) to operate on these logarithmically scaled inputs. Alternatively, use QAT with Parameterized Clipping Activation (PACT) to deliberately clip 100g outliers and allocate all INT8 bins to the critical 0-2g range.'
+  common_mistake: |
+    **The Pitfall:** Relying on standard min-max calibration over the entire dataset.
+    **The Rationale:** Candidates blindly use standard PTQ tools without inspecting the signal dynamic range.
+    **The Consequence:** The 100g peaks map to 127, crushing the critical 0.01g micro-fracture signatures entirely into the 0 bin, destroying all anomaly recall.
+  napkin_math: |
+    *   **Linear Min-Max:** Range [-100g, 100g] over 255 bins = 200 / 255 = 0.78g/bin. A 0.01g signal rounds to 0.
+    *   **PACT Clipping:** Clip at [-2g, 2g]. Bin size = 4 / 255 = 0.015g/bin. A 0.01g signal registers in the first bin.
+    *   **Log2 Companding:** Log2(100) = 6.64. Log2(0.01) = -6.64. Range = 13.28. Bin size = 13.28 / 255 = 0.052.
+    *   **Result:** **Non-linear companding or extreme clipping perfectly preserves relative amplitude across the 10^4 range within INT8.**
   options:
-  - Using standard min-max calibration over the whole dataset, which maps the 100g peaks to 127 and completely
-    crushes the critical 0.01g micro-fracture signatures into the 0 bin.
-  - Network I/O is the dominant bottleneck; optimizing the model or inference pipeline will have minimal
-    impact on end-to-end latency.
-  - Standard linear quantization fails here because the dynamic range (10^4) exceeds the representational
-    capacity of linear INT8. To fix this without upgrading the hardware, the system architecture must
-    incorporate non-linear signal compression before NPU execution.
-  - The bottleneck is in the software framework, not the hardware; switching to a lower-level API will
-    achieve near-theoretical-peak performance.
+  - Using standard min-max calibration over the whole dataset, which maps the 100g peaks to 127 and completely crushes the critical 0.01g micro-fracture signatures into the 0 bin.
+  - Network I/O is the dominant bottleneck; optimizing the model or inference pipeline will have minimal impact on end-to-end latency.
+  - Standard linear quantization fails here because the dynamic range (10^4) exceeds the representational capacity of linear INT8. To fix this without upgrading the hardware, the system architecture must incorporate non-linear signal compression before NPU execution.
+  - The bottleneck is in the software framework, not the hardware; switching to a lower-level API will achieve near-theoretical-peak performance.
   correct_index: 2
 status: published
 provenance: imported

@@ -8,28 +8,20 @@ competency_area: architecture
 bloom_level: analyze
 phase: training
 title: TPU MXU Padding and Memory Stalls
-scenario: You migrated a two-tower retrieval model to a TPU v4 Pod. The model uses a custom dense architecture
-  with an input dimension of 1000, hidden dimension of 500, and a serving batch size of 150. Throughput
-  is capped at 12,000 QPS. Hardware profiling reveals severe memory stall times and an abysmal Matrix
-  Multiply Unit (MXU) utilization of 14%, despite theoretical arithmetic intensity suggesting it should
-  be compute-bound.
-question: "Why is MXU utilization only 14% on the TPU v4 Pod, and what changes would you make to improve throughput?"
+scenario: You migrated a two-tower retrieval model to a TPU v4 Pod. The model uses a custom dense architecture with an input dimension of 1000, hidden dimension of 500, and a serving batch size of 150. Hardware profiling reveals severe memory stall times and an abysmal Matrix Multiply Unit (MXU) utilization of 14%, despite theoretical arithmetic intensity suggesting it should be compute-bound. Throughput is capped at 12,000 QPS.
+question: Why is MXU utilization only 14% on the TPU v4 Pod, and what changes would you make to improve throughput?
 details:
-  realistic_solution: 'The root cause is a severe hardware-compiler-algorithm mismatch. TPU v4 uses a
-    128x128 Systolic Array (MXU). The XLA compiler maps matrix multiplications to this hardware by padding
-    dimensions to be multiples of 128 (or 8/128 depending on the specific axis and tiling). A batch size
-    of 150 is padded to 256. An input dimension of 1000 is padded to 1024. A hidden dimension of 500 is
-    padded to 512. The hardware is executing a 256x1024x512 matrix multiplication, loading padded zeros
-    from High Bandwidth Memory (HBM). This destroys arithmetic intensity and wastes MXU cycles. The co-design
-    fix involves three steps: 1) Algorithm: Change the model dimensions to 1024 and 512. 2) Serving: Force
-    the batch size to exactly 256. 3) Compiler: Ensure XLA avoids dynamic shape recompilations. This perfectly
-    aligns with the MXU tiles, eliminating padding overhead and restoring compute-bound performance.'
-  common_mistake: Assuming the model is memory-bandwidth bound and attempting to apply aggressive weight
-    quantization or operator fusion without addressing the matrix shapes.
-  napkin_math: 'Actual compute needed: 150 * 1000 * 500 = 75M MACs. Padded compute executed: 256 * 1024
-    * 512 = 134,217,728 MACs (~134M MACs). Wasted compute = 44%. Furthermore, memory reads for padded
-    tensors increase bandwidth pressure. By aligning dimensions (batch 256, dims 1024/512), MXU utilization
-    jumps from 14% to >60%, and throughput increases from 12k QPS to >35k QPS.'
+  realistic_solution: 'The root cause is a severe hardware-compiler-algorithm mismatch. TPU v4 uses a 128x128 Systolic Array (MXU). The XLA compiler maps matrix multiplications to this hardware by padding dimensions to be multiples of 128 (or 8/128 depending on the specific axis and tiling). A batch size of 150 is padded to 256. An input dimension of 1000 is padded to 1024. A hidden dimension of 500 is padded to 512. The hardware is executing a 256x1024x512 matrix multiplication, loading padded zeros from High Bandwidth Memory (HBM). This destroys arithmetic intensity and wastes MXU cycles. The co-design fix involves three steps: 1) Algorithm: Change the model dimensions to 1024 and 512. 2) Serving: Force the batch size to exactly 256. 3) Compiler: Ensure XLA avoids dynamic shape recompilations. This perfectly aligns with the MXU tiles, eliminating padding overhead and restoring compute-bound performance.'
+  common_mistake: |
+    **The Pitfall:** Assuming the model is natively memory-bandwidth bound and blindly applying weight quantization.
+    **The Rationale:** Candidates trust the theoretical arithmetic intensity of the algorithmic shapes without understanding how the compiler pads dimensions to fit hardware matrix units.
+    **The Consequence:** Quantization degrades model accuracy without fixing the underlying padding overhead that is destroying MXU utilization.
+  napkin_math: |
+    - **Algorithmic Compute Needed:** 150 × 1000 × 500 = 75M MACs.
+    - **TPU v4 Padding Rules:** Dimensions padded to multiples of 128 (or sub-tiles). Batch 150 → 256. Input 1000 → 1024. Hidden 500 → 512.
+    - **Hardware Compute Executed:** 256 × 1024 × 512 = 134,217,728 MACs (~134M MACs).
+    - **Wasted Compute:** (134M - 75M) / 134M = **~44% wasted cycles**, plus massive memory bandwidth wasted loading zero-padding.
+    - **Fix:** Aligning dimensions (e.g., 256 batch, 1024/512 dims) eliminates padding, boosting MXU util to >60% and QPS to >35k.
 status: published
 provenance: imported
 requires_explanation: false

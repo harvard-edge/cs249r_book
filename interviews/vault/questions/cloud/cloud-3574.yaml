@@ -8,34 +8,21 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: both
 title: 'DP-SGD Scaling on NVIDIA H100: Balancing Privacy and Performance'
-scenario: You are leading the development of a privacy-preserving machine learning
-  service. Your current task is to train a large language model using DP-SGD on a
-  dataset of 1 billion sensitive records. The training is performed on a single NVIDIA
-  H100 GPU (80 GB HBM3, 989 TFLOPS FP16 dense, 3.35 TB/s memory bandwidth, 700W TDP).
-  You need to achieve an (ε, δ)-privacy guarantee of (8, 1e-7) over one year of continuous
-  training. The current proposed training setup uses a microbatch size of 16 and a
-  global batch size of 4096. Your challenge is to determine the appropriate noise
-  scale, evaluate its impact on model utility, and assess the system-level implications
-  for throughput and resource utilization on the H100, ensuring the privacy budget
-  is met efficiently.
-question: How would you set the DP-SGD noise scale for (epsilon=8, delta=1e-7) on
-  a single H100 and assess utility, throughput, and resource impact?
+scenario: You are training a large language model using DP-SGD on a dataset of 1 billion sensitive records on a single NVIDIA H100 GPU. You need to achieve an (ε, δ)-privacy guarantee of (8, 1e-7) over one year of continuous training. The current setup uses a microbatch size of 16 and a global batch size of 4096.
+question: How does the DP-SGD noise scale and per-sample gradient computation impact utility, throughput, and resource utilization on the H100?
 details:
-  realistic_solution: To address this, implement a moments accountant for precise
-    ε tracking. Optimize the DP-SGD algorithm by leveraging the H100's FP16 dense
-    capabilities for gradient accumulation and noise generation where possible, maximizing
-    the 989 TFLOPS throughput. Carefully tune the microbatch and global batch sizes
-    to balance memory access patterns with the 3.35 TB/s HBM3 bandwidth. Explore advanced
-    techniques like adaptive clipping or hierarchical noise addition to minimize utility
-    loss. Profiling the H100 to identify bottlenecks in gradient aggregation and noise
-    injection is crucial for maximizing device utilization.
-  common_mistake: A common mistake is to either apply an overly conservative noise
-    scale, severely degrading model utility, or an insufficient one, violating the
-    privacy budget. Another pitfall is neglecting the significant computational overhead
-    of gradient clipping and noise addition in DP-SGD, which can bottleneck performance
-    on powerful hardware like the H100 if not efficiently parallelized or optimized,
-    especially regarding memory bandwidth for gradient access.
-  napkin_math: 'Global batch 4096, microbatch 16 -> 256 microbatches/step. 1 billion records / 4096 = 244,140 steps per epoch. For each microbatch, DP-SGD instantiates per-sample gradients, dramatically increasing memory traffic. For a 1B param model, weights = 2GB. Per-sample grads (BS=16) = 32GB. At 3.35 TB/s, reading/writing this takes ~20ms per microbatch -> ~5.1s per global step. Total time for 1 epoch = 244K * 5.1s ≈ 14 days. Noise scale required for ε=8 over 244K steps is roughly σ=0.001 due to massive privacy amplification (q ≈ 4e-6), so noise-induced utility loss is minimal. However, the 14-day epoch time and clipping overhead make the system heavily bottlenecked.'
+  realistic_solution: To address this, implement a moments accountant for precise ε tracking. Optimize the DP-SGD algorithm by leveraging the H100's FP16 dense capabilities for gradient accumulation and noise generation where possible, maximizing the 989 TFLOPS throughput. Carefully tune the microbatch and global batch sizes to balance memory access patterns with the 3.35 TB/s HBM3 bandwidth. Explore advanced techniques like adaptive clipping or hierarchical noise addition to minimize utility loss. Profiling the H100 to identify bottlenecks in gradient aggregation and noise injection is crucial for maximizing device utilization.
+  common_mistake: |
+    **The Pitfall:** Neglecting the massive computational and memory overhead of per-sample gradient clipping in DP-SGD.
+    **The Rationale:** It's easy to focus solely on the mathematical $\epsilon$ budget and assume standard SGD throughput, forgetting that DP-SGD breaks gradient accumulation by requiring distinct instantiations for every sample.
+    **The Consequence:** The system becomes catastrophically memory-bandwidth bottlenecked, making the 1-year training SLA impossible to hit despite having an H100.
+  napkin_math: |
+    - **Steps:** 1B records / 4096 global batch = $244,140\text{ steps}$ per epoch. (256 microbatches/step).
+    - **Memory Traffic (1B param model):** Weights = $2\text{GB}$. Per-sample grads (BS=16) = $32\text{GB}$.
+    - **HBM Bottleneck:** At $3.35\text{ TB/s}$, read/write takes $\sim 20\text{ms}$ per microbatch $\rightarrow \sim 5.1\text{s}$ per global step.
+    - **Epoch Time:** $244\text{K} \times 5.1\text{s} \approx 14\text{ days}$.
+    - **Noise Scale:** For $\epsilon=8$ over 244K steps with massive amplification ($q \approx 4\times 10^{-6}$), required noise $\sigma \approx 0.001$.
+    - **Conclusion:** Noise utility loss is minimal, but the **14-day epoch time is severely memory-bottlenecked** by per-sample gradients.
 status: published
 provenance: imported
 requires_explanation: false

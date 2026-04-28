@@ -8,27 +8,20 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: The Prefetch Buffer Sizing
-scenario: You're training a vision model on ImageNet. Your GPU processes each batch in 50ms, but `nvidia-smi`
-  shows utilization dropping to 0% every few seconds. You're using PyTorch DataLoader with `num_workers=2`
-  and `prefetch_factor=2`. Your colleague says 'just set num_workers=32.' Why might that make things worse,
-  and what's the right way to size the prefetch pipeline?
-question: "Why might that make things worse, and what's the right way to size the prefetch pipeline?"
+scenario: You're training a vision model on ImageNet. Your GPU processes each batch in 50ms, but utilization drops to 0% every few seconds. You're using PyTorch DataLoader with num_workers=2 and prefetch_factor=2. A colleague suggests setting num_workers=32.
+question: Why might setting num_workers=32 make things worse, and what's the right way to size the prefetch pipeline?
 details:
-  realistic_solution: Each DataLoader worker maintains its own prefetch buffer in CPU pinned memory. With
-    `prefetch_factor=2`, each worker holds 2 batches ready. The total pinned memory consumed is $\text{num\_workers}
-    \times \text{prefetch\_factor} \times \text{batch\_memory}$. Setting `num_workers=32` with large image
-    batches can exhaust CPU RAM, causing the OS to swap to disk — which is catastrophically slower than
-    the original bottleneck. The right approach is to calculate the minimum workers needed to keep the
-    GPU fed.
-  common_mistake: '"More workers is always better" or "Set num_workers to the number of CPU cores." Both
-    ignore the memory cost of prefetch buffers and the diminishing returns of over-provisioning.'
-  napkin_math: 'GPU processes a batch in 50ms. Each worker takes ~200ms to load + decode + augment a batch
-    (ImageNet JPEGs at 224×224). To keep the GPU continuously fed: need $200 / 50 = 4$ workers minimum.
-    With `prefetch_factor=2`: 4 workers × 2 prefetched batches = 8 batches in flight. Batch size 256 at
-    224×224×3 in FP32: $256 \times 224 \times 224 \times 3 \times 4 = 154\text{ MB}$ per batch. Total
-    pinned memory: $8 \times 154 = 1.23\text{ GB}$ — reasonable. At `num_workers=32`: $32 \times 2 \times
-    154 = 9.9\text{ GB}$ of pinned memory — wasteful, and the extra 28 workers sit idle because the GPU
-    only consumes one batch per 50ms.'
+  realistic_solution: Each DataLoader worker maintains its own prefetch buffer in CPU pinned memory. With `prefetch_factor=2`, each worker holds 2 batches ready. The total pinned memory consumed is $\text{num\_workers} \times \text{prefetch\_factor} \times \text{batch\_memory}$. Setting `num_workers=32` with large image batches can exhaust CPU RAM, causing the OS to swap to disk — which is catastrophically slower than the original bottleneck. The right approach is to calculate the minimum workers needed to keep the GPU fed.
+  common_mistake: |
+    **The Pitfall:** Believing "more workers is always better" or setting workers to match CPU cores.
+    **The Rationale:** This ignores the memory cost of prefetch buffers and the diminishing returns of over-provisioning.
+    **The Consequence:** CPU RAM gets exhausted, causing disk swapping which destroys training throughput.
+  napkin_math: |
+    - **Worker Demand:** 200ms load time / 50ms GPU time = 4 workers minimum.
+    - **Batch Memory:** 256 * 224 * 224 * 3 * 4 bytes = 154 MB.
+    - **Reasonable Setup:** 4 workers * 2 prefetched = 8 batches = 1.23 GB pinned memory.
+    - **Colleague's Setup:** 32 workers * 2 prefetched = 64 batches = 9.9 GB pinned memory.
+    - **Final Result:** **32 workers waste nearly 10 GB of RAM while 28 workers sit idle; 4 workers optimally feed the GPU.**
 status: published
 provenance: imported
 requires_explanation: false

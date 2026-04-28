@@ -8,12 +8,21 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: The Cache Miss Penalty
-scenario: You're running a 400 KB INT8 model on a Cortex-M7 at 480 MHz with 16 KB I-cache and 16 KB D-cache. The model's weights are in flash (with 6 wait states for a cache miss). During profiling, you see inference takes 8ms when weights are in DTCM but 22ms when left in flash. Explain the 2.75x slowdown and calculate the cache miss rate.
-question: "How would you explain the 2.75x slowdown and calculate the cache miss rate?"
+scenario: You're running a 400 KB INT8 model on a Cortex-M7 at 480 MHz with 16 KB I-cache and 16 KB D-cache. The model's weights are in flash (with 6 wait states for a cache miss). During profiling, you see inference takes 8ms when weights are in DTCM but 22ms when left in flash.
+question: How would you explain the 2.75x slowdown and calculate the cache miss rate?
 details:
   realistic_solution: 'The 2.75x slowdown is due to D-cache thrashing. The 400KB model far exceeds the 16KB D-cache. Because the working set of the largest layers exceeds the cache, convolution loops repeatedly evict and re-fetch the same weights. The 14ms penalty represents ~6.7M stall cycles, which at 6 cycles per miss equals ~1.12M cache misses. Since the model is only 12,800 cache lines (400KB), it means the weights are fetched ~90 times per inference due to severe cache thrashing. Fix: place the hottest layers'' weights in DTCM (zero wait states) to eliminate flash reads.'
-  common_mistake: 'Assuming that because the MCU has a cache, flash reads are effectively zero-wait-state. When the working set exceeds the D-cache, thrashing causes severe write amplification equivalent to fetching the model dozens of times.'
-  napkin_math: 'Fast (DTCM): 8ms. Flash: 22ms. Delta: 14ms = 6.72M stall cycles. Miss penalty: 6 cycles. Misses: 1.12M. D-cache: 16 KB / 32-byte lines = 512 lines. Model: 409.6 KB / 32 bytes = 12,800 lines. The 1.12M misses mean the 12,800 lines are fetched ~90 times per inference due to severe cache thrashing in the 16KB D-cache. Fix: DTCM placement of hot layers. If top 3 layers (60 KB weights) placed in DTCM: miss rate drops drastically.'
+  common_mistake: |
+    **The Pitfall:** Assuming that because the MCU has a cache, flash reads are effectively zero-wait-state.
+    **The Rationale:** Candidates underestimate the massive write amplification that occurs when the working set of convolution loops continuously evicts the tiny 16KB D-cache.
+    **The Consequence:** Accepting a 3x performance penalty instead of simply placing the hottest layers in zero-wait-state DTCM memory.
+  napkin_math: |
+    - Fast (DTCM): 8ms. Flash: 22ms.
+    - Penalty delta: 14ms = 6.72M stall cycles (at 480 MHz).
+    - Cache misses: 6.72M cycles / 6 cycles per miss = 1.12M misses.
+    - Model size in cache lines: 409.6 KB / 32 bytes = 12,800 lines.
+    - Misses per line: 1.12M misses / 12,800 lines = **~87 fetches per inference**.
+    - The severe slowdown is caused by D-cache thrashing.
   options:
   - The first run is slow due to TFLite Micro interpreter initialization overhead. Subsequent runs reuse cached interpreter state and skip the setup, achieving the 8ms baseline.
   - 'The 400 KB model far exceeds the 16 KB D-cache. When executing from flash, severe cache thrashing occurs. 14ms of stall = ~6.7M penalty cycles = 1.12M cache misses (6 wait-state penalty). This means the 12,800 cache lines (400 KB) are fetched ~90 times per inference. Fix: place the hottest layers (top 3, 60 KB) in DTCM for zero-wait-state access, reducing inference to ~12ms.'

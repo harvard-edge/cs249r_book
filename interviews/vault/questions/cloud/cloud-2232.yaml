@@ -8,29 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The I/O Wall at Scale
-scenario: A team scales their training job from 256 GPUs to 4,096 GPUs. Per-GPU throughput (samples/sec/GPU)
-  drops by 35%. Profiling shows GPU compute utilization has dropped from 82% to 53%, with large gaps between
-  training steps. The network interconnect shows only 40% utilization. The data pipeline uses a shared
-  Lustre filesystem with 500 GB/s aggregate bandwidth. What is happening?
-question: "What is happening?"
+scenario: 'A team scales their training job from 256 GPUs to 4,096 GPUs. Per-GPU throughput (samples/sec/GPU) drops by 35%. Profiling shows GPU compute utilization has dropped from 82% to 53%, with large gaps between training steps. The network interconnect shows only 40% utilization. The data pipeline uses a shared Lustre filesystem with 500 GB/s aggregate bandwidth.'
+question: 'What is causing the 35% drop in per-GPU throughput when scaling from 256 to 4,096 GPUs, given underutilized network and compute?'
 details:
-  realistic_solution: 'This is the ''I/O wall'' — storage bandwidth becomes the binding constraint before
-    network or compute. At 256 GPUs, each GPU''s data demand might be 100 MB/s (for a vision model with
-    large images). Total demand: $256 \times 100 = 25.6$ GB/s — well within Lustre''s 500 GB/s. At 4,096
-    GPUs: $4{,}096 \times 100 = 409.6$ GB/s — approaching 82% of Lustre''s capacity. But Lustre''s effective
-    bandwidth degrades non-linearly under heavy load due to lock contention, metadata overhead, and OST
-    hotspots. At 80%+ utilization, read latency spikes 3-5x, creating data pipeline stalls. The GPUs finish
-    their compute step, wait for the next batch from the data loader, and sit idle. The fix: add a local
-    NVMe caching tier so each node reads from Lustre once and serves subsequent accesses from local SSD,
-    reducing Lustre load by the number of epochs.'
-  common_mistake: Blaming the network interconnect because 'scaling problems must be network problems.'
-    The interconnect is underutilized — the bottleneck is upstream of the network, in the storage layer.
-  napkin_math: 'Per-GPU data rate: 100 MB/s. At 256 GPUs: 25.6 GB/s demand / 500 GB/s capacity = 5% utilization
-    — no contention. At 4,096 GPUs: 409.6 GB/s / 500 GB/s = 82% utilization. Lustre at 80%+ load: effective
-    latency increases ~3x (from 3ms to ~10ms per read). Data loader stall per step: $\Delta t_{\text{stall}}
-    \approx 7\text{ms} \times 100\text{ reads/step} = 700\text{ms}$. Training step compute time: ~1.5s.
-    With stalls: $1.5 + 0.7 = 2.2$s. Throughput drop: $(2.2 - 1.5) / 2.2 \approx 32\%$ — matches the observed
-    35%.'
+  realistic_solution: 'This is the "I/O wall" — storage bandwidth becomes the binding constraint before network or compute. At 256 GPUs, each GPU''s data demand might be 100 MB/s (for a vision model with large images). Total demand: 256 * 100 = 25.6 GB/s — well within Lustre''s 500 GB/s. At 4,096 GPUs: 4,096 * 100 = 409.6 GB/s — approaching 82% of Lustre''s capacity. But Lustre''s effective bandwidth degrades non-linearly under heavy load due to lock contention, metadata overhead, and OST hotspots. At 80%+ utilization, read latency spikes 3-5x, creating data pipeline stalls. The GPUs finish their compute step, wait for the next batch from the data loader, and sit idle. The fix: add a local NVMe caching tier so each node reads from Lustre once and serves subsequent accesses from local SSD, reducing Lustre load by the number of epochs.'
+  common_mistake: |
+    **The Pitfall:** Blaming the network interconnect for scaling issues without checking storage metrics.
+    **The Rationale:** Because scaling problems are frequently related to network communication (AllReduce), engineers assume "scaling problems must be network problems" and ignore I/O.
+    **The Consequence:** Teams waste time optimizing NCCL parameters or network topologies while the actual bottleneck remains upstream in the storage layer, leaving expensive compute idle.
+  napkin_math: |
+    - **Data Demand at 256 GPUs:** 256 * 100 MB/s = 25.6 GB/s (5% of Lustre capacity, no contention).
+    - **Data Demand at 4,096 GPUs:** 4096 * 100 MB/s = 409.6 GB/s (82% of Lustre capacity).
+    - **Contention Penalty:** At >80% load, Lustre read latency increases ~3x (e.g., 3ms to 10ms).
+    - **Data Loader Stall:** 7ms extra delay * 100 reads/step = 700ms stall.
+    - **Throughput Drop:** Original step (1.5s) vs New step (1.5s + 0.7s = 2.2s). (2.2 - 1.5) / 2.2 = **~32% drop (matching the observed 35%).**
   options:
   - 'The shared Lustre filesystem is hitting an I/O wall; at 4,096 GPUs the aggregate read demand exceeds 80% of the 500 GB/s capacity, causing non-linear latency spikes that stall the data loader.'
   - 'The InfiniBand network is bottlenecked by the AllReduce communication of 4,096 GPUs, causing the training step to block on network transfers.'

@@ -8,32 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The Prompt Caching Optimization
-scenario: Every request to our customer-support LLM starts with the same 2,000-token system prompt. We're
-  serving 1,000 requests/minute on 4× H100 GPUs. An engineer says 'we should cache the system prompt's
-  KV-cache.' Quantify the savings — is this worth the engineering effort?
-question: "Quantify the savings — is this worth the engineering effort?"
+scenario: Every request to our customer-support 70B LLM starts with the same 2,000-token system prompt. We are serving 1,000 requests/minute on 4× H100 GPUs. An engineer suggests prefix caching the system prompt's KV-cache.
+question: Quantify the compute and memory savings of caching the system prompt, and justify if it is worth the engineering effort.
 details:
-  realistic_solution: 'Caching the system prompt''s KV-cache provides two savings: (1) **compute savings**
-    — skip the 2,000-token prefill for every request, and (2) **memory savings** — store one copy of the
-    system prompt''s KV-cache instead of one per concurrent request. The compute savings dominate at high
-    QPS. This is essentially prefix caching, implemented in vLLM via automatic prefix caching (APC) and
-    in SGLang via RadixAttention.'
-  common_mistake: '"Prompt caching only saves a little memory — the real cost is in generation." Wrong.
-    The system prompt''s prefill is the most expensive per-request compute cost, and its KV-cache is duplicated
-    across every concurrent request.'
-  napkin_math: '70B Llama model (80 layers, 8 KV heads via GQA, 128 head_dim), 2,000-token system prompt.
-    **KV cache per token:** 2 (K+V) × 80 (layers) × 8 (kv_heads) × 128 (head_dim) × 2 bytes (FP16) = **327,680
-    bytes ≈ 320 KB/token**. **System prompt KV cache:** 2,000 tokens × 320 KB = **640 MB**. **Without
-    caching at 1,000 req/min:** Each request recomputes and stores its own copy. Peak concurrent requests
-    (assuming 2s avg generation): ~33 concurrent. Memory: 33 × 640 MB = **21.1 GB** duplicated KV cache
-    across the cluster. Compute: 2,000-token prefill per request = 2 × 70B × 2,000 = 280 TFLOPs per request.
-    At 1,000 req/min = 16.7 req/s: prefill load = 16.7 × 280 = **4,676 TFLOPS** — nearly 5× a single
-    H100''s capacity (989 TFLOPS), explaining the need for 4 GPUs. **With prefix caching:** Store one
-    copy of the system prompt''s KV cache (640 MB) shared across all requests. Memory savings: 21.1 GB
-    → 640 MB = **20.5 GB freed** for more concurrent requests. Compute savings: skip 2,000-token prefill
-    entirely. At 280 TFLOPs saved × 16.7 req/s = **4,676 TFLOPS saved** — equivalent to freeing ~4.7
-    H100s worth of prefill compute. This could allow serving the same traffic on 2 GPUs instead of 4,
-    halving cost.'
+  realistic_solution: 'Caching the system prompt''s KV-cache provides two savings: compute (skip the 2,000-token prefill) and memory (store one copy instead of one per concurrent request). The compute savings overwhelmingly dominate at high QPS, freeing up massive GPU capacity.'
+  common_mistake: |
+    **The Pitfall:** Dismissing prompt caching because it "only saves a little memory."
+    **The Rationale:** Candidates fail to realize that the system prompt prefill is the most compute-heavy phase and its KV-cache is duplicated across all concurrent requests.
+    **The Consequence:** Wasting massive amounts of compute and memory, forcing unnecessary GPU scaling.
+  napkin_math: |
+    - **KV Cache per Token:** 2 (K+V) × 80 (layers) × 8 (kv_heads) × 128 (head_dim) × 2 bytes (FP16) ≈ 320 KB/token.
+    - **System Prompt KV Cache:** 2,000 tokens × 320 KB = 640 MB.
+    - **Without Caching (1,000 req/min):** ~33 concurrent requests. Memory: 33 × 640 MB = 21.1 GB duplicated. Compute: 16.7 req/s × 280 TFLOPs = 4,676 TFLOPS load.
+    - **With Prefix Caching:** Memory savings: 21.1 GB → 640 MB = 20.5 GB freed. Compute savings: 4,676 TFLOPS saved.
+    - **Result:** Prompt caching effectively **frees ~4.7 H100s worth of prefill compute**, allowing the cluster to be halved.
 status: published
 provenance: imported
 requires_explanation: false

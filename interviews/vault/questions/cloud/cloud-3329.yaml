@@ -8,51 +8,20 @@ competency_area: precision
 bloom_level: analyze
 phase: training
 title: Optimizing Large Model Training with Mixed-Precision on Google TPU v5e
-scenario: You are training a large language model (LLM) on a Google TPU v5e, which
-  features 16 GB HBM, 197 TFLOPS BF16 performance, and 1.6 TB/s memory bandwidth.
-  Your current training setup uses FP32 for weights and activations, but you're encountering
-  out-of-memory errors and achieving significantly lower throughput than expected
-  given the TPU's BF16 TFLOPS. The model has 70 billion parameters, and you are using
-  a batch size of 1 for simplicity in initial debugging. Diagnose the primary bottlenecks
-  and propose a mixed-precision strategy, including specific techniques, to leverage
-  the TPU's capabilities more effectively and resolve the OOM issues while maintaining
-  acceptable model quality. Quantify the expected improvements.
-question: How would you diagnose the OOM and low throughput for a 70B FP32 LLM on
-  TPU v5e and design a mixed-precision strategy to fix it?
+scenario: You are training a 70B parameter LLM on a single TPU v5e using FP32 for weights and activations, with a batch size of 1. You are encountering out-of-memory errors and achieving significantly lower throughput than expected.
+question: How would you diagnose the OOM and low throughput for a 70B FP32 LLM on a TPU v5e and design a mixed-precision strategy to fix it?
 details:
-  realistic_solution: Implement mixed-precision training using BF16 for activations
-    and weights where possible, while keeping a copy of weights in FP32 for updates.
-    Crucially, apply dynamic loss scaling to prevent vanishing gradients. To manage
-    memory, consider gradient accumulation to simulate larger batch sizes, utilize
-    techniques like parameter sharding (e.g., within data parallelism) to distribute
-    model parameters across multiple TPUs (if available, though the scenario focuses
-    on a single v5e), or explore more memory-efficient optimizers or quantization-aware
-    training. For the given 70B parameter model on a single TPU v5e, it's highly likely
-    that full model parameters won't fit even in BF16, let alone optimizer states.
-    The most realistic solution would involve partitioning the model or using advanced
-    techniques like 'ZeRO' (Zero Redundancy Optimizer) if implemented on TPUs, or
-    data parallelism across multiple TPUs. If constrained to a *single* TPU v5e, the
-    candidate should acknowledge the limitations and suggest techniques to fit the
-    largest possible portion, or propose distributed training.
-  common_mistake: A common mistake is simply switching to BF16 without implementing
-    proper loss scaling, leading to vanishing gradients, or overlooking the memory
-    implications of optimizer states (e.g., Adam stores 2 extra states per parameter,
-    doubling or tripling memory usage relative to the model itself). Another mistake
-    is not considering the memory bandwidth as a bottleneck, assuming TFLOPS is the
-    sole constraint.
-  napkin_math: "1. **Model Size (FP32):** 70B params * 4 bytes/param = 280 GB. Exceeds\
-    \ 16 GB HBM significantly. Even with a single optimizer state, it's 280 GB * 3\
-    \ = 840 GB. \n2. **Model Size (BF16):** 70B params * 2 bytes/param = 140 GB. Still\
-    \ far exceeds 16 GB HBM. With optimizer states (FP32), it's 140 GB (BF16) + 70B\
-    \ * 2 * 4 bytes/param (optimizer states in FP32) = 140GB + 560 GB = 700 GB.\n\
-    3. **Throughput:** The TPU offers 197 TFLOPS BF16. FP32 operations would execute\
-    \ at a much lower rate. Moving to BF16 could potentially unlock near 197 TFLOPS\
-    \ if compute-bound. However, memory bandwidth (1.6 TB/s) is also critical. If\
-    \ the model is too large, the bandwidth required to fetch weights/activations\
-    \ for 70B parameters will quickly become a bottleneck, even if computation is\
-    \ fast. For example, loading 140 GB (BF16 model) once takes 140 GB / 1.6 TB/s\
-    \ = 0.0875 seconds, which is significant if done frequently or with large intermediate\
-    \ activations."
+  realistic_solution: Implement mixed-precision training using BF16 for activations and weights where possible, while keeping a copy of weights in FP32 for updates. Crucially, apply dynamic loss scaling to prevent vanishing gradients. To manage memory, consider gradient accumulation to simulate larger batch sizes, utilize techniques like parameter sharding (e.g., within data parallelism) to distribute model parameters across multiple TPUs (if available, though the scenario focuses on a single v5e), or explore more memory-efficient optimizers or quantization-aware training. For the given 70B parameter model on a single TPU v5e, it's highly likely that full model parameters won't fit even in BF16, let alone optimizer states. The most realistic solution would involve partitioning the model or using advanced techniques like 'ZeRO' (Zero Redundancy Optimizer) if implemented on TPUs, or data parallelism across multiple TPUs. If constrained to a *single* TPU v5e, the candidate should acknowledge the limitations and suggest techniques to fit the largest possible portion, or propose distributed training.
+  common_mistake: |
+    **The Pitfall:** Simply switching to BF16 without implementing proper loss scaling or considering optimizer state memory.
+    **The Rationale:** Candidates often assume changing the data type is a silver bullet and overlook the memory footprint of states like Adam's momentum and variance, or the risk of vanishing gradients.
+    **The Consequence:** The model still OOMs due to optimizer states, or training diverges due to numerical underflow.
+  napkin_math: |
+    1. **Model Size (FP32):** 70B params × 4 bytes = 280 GB. Exceeds 16 GB HBM significantly.
+    2. **Optimizer States:** 280 GB × 2 (Adam) = 560 GB. Total FP32 = 840 GB.
+    3. **Model Size (BF16):** 70B params × 2 bytes = 140 GB. Still far exceeds 16 GB HBM.
+    4. **Mixed Precision:** 140 GB (BF16) + 560 GB (FP32 optim states) = 700 GB.
+    **Conclusion:** Even in BF16, a 70B model cannot fit on a single 16 GB TPU; model parallel sharding across multiple TPUs is mathematically required.
 status: published
 provenance: imported
 requires_explanation: false

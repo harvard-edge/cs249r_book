@@ -8,24 +8,19 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: The CoreML Conversion Black Hole
-scenario: 'Your PyTorch model uses a custom ''GatedLinearUnit'' activation: `GLU(x) = x[:, :n] * sigmoid(x[:,
-  n:])`. The model works perfectly in PyTorch. After converting to Core ML via `coremltools`, inference
-  produces garbage — all outputs are near zero. No conversion error was raised. The model has 45 layers
-  and you don''t know which one is broken. How do you diagnose and fix this?'
-question: "How do you find and fix a silently broken Core ML conversion of a 45-layer PyTorch GLU model?"
+scenario: Your PyTorch model uses a custom 'GatedLinearUnit' activation (`GLU(x) = x[:, :n] * sigmoid(x[:, n:])`). The model works perfectly in PyTorch. After converting to Core ML via `coremltools`, inference produces garbage — all outputs are near zero. No conversion error was raised. The model has 45 layers and you don't know which one is broken.
+question: How do you diagnose and fix a silently broken Core ML conversion of a custom GLU operation in a 45-layer PyTorch model?
 details:
-  realistic_solution: 'CoreML''s converter silently mishandles the custom GLU op (x[:,:n] * sigmoid(x[:,n:])),
-    replacing it with an incorrect graph. Diagnose: binary search across 45 layers (6 iterations x 5 min
-    = 30 min). Export partial models, compare outputs, find divergence. Fix: register a custom op converter
-    in coremltools mapping GLU to split + sigmoid + mul. Prevention: CI step validating 100 inputs through
-    both PyTorch and CoreML, asserting max error < 1e-4.'
-  common_mistake: '"Re-export with ONNX as an intermediate format." ONNX may have the same problem — GLU
-    isn''t a standard ONNX op either. You''re just adding another conversion step that can silently fail.'
-  napkin_math: 'Bisection debugging: 6 iterations × 5 min each = 30 min to isolate the layer. Manual inspection
-    of 45 layers: ~4 hours. Speedup: 8×. Conversion validation cost: 100 inputs × 2 forward passes (PyTorch
-    + Core ML) × 50 ms = 10 seconds in CI. Cost of shipping the broken model: if 5% of users trigger the
-    GLU path and get garbage results, at 1M DAU = 50K bad experiences/day. At 2% uninstall rate from bad
-    experience: 1000 lost users/day × $5 LTV = $5,000/day.'
+  realistic_solution: 'CoreML''s converter silently mishandles the custom GLU op, replacing it with an incorrect graph. Diagnose: binary search across 45 layers (6 iterations x 5 min = 30 min). Export partial models, compare outputs, find divergence. Fix: register a custom op converter in coremltools mapping GLU to split + sigmoid + mul. Prevention: CI step validating 100 inputs through both PyTorch and CoreML, asserting max error < 1e-4.'
+  common_mistake: |
+    **The Pitfall:** Attempting to fix the issue by adding an intermediate conversion format like ONNX.
+    **The Rationale:** Candidates assume another format will handle custom ops better, ignoring that GLU isn't standard in ONNX either, adding more points of failure.
+    **The Consequence:** Wasting time on complex multi-step conversions without diagnosing the actual silent mapping failure.
+  napkin_math: |
+    1. **Bisection Debugging:** 6 iterations * 5 min each = 30 min to isolate the broken layer (vs ~4 hours manual inspection).
+    2. **Validation Cost:** 100 inputs * 2 forward passes (PyTorch + Core ML) * 50 ms = 10 seconds added to CI.
+    3. **Business Cost:** 5% of users hitting bad path at 1M DAU = 50K bad experiences/day. At 2% uninstall rate and $5 LTV, that's $5,000/day lost.
+    4. **Conclusion:** **Implement a custom op converter in `coremltools` and add a fast 10-second CI validation step.**
 status: published
 provenance: imported
 requires_explanation: false

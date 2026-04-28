@@ -8,32 +8,23 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: 'Causal Masking in FlashAttention: Skipping Unnecessary Tiles'
-scenario: In causal (autoregressive) attention, the attention matrix is lower-triangular
-  — tokens can only attend to previous tokens. When FlashAttention tiles the computation
-  into B_r × B_c blocks, approximately half the tiles are entirely above the diagonal
-  and contain only zeros. How does FlashAttention-2 exploit this for speedup, and
-  what is the FLOP savings?
-question: How does FlashAttention-2 exploit the causal lower-triangular mask when
-  tiling, and what FLOP savings does it get?
+scenario: In causal (autoregressive) attention, the attention matrix is lower-triangular — tokens can only attend to previous tokens. FlashAttention-2 tiles the computation into blocks.
+question: How does FlashAttention-2 exploit the causal lower-triangular mask when tiling, and what FLOP savings does it get?
 details:
-  realistic_solution: 'For an N×N attention matrix tiled into (N/B_r) × (N/B_c) tiles,
-    with causal masking: tiles fully above the diagonal are skipped entirely (no computation).
-    Tiles on the diagonal require partial masking. Tiles fully below the diagonal
-    compute normally. Number of full tiles (below diagonal) ≈ N²/(2B²), skipped tiles
-    ≈ N²/(2B²), diagonal tiles ≈ N/B. FLOP savings: approximately 50% compared to
-    full attention, because the upper triangle is never computed. FlashAttention-2
-    further optimizes diagonal tiles by using a specialized kernel that applies the
-    mask during the softmax computation within SRAM, avoiding wasted FLOPS on masked
-    positions. For non-causal attention (e.g., BERT-style), this optimization doesn''t
-    apply. Practical speedup for causal models: ~1.7-2× faster than non-causal FlashAttention
-    at the same sequence length.'
-  common_mistake: Thinking FlashAttention still computes all tiles and applies the
-    mask afterward. FlashAttention-2 skips entire tiles that are fully above the diagonal,
-    saving both compute and memory bandwidth.
-  napkin_math: 'N=8192, B=128. Total tiles: (64)² = 4096. Below diagonal: ~2016. On
-    diagonal: 64. Above diagonal (skipped): ~2016. FLOP savings: 2016/4096 = 49.2%.
-    Plus diagonal tile savings: ~25% of diagonal tile FLOPS masked = additional ~0.4%.
-    Total: ~50% FLOP reduction.'
+  realistic_solution: |
+    For an N x N attention matrix tiled into blocks, tiles fully above the diagonal are skipped entirely (no computation). Tiles on the diagonal require partial masking. Tiles fully below the diagonal compute normally. FlashAttention-2 skips entire tiles that are fully above the diagonal, saving both compute and memory bandwidth.
+  common_mistake: |
+    **The Pitfall:** Assuming FlashAttention computes all tiles and applies the causal mask afterward.
+    **The Rationale:** Candidates don't understand the block-level optimization that avoids computation entirely for upper-triangular blocks.
+    **The Consequence:** Overestimating the required FLOPS and memory bandwidth by roughly 2x for causal models.
+  napkin_math: |
+    - N=8192, B=128.
+    - Total tiles: (8192/128)^2 = 64^2 = 4096 tiles.
+    - Diagonal tiles: 64.
+    - Above diagonal (skipped): (4096 - 64) / 2 = 2016 tiles.
+    - FLOP savings from skipped tiles: 2016 / 4096 = 49.2%.
+    - Additional diagonal tile savings (masking during softmax): ~0.4%.
+    - **Skipping upper-triangular tiles reduces total FLOPS by approximately 50%.**
 status: published
 provenance: imported
 requires_explanation: false

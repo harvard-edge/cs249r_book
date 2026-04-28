@@ -8,28 +8,19 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Backward Pass Communication in TP
-scenario: In the forward pass of Megatron's fused column→row design, an AllReduce
-  follows the row-parallel layer. What communication operations occur in the backward
-  pass through the same two layers? Derive the total communication volume per block
-  for a full training step.
-question: In Megatron's fused column→row block, what TP communications occur in backward,
-  and what is the per-block volume for a full training step?
+scenario: In the forward pass of Megatron's fused column→row design, an AllReduce follows the row-parallel layer.
+question: In Megatron's fused column→row block, what TP communications occur in backward, and what is the per-block volume for a full training step?
 details:
-  realistic_solution: 'Forward: Identity (replicate input) → Column-parallel GEMM
-    → Row-parallel GEMM → AllReduce (sum partials). Backward (reverse order): AllReduce
-    backward = Identity (gradients pass through unchanged). Row-parallel backward:
-    local gradient GEMM yields a column-partitioned gradient with NO communication.
-    Column-parallel backward: local gradient GEMM yields partial full-sized gradients.
-    The gradient of the Identity (input replication) is AllReduce, which sums these
-    partial gradients from all ranks. So the backward pass has exactly 1 AllReduce
-    (before the column-parallel input). Total per block per training step: Forward:
-    1 AllReduce (after row-parallel). Backward: 1 AllReduce (before column-parallel).
-    For a block with both Attention and MLP: 4 AllReduces total (2 forward + 2 backward).
-    Communication volume per AllReduce = 2 × (P-1)/P × batch × seq × hidden × 2B.'
-  common_mistake: Assuming backward communication mirrors forward exactly. The backward
-    pass through an AllReduce in the forward becomes a no-op (identity) in backward,
-    while the forward identity (input replication) becomes an AllReduce in backward.
-  napkin_math: '70B model, hidden=8192, TP=8, batch×seq=8192: per AllReduce = 2 × 7/8 × 8192 × 8192 × 2B = 234.8 MB. 4 per block × 80 blocks = 320 AllReduces × 234.8 MB = 75.1 GB per step.'
+  realistic_solution: 'Forward: Identity (replicate input) → Column-parallel GEMM → Row-parallel GEMM → AllReduce (sum partials). Backward (reverse order): AllReduce backward = Identity (gradients pass through unchanged). Row-parallel backward: local gradient GEMM yields a column-partitioned gradient with NO communication. Column-parallel backward: local gradient GEMM yields partial full-sized gradients. The gradient of the Identity (input replication) is AllReduce, which sums these partial gradients from all ranks. So the backward pass has exactly 1 AllReduce (before the column-parallel input). Total per block per training step: Forward: 1 AllReduce (after row-parallel). Backward: 1 AllReduce (before column-parallel). For a block with both Attention and MLP: 4 AllReduces total (2 forward + 2 backward). Communication volume per AllReduce = 2 × (P-1)/P × batch × seq × hidden × 2B.'
+  common_mistake: |
+    **The Pitfall:** Assuming backward communication mirrors forward exactly.
+    **The Rationale:** It intuitively makes sense that operations reverse symmetrically in the backward pass.
+    **The Consequence:** Candidates miscalculate the communication volume, failing to realize the backward pass through an AllReduce in the forward becomes a no-op (identity) in backward, while the forward identity becomes an AllReduce in backward.
+  napkin_math: |
+    - 70B model, hidden=8192, TP=8, batch×seq=8192.
+    - Volume per AllReduce = 2 × (P-1)/P × batch × seq × hidden × 2B.
+    - Per AllReduce = 2 × 7/8 × 8192 × 8192 × 2B = 234.8 MB.
+    - **4 AllReduces per block × 80 blocks = 320 AllReduces × 234.8 MB = 75.1 GB per training step.**
 status: published
 provenance: imported
 requires_explanation: false

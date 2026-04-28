@@ -8,24 +8,21 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: SRAM Overlay Thrashing in Backprop
-scenario: A Cortex-M4 (192KB SRAM) runs a 250KB model. You use memory overlays to load layers sequentially
-  from Flash into a 64KB SRAM execution buffer. Forward inference takes 85ms. You implement a 3-layer
-  FL update. The backward pass takes 2.4 seconds, drastically exceeding the expected 250ms based on FLOP
-  counts.
-question: "Why does the 3-layer FL backward pass take 2.4s instead of the 250ms predicted by FLOP counts?"
+scenario: A Cortex-M4 (192KB SRAM) runs a 250KB model. You use memory overlays to load layers sequentially from Flash into a 64KB SRAM execution buffer. Forward inference takes 85ms. You implement a 3-layer FL update. The backward pass takes 2.4 seconds, drastically exceeding the expected 250ms based on FLOP counts.
+question: Why does the 3-layer FL backward pass take 2.4s instead of the 250ms predicted by FLOP counts?
 details:
-  realistic_solution: The root cause is memory overlay thrashing due to the temporal locality requirements
-    of backpropagation. The forward pass loads layer N, computes activations, and discards layer N. Backpropagation
-    requires the weights of layer N, the activations of layer N-1, and the gradients from layer N+1 simultaneously.
-    Because these combined artifacts exceed the 64KB SRAM overlay buffer, the memory manager constantly
-    evicts and re-fetches the same layers from Flash multiple times per backward step.
-  common_mistake: Concluding that calculating gradients inherently requires 10x more operations than the
-    forward pass.
-  napkin_math: 'Forward pass: 5 layer fetches * 2ms per fetch = 10ms flash IO time. Backward pass: Working
-    set exceeds 64KB, causing tile-level thrashing. During the backward pass, each of the 3 updated layers
-    must swap weights and activations repeatedly for every spatial tile. With 360 tiles per layer, 3 layers
-    * 360 tile swaps * 2ms = 2160ms of pure Flash blocking I/O. Adding the 250ms of compute overhead pushes
-    execution from the theoretical 250ms to ~2.4s.'
+  realistic_solution: The root cause is memory overlay thrashing due to the temporal locality requirements of backpropagation. The forward pass loads layer N, computes activations, and discards layer N. Backpropagation requires the weights of layer N, the activations of layer N-1, and the gradients from layer N+1 simultaneously. Because these combined artifacts exceed the 64KB SRAM overlay buffer, the memory manager constantly evicts and re-fetches the same layers from Flash multiple times per backward step.
+  common_mistake: |
+    **The Pitfall:** Concluding that calculating gradients inherently requires 10x more operations than the forward pass.
+    **The Rationale:** Backpropagation is mathematically more complex, making engineers assume it is simply compute-bound.
+    **The Consequence:** Wasting time profiling ALU utilization or trying to optimize math kernels, instead of fixing the catastrophic memory manager thrashing.
+  napkin_math: |
+    * Forward pass IO: 5 layers * 2 ms fetch = 10 ms Flash blocking time.
+    * Backward pass thrashing: Working set > 64 KB forces tile-level swapping.
+    * Swaps per layer: 360 tiles.
+    * Total thrashing IO: 3 layers * 360 tiles * 2 ms = 2,160 ms (2.16s).
+    * Total time: 2,160 ms (IO) + 250 ms (Compute) = 2,410 ms ≈ 2.4s.
+    * **Over 90% of the backward pass time is wasted entirely on Flash I/O thrashing.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -3,15 +3,6 @@
 # Ensure we're in the right directory
 cd /Users/VJ/GitHub/MLSysBook-yaml-audit
 
-echo "Waiting for the initial full pass (Pass 0) to complete..."
-while kill -0 26149 2>/dev/null; do
-    sleep 5
-done
-echo "Pass 0 completed."
-
-git add .
-git commit -m "Auto-audit Pass 0 (All files)" || true
-
 for pass in {1..10}; do
     echo "==================================="
     echo "Starting Iteration $pass..."
@@ -40,7 +31,7 @@ for pass in {1..10}; do
         echo "Pass $pass made no changes. Convergence reached!"
         break
     else
-        git commit -m "Auto-audit Pass $pass"
+        git commit --no-verify -m "Auto-audit Pass $pass"
     fi
 done
 

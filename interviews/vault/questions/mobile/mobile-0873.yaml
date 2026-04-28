@@ -8,33 +8,22 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Diagnosing Slow First-Token Latency in On-Device RAG on Tensor G3
-scenario: A Tensor G3 (7.5 TOPS, 12GB) on-device RAG app shows time-to-first-token
-  (TTFT) of 4.2 seconds despite the LLM being loaded into memory. Users experience
-  a 4-second freeze before any text appears. The LLM is a 1B INT8 model with a 2048-token
-  context. Retrieval returns 3 documents averaging 400 tokens each. Diagnose the root
-  cause and propose a fix.
-question: Why does Tensor G3 on-device RAG have 4.2 s TTFT with a loaded 1B INT8 LLM
-  and three 400-token documents?
+scenario: A Tensor G3 (7.5 TOPS, 12GB) on-device RAG app shows time-to-first-token (TTFT) of 4.2 seconds despite the LLM being loaded into memory. Users experience a 4-second freeze before any text appears. The LLM is a 1B INT8 model with a 2048-token context. Retrieval returns 3 documents averaging 400 tokens each.
+question: Why does Tensor G3 on-device RAG have 4.2 s TTFT with a loaded 1B INT8 LLM and three 400-token documents?
 details:
-  realistic_solution: 'Diagnose by timing: prefill of 2048 tokens at Tensor G3 7.5
-    TOPS. For 1B INT8 model (2B ops per forward token): 2048 tokens * 2B ops / 7.5e12
-    TOPS * efficiency_factor(0.3) = 2048 * 2e9 / (7.5e12 * 0.3) = 1.82s. Plus overhead:
-    tokenization (50ms), document loading from SQLite (200ms), embedding for retrieval
-    (300ms), FAISS search (50ms). Total: 50+200+300+50+1820=2420ms ≈ 2.4s for pipeline.
-    If measured 4.2s: gap of 1.8s suggests cold model load from flash despite being
-    ''in memory'' — iOS/Android may have evicted model from GPU memory to CPU RAM.
-    Fix: verify model is in GPU/NPU memory with a warm-up ping every 30s.'
-  common_mistake: 'Assuming TTFT is dominated by model weight loading (already in
-    memory) or generation (which hasn''t started yet). The real culprit is prefill:
-    processing the 2048-token prompt (system prompt + 3 retrieved docs + query) to
-    build the KV cache before the first token can be generated.'
-  napkin_math: 'Tensor G3: 7.5 TOPS. 1B INT8 prefill: each token requires 2 * num_params
-    ops = 2B ops. 2048 tokens: 2048 * 2e9 = 4.096e12 ops. At 7.5e12 TOPS * 0.3 utilization
-    = 2.25e12 effective TOPS: 4.096/2.25 = 1.82s prefill. Add retrieval pipeline:
-    300ms embed + 50ms search = 350ms. Total minimum: 2.17s. If 4.2s observed: 2.03s
-    extra. Likely cause: model evicted from NPU cache (Tensor G3 NPU has limited persistent
-    memory). Fix: keep-alive inference every 25s adds ~50ms overhead but prevents
-    2s cold-NPU penalty.'
+  realistic_solution: 'Diagnose by timing: prefill of 2048 tokens at Tensor G3 7.5 TOPS. For 1B INT8 model (2B ops per forward token): 2048 tokens * 2B ops / 7.5e12 TOPS * efficiency_factor(0.3) = 2048 * 2e9 / (7.5e12 * 0.3) = 1.82s. Plus overhead: tokenization (50ms), document loading from SQLite (200ms), embedding for retrieval (300ms), FAISS search (50ms). Total: 50+200+300+50+1820=2420ms ≈ 2.4s for pipeline. If measured 4.2s: gap of 1.8s suggests cold model load from flash despite being ''in memory'' — iOS/Android may have evicted model from GPU memory to CPU RAM. Fix: verify model is in GPU/NPU memory with a warm-up ping every 30s.'
+  common_mistake: |
+    **The Pitfall:** Assuming TTFT is dominated by model weight loading or generation speed.
+    **The Rationale:** Engineers forget that processing a large context window (prefill) scales quadratically and is computationally intensive on mobile hardware.
+    **The Consequence:** Time is wasted optimizing disk I/O when the issue is actually the NPU prefill compute and cache eviction.
+  napkin_math: |
+    1. Prefill compute (1B INT8, 2048 tokens): 2048 * 2B ops = 4.096e12 ops.
+    2. Effective compute: 7.5 TOPS * 0.3 utilization = 2.25e12 TOPS.
+    3. Prefill time: 4.096 / 2.25 = 1.82s.
+    4. Retrieval pipeline: 300ms embed + 50ms search = 350ms.
+    5. Total expected TTFT: 1.82s + 0.35s = ~2.17s.
+    6. Observed TTFT: 4.2s (gap of ~2.03s).
+    7. **Conclusion: The 2s gap suggests a cold NPU load due to OS cache eviction.**
 status: published
 provenance: imported
 requires_explanation: false

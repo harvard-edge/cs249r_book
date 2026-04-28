@@ -8,34 +8,19 @@ competency_area: precision
 bloom_level: analyze
 phase: inference
 title: INT8 Per-Tensor Degradation in Depthwise Convolutions
-scenario: You are deploying a continuous keyword spotting model to a Nordic nRF5340.
-  To fit within the 256 KB SRAM and minimize compute cycles on the 128 MHz app core
-  to maintain a ~5mA active power budget, you apply INT8 Post-Training Quantization
-  (PTQ) using a per-tensor scheme. During testing, the overall quantization error
-  is low, but specific depthwise convolution layers exhibit massive activation deviations,
-  completely breaking the model's recall. What quantization fundamental is causing
-  this catastrophic failure in the depthwise layers?
-question: What quantization fundamental is causing this catastrophic failure in the
-  depthwise layers?
+scenario: You are deploying a continuous keyword spotting model to a Nordic nRF5340. To fit within the 256 KB SRAM and minimize compute cycles, you apply INT8 Post-Training Quantization (PTQ) using a per-tensor scheme. During testing, specific depthwise convolution layers exhibit massive activation deviations, breaking the model's recall.
+question: What quantization fundamental causes massive activation deviations in depthwise convolution layers under per-tensor INT8 PTQ?
 details:
-  realistic_solution: The root cause is applying a single global scale factor (per-tensor
-    quantization) to channels with vastly different dynamic ranges. Channels with
-    narrow weight distributions lose almost all precision when forced to use the large
-    step size dictated by outlier channels. The correct solution is to switch to per-channel
-    quantization for the weights, assigning a unique scale factor to each output channel
-    to preserve its full INT8 precision without adding significant runtime overhead
-    on the 128 MHz core.
-  common_mistake: Candidates often misdiagnose this as a calibration data mismatch
-    or clipping issue and suggest switching to costly Quantization-Aware Training
-    (QAT). They fail to analyze the inherent architectural property of depthwise convolutions
-    where weight distributions vary drastically across independent channels.
-  napkin_math: Assume a 64-channel depthwise layer where Channel A weights are [-10.0,
-    10.0] and Channel B weights are [-0.1, 0.1]. With per-tensor INT8, the global
-    scale is 20.0/255 = 0.0784. Channel B's weights (-0.1 to 0.1) quantize to just
-    three distinct values (-1, 0, 1), destroying the feature. With per-channel quantization,
-    Channel B gets its own scale (0.2/255 = 0.00078). Storing 64 unique FP32 scales
-    requires 64 * 4 bytes = 256 bytes, which consumes a negligible 0.09% of the nRF5340's
-    256 KB SRAM budget while fully resolving the precision collapse.
+  realistic_solution: The root cause is applying a single global scale factor (per-tensor quantization) to channels with vastly different dynamic ranges. Channels with narrow weight distributions lose almost all precision when forced to use the large step size dictated by outlier channels. The correct solution is to switch to per-channel quantization for the weights, assigning a unique scale factor to each output channel to preserve its full INT8 precision without adding significant runtime overhead on the 128 MHz core.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing the issue as a calibration data mismatch and suggesting Quantization-Aware Training (QAT).
+    **The Rationale:** Candidates fail to analyze the architectural property of depthwise convolutions, where weight distributions vary drastically across independent channels, making global scaling destructive.
+    **The Consequence:** Wasting extensive engineering time on QAT when a simple switch to per-channel quantization would instantly solve the issue with minimal overhead.
+  napkin_math: |
+    *   **Scenario:** A 64-channel depthwise layer. Channel A weights are [-10.0, 10.0]. Channel B weights are [-0.1, 0.1].
+    *   **Per-Tensor Scaling:** Global scale is 20.0/255 = 0.0784. Channel B's weights (-0.1 to 0.1) quantize to just three distinct INT8 values (-1, 0, 1), completely destroying the feature.
+    *   **Per-Channel Scaling:** Channel B gets its own scale (0.2/255 = 0.00078). Storing 64 unique FP32 scales requires 64 * 4 bytes = 256 bytes.
+    *   **Conclusion:** Per-channel scaling consumes a negligible **0.1% of the 256 KB SRAM** budget while fully resolving the precision collapse.
 status: published
 provenance: imported
 requires_explanation: false

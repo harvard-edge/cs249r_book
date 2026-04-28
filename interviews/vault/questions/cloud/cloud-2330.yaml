@@ -8,25 +8,19 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: MoE Router Overhead in FP8 Inference
-scenario: You are serving a 140B MoE model. The entire model (weights and activations) is quantized to
-  FP8 E4M3. However, because MoE router logits overflow the E4M3 range, the architecture requires casting
-  activations to E5M2 just for the router, then back to E4M3. This casting introduces a 15ms latency penalty
-  per generated token.
+scenario: You are serving a 140B MoE model. The entire model (weights and activations) is quantized to FP8 E4M3. However, because MoE router logits overflow the E4M3 range, the architecture requires casting activations to E5M2 just for the router, then back to E4M3. This casting introduces a 15ms latency penalty per generated token.
 question: "How would you eliminate the 15ms/token router casting penalty while preventing FP8 E4M3 router overflow?"
 details:
-  realistic_solution: Optimizing the cast is the wrong architectural approach because the router computation
-    itself is purely compute-bound (a tiny matrix multiplication compared to the massive expert layers).
-    The memory bandwidth saved by keeping the router inputs in FP8 is negligible, but the latency cost
-    of dispatching casting kernels is high. The correct architecture is to keep the router inputs, weights,
-    and computation entirely in higher precision (BF16 or FP16). By bypassing FP8 entirely for the routing
-    mechanism, you eliminate the casting overhead, prevent numeric overflow, and incur almost zero memory
-    penalty since the router parameters represent <0.1% of the model.
-  common_mistake: Attempting to optimize the casting kernel using shared memory to make the E4M3 to E5M2
-    conversion faster.
-  napkin_math: 'Router matrix for 140B model: hidden_dim (8192) x num_experts (8). Total weights = 65,536.
-    In FP8 this is 65KB; in BF16 it is 131KB. The memory bandwidth difference is imperceptible, but launching
-    2 casting kernels (upcast, downcast) across 32 layers takes 32 * 2 * 0.2ms = 12.8ms of pure kernel
-    launch overhead.'
+  realistic_solution: Optimizing the cast is the wrong architectural approach because the router computation itself is purely compute-bound (a tiny matrix multiplication compared to the massive expert layers). The memory bandwidth saved by keeping the router inputs in FP8 is negligible, but the latency cost of dispatching casting kernels is high. The correct architecture is to keep the router inputs, weights, and computation entirely in higher precision (BF16 or FP16). By bypassing FP8 entirely for the routing mechanism, you eliminate the casting overhead, prevent numeric overflow, and incur almost zero memory penalty since the router parameters represent <0.1% of the model.
+  common_mistake: |
+    **The Pitfall:** Attempting to optimize the casting kernels using shared memory tricks to speed up the E4M3 to E5M2 conversion.
+    **The Rationale:** Engineers often reach for low-level CUDA optimization when faced with latency penalties, missing the architectural flaw.
+    **The Consequence:** Wasting effort optimizing a kernel that shouldn't exist, as the casting overhead will still remain a bottleneck.
+  napkin_math: |
+    - Router matrix for 140B model: hidden_dim (8192) × num_experts (8) = 65,536 weights.
+    - In FP8, this is 65KB; in BF16, it is 131KB (memory difference is negligible).
+    - Launching 2 casting kernels (upcast, downcast) across 32 layers takes 32 × 2 × 0.2ms = 12.8ms.
+    - **Keeping the router in BF16 bypasses 12.8ms of pure kernel launch overhead with almost zero memory penalty.**
 status: published
 provenance: imported
 requires_explanation: true

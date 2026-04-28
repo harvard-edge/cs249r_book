@@ -8,29 +8,22 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Incast Collapse During Gradient Aggregation
-scenario: A 512-GPU training job on MI300X clusters uses parameter servers. All 512
-  workers send their gradient shards to 16 PS nodes simultaneously (fan-in ratio 32:1).
-  Step times are 4× slower than expected. Wireshark shows massive packet loss at the
-  PS-facing switch ports despite link utilization appearing normal. Identify the failure
-  mode and fix it.
-question: What failure mode is slowing the 512-worker parameter-server training job,
-  and how would you fix the 32:1 fan-in?
+scenario: 'A 512-GPU training job on MI300X clusters uses parameter servers. All 512 workers send their gradient shards to 16 PS nodes simultaneously (fan-in ratio 32:1). Step times are 4× slower than expected. Wireshark shows massive packet loss at the PS-facing switch ports despite link utilization appearing normal.'
+question: What failure mode is slowing the 512-worker parameter-server training job, and how would you fix the 32:1 fan-in?
 details:
-  realistic_solution: 'Use RDMA (RoCEv2) with DCQCN instead of TCP for gradient transfers
-    — RDMA''s lossless transport avoids TCP incast collapse. If TCP must be used,
-    implement scatter-gather: stagger worker sends with a random jitter of 0-10 ms
-    and reduce the TCP initial congestion window. Also increase switch buffer allocation
-    for PS-facing ports.'
-  common_mistake: Confusing incast collapse with link saturation. Incast occurs when
-    many small flows arrive at nearly the same time and overwhelm shallow switch buffers,
-    causing synchronized drops and TCP retransmissions — even when average utilization
-    is low. Teams see 'normal' utilization (40-60%) but fail to capture microsecond-level
-    bursts.
-  napkin_math: '512 workers each send 1 MB gradient shard simultaneously. 512 MB arrives
-    at 16 PS nodes in ~1 ms (400 GbE: 1 MB / 50 GB/s = 20 µs per worker). Switch buffer
-    per port: 2 MB (typical shallow buffer). 32 incast flows × 1 MB = 32 MB needed
-    vs. 2 MB available: 16× buffer overflow → packet drops → TCP back-off → 4× slowdown
-    matches observed degradation.'
+  realistic_solution: 'Use RDMA (RoCEv2) with DCQCN instead of TCP for gradient transfers — RDMA''s lossless transport avoids TCP incast collapse. If TCP must be used, implement scatter-gather: stagger worker sends with a random jitter of 0-10 ms and reduce the TCP initial congestion window. Also increase switch buffer allocation for PS-facing ports.'
+  common_mistake: |
+    **The Pitfall:** Confusing incast collapse with average link saturation.
+    
+    **The Rationale:** Teams monitor network utilization and see 'normal' 40-60% load, failing to realize that microsecond-level bursts are instantly overflowing shallow switch buffers.
+    
+    **The Consequence:** Wasting time debugging application logic when the network layer is actively dropping packets.
+  napkin_math: |
+    * **Incast Burst:** 512 workers send 1 MB simultaneously.
+    * **Arrival Rate:** 512 MB arrives at 16 PS nodes in ~1 ms (20 µs per worker on 400 GbE).
+    * **Port Pressure:** 32 workers hit 1 PS node = 32 MB of data hitting one switch port simultaneously.
+    * **Buffer Capacity:** Typical switch buffer per port is ~2 MB.
+    * **Result:** **32 MB demand vs. 2 MB capacity leads to a 16× buffer overflow, causing massive packet drops and TCP back-off.**
 status: published
 provenance: imported
 requires_explanation: false

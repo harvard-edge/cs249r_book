@@ -8,33 +8,20 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Analyzing KV-Cache Constraints on A17 Pro
-scenario: You are deploying a 1.5B parameter transformer model for on-device chat
-  on the Apple A17 Pro. The model runs efficiently for short inputs, but as the conversation
-  history grows past 2000 tokens, system performance degrades heavily and the device
-  heats up, despite the 16-core Neural Engine theoretically supporting 35 TOPS within
-  a ~5W budget. Analyze why the shared 8GB unified memory architecture becomes the
-  primary bottleneck as sequence length increases.
-question: How would you analyze why the shared 8GB unified memory architecture becomes
-  the primary bottleneck as sequence length increases?
+scenario: You are deploying a 1.5B parameter transformer on the Apple A17 Pro (8GB unified memory, 35 TOPS, ~5W). As conversation history grows past 2000 tokens, token generation slows down and the device heats up.
+question: Why does the shared 8GB unified memory architecture become the primary bottleneck as sequence length increases?
 details:
-  realistic_solution: The degradation happens because generation is memory-bound,
-    not compute-bound. In the A17 Pro's unified architecture, the Neural Engine, CPU,
-    and GPU all share the 8GB of memory and its bandwidth. As the KV-cache grows linearly
-    with sequence length, reading the entire cache for each new token saturates the
-    memory bandwidth, causing stalls and increased power consumption that hits the
-    ~5W thermal limit, leading to throttling.
-  common_mistake: Candidates often blame the O(N^2) compute complexity of the attention
-    mechanism, assuming the 35 TOPS limit is being exceeded. They miss that autoregressive
-    generation is entirely memory-bandwidth bound, and the growing KV-cache must be
-    loaded from the shared 8GB memory for every single generated token.
-  napkin_math: Let's assume the 1.5B model has 24 layers and a hidden dimension of
-    2048. The KV-cache size per token is 2 (K,V) * 2 bytes (FP16) * 24 layers * 2048
-    dim = 196,608 bytes (~196 KB). At a sequence length of 2000 tokens, the KV-cache
-    is 2000 * 196 KB = 393 MB. To generate 20 tokens per second, the Neural Engine
-    must read the model weights (1.5B * 2B = 3GB) and the KV-cache (393 MB) for every
-    token. Memory bandwidth required = 20 * (3 GB + 393 MB) = ~68 GB/s. This massive
-    continuous bandwidth draw competes with the CPU/GPU for the shared memory, blowing
-    past the efficiency of the ~5W budget and causing thermal throttling.
+  realistic_solution: The degradation happens because generation is memory-bound, not compute-bound. In the A17 Pro's unified architecture, the Neural Engine, CPU, and GPU all share the 8GB of memory and its bandwidth. As the KV-cache grows linearly with sequence length, reading the entire cache for each new token saturates the memory bandwidth, causing stalls and increased power consumption that hits the ~5W thermal limit, leading to throttling.
+  common_mistake: |
+    **The Pitfall:** Blaming the O(N²) compute complexity of the attention mechanism.
+    **The Rationale:** Candidates assume the performance drop is due to exceeding the 35 TOPS NPU limit.
+    **The Consequence:** They optimize mathematical operations instead of addressing the core memory bandwidth constraint of autoregressive generation.
+  napkin_math: |
+    - **KV Cache per Token:** 2 (K,V) * 2 bytes * 24 layers * 2048 dim = ~196 KB.
+    - **Cache at 2000 Tokens:** 2000 * 196 KB = 393 MB.
+    - **Bandwidth per Token:** Must read full 1.5B model (3GB) + full KV cache (393 MB) = ~3.4 GB.
+    - **Bandwidth at 20 tok/sec:** 20 * 3.4 GB = 68 GB/s.
+    - **Final Result:** **Sustaining 68 GB/s constantly saturates the memory bus, spiking power draw beyond the 5W thermal limit and triggering throttling.**
 status: published
 provenance: imported
 requires_explanation: false

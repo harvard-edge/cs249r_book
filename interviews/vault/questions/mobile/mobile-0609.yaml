@@ -8,31 +8,21 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: The Shared GPU Contention
-scenario: Your app runs a 12ms style transfer model on the Apple GPU while simultaneously rendering a
-  complex UI with animations at 60 FPS. Users report dropped frames and UI jank during inference. The
-  GPU has a 16.67ms budget per frame for 60 FPS. Show why the math doesn't add up, and design a scheduling
-  strategy that eliminates frame drops.
-question: "Why do a 12ms ML GPU kernel and 4ms UI render still drop frames, and what scheduling strategy prevents jank?"
+scenario: Your app runs a 12ms style transfer model on the Apple GPU while simultaneously rendering a complex UI with animations at 60 FPS. Users report dropped frames and UI jank during inference. The GPU has a 16.67ms budget per frame for 60 FPS.
+question: Why do a 12ms ML GPU kernel and 4ms UI render still drop frames, and what scheduling strategy prevents jank?
 details:
-  realistic_solution: 'The Apple GPU uses a **non-preemptive tile-based deferred renderer**. Once a compute
-    or render command buffer starts executing, it runs to completion — the GPU cannot pause ML inference
-    mid-kernel to service a UI render pass. With a 12ms ML kernel and 4ms UI render, total is 16ms — only
-    0.67ms margin on the 16.67ms budget. Any scheduling jitter causes frame drops. Fix with chunked inference:
-    split the model into 6 sequential chunks of ~2ms each. Between chunks, the GPU can service UI render
-    passes. Worst-case UI wait time is now 2ms (one chunk), not 12ms. If UI starts immediately after a
-    chunk begins, it waits 2ms then renders for 4ms, completing in 6ms total, leaving 10.67ms margin.
-    Even better: offload ML entirely to the ANE, freeing the GPU for UI exclusively.
-    The ANE runs the same model in ~8ms on a separate compute unit with zero GPU contention. GPU gets
-    the full 16.67ms for rendering with 12.67ms margin. Implementation: use MPSGraph for chunked GPU inference
-    or CoreML with ANE preference. Set QoS priorities so UI command buffers get Metal priority level .high
-    while ML gets .default. Result: zero dropped frames even under sustained ML + UI workloads.'
-  common_mistake: '"12ms inference + 4ms UI rendering = 16ms total, which fits in the 16.67ms frame budget."
-    This assumes ML inference and UI rendering can be perfectly serialized within a single frame, which
-    ignores GPU command buffer scheduling and preemption behavior.'
-  napkin_math: 'Unchunked: 12ms ML + 4ms UI = 16ms. Frame budget: 16.67ms. Margin: 0.67ms (any jitter
-    causes drops). Chunked (6 × 2ms): worst-case UI wait = 2ms. UI render: 4ms. Max time from trigger to
-    UI complete = 6ms. Margin: **10.67ms** (safe). ANE offload: GPU has full 16.67ms for UI (4ms render, 12.67ms margin).
-    ML runs on ANE in parallel at 8ms. **Zero contention.** Frame drops: 0.'
+  realistic_solution: 'The Apple GPU uses a **non-preemptive tile-based deferred renderer**. Once a compute or render command buffer starts executing, it runs to completion — the GPU cannot pause ML inference mid-kernel to service a UI render pass. With a 12ms ML kernel and 4ms UI render, total is 16ms — only 0.67ms margin on the 16.67ms budget. Any scheduling jitter causes frame drops. Fix with chunked inference: split the model into 6 sequential chunks of ~2ms each. Between chunks, the GPU can service UI render passes. Worst-case UI wait time is now 2ms (one chunk), not 12ms. If UI starts immediately after a chunk begins, it waits 2ms then renders for 4ms, completing in 6ms total, leaving 10.67ms margin. Even better: offload ML entirely to the ANE, freeing the GPU for UI exclusively. The ANE runs the same model in ~8ms on a separate compute unit with zero GPU contention. GPU gets the full 16.67ms for rendering with 12.67ms margin. Implementation: use MPSGraph for chunked GPU inference or CoreML with ANE preference. Set QoS priorities so UI command buffers get Metal priority level .high while ML gets .default. Result: zero dropped frames even under sustained ML + UI workloads.'
+  common_mistake: |
+    **The Pitfall:** Assuming ML inference and UI rendering can be perfectly serialized within a single frame budget.
+    **The Rationale:** Engineers calculate 12ms + 4ms < 16.67ms, ignoring GPU command buffer scheduling and the lack of preemption on mobile GPUs.
+    **The Consequence:** The GPU cannot pause the 12ms ML kernel to service a UI render pass, resulting in dropped frames and visible jank.
+  napkin_math: |
+    1. Unchunked: 12ms ML + 4ms UI = 16ms execution. Margin on 16.67ms budget = 0.67ms (highly prone to jitter/jank).
+    2. Chunked ML (6 chunks of 2ms): Worst-case UI wait time is 2ms.
+    3. Maximum UI path time: 2ms wait + 4ms render = 6ms.
+    4. Margin for UI render: 16.67ms - 6ms = 10.67ms.
+    5. ANE Offload: ML runs on ANE in parallel. GPU dedicated purely to UI.
+    6. **Conclusion: Chunking provides a safe 10.67ms margin; ANE offload entirely eliminates GPU contention.**
 status: published
 provenance: imported
 requires_explanation: true
@@ -41,17 +31,10 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The 'Total frame' calculation for chunked inference in Napkin Math is unclear and might be misleadingly
-  additive (2ms ML chunk + 4ms UI = 6ms) when explaining how the 16.67ms frame budget is met, as it doesn't
-  clearly account for the total 12ms ML execution being distributed across the frame.
 math_verified: true
 math_status: WARN
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Calculation of ''Total frame: 2 + 4 = 6ms'' is loosely termed and could be misleading as it only represents
-  a single chunk''s slice of the frame budget.'
 human_reviewed:
   status: not-reviewed
   by: null

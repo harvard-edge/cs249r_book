@@ -8,32 +8,19 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: RDMA Multi-Path with Bonded NICs
-scenario: Each H100 node has 8 ConnectX-7 NICs (8-rail design). Design the multi-path
-  RDMA strategy for a single 2GB AllReduce operation that utilizes all 8 NICs simultaneously,
-  addressing how to partition data across rails, handle rail failures, and maintain
-  in-order delivery for the reduction operation.
-question: How would you use all 8 ConnectX-7 rails for a 2GB AllReduce while handling
-  rail failures and preserving reduction ordering?
+scenario: Each H100 node has 8 ConnectX-7 NICs (8-rail design).
+question: How would you use all 8 ConnectX-7 rails for a 2GB AllReduce while handling rail failures and preserving reduction ordering?
 details:
-  realistic_solution: 'Multi-rail AllReduce design: (1) Data partitioning: divide
-    the 2GB gradient into 8 equal partitions of 256MB. Assign each partition to a
-    dedicated rail. Rail K handles gradient[K×256MB : (K+1)×256MB]. This eliminates
-    reordering because each rail processes independent data — no cross-rail ordering
-    dependency. (2) Per-rail AllReduce: each rail runs an independent ring AllReduce
-    on its 256MB partition. With N=512 GPUs: each rail has 512 participants. Time
-    per rail: 2 × 511/512 × 256MB / 50GB/s = 10.2ms. All 8 rails run simultaneously:
-    total time = 10.2ms (not 8 × 10.2ms). (3) Rail failure handling: if Rail K fails,
-    redistribute its 256MB across remaining 7 rails (256/7 = 36.6MB extra per rail).
-    New per-rail data: 256 + 36.6 = 292.6MB. Time: 2 × 511/512 × 292.6MB / 50GB/s
-    = 11.7ms. Degradation: 14.7% (vs 12.5% bandwidth loss — close to theoretical minimum).
-    (4) Implementation: NCCL sets NCCL_NCHANNELS=8 (one channel per rail) and binds
-    each channel to a specific NIC via NCCL_IB_HCA=mlx5_0,mlx5_1,...,mlx5_7. (5) Consistency:
-    after all 8 rail-level AllReduces complete, each GPU has the fully reduced gradient
-    — no cross-rail synchronization needed because the partitions are disjoint.'
-  common_mistake: Simple round-robin striping across NICs, which causes packet reordering
-    since different rails have different latencies. RDMA RC transport interprets reordering
-    as packet loss, triggering expensive go-back-N retransmission.
-  napkin_math: 'Single rail pure transfer: 2GB / 50 GB/s = 40ms. 8 rails parallel pure transfer: 2GB / (8 * 50) GB/s = 5ms. However, AllReduce on 512 GPUs takes 2*(N-1)/N * Size / Bandwidth. Single rail AllReduce: 2 * (511/512) * 2GB / 50 GB/s = 79.8ms. 8 rails parallel AllReduce (256MB chunks): 2 * (511/512) * 256MB / 50 GB/s = 10.2ms. Speedup: 79.8ms / 10.2ms = 7.82x (near linear 8x scaling). At N=64: per-rail AllReduce = 2 * 63/64 * 256MB / 50GB/s = 10.1ms ≈ same, because bandwidth term dominates.'
+  realistic_solution: 'Multi-rail AllReduce design: (1) Data partitioning: divide the 2GB gradient into 8 equal partitions of 256MB. Assign each partition to a dedicated rail. Rail K handles gradient[K×256MB : (K+1)×256MB]. This eliminates reordering because each rail processes independent data — no cross-rail ordering dependency. (2) Per-rail AllReduce: each rail runs an independent ring AllReduce on its 256MB partition. With N=512 GPUs: each rail has 512 participants. Time per rail: 2 × 511/512 × 256MB / 50GB/s = 10.2ms. All 8 rails run simultaneously: total time = 10.2ms (not 8 × 10.2ms). (3) Rail failure handling: if Rail K fails, redistribute its 256MB across remaining 7 rails (256/7 = 36.6MB extra per rail). New per-rail data: 256 + 36.6 = 292.6MB. Time: 2 × 511/512 × 292.6MB / 50GB/s = 11.7ms. Degradation: 14.7% (vs 12.5% bandwidth loss — close to theoretical minimum). (4) Implementation: NCCL sets NCCL_NCHANNELS=8 (one channel per rail) and binds each channel to a specific NIC via NCCL_IB_HCA=mlx5_0,mlx5_1,...,mlx5_7. (5) Consistency: after all 8 rail-level AllReduces complete, each GPU has the fully reduced gradient — no cross-rail synchronization needed because the partitions are disjoint.'
+  common_mistake: |
+    **The Pitfall:** Implementing simple round-robin striping across NICs.
+    **The Rationale:** This seems like an intuitive way to distribute load across multiple parallel links.
+    **The Consequence:** It causes packet reordering since different rails have different latencies. RDMA RC transport interprets reordering as packet loss, triggering expensive go-back-N retransmission.
+  napkin_math: |
+    1. **Single Rail Pure Transfer:** 2GB / 50 GB/s = 40ms.
+    2. **8 Rails Parallel Pure Transfer:** 2GB / (8 * 50) GB/s = 5ms.
+    3. **Single Rail AllReduce:** For N=512, 2 × (511/512) × 2GB / 50 GB/s ≈ 79.8ms.
+    4. **8 Rails Parallel AllReduce:** 256MB chunks per rail. 2 × (511/512) × 256MB / 50 GB/s ≈ **10.2ms** (a 7.82x speedup).
 status: published
 provenance: imported
 requires_explanation: true

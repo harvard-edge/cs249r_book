@@ -8,23 +8,20 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Choosing 3D Parallelism Configuration
-scenario: 'You must train a 30B-parameter model on 64 H100 GPUs (8 nodes × 8 GPUs). Intra-node NVLink:
-  900 GB/s. Inter-node InfiniBand: 400 Gb/s. Adam mixed-precision requires 16 bytes/param = 480 GB total
-  model state. Design the optimal (TP, PP, DP) configuration.'
+scenario: You must train a 30B-parameter model on 64 H100 GPUs (8 nodes × 8 GPUs). Intra-node NVLink: 900 GB/s. Inter-node InfiniBand: 400 Gb/s. Adam mixed-precision requires 16 bytes/param = 480 GB total model state.
 question: "How would you design the optimal (TP, PP, DP) configuration?"
 details:
-  realistic_solution: 'Constraints: TP must stay intra-node (NVLink). DP and PP can span nodes (InfiniBand).
-    480 GB model state / 8 GPUs per TP group = 60 GB per GPU — fits in 80 GB with room for activations.
-    Config: TP=8 (within each node), PP=1, DP=8 (across 8 nodes). But 60 GB/GPU leaves only 20 GB for
-    activations — tight. Alternative: TP=4, PP=2, DP=8. Model state = 480/(4×2) = 60 GB per GPU (same).
-    But TP=4 has lower communication overhead: ring AllReduce volume drops from 1.75x to 1.5x tensor size.
-    PP=2 splits model across 2 nodes in a pipeline, adding ~15 ms bubble per micro-batch. Best config:
-    TP=4, PP=2, DP=8 balances memory, communication, and pipeline efficiency. Use ZeRO-1 to shard optimizer
-    states across DP ranks, reducing per-GPU memory from 60 GB to ~21 GB.'
-  common_mistake: Using maximum tensor parallelism across all 64 GPUs. TP requires all-to-all communication
-    every layer and is only efficient over NVLink (intra-node).
-  napkin_math: '480 GB state. TP=4, PP=2: per-GPU = 480/8 = 60 GB. With ZeRO-1 on DP=8: optimizer sharded
-    → ~21 GB. Leaves 59 GB for activations. TP-4 AllReduce volume is 1.5x tensor size vs 1.75x for TP-8.'
+  realistic_solution: "Constraints: TP must stay intra-node (NVLink). DP and PP can span nodes (InfiniBand). 480 GB model state / 8 GPUs per TP group = 60 GB per GPU — fits in 80 GB with room for activations. Config: TP=8 (within each node), PP=1, DP=8 (across 8 nodes). But 60 GB/GPU leaves only 20 GB for activations — tight. Alternative: TP=4, PP=2, DP=8. Model state = 480/(4×2) = 60 GB per GPU (same). But TP=4 has lower communication overhead: ring AllReduce volume drops from 1.75x to 1.5x tensor size. PP=2 splits model across 2 nodes in a pipeline, adding ~15 ms bubble per micro-batch. Best config: TP=4, PP=2, DP=8 balances memory, communication, and pipeline efficiency. Use ZeRO-1 to shard optimizer states across DP ranks, reducing per-GPU memory from 60 GB to ~21 GB."
+  common_mistake: |
+    **The Pitfall:** Using maximum tensor parallelism across all 64 GPUs.
+    **The Rationale:** Developers often try to maximize TP to reduce memory per GPU.
+    **The Consequence:** TP requires all-to-all communication every layer; running this across slower inter-node InfiniBand instead of intra-node NVLink severely bottlenecks training.
+  napkin_math: |
+    - Total state: 480 GB.
+    - TP=4, PP=2: per-GPU model state = 480 GB / (4 × 2) = 60 GB.
+    - With ZeRO-1 on DP=8, optimizer state is sharded across 8 GPUs.
+    - New per-GPU footprint ≈ 21 GB, leaving 59 GB for activations.
+    - **TP=4 AllReduce volume is 1.5x tensor size (vs 1.75x for TP=8), optimally balancing memory and communication.**
 status: published
 provenance: imported
 requires_explanation: false

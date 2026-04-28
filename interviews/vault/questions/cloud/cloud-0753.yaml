@@ -8,34 +8,19 @@ competency_area: reliability
 bloom_level: analyze
 phase: training
 title: The Checkpoint Storage Bottleneck
-scenario: You're training a 175B parameter model on 512 H100 GPUs using 3D parallelism.
-  The training lead wants to checkpoint every 20 minutes (matching the cluster's estimated
-  MTBF). Each checkpoint must be written to persistent storage. What's the checkpoint
-  size, how long does the write take, and what's the impact on training throughput?
-question: What's the checkpoint size, how long does the write take, and what's the
-  impact on training throughput?
+scenario: You're training a 175B parameter model on 512 H100 GPUs using 3D parallelism. The cluster's estimated MTBF requires a checkpoint every 20 minutes. Each checkpoint must be written to persistent storage.
+question: What's the checkpoint size, how long does the write take, and what's the impact on training throughput?
 details:
-  realistic_solution: 'A full checkpoint includes FP16 weights (350 GB), FP32 master
-    weights (700 GB), Adam moments (1,400 GB), and gradient buffers (350 GB) = **2.8
-    TB total**. With FSDP, each GPU writes its shard: 2.8 TB / 512 = 5.47 GB per GPU.
-    The bottleneck is aggregate storage bandwidth. A high-end parallel filesystem
-    (Lustre/GPFS) might provide 200 GB/s aggregate write bandwidth. 2.8 TB / 200 GB/s
-    = **14 seconds** write time. But 512 GPUs issuing concurrent writes create metadata
-    storms and I/O contention, realistically 2-3× slower: **30-42 seconds**. At 20-minute
-    intervals, that''s 2.5-3.5% overhead — acceptable. The real solution: write to
-    local NVMe first (each GPU has ~3.5 GB/s write), then async-flush to persistent
-    storage.'
-  common_mistake: '"175B × 2 bytes = 350 GB, write it to NFS, done in a few seconds."
-    This forgets the optimizer state (which is the majority of the checkpoint) and
-    ignores that 512 GPUs writing simultaneously will saturate any shared storage
-    system.'
-  napkin_math: 'Checkpoint size: 175B × (2 + 4 + 4 + 4 + 2) bytes (including gradients)
-    = 175B × 16B = **2.8 TB**. Local NVMe write: 5.47 GB / 3.5 GB/s = 1.56 seconds
-    per GPU (parallel, no contention). Background flush to Lustre: 2.8 TB / 200 GB/s
-    = 14 seconds (overlapped with training). Training step ≈ 2 seconds. Checkpoint
-    every 20 min = 600 steps. Overhead with local NVMe: 1.56s / (600 × 2s) = **0.13%**
-    — negligible. Without local NVMe (direct to Lustre with contention, taking ~42s):
-    42s / 1200s = **3.5%**.'
+  realistic_solution: 'A full checkpoint includes FP16 weights (350 GB), FP32 master weights (700 GB), Adam moments (1,400 GB), and gradient buffers (350 GB) = **2.8 TB total**. With FSDP, each GPU writes its shard: 2.8 TB / 512 = 5.47 GB per GPU. The bottleneck is aggregate storage bandwidth. A high-end parallel filesystem (Lustre/GPFS) might provide 200 GB/s aggregate write bandwidth. 2.8 TB / 200 GB/s = **14 seconds** write time. But 512 GPUs issuing concurrent writes create metadata storms and I/O contention, realistically 2-3× slower: **30-42 seconds**. At 20-minute intervals, that''s 2.5-3.5% overhead — acceptable. The real solution: write to local NVMe first (each GPU has ~3.5 GB/s write), then async-flush to persistent storage.'
+  common_mistake: |
+    **The Pitfall:** Assuming the checkpoint size is just the 16-bit weights (350 GB).
+    **The Rationale:** Engineers equate model size directly with file size, forgetting training state.
+    **The Consequence:** Under-provisioning storage bandwidth by 8x, leading to massive metadata storms and I/O contention that paralyzes the cluster during checkpointing.
+  napkin_math: |
+    - **Checkpoint Size**: 175B × (2 bytes FP16 + 4 bytes FP32 + 8 bytes Adam + 2 bytes Gradients) = 175B × 16 bytes = **2.8 TB total**.
+    - **Shard Size**: 2.8 TB / 512 GPUs = 5.47 GB per GPU.
+    - **Lustre Flush**: 2.8 TB / 200 GB/s = 14 seconds (ideal), but contention pushes this to **~42 seconds**.
+    - **Overhead**: 42s / 1200s (20 min) = 3.5% overhead. Writing to local NVMe first drops this to **0.13%**.
 status: published
 provenance: imported
 requires_explanation: false

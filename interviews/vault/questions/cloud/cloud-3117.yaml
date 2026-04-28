@@ -8,30 +8,26 @@ competency_area: compute
 bloom_level: apply
 phase: both
 title: 'Transformer Cost Realization: Size Activation Memory for LLM Training'
-scenario: 'Concretely calculate peak activation memory for training GPT-3 (175B params,
-  96 layers, hidden=12288, FFN=49152, heads=96, seq=2048, batch=1) on H100 (80GB).
-  Without gradient checkpointing: all layer activations stored. With checkpointing:
-  only layer inputs. Determine if either fits and whether model parallelism is required.'
-question: What is the peak activation memory with and without checkpointing, and is
-  model parallelism required on an 80GB H100?
+scenario: 'Concretely calculate peak activation memory for training GPT-3 (175B params, 96 layers, hidden=12288, FFN=49152, heads=96, seq=2048, batch=1) on H100 (80GB). Without gradient checkpointing: all layer activations stored. With checkpointing: only layer inputs.'
+question: What is the peak activation memory with and without checkpointing, and is model parallelism required on an 80GB H100?
 details:
-  realistic_solution: 'Per-layer activation (without checkpointing): QKV: batch*seq*hidden*3*2
-    = 1*2048*12288*3*2=150.99MB. Attention scores: heads*seq^2*2=96*2048^2*2=805.3MB.
-    FFN up+gate: batch*seq*FFN_dim*2*2=1*2048*49152*2*2=402.6MB. LN inputs: 2*batch*seq*hidden*2=100.66MB.
-    Total per layer: ~1460MB. 96 layers: 96*1460MB=140.1GB >> 80GB H100. With checkpointing:
-    store layer input only. Per layer: batch*seq*hidden*2=2048*12288*2=50.3MB. 96 layers:
-    4.8GB. Fits! But: model weights at BF16: 175B*2=350GB. Single H100 (80GB) can''t
-    hold weights. Need TP=8+ to shard model.'
-  common_mistake: Calculating activation memory per layer only for attention without
-    including FFN intermediates, and not multiplying by number of layers for the total
-    stack.
-  napkin_math: 'Activation per layer (BF16, no checkpointing): attention intermediates=150.99+805.3=956MB.
-    FFN intermediates=402.6MB. Total≈1460MB. 96 layers=140GB. OOM. With checkpointing:
-    input only=1*2048*12288*2=50.3MB/layer. 96*50.3=4.8GB. Fits memory. But weights:
-    175B*2=350GB >> 80GB. Even with checkpointing: need 4-8 H100s for weights. TP=8:
-    350/8=43.75GB weights per device. Plus activations: 4.8/8=600MB (if split by
-    batch). Total per H100: 43.75+0.6+optimizer_shard≈50+GB. With ZeRO-3 optimizer
-    sharding: fits in 80GB.'
+  realistic_solution: 'Per-layer activation (without checkpointing): QKV: batch*seq*hidden*3*2 = 1*2048*12288*3*2=150.99MB. Attention scores: heads*seq^2*2=96*2048^2*2=805.3MB. FFN up+gate: batch*seq*FFN_dim*2*2=1*2048*49152*2*2=402.6MB. LN inputs: 2*batch*seq*hidden*2=100.66MB. Total per layer: ~1460MB. 96 layers: 96*1460MB=140.1GB >> 80GB H100. With checkpointing: store layer input only. Per layer: batch*seq*hidden*2=2048*12288*2=50.3MB. 96 layers: 4.8GB. Fits! But: model weights at BF16: 175B*2=350GB. Single H100 (80GB) can''t hold weights. Need TP=8+ to shard model.'
+  common_mistake: |
+    **The Pitfall:** Calculating activation memory per layer only for attention.
+    
+    **The Rationale:** Candidates focus solely on the quadratic scaling of attention, forgetting that FFN intermediates actually dominate memory at standard sequence lengths, and forgetting to multiply by the total layer count.
+    
+    **The Consequence:** Drastically underestimating activation memory and crashing with OOMs.
+  napkin_math: |
+    * **Per-layer Activation (No Checkpointing):**
+      * QKV: 1 × 2048 × 12288 × 3 × 2 = ~151 MB
+      * Attention Scores: 96 × 2048² × 2 = ~805 MB
+      * FFN: 1 × 2048 × 49152 × 2 × 2 = ~403 MB
+      * LN Inputs: 2 × 1 × 2048 × 12288 × 2 = ~101 MB
+      * Total Per Layer = 1,460 MB
+    * **Total Activations (96 layers):** 96 × 1,460 MB = ~140 GB (OOM on 80 GB H100)
+    * **With Checkpointing (Input only):** 2048 × 12288 × 2 = 50.3 MB/layer. 96 × 50.3 MB = 4.8 GB.
+    * **Result:** **Checkpointing reduces activations from 140 GB to 4.8 GB, but the 350 GB weights still mandate Tensor Parallelism across multiple GPUs.**
 status: published
 provenance: imported
 requires_explanation: false

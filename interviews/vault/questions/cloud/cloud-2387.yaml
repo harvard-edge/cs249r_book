@@ -8,26 +8,20 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: Resolving Feature-Model Desynchronization
-scenario: During a Blue/Green deployment of a V2 recommendation model, P99 latency suddenly spikes from
-  50ms to 800ms, triggering automated rollbacks. The V2 model requires a new feature (`user_affinity_v2`)
-  fetched from a Redis online feature store at runtime. The batch pipeline began backfilling this feature
-  into Redis at the exact same time the model deployment started.
+scenario: During a Blue/Green deployment of a V2 recommendation model, P99 latency suddenly spikes from 50ms to 800ms, triggering automated rollbacks. The V2 model requires a new feature (`user_affinity_v2`) fetched from a Redis online feature store at runtime. The batch pipeline began backfilling this feature into Redis at the exact same time the model deployment started.
 question: "How would you prevent the V2 model rollout from causing Redis cache-miss storms on user_affinity_v2?"
 details:
-  realistic_solution: 'Decouple the feature store backfill lifecycle from the model deployment lifecycle.
-    The latency spike is caused by a massive cache-miss storm: V2 requests `user_affinity_v2`, it''s missing
-    in Redis, causing the system to fall back to on-the-fly computation or database queries. Architecture
-    fix: 1) Deploy the feature pipeline days in advance and dual-write to both V1 and V2 namespaces. 2)
-    Monitor the cache hit rate for the V2 feature until it reaches >99%. 3) Only then, trigger the Blue/Green
-    deployment of the V2 model. 4) Enforce this via a Model Registry webhook that checks feature readiness
-    before allowing deployment.'
-  common_mistake: Increasing the Redis timeout settings or scaling up the Redis cluster to handle the
-    perceived load spike.
-  napkin_math: 'Service throughput: 5,000 QPS. Cache hit takes 1ms. Cache miss triggers fallback compute
-    taking 150ms. If 80% of requests miss during the backfill, expected latency per request = (0.2 * 1ms)
-    + (0.8 * 150ms) = 120.2ms average. However, 5,000 QPS * 0.8 = 4,000 heavy operations/sec queues up,
-    instantly exhausting the typical 200-thread worker pool (Little''s Law: 4000 * 0.15 = 600 concurrent
-    threads needed), causing P99 to skyrocket to 800ms+ due to queuing delay.'
+  realistic_solution: Decouple the feature store backfill lifecycle from the model deployment lifecycle. The latency spike is caused by a massive cache-miss storm because the feature is missing in Redis during backfill. Fix: 1) Deploy the feature pipeline days in advance and dual-write to both namespaces. 2) Monitor cache hit rate until it reaches >99%. 3) Only then trigger the Blue/Green deployment. 4) Enforce via a Model Registry webhook.
+  common_mistake: |
+    **The Pitfall:** Increasing Redis timeout settings or scaling up the Redis cluster.
+    **The Rationale:** Candidates assume the database is overwhelmed by raw request volume rather than realizing the cache misses are triggering extremely slow fallback computation pathways.
+    **The Consequence:** Scaling Redis does nothing to resolve the fallback compute bottleneck, and latency remains at 800ms+ until the backfill naturally completes.
+  napkin_math: |
+    1. **Service throughput:** 5,000 QPS.
+    2. **Latency baselines:** Cache hit = 1ms. Cache miss (fallback compute) = 150ms.
+    3. **Average latency during backfill (80% miss rate):** (0.2 * 1ms) + (0.8 * 150ms) = 120.2ms.
+    4. **Thread pool exhaustion:** 5,000 QPS * 0.8 = 4,000 heavy operations/sec. By Little's Law, required concurrency = 4,000 * 0.15s = 600 concurrent threads.
+    5. **Result:** This instantly exhausts a typical 200-thread worker pool, causing P99 to skyrocket to **800ms+** due to severe queueing delays.
 status: published
 provenance: imported
 requires_explanation: false

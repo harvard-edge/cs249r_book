@@ -8,26 +8,19 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The NUMA Penalty
-scenario: You have a dual-socket server with two AMD EPYC CPUs. Each socket has 256 GB of DDR5 RAM and
-  one A100 GPU attached via PCIe. Your data loading pipeline reads training images from an NVMe drive
-  attached to Socket 0, but the training runs on the GPU attached to Socket 1. The data loading throughput
-  is 40% lower than expected. What physical topology problem are you hitting?
-question: "What physical topology problem are you hitting?"
+scenario: 'You have a dual-socket server with two CPUs. Each socket has its own RAM and one GPU attached via PCIe. Your data loading pipeline reads training images from an NVMe drive attached to Socket 0, but the training runs on the GPU attached to Socket 1. The data loading throughput is 40% lower than expected.'
+question: 'What physical topology problem is causing the 40% drop in data loading throughput?'
 details:
-  realistic_solution: You're paying the NUMA (Non-Uniform Memory Access) penalty. In a dual-socket server,
-    each CPU socket has its own local memory controller. When data is read from the NVMe on Socket 0,
-    it lands in Socket 0's local DRAM. But the GPU on Socket 1 must access that data across the inter-socket
-    link (AMD Infinity Fabric or Intel UPI), which has roughly half the bandwidth and double the latency
-    of local memory access. Every training batch must traverse this cross-socket hop before reaching the
-    GPU.
-  common_mistake: '"The NVMe is too slow" or "We need more DataLoader workers." Both ignore the physical
-    memory topology of the server.'
-  napkin_math: 'DDR5 local bandwidth per socket: ~200 GB/s. Cross-NUMA bandwidth (Infinity Fabric): ~100
-    GB/s. If each training batch is 512 MB of image data: local path = $512\text{ MB} / 200\text{ GB/s}
-    = 2.56\text{ ms}$, cross-NUMA path = $512\text{ MB} / 100\text{ GB/s} = 5.12\text{ ms}$. That''s a
-    2× slowdown on the data transfer alone. With 8 workers filling a prefetch queue, the cross-NUMA bottleneck
-    caps your pipeline at $100\text{ GB/s} / 200\text{ GB/s} = 50\%$ of peak throughput. Fix: pin the
-    DataLoader workers to the same NUMA node as the target GPU using `numactl --cpunodebind=1 --membind=1`.'
+  realistic_solution: 'You''re paying the NUMA (Non-Uniform Memory Access) penalty. In a dual-socket server, each CPU socket has its own local memory controller. When data is read from the NVMe on Socket 0, it lands in Socket 0''s local DRAM. But the GPU on Socket 1 must access that data across the inter-socket link (AMD Infinity Fabric or Intel UPI), which has roughly half the bandwidth and double the latency of local memory access. Every training batch must traverse this cross-socket hop before reaching the GPU.'
+  common_mistake: |
+    **The Pitfall:** Blaming the NVMe drive speed or assuming the DataLoader simply needs more worker processes.
+    **The Rationale:** Engineers abstract away the motherboard topology and view all CPU RAM as a uniform pool, forgetting the physical distance between sockets.
+    **The Consequence:** Adding more DataLoader workers just increases contention on the cross-socket interconnect, failing to fix the bottleneck.
+  napkin_math: |
+    - **Local RAM Bandwidth:** ~200 GB/s.
+    - **Cross-NUMA Bandwidth:** ~100 GB/s.
+    - **Transfer Time (512 MB batch):** Local = 512 MB / 200 GB/s = 2.56 ms. Cross-NUMA = 512 MB / 100 GB/s = 5.12 ms.
+    - **Result:** The cross-socket hop imposes a **2x slowdown** on memory transfers, capping the pipeline at 50% of peak throughput.
 status: published
 provenance: imported
 requires_explanation: false

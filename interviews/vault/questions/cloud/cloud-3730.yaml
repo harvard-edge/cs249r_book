@@ -8,29 +8,20 @@ competency_area: architecture
 bloom_level: create
 phase: inference
 title: Prefill-Decode Disaggregation Architecture Specification for H100 Fleet
-scenario: Design a prefill-decode disaggregation system for serving Llama-3-70B at
-  1000 req/s with P50 TTFT < 200ms and P50 TPOT < 50ms/token on an H100 fleet. Specify
-  the number of prefill GPUs vs decode GPUs, KV cache transfer mechanism, and load
-  balancing strategy.
-question: How many prefill vs decode H100s would you use, how would you transfer KV
-  cache, and how would you load-balance 1000 req/s?
+scenario: Design a prefill-decode disaggregation system for serving Llama-3-70B at 1000 req/s with P50 TTFT < 200ms and P50 TPOT < 50ms/token on an H100 fleet.
+question: How many prefill vs decode H100s would you use, how would you transfer KV cache, and how would you load-balance 1000 req/s?
 details:
-  realistic_solution: 'Prefill GPU requirement: avg prompt 512 tokens, 70B model,
-    50ms prefill per request at 1 GPU. Need 1000 req/s \u00d7 0.05s = 50 concurrent prefills
-    \u2192 50 H100s for prefill. Decode GPU requirement: avg 256 output tokens per response,
-    30 tok/s per sequence at batch=16. Throughput: 16 \u00d7 30 = 480 tok/s per GPU. Need 1000
-    \u00d7 256 / 480 = 534 decode GPUs. Ratio: 50 prefill : 534 decode = 1:10.7. KV transfer:
-    after prefill, transfer KV cache (2\u00d780\u00d78\u00d7128\u00d7512\u00d72B = 160MB) from prefill GPU
-    to decode GPU via RDMA over InfiniBand at 100 GB/s: 1.6ms. Load balancer: route
-    new requests to least-loaded prefill GPU; after prefill, schedule decode on GPU
-    with most spare capacity.'
-  common_mistake: Using the same GPU ratio as the compute ratio without accounting
-    for the different memory bandwidth requirements of decode vs the compute requirements
-    of prefill.
-  napkin_math: 'Prefill GPUs: 1000 req/s \u00d7 50ms = 50 GPUs. Decode: 1000 req/s \u00d7 256
-    tokens avg = 256K tok/s needed. At 480 tok/s/GPU (batch=16 at 30 tok/s): 256K / 480
-    = 534 GPUs. Fleet: 50 prefill + 534 decode = 584 H100s. KV transfer: 2 \u00d7 80 layers
-    \u00d7 8 KV heads \u00d7 128 dim \u00d7 512 tokens \u00d7 2B = 160MB. 160MB @ 100 GB/s = 1.6ms.'
+  realistic_solution: "Prefill GPU requirement: avg prompt 512 tokens, 70B model, 50ms prefill per request at 1 GPU. Need 1000 req/s × 0.05s = 50 concurrent prefills → 50 H100s for prefill. Decode GPU requirement: avg 256 output tokens per response, 30 tok/s per sequence at batch=16. Throughput: 16 × 30 = 480 tok/s per GPU. Need 1000 × 256 / 480 = 534 decode GPUs. Ratio: 50 prefill : 534 decode = 1:10.7. KV transfer: after prefill, transfer KV cache (2×80×8×128×512×2B = 160MB) from prefill GPU to decode GPU via RDMA over InfiniBand at 100 GB/s: 1.6ms. Load balancer: route new requests to least-loaded prefill GPU; after prefill, schedule decode on GPU with most spare capacity."
+  common_mistake: |
+    **The Pitfall:** Using the same GPU ratio as the compute ratio without accounting for the different memory bandwidth requirements.
+    **The Rationale:** Failing to isolate the compute-heavy prefill phase from the memory-bound decode phase.
+    **The Consequence:** Grossly undersizing the decode fleet, leading to severe queuing and SLA violations.
+  napkin_math: |
+    *   **Prefill GPUs:** 1000 req/s × 50ms prefill latency = 50 concurrent prefills = 50 GPUs.
+    *   **Decode Throughput Required:** 1000 req/s × 256 tokens avg = 256K tokens/s.
+    *   **Decode GPUs:** At 480 tok/s per GPU (batch=16 at 30 tok/s): 256K / 480 = 534 GPUs.
+    *   **Total Fleet:** 50 prefill + 534 decode = **584 H100s** (Ratio 1:10.7).
+    *   **KV Transfer Time:** $2 \times 80 \text{ layers} \times 8 \text{ KV heads} \times 128 \text{ dim} \times 512 \text{ tokens} \times 2 \text{ Bytes}$ = 167.7 MB. At 100 GB/s InfiniBand = **1.67ms transfer time**.
 status: published
 provenance: imported
 requires_explanation: true

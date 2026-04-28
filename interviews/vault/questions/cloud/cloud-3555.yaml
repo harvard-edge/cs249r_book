@@ -8,51 +8,20 @@ competency_area: data
 bloom_level: analyze
 phase: both
 title: Optimizing Large-Scale ML Data Storage for AMD MI300X
-scenario: You are designing the data pipeline for training a multi-trillion parameter
-  large language model. The raw dataset, comprising petabytes of diverse modalities
-  (text, images, video frames), resides in an S3-compatible object store. Training
-  will occur on an AMD MI300X cluster, where each accelerator features 192 GB HBM3,
-  1,307 TFLOPS FP16 sparse compute, and a peak memory bandwidth of 5.3 TB/s. Your
-  goal is to select an optimal storage format and accompanying strategies to minimize
-  data loading bottlenecks and maximize MI300X utilization during training. Discuss
-  the trade-offs between columnar (e.g., Parquet), row-oriented (e.g., TFRecord),
-  and potentially custom formats, considering compression, indexing, and storage tier
-  selection to ensure efficient data feeding to the MI300X's HBM3.
-question: What storage formats, compression, indexing, and tiering would you use to
-  feed PB-scale multimodal data to MI300X training efficiently?
+scenario: You are designing the data pipeline for training a multi-trillion parameter large language model. The raw dataset, comprising petabytes of diverse modalities, resides in an S3-compatible object store. Training will occur on an AMD MI300X cluster.
+question: What storage formats, compression, indexing, and tiering would you use to feed PB-scale multimodal data to MI300X training efficiently?
 details:
-  realistic_solution: A realistic solution involves a multi-stage data processing
-    pipeline. For the raw PBs of data, a highly compressed, partitioned columnar format
-    like Parquet (with Zstd compression) is suitable for archival and initial processing
-    due to its efficiency for selective reads. For training, a derived, pre-processed
-    dataset would be stored in a format optimized for sequential reads and fast deserialization,
-    potentially a custom binary format or a highly optimized TFRecord/WebDataset structure
-    (e.g., contiguous tensors, minimal parsing overhead). Data should be strategically
-    sharded and potentially pre-fetched to local NVMe SSDs (a faster storage tier)
-    on the training nodes, allowing the MI300X to pull data from HBM3 caches. This
-    setup allows for continuous, high-bandwidth data feeding, ensuring the MI300X's
-    compute units remain saturated.
-  common_mistake: A common mistake is applying a 'one-size-fits-all' storage format
-    (e.g., using generic CSV/JSON or even TFRecord without careful serialization)
-    without analyzing the specific access patterns of the training workload. This
-    often leads to inefficient deserialization, excessive data transfer, and underutilization
-    of the MI300X's high HBM3 bandwidth, as the I/O system becomes the primary bottleneck
-    rather than compute.
-  napkin_math: "Consider loading a 100GB batch for a training iteration. \n\n1.  **MI300X\
-    \ HBM3 Bandwidth**: 5.3 TB/s = 5300 GB/s. \n    *   If data is already in HBM3,\
-    \ loading 100GB takes 100 GB / 5300 GB/s ≈ 0.019 seconds.\n\n2.  **NVMe SSD Bandwidth**:\
-    \ Assume a high-end NVMe SSD can deliver ~10 GB/s. \n    *   Loading 100GB from\
-    \ NVMe takes 100 GB / 10 GB/s = 10 seconds. \n    *   If data is compressed (e.g.,\
-    \ 4x with Zstd), 25GB needs to be read from NVMe, taking 2.5 seconds. However,\
-    \ this adds CPU/GPU decompression overhead. If decompression takes 500 MB/s (CPU-bound)\
-    \ per core, 25GB would take ~50 seconds on a single core. This implies distributed\
-    \ decompression or hardware acceleration is crucial.\n\n3.  **Network Bandwidth\
-    \ (S3)**: Assume typical network throughput to S3 is ~1-2 GB/s. \n    *   Loading\
-    \ 100GB from S3 takes 100 GB / 2 GB/s = 50 seconds. This is clearly a bottleneck\
-    \ for per-iteration loading. \n\nThis simple math demonstrates that direct loading\
-    \ from S3 for each batch is infeasible for MI300X, necessitating intermediate\
-    \ storage tiers (NVMe) and highly efficient, pre-processed formats to keep the\
-    \ GPU busy."
+  realistic_solution: A realistic solution involves a multi-stage data processing pipeline. For the raw PBs of data, a highly compressed, partitioned columnar format like Parquet (with Zstd compression) is suitable for archival and initial processing due to its efficiency for selective reads. For training, a derived, pre-processed dataset would be stored in a format optimized for sequential reads and fast deserialization, potentially a custom binary format or a highly optimized TFRecord/WebDataset structure (e.g., contiguous tensors, minimal parsing overhead). Data should be strategically sharded and potentially pre-fetched to local NVMe SSDs (a faster storage tier) on the training nodes, allowing the MI300X to pull data from HBM3 caches. This setup allows for continuous, high-bandwidth data feeding, ensuring the MI300X's compute units remain saturated.
+  common_mistake: |
+    **The Pitfall:** Applying a 'one-size-fits-all' storage format like generic CSV/JSON or unoptimized TFRecord directly from S3.
+    **The Rationale:** Candidates fail to analyze the specific sequential access patterns of training versus the random access needs of data preparation.
+    **The Consequence:** Inefficient deserialization and excessive data transfer turn the I/O system into the primary bottleneck, severely underutilizing the MI300X compute.
+  napkin_math: |
+    - Loading a 100GB batch for a training iteration.
+    - **MI300X HBM3 Bandwidth:** 5.3 TB/s = 5300 GB/s. If data is in HBM3, loading takes 100 GB / 5300 GB/s ≈ 0.019 seconds.
+    - **NVMe SSD Bandwidth:** ~10 GB/s. Loading 100GB takes 100 GB / 10 GB/s = 10 seconds.
+    - **S3 Network Bandwidth:** ~2 GB/s. Loading 100GB takes 100 GB / 2 GB/s = 50 seconds.
+    - **Direct S3 loading is infeasible (50s per batch); caching compressed data on NVMe (2.5s read) with parallel CPU decompression is required to avoid starving the GPU.**
 status: published
 provenance: imported
 requires_explanation: false

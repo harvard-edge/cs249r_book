@@ -8,44 +8,26 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Tensor Parallelism Choke Point
-scenario: 'You are diagnosing a performance issue in a large-scale LLM training job using 8-way tensor
-  parallelism. The job runs across two servers, each with four H100 GPUs. Profiling shows that an `All-Reduce`
-  operation on a 4 GB tensor is a major bottleneck. Your servers use NVLink 4.0 for intra-node GPU communication
-  and InfiniBand NDR for inter-node communication. Using your systems knowledge, diagnose the most likely
-  performance bottleneck by calculating the transfer time for this operation under two conditions: a)
-  when all GPUs are in one server, and b) when the GPUs are split across two servers.'
-question: "How long should the 4GB all-reduce take with all 8 GPUs on NVLink versus split across two servers, and what bottleneck does this reveal?"
+scenario: 'You are diagnosing a performance issue in a large-scale LLM training job using 8-way tensor parallelism. The job runs across two servers, each with four H100 GPUs. Profiling shows that an `All-Reduce` operation on a 4 GB tensor is a major bottleneck. Your servers use NVLink 4.0 for intra-node GPU communication and InfiniBand NDR for inter-node communication.'
+question: 'How long should the 4GB all-reduce take with all 8 GPUs on NVLink versus split across two servers, and what bottleneck does this reveal?'
 details:
-  realistic_solution: The primary bottleneck is the dramatic drop in bandwidth when communication must
-    leave the server and traverse the InfiniBand network. Intra-node communication happens over the ultra-high-bandwidth
-    NVLink fabric, while inter-node communication is limited by the speed of the network interface cards
-    and switches, which is an order of magnitude slower. The `All-Reduce` operation becomes bound by the
-    slowest link in the chain, which is the inter-node InfiniBand connection.
-  common_mistake: Engineers often underestimate the magnitude of the bandwidth gap between on-node (NVLink)
-    and off-node (InfiniBand) interconnects. They might assume the difference is minor (2-3x) or incorrectly
-    blame software overhead (e.g., NCCL) or PCIe bus contention, rather than the fundamental physics of
-    the network topology.
-  napkin_math: '**Data size:** 4 GB tensor | **All-Reduce cost ≈ 2 × (N-1)/N × data_size** (ring all-reduce)
-    | For N=8 GPUs: effective data ≈ 2 × 7/8 × 4 GB = 7 GB | **Case A: All 8 GPUs in one server (NVLink
-    4.0):** | NVLink 4.0 bisection bandwidth: 900 GB/s per GPU | All-Reduce time ≈ 7 GB / 900 GB/s ≈ 7.8
-    ms | **Case B: 4 GPUs per server, 2 servers (InfiniBand NDR):** | Intra-node (NVLink): 900 GB/s |
-    Inter-node (IB NDR): 400 Gbps = 50 GB/s per link (unidirectional) | The all-reduce must cross the
-    inter-node link. The bottleneck is the IB link. | Effective cross-node data ≈ 2 × 4 GB = 8 GB (each
-    server sends ~4 GB across) | Inter-node transfer time ≈ 4 GB / 50 GB/s ≈ 80 ms | Plus intra-node steps:
-    ~4 ms each side | Total ≈ 80 + 8 = ~88 ms | **Slowdown:** 88 ms / 7.8 ms ≈ 11× slower when crossing
-    server boundary | **Diagnosis:** The inter-node IB link (50 GB/s) is ~18× slower than NVLink (900
-    GB/s). Tensor parallelism''s frequent all-reduces make it extremely sensitive to this gap. Keep TP
-    within a single NVLink domain; use pipeline parallelism across nodes.'
+  realistic_solution: 'The primary bottleneck is the dramatic drop in bandwidth when communication must leave the server and traverse the InfiniBand network. Intra-node communication happens over the ultra-high-bandwidth NVLink fabric, while inter-node communication is limited by the speed of the network interface cards and switches, which is an order of magnitude slower. The `All-Reduce` operation becomes bound by the slowest link in the chain, which is the inter-node InfiniBand connection.'
+  common_mistake: |
+    **The Pitfall:** Underestimating the bandwidth gap between on-node and off-node interconnects.
+    **The Rationale:** Engineers assume standard network cards are "fast enough" or blame software overhead (NCCL).
+    **The Consequence:** Splitting Tensor Parallelism domains across physical nodes, totally crippling MFU.
+  napkin_math: |
+    - **Data Size:** 4 GB tensor. Ring All-Reduce transfers 2 × (N-1)/N × Size per link.
+    - **Effective Volume (N=8):** 2 × 7/8 × 4 GB = 7 GB per link.
+    - **Case A (NVLink 4.0):** 7 GB / 900 GB/s = ~7.8 ms.
+    - **Case B (InfiniBand NDR):** The cross-node IB link capacity is 400 Gbps (50 GB/s unidirectional).
+    - **Inter-Node Transfer Time:** 7 GB / 50 GB/s = 140 ms.
+    - **Slowdown:** 140 ms / 7.8 ms = ~18× slower when crossing the server boundary.
   options:
-  - The bottleneck is PCIe Gen5 bandwidth, as the data must cross the PCIe bus to reach the network card,
-    adding ~20ms of latency.
-  - Software overhead in the NCCL communication library is the primary issue; the hardware difference
-    between NVLink and InfiniBand is negligible for large transfers.
-  - The bottleneck is the InfiniBand NDR link, which has ~18x less bandwidth (50 GB/s vs 900 GB/s). The
-    inter-node transfer takes ~80ms vs ~7.8ms for the all-NVLink case, making inter-node communication
-    dominant.
-  - The bottleneck is HBM memory access latency; reading the 4 GB tensor from HBM on each GPU is slower
-    than the network transfer itself.
+  - The bottleneck is PCIe Gen5 bandwidth, as the data must cross the PCIe bus to reach the network card, adding ~20ms of latency.
+  - Software overhead in the NCCL communication library is the primary issue; the hardware difference between NVLink and InfiniBand is negligible for large transfers.
+  - The bottleneck is the InfiniBand NDR link, which has ~18x less bandwidth (50 GB/s vs 900 GB/s). The inter-node transfer takes ~140ms vs ~7.8ms for the all-NVLink case, making inter-node communication dominant.
+  - The bottleneck is HBM memory access latency; reading the 4 GB tensor from HBM on each GPU is slower than the network transfer itself.
   correct_index: 2
 status: published
 provenance: imported
@@ -55,13 +37,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The 'Napkin Math' for Case B is incomplete, specifically the 'all-reduce must cross the inter-node'
-  part.
-validation_status_pro: ERROR
-validation_issues_pro:
-- The napkin math section is completely empty, which is a critical failure for a question with the 'napkin-math'
-  reasoning mode.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

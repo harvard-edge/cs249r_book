@@ -8,27 +8,20 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: High-Fanout Item Feature Retrieval
-scenario: 'Your recommendation serving system scores 1,000 candidate items per user request at 2,000 QPS.
-  The end-to-end P99 latency is 320ms against a 150ms SLA. Profiling reveals: Candidate Generation takes
-  20ms, User Feature Fetch takes 10ms, Item Feature Fetch takes 250ms, Cross-feature computation takes
-  10ms, and Model Scoring takes 30ms. The 250ms item fetch is caused by 10 concurrent threads making 100
-  sequential gRPC calls each to a Redis-backed feature store. Network RTT is 0.5ms.'
-question: "How would you fix the 250ms item feature fetch and bring end-to-end P99 under the 150ms SLA?"
+scenario: Your recommendation serving system scores 1,000 candidate items per request. End-to-end P99 latency is 320ms against a 150ms SLA. The 250ms item fetch bottleneck is caused by 10 concurrent threads making 100 sequential gRPC calls each to a Redis-backed feature store with a 0.5ms network RTT.
+question: How would you fix the 250ms item feature fetch and bring end-to-end P99 under the 150ms SLA?
 details:
-  realistic_solution: 'The 250ms bottleneck is dominated by network RTT overhead due to an N+1 query anti-pattern
-    in feature retrieval. We decompose the latency: 100 sequential calls per thread * (0.5ms RTT + 2.0ms
-    DB processing) = 250ms. Optimization 1: Implement batched retrievals (MGET). Group the 1,000 item
-    IDs into 5 parallel batches of 200 items. Optimization 2: Introduce an in-memory L1 cache (e.g., Caffeine)
-    on the serving nodes for item features, as item features typically mutate slowly compared to user
-    features. With an 80% cache hit rate, we only need to fetch 200 items over the network per request,
-    further reducing network bandwidth and Redis CPU load.'
-  common_mistake: Reducing the candidate pool from 1,000 to 200 to cut down fetch times, which severely
-    degrades recommendation quality.
-  napkin_math: 'Current Item Fetch: 100 sequential calls * 2.5ms = 250ms. Optimized Fetch with MGET: 1,000
-    items split into 5 parallel gRPC calls. Network RTT (0.5ms) + Redis MGET processing for 200 keys (~4.5ms)
-    = 5ms total latency. With 80% L1 cache hit rate, we only fetch 200 keys total, reducing Redis load
-    and dropping fetch latency to ~2ms. New End-to-End P99: 20ms (Gen) + 10ms (User) + 2ms (Item Fetch)
-    + 10ms (Cross) + 30ms (Model) = 72ms. This represents a 77.5% reduction in latency.'
+  realistic_solution: 'The 250ms bottleneck is an N+1 query anti-pattern. Optimization 1: Implement batched retrievals (MGET), grouping the 1,000 items into 5 parallel batches. Optimization 2: Introduce an in-memory L1 cache (e.g., Caffeine) on the serving nodes. With an 80% hit rate, you fetch drastically fewer items over the network.'
+  common_mistake: |
+    **The Pitfall:** Reducing the candidate pool from 1,000 to 200 items to cut down fetch times.
+    **The Rationale:** Candidates try to solve the N+1 network fetch problem by arbitrarily throwing away valid data.
+    **The Consequence:** Severely degrading recommendation quality and business metrics to hit an engineering SLA.
+  napkin_math: |
+    - **Current Fetch:** 100 sequential calls × 2.5ms = 250ms.
+    - **Optimized Fetch (MGET + Cache):** 1,000 items grouped into 5 parallel calls.
+    - **Cache Impact:** 80% L1 cache hit rate means only 200 keys are fetched over the network. Network RTT (0.5ms) + Redis MGET (~1.5ms) = 2ms total latency.
+    - **New Latency Stack:** 20ms (Gen) + 10ms (User) + 2ms (Item Fetch) + 10ms (Cross) + 30ms (Model) = 72ms.
+    - **Result:** P99 latency drops to **72ms**, well below the 150ms SLA, achieving a **77.5% reduction**.
   options:
   - Reduce the candidate pool from 1,000 to 200 items to cut down fetch times by 80%, reducing item fetch to 50ms and total latency to 120ms.
   - Implement batched retrievals (MGET) to group the 1,000 item IDs into 5 parallel batches, and add an in-memory L1 cache to achieve an 80% hit rate, dropping fetch latency to ~2ms.

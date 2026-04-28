@@ -8,31 +8,23 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The Translation Service Traffic Jam
-scenario: You are the ML Systems Engineer for a new real-time translation API that uses a 13B parameter
-  LLM hosted on H100 GPUs. Users are complaining about unpredictable freezes, where the service feels
-  responsive one moment and hangs the next. Your dashboard shows that average Time To First Token (TTFT)
-  is acceptable at ~110ms, but the P99 TTFT is spiking to over 500ms during peak traffic. The service
-  uses static batching with a fixed timeout of 100ms to collect requests. GPU utilization is consistently
-  high (90%+). Based on this data, diagnose the most likely cause of the P99 latency spikes.
-question: "What is the most likely cause of the P99 TTFT spikes above 500ms with a 100ms static batching timeout and 90% GPU utilization?"
+scenario: You are the ML Systems Engineer for a new real-time translation API that uses a 13B parameter LLM hosted on H100 GPUs. Users are complaining about unpredictable freezes, where the service feels responsive one moment and hangs the next. Your dashboard shows that average Time To First Token (TTFT) is acceptable at ~110ms, but the P99 TTFT is spiking to over 500ms during peak traffic. The service uses static batching with a fixed timeout of 100ms to collect requests. GPU utilization is consistently high (90%+).
+question: What is the most likely cause of the P99 TTFT spikes above 500ms with a 100ms static batching timeout and 90% GPU utilization?
 details:
-  realistic_solution: The most likely cause is head-of-line blocking due to the static 100ms batching
-    timeout. A request arriving at the beginning of a window must wait the full 100ms for the batch to
-    be dispatched, even if the GPU is free. Under load, this wait time cascades, causing a long queue
-    to form and leading to high P99 latency. The correct solution is to replace static batching with continuous
-    batching (also known as in-flight batching). This allows the system to add new requests to the currently
-    running batch, decoupling the arrival of requests from the batch dispatch schedule and minimizing
-    idle time and queue length.
-  common_mistake: Engineers often misdiagnose this as a raw throughput problem and try to solve it by
-    either adding more hardware (which doesn't fix the scheduling issue) or by shrinking the batch size
-    (which destroys throughput and makes the queue even longer). They fail to see that the core issue
-    is head-of-line blocking caused by the static batching window.
-  napkin_math: 'Let''s analyze the worst-case scenario for a single request with static batching: A request arrives just after a batch is dispatched, so it must wait 99ms for its own batch window to close. However, because GPU utilization is 90%+, the GPU is likely busy. If the previous batch takes 400ms to finish generating tokens, our request waits the full 400ms for the GPU to become free (the 99ms window wait happens concurrently). This 400ms queue delay, plus its own compute time, causes the P99 TTFT to spike well past 500ms under load due to severe head-of-line blocking.'
+  realistic_solution: The most likely cause is head-of-line blocking due to the static 100ms batching timeout. A request arriving at the beginning of a window must wait the full 100ms for the batch to be dispatched, even if the GPU is free. Under load, this wait time cascades, causing a long queue to form and leading to high P99 latency. The correct solution is to replace static batching with continuous batching (also known as in-flight batching). This allows the system to add new requests to the currently running batch, decoupling the arrival of requests from the batch dispatch schedule and minimizing idle time and queue length.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing this as a raw throughput problem and attempting to solve it by adding more hardware or arbitrarily shrinking the batch size.
+    
+    **The Rationale:** High GPU utilization combined with latency spikes logically points inexperienced engineers toward a lack of compute resources, masking the underlying scheduling architecture flaw.
+    
+    **The Consequence:** Shrinking the batch size destroys overall throughput, resulting in longer queues and worsening the P99 latency, while adding hardware is a vastly expensive band-aid over a solvable software issue.
+  napkin_math: |
+    - **Worst-Case Arrival**: A request arrives just after a batch is dispatched, forcing a 99ms wait for its own window to close.
+    - **Execution Wait**: Because GPU utilization is 90%+, the GPU is likely busy. If the previous batch takes 400ms to generate tokens, the request waits 400ms in queue (the 99ms window overlaps).
+    - **Result**: Queue delay (400ms) + compute time cleanly pushes the P99 TTFT **well past 500ms**, proving severe head-of-line blocking.
   options:
-  - The model is too large for the H100, causing compute delays. We should use a smaller model or upgrade
-    to B200s.
-  - The static batching timeout is causing head-of-line blocking. We should switch to a continuous batching
-    strategy.
+  - The model is too large for the H100, causing compute delays. We should use a smaller model or upgrade to B200s.
+  - The static batching timeout is causing head-of-line blocking. We should switch to a continuous batching strategy.
   - Network latency between the user and the server is fluctuating, causing the P99 spikes.
   - The batch size is too large. We should reduce the batch size to process individual requests faster.
   correct_index: 1

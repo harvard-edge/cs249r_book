@@ -7,19 +7,30 @@ topic: latency-decomposition
 competency_area: latency
 bloom_level: apply
 phase: both
-title: 'Latency Decomposition: Size the Per-Component Latency for a 70B Model Serving
-  Request'
-scenario: Concretely size the per-component latency breakdown for serving a single
+title: 'Latency Decomposition: Size the Per-Component Latency for a 70B Model Serving Request'
+scenario: >-
+  Concretely size the per-component latency breakdown for serving a single
   request to a 70B LLaMA model on one H100 node (80GB HBM3, 3.35TB/s, 989 TFLOPS BF16).
   The request is 256 tokens prompt, 64 tokens output. Assume no batching, no speculative
   decoding, and that weights fit in HBM after tensor-parallel split across 4 GPUs
-  with NVLink (600GB/s bidirectional).
-question: What NVLink bandwidth and all-reduce overhead should be included in the
+  with NVLink.
+question: >-
+  What NVLink bandwidth and all-reduce overhead should be included in the
   4-GPU tensor-parallel latency budget?
 details:
-  realistic_solution: 'For inference with tensor parallelism, the model performs 2 AllReduce operations per transformer layer per token. LLaMA-70B has 80 layers, totaling 160 AllReduces per generated token. H100 NVLink 4.0 provides 900 GB/s total bidirectional bandwidth, not 600 GB/s. For a batch size of 1, the activation tensor size is small (e.g., 1x1x8192x2 bytes = 16KB). Thus, the AllReduce time is bottlenecked by the NCCL latency overhead (typically ~2-5 μs per call), not bandwidth. For 4 GPUs, the overhead is 160 * 3μs ≈ 0.5ms per token. For 64 output tokens, this adds ~32ms of pure communication latency overhead.'
-  common_mistake: 'Assuming tensor parallelism communication latency is bottlenecked by NVLink bandwidth for batch=1 inference, or calculating gradient synchronization times (which are for training). At batch=1, AllReduce is purely latency-bound by NCCL overhead.'
-  napkin_math: 'Activation size (BS=1): 8192 hidden dim * 2 bytes = 16 KB. AllReduce data sent: 2 * (4-1)/4 * 16 KB = 24 KB. Bandwidth time at 450 GB/s (unidirectional) is 24KB / 450 GB/s ≈ 0.053 μs. However, NCCL AllReduce hardware/software latency is ~3 μs. 2 AllReduces per layer * 80 layers = 160 AllReduces per token. 160 * 3 μs = 480 μs (≈0.5 ms) per token. For 64 generated tokens: 64 * 0.5 ms = 32 ms added latency.'
+  realistic_solution: 'For inference with tensor parallelism, the model performs 2 AllReduce operations per transformer layer per token. LLaMA-70B has 80 layers, totaling 160 AllReduces per generated token. H100 NVLink 4.0 provides 900 GB/s total bidirectional bandwidth, not 600 GB/s. For a batch size of 1, the activation tensor size is small (e.g., 1x1x8192x2 bytes = 16KB). Thus, the AllReduce time is bottlenecked by the NCCL latency overhead (typically ~2-5 µs per call), not bandwidth. For 4 GPUs, the overhead is 160 * 3µs ≈ 0.5ms per token. For 64 output tokens, this adds ~32ms of pure communication latency overhead.'
+  common_mistake: |
+    **The Pitfall:** Assuming tensor parallelism communication latency is bottlenecked by NVLink bandwidth for batch=1.
+    **The Rationale:** Candidates calculate gradient synchronization times (which are bandwidth-heavy for training), failing to see that tiny 16KB activations are bottlenecked entirely by NCCL software overhead.
+    **The Consequence:** Over-investing in raw NVLink bandwidth instead of optimizing NCCL overhead or kernel fusion.
+  napkin_math: |
+    1. **Activation size (BS=1):** 8192 hidden dim × 2 bytes = 16 KB.
+    2. **AllReduce data sent:** 2 × (4-1)/4 × 16 KB = 24 KB.
+    3. **Bandwidth time:** At 450 GB/s (unidirectional NVLink), 24 KB / 450 GB/s ≈ 0.053 µs.
+    4. **NCCL Latency:** Hardware/software latency is ~3 µs (dominates bandwidth).
+    5. **Total AllReduces:** 2 per layer × 80 layers = 160 AllReduces per token.
+    6. **Time per token:** 160 × 3 µs = 480 µs (≈0.5 ms).
+    7. **Total overhead:** For 64 generated tokens, 64 × 0.5 ms = **~32 ms added latency.**
 status: published
 provenance: imported
 requires_explanation: false

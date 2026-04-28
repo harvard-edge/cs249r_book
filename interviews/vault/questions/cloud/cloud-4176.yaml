@@ -8,33 +8,22 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Network Partitioning for Failure Isolation
-scenario: 'Your 1024-GPU H100 fat-tree cluster experiences a spine switch failure,
-  partitioning the network into two 512-GPU halves. Your 3D parallel training job
-  (TP=8, PP=8, DP=16) spans both halves. Evaluate the blast radius: which parallelism
-  dimension is most affected, and how should you design the topology to contain failures?'
-question: Which 3D parallelism dimension is most affected by the 512-GPU partition,
-  and how would you design the topology to contain failures?
+scenario: Your 1024-GPU H100 fat-tree cluster experiences a spine switch failure, partitioning the network into two 512-GPU halves. Your 3D parallel training job (TP=8, PP=8, DP=16) spans both halves.
+question: Which 3D parallelism dimension is most affected by the 512-GPU partition, and how would you design the topology to contain failures?
 details:
-  realistic_solution: 'Blast radius analysis by parallelism dimension: TP (8 GPUs)
-    — all within one NVLink domain (same node), unaffected by network failure. PP
-    (8 stages) — spans 1 node if combined with TP (8×8=64 GPUs per PP group), but
-    likely spans 2+ nodes = potentially split by partition. DP (16 groups) — 16 identical
-    model replicas, spans the full cluster, definitely split. Impact: if PP groups
-    cross the partition boundary, the pipeline stalls completely (no data can flow
-    between stages). DP can tolerate partition by reducing to 8-way DP (one half).
-    Design for containment: (1) Ensure PP groups are topology-aware — all 8 PP stages
-    within the same pod (under the same spine switches). (2) Use 2× spine switch redundancy.
-    (3) DP groups span pods — DP can gracefully degrade to fewer replicas. (4) Use
-    ECMP with 4+ equal-cost paths through different spines.'
-  common_mistake: Assuming spine switch failure only affects bandwidth (2:1 oversubscription).
-    In a fat-tree, a spine failure can completely disconnect pods if there's no path
-    redundancy, killing the training job entirely rather than just slowing it down.
-  napkin_math: '1024 GPUs, TP=8, PP=8, DP=16. PP groups: 64 GPUs each (8×8). 1024/64
-    = 16 PP groups. Fat-tree pods: typically 64-128 GPUs each. If PP group fits in
-    1 pod (64 GPUs/pod): PP survives spine failure. DP: 16 → 8 replicas (50% throughput).
-    Recovery time: checkpoint at last step, restart with 8-way DP on healthy half.
-    Resume in ~5 min. Without topology awareness: PP split → full job failure, 30
-    min recovery (re-queue + reload).'
+  realistic_solution: 'Blast radius analysis by parallelism dimension: TP (8 GPUs) — all within one NVLink domain (same node), unaffected by network failure. PP (8 stages) — spans 1 node if combined with TP (8×8=64 GPUs per PP group), but likely spans 2+ nodes = potentially split by partition. DP (16 groups) — 16 identical model replicas, spans the full cluster, definitely split. Impact: if PP groups cross the partition boundary, the pipeline stalls completely (no data can flow between stages). DP can tolerate partition by reducing to 8-way DP (one half). Design for containment: (1) Ensure PP groups are topology-aware — all 8 PP stages within the same pod (under the same spine switches). (2) Use 2× spine switch redundancy. (3) DP groups span pods — DP can gracefully degrade to fewer replicas. (4) Use ECMP with 4+ equal-cost paths through different spines.'
+  common_mistake: |
+    **The Pitfall:** Assuming a spine switch failure only causes a bandwidth degradation due to oversubscription.
+    
+    **The Rationale:** Engineers familiar with generic web architectures assume routing protocols inherently route around damage without penalty, ignoring the strict synchronized pipeline dependencies of distributed training.
+    
+    **The Consequence:** If a pipeline-parallel group is bisected, the entire 1024-GPU training run freezes completely because data dependencies stall, turning a partial network fault into a catastrophic global failure.
+  napkin_math: |
+    - **GPU Topology**: 1024 GPUs total. TP=8, PP=8, DP=16 (8 * 8 * 16 = 1024).
+    - **PP Group Size**: 64 GPUs each (8x8).
+    - **Cluster Division**: 1024/64 = 16 PP groups.
+    - **Degradation Path**: DP can degrade from 16 to 8 replicas (50% throughput) safely.
+    - **Result**: If PP groups are confined cleanly to pods, the job survives. Without topology awareness, a PP split causes **full job failure** and a 30 min recovery cycle.
 status: published
 provenance: imported
 requires_explanation: false

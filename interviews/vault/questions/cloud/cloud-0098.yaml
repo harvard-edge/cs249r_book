@@ -8,39 +8,24 @@ competency_area: latency
 bloom_level: apply
 phase: both
 title: The Interactive API Latency Spike
-scenario: You are managing an interactive LLM API using a 70B model on H100 GPUs. Users are complaining
-  about poor Time To First Token (TTFT), with P99 latency exceeding your 500ms SLA. The system uses static
-  batching with a fixed timeout of 100ms to form batches. Monitoring shows that during peak load, GPU
-  utilization is spiky (oscillating between 90% and 20%) and the request queue is consistently long. Diagnose
-  the most likely cause for the high TTFT.
+scenario: You are managing an interactive LLM API using a 70B model on H100 GPUs. Users are complaining about poor Time To First Token (TTFT), with P99 latency exceeding your 500ms SLA. The system uses static batching with a fixed timeout of 100ms to form batches. Monitoring shows that during peak load, GPU utilization is spiky (oscillating between 90% and 20%) and the request queue is consistently long.
 question: "What is the most likely cause of the P99 TTFT exceeding 500ms with static batching and spiky GPU utilization?"
 details:
-  realistic_solution: 'The most likely cause is head-of-line blocking induced by the static batching strategy.
-    A new, short-sequence request arriving in the queue is forced to wait up to the full 100ms timeout
-    for a batch to form. If it gets batched with a long-running request from another user, it must also
-    wait for that entire generation to complete. This inflates the wait time (W) for every request. The
-    spiky GPU utilization confirms this: the GPU processes a batch quickly, then waits idly while the
-    next batch is slowly formed by the timeout mechanism. Switching to a continuous batching scheduler
-    (like vLLM''s) would solve this by processing requests on a token-by-token basis, eliminating idle
-    time and head-of-line blocking.'
-  common_mistake: Engineers often focus only on throughput (TPOT) and assume high batching is always better.
-    They might blame the model's inference speed or the network, ignoring that for interactive use-cases,
-    TTFT is dominated by scheduling and queueing delays, a phenomenon known as head-of-line blocking.
-  napkin_math: Let's use Little's Law. If the arrival rate (λ) is high, the queue length (L) grows. The
-    total time a request spends (W) is the sum of wait time in the queue (W_q) and service time (W_s).
-    With static batching, W_q includes up to the 100ms timeout *plus* the service time of the *longest*
-    request in the batch. If a request for 1 token gets batched with a request for 500 tokens, its perceived
-    latency isn't just its own generation time; it's the time for all 500 tokens. Continuous batching
-    decouples requests, so a new request can start processing on the next GPU iteration, dramatically
-    reducing W_q and thus improving TTFT.
+  realistic_solution: 'The most likely cause is head-of-line blocking induced by the static batching strategy. A new, short-sequence request arriving in the queue is forced to wait up to the full 100ms timeout for a batch to form. If it gets batched with a long-running request from another user, it must also wait for that entire generation to complete. This inflates the wait time (W) for every request. The spiky GPU utilization confirms this: the GPU processes a batch quickly, then waits idly while the next batch is slowly formed by the timeout mechanism. Switching to a continuous batching scheduler (like vLLM''s) would solve this by processing requests on a token-by-token basis, eliminating idle time and head-of-line blocking.'
+  common_mistake: |
+    **The Pitfall:** Assuming the H100 is compute-bound or blaming the network latency.
+    **The Rationale:** Engineers often focus exclusively on aggregate throughput (TPOT) and assume larger batching always yields better system performance.
+    **The Consequence:** Failing to diagnose head-of-line blocking, resulting in severe P99 TTFT SLA violations that cannot be fixed by simply adding more hardware.
+  napkin_math: |
+    - Using Little's Law, wait time (W) is the sum of wait time in the queue (W_q) and service time (W_s).
+    - With static batching, W_q includes up to the 100ms timeout *plus* the service time of the *longest* request in the previous batch.
+    - If a 1-token request is batched with a 500-token request, its generation is blocked until all 500 tokens complete.
+    - **Continuous batching decoupling reduces W_q by iterating token-by-token**, preventing short requests from being trapped behind long ones.
   options:
   - The H100 GPU is compute-bound and cannot generate tokens fast enough for the user load.
-  - The network latency between the API server and the inference server is the primary contributor to
-    the 500ms delay.
-  - Head-of-line blocking from the static batching timeout is causing excessive queueing delays for new
-    requests.
-  - The HBM3 memory bandwidth on the H100 is insufficient, causing a bottleneck when loading model weights
-    for each batch.
+  - The network latency between the API server and the inference server is the primary contributor to the 500ms delay.
+  - Head-of-line blocking from the static batching timeout is causing excessive queueing delays for new requests.
+  - The HBM3 memory bandwidth on the H100 is insufficient, causing a bottleneck when loading model weights for each batch.
   correct_index: 2
 status: published
 provenance: imported

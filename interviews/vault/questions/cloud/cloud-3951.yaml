@@ -8,30 +8,22 @@ competency_area: parallelism
 bloom_level: analyze
 phase: both
 title: Sequence Parallelism AllGather Overlap in Megatron-LM
-scenario: Megatron-LM's sequence parallelism partitions the sequence dimension across
-  tensor-parallel GPUs for LayerNorm and Dropout (which are not parallelizable by
-  standard tensor parallelism). Before each attention/MLP block, an AllGather reconstructs
-  the full sequence. Analyze how Megatron overlaps this AllGather with computation.
-question: How does Megatron-LM overlap the sequence-parallel AllGather before attention/MLP
-  blocks with computation?
+scenario: 'Megatron-LM''s sequence parallelism partitions the sequence dimension across tensor-parallel GPUs for LayerNorm and Dropout (which are not parallelizable by standard tensor parallelism). Before each attention/MLP block, an AllGather reconstructs the full sequence.'
+question: How does Megatron-LM overlap the sequence-parallel AllGather before attention/MLP blocks with computation?
 details:
-  realistic_solution: 'Megatron''s approach: decompose AllGather into chunks along
-    the sequence dimension. As each chunk arrives, start processing it: (1) AllGather
-    chunk 0 of the sequence. (2) While AllGathering chunk 1, start computing attention
-    on chunk 0 (only self-attention within chunk 0, which is valid for causal models
-    where chunk 0 contains the earliest tokens). (3) For cross-chunk attention (later
-    chunks attend to earlier chunks), earlier chunks are already available. (4) This
-    works perfectly for causal (autoregressive) models but NOT for bidirectional models
-    (BERT) where every token attends to every other. For causal models, overlap efficiency:
-    ~60-70% of AllGather hidden. For bidirectional: 0% overlap possible (must wait
-    for full sequence).'
-  common_mistake: Thinking AllGather and attention computation are independent. The
-    attention block needs the full sequence tensor from AllGather before it can start.
-    Naive overlap is not possible.
-  napkin_math: '70B model, 8-way TP, seq_len=8192 in BF16. Full sequence tensor: 8192
-    x 8192 x 2 = 128MB. AllGather: 128MB / 900 GB/s = 0.14ms. Attention compute: ~5ms
-    per layer. AllGather is only 2.8% of compute — overlap gains are small here, but
-    they add up over 96 layers: 96 x 0.14ms = 13.4ms saved.'
+  realistic_solution: 'Megatron''s approach: decompose AllGather into chunks along the sequence dimension. As each chunk arrives, start processing it: (1) AllGather chunk 0 of the sequence. (2) While AllGathering chunk 1, start computing attention on chunk 0 (only self-attention within chunk 0, which is valid for causal models where chunk 0 contains the earliest tokens). (3) For cross-chunk attention (later chunks attend to earlier chunks), earlier chunks are already available. (4) This works perfectly for causal (autoregressive) models but NOT for bidirectional models (BERT) where every token attends to every other. For causal models, overlap efficiency: ~60-70% of AllGather hidden. For bidirectional: 0% overlap possible (must wait for full sequence).'
+  common_mistake: |
+    **The Pitfall:** Thinking AllGather and attention computation are completely independent.
+    
+    **The Rationale:** Candidates assume network transfers can always be fully hidden, forgetting that the attention block intrinsically requires the full sequence tensor to begin.
+    
+    **The Consequence:** Implementing naive overlap schemes that cause deadlocks or corrupt data logic.
+  napkin_math: |
+    * **Sequence Tensor Size:** 8192 (seq) × 8192 (hidden) × 2 bytes = 134.2 MB
+    * **AllGather Time:** 134.2 MB / 900 GB/s = 0.15 ms
+    * **Attention Compute:** ~5 ms per layer
+    * **Overlap Ratio:** 0.15 ms is only ~3% of the 5 ms compute time.
+    * **Result:** **While the overlap per layer is tiny (0.15 ms), it accumulates to save ~14.4 ms across all 96 layers.**
 status: published
 provenance: imported
 requires_explanation: false

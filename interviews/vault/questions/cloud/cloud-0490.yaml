@@ -8,55 +8,39 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Disappointing Scaling Factor
-scenario: You are training a 70B parameter LLM using a data-parallel strategy across two servers. Each
-  server contains 8 H100 GPUs connected with NVLink 4.0. The two servers are connected via an InfiniBand
-  NDR switch. When you scale your training job from one server (8 GPUs) to two servers (16 GPUs), you
-  only see a 1.2x speedup, not the near-linear 2x you hoped for. Your profiler shows that the `All-Reduce`
-  operation for gradient synchronization is taking up a massive portion of each training step. Demonstrate
-  why this is happening by diagnosing the primary communication bottleneck.
-question: "Why does the 70B data-parallel job get only 1.2x speedup when All-Reduce crosses two InfiniBand-connected H100 servers?"
+scenario: You are training a 70B parameter LLM using a data-parallel strategy across two servers. Each server contains 8 H100 GPUs connected with NVLink 4.0. The two servers are connected via an InfiniBand NDR switch. When you scale your training job from one server (8 GPUs) to two servers (16 GPUs), you only see a 1.2x speedup, not the near-linear 2x you hoped for. Your profiler shows that the All-Reduce operation for gradient synchronization is taking up a massive portion of each training step.
+question: Why does the 70B data-parallel job get only 1.2x speedup when All-Reduce crosses two InfiniBand-connected H100 servers?
 details:
-  realistic_solution: The primary bottleneck is the InfiniBand interconnect between the two servers. While
-    NVLink provides massive bandwidth for communication *within* a server, the `All-Reduce` operation
-    for a 16-GPU job must synchronize gradients *across* the two servers. The bandwidth of the InfiniBand
-    link is an order of magnitude lower than the aggregated NVLink bandwidth inside each server, and this
-    inter-node communication now dominates the entire step time, leading to disastrous scaling efficiency.
-  common_mistake: Engineers often misattribute scaling bottlenecks. They might blame the PCIe bus, not
-    realizing that modern GPU servers use NVLink to bypass it for intra-node communication. Others might
-    underestimate the sheer volume of data being moved during gradient sync, or not know the bandwidth
-    difference between NVLink and InfiniBand.
-  napkin_math: '1. **Calculate Gradient Size**: The model has 70B parameters. With FP16 training, gradients
-    also use 2 bytes per parameter, totaling 140 GB.
-    2. **NVLink vs InfiniBand Bandwidth**: Within an 8-GPU node, NVLink 4.0 provides 900 GB/s bidirectional per GPU. An All-Reduce takes ~0.54s.
-    3. **The Bottleneck**: An NDR InfiniBand link is 400 Gbps (50 GB/s). A hierarchical All-Reduce across 2 nodes requires exchanging exactly 140 GB across the inter-node link. Transferring 140 GB across 50 GB/s takes 2.8 seconds. If an 8-GPU compute step takes 7.15s, the total single-node step is 7.15 + 0.5 = 7.65s. Scaling to 16 GPUs halves compute to 3.57s, but communication jumps to 2.8s, totaling 6.37s. The resulting speedup is 7.65s / 6.37s = 1.2x, matching the observed scaling wall.'
+  realistic_solution: The primary bottleneck is the InfiniBand interconnect between the two servers. While NVLink provides massive bandwidth for communication within a server, the All-Reduce operation for a 16-GPU job must synchronize gradients across the two servers. The bandwidth of the InfiniBand link is an order of magnitude lower than the aggregated NVLink bandwidth inside each server, and this inter-node communication now dominates the entire step time, leading to disastrous scaling efficiency.
+  common_mistake: |
+    **The Pitfall:** Blaming the PCIe bus or the NVLink switch for the communication bottleneck.
+    **The Rationale:** Engineers often misattribute scaling bottlenecks because they don't realize modern GPU servers use NVLink to bypass the PCIe bus, or they underestimate the vast bandwidth difference between NVLink and InfiniBand.
+    **The Consequence:** Wasting time tuning intra-node communication or purchasing unnecessary hardware instead of addressing the inter-node network bottleneck.
+  napkin_math: |
+    - **Gradient Size:** 70B parameters with FP16 gradients = **140 GB**.
+    - **Single-node Step:** Compute (7.15s) + NVLink All-Reduce (~0.5s) = **7.65s**.
+    - **Two-node Scale Compute:** Compute halves on 16 GPUs to **3.57s**.
+    - **Two-node Communication:** An NDR InfiniBand link is 400 Gbps (50 GB/s). Transferring 140 GB across 50 GB/s takes **2.8s**.
+    - **Two-node Step:** 3.57s (compute) + 2.8s (communication) = **6.37s**.
+    - **Speedup:** 7.65s / 6.37s = **1.2x**, matching the observed scaling wall exactly.
   options:
-  - The PCIe Gen5 bus in each server is saturated from copying gradients between the GPUs and the CPU's
-    main memory.
-  - The InfiniBand network connecting the two servers has insufficient bandwidth for the 140 GB gradient
-    synchronization required at each step.
-  - The NVLink switch within each 8-GPU server is the bottleneck, as it cannot handle the All-Reduce traffic
-    from 8 H100s simultaneously.
-  - The model is too large. Using a smaller 7B parameter model would resolve the communication bottleneck
-    without changing hardware.
+  - The PCIe Gen5 bus in each server is saturated from copying gradients between the GPUs and the CPU's main memory.
+  - The InfiniBand network connecting the two servers has insufficient bandwidth for the 140 GB gradient synchronization required at each step.
+  - The NVLink switch within each 8-GPU server is the bottleneck, as it cannot handle the All-Reduce traffic from 8 H100s simultaneously.
+  - The model is too large. Using a smaller 7B parameter model would resolve the communication bottleneck without changing hardware.
   correct_index: 1
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 6
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- Napkin Math calculates gradient size but does not further quantify the impact of the InfiniBand bottleneck
-  or explain the 1.2x speedup discrepancy.
 math_verified: true
-math_status: WARN
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Napkin Math calculates gradient size but does not further quantify the impact of the InfiniBand bottleneck
-  or explain the 1.2x speedup discrepancy.
 human_reviewed:
   status: not-reviewed
   by: null

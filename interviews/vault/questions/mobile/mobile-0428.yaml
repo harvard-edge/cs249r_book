@@ -8,40 +8,27 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: The Jank-Inducing Mobile Generative Model
-scenario: You are a mobile ML engineer deploying a new generative language model for an in-app sticker
-  feature on a flagship phone with a Snapdragon 8 Gen 3 SoC. The model is INT8 quantized, but you observe
-  significant UI 'jank' (stuttering) during inference, which needs to run in under the 16ms frame budget
-  to feel smooth. The on-device profiler shows that the current 25ms inference time is dominated by ~1,000
-  sequential kernel calls. Each kernel takes ~15µs to execute, but there's a consistent ~10µs gap between
-  each call where the accelerator appears idle. Apply your systems knowledge to diagnose the primary bottleneck
-  and select the most effective solution.
-question: "What profiler pattern shows a mobile generative model is dispatch-bound, and how can operator fusion fix it?"
+scenario: You are a mobile ML engineer deploying a new generative language model for an in-app sticker feature on a flagship phone with a Snapdragon 8 Gen 3 SoC. The model is INT8 quantized, but you observe significant UI 'jank' (stuttering) during inference. The on-device profiler shows that the current 25ms inference time is dominated by ~1,000 sequential kernel calls. Each kernel takes ~15µs to execute, but there's a consistent ~10µs gap between each call where the accelerator appears idle.
+question: What does the 'work-gap-work-gap' profiler pattern indicate, and how can operator fusion fix it?
 details:
-  realistic_solution: The correct diagnosis is that the model is **dispatch-bound** due to excessive kernel
-    launch overhead. The most effective solution is to **apply operator fusion**. By using a compiler
-    or framework feature to fuse sequential operations (e.g., a `Conv` followed by `BatchNorm` and `ReLU`)
-    into a single, larger kernel, you drastically reduce the number of CPU-to-accelerator dispatches.
-    This eliminates the overhead associated with each call, allowing the accelerator to spend more time
-    on useful computation instead of waiting for its next instruction.
-  common_mistake: 'Engineers often misdiagnose this as a raw compute or memory bandwidth problem, suggesting
-    architectural changes like distillation or pruning. While these can reduce latency, they don''t address
-    the root cause: the fixed, per-operation overhead of dispatching work to the accelerator (the ''death
-    by a thousand cuts'' problem). The profiler''s pattern of ''work-gap-work-gap'' is the classic signature
-    of kernel launch overhead dominating the tiny compute time of each individual operation.'
-  napkin_math: We can model the total latency to prove the bottleneck. Total Time = Num_Kernels × (Kernel_Execution_Time
-    + Dispatch_Overhead). Here, Total Time = 1,000 × (15µs + 10µs) = 1,000 × 25µs = 25ms. The dispatch
-    overhead alone accounts for 10ms (40% of the total inference time). By fusing kernels, we dramatically
-    reduce the multiplier (Num_Kernels), eliminating the 10µs gaps and bringing the latency closer to
-    15ms (under the 16ms budget).
+  realistic_solution: The correct diagnosis is that the model is **dispatch-bound** due to excessive kernel launch overhead. The most effective solution is to **apply operator fusion**. By using a compiler or framework feature to fuse sequential operations (e.g., a `Conv` followed by `BatchNorm` and `ReLU`) into a single, larger kernel, you drastically reduce the number of CPU-to-accelerator dispatches. This eliminates the overhead associated with each call, allowing the accelerator to spend more time on useful computation instead of waiting for its next instruction.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing the stutter as a raw compute or memory bandwidth limitation.
+    **The Rationale:** Engineers default to applying standard ML optimizations like pruning or distillation without deeply reading the profiler trace.
+    **The Consequence:** Shrinking the model size but failing to remove the actual bottleneck (kernel launch overhead), leaving the jank unresolved.
+  napkin_math: |
+    *   **Number of Kernels:** 1,000.
+    *   **Kernel Compute Time:** 15 µs.
+    *   **Dispatch Overhead:** 10 µs.
+    *   **Total Compute:** 1,000 * 15 µs = 15 ms.
+    *   **Total Overhead:** 1,000 * 10 µs = 10 ms (40% of total inference time).
+    *   **Total Time:** 15 ms + 10 ms = **25 ms**.
+    *   **Conclusion:** Fusing operations reduces the 1,000 dispatch calls down to a fraction, pulling the 25 ms total under the **16 ms** budget.
   options:
-  - The model is memory-bound due to repeated access to slow LPDDR5x RAM. Apply 50% unstructured pruning
-    to reduce the model's memory footprint.
-  - The model is compute-bound, exceeding the 45 TOPS of the NPU. Distill the model to a smaller architecture
-    with half the parameters.
-  - The model is dispatch-bound due to kernel launch overhead from too many small operations. Use operator
-    fusion to combine sequential operations into fewer, larger kernels.
-  - The SoC is thermally throttling, reducing its clock speed. Add a 100ms cool-down period after every
-    5 inferences to manage heat.
+  - The model is memory-bound due to repeated access to slow LPDDR5x RAM. Apply 50% unstructured pruning to reduce the model's memory footprint.
+  - The model is compute-bound, exceeding the 45 TOPS of the NPU. Distill the model to a smaller architecture with half the parameters.
+  - The model is dispatch-bound due to kernel launch overhead from too many small operations. Use operator fusion to combine sequential operations into fewer, larger kernels.
+  - The SoC is thermally throttling, reducing its clock speed. Add a 100ms cool-down period after every 5 inferences to manage heat.
   correct_index: 2
 status: published
 provenance: imported

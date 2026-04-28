@@ -8,36 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: The MLIR Retargetability Boundary
-scenario: Your company trained a 70B transformer on NVIDIA H100s using PyTorch. A cloud cost analysis
-  shows that AMD MI300X GPUs offer 30% lower $/TFLOP. The plan is to retarget the compiled model using
-  MLIR's multi-target lowering — keep the high-level dialects identical and swap only the final backend
-  from NVVM to AMDGPU. After migration, actual training throughput is only 60% of the H100's, despite
-  MI300X having comparable peak TFLOPS. Evaluate where the retargetability promise of MLIR breaks down
-  and what additional work is required.
-question: "Where does MLIR retargetability break when moving from H100 to MI300X, and what extra optimization work is required?"
+scenario: 'Your company trained a 70B transformer on NVIDIA GPUs using PyTorch. A cloud cost analysis shows that AMD MI300X GPUs offer 30% lower $/TFLOP. The plan is to retarget the compiled model using MLIR''s multi-target lowering — keep the high-level dialects identical and swap only the final backend from NVVM to AMDGPU. After migration, actual training throughput is only 60% of the NVIDIA baseline, despite comparable peak TFLOPS.'
+question: 'Where does MLIR retargetability break when moving to MI300X, and what extra optimization work is required?'
 details:
-  realistic_solution: 'The retargetability promise breaks down at three levels: (1) **Tiling and memory
-    hierarchy mismatch**: Tile sizes auto-tuned for H100 (80GB HBM3 at 3.35 TB/s, 50MB L2, 228KB shared
-    memory per SM) are suboptimal for MI300X (192GB HBM3 at 5.3 TB/s, 256MB Infinity Cache, 64KB LDS per
-    CU). MI300X''s much larger cache favors different working-set sizes. The tiling passes in the mid-level
-    dialects must be re-tuned. (2) **Missing hardware primitives**: NVIDIA''s TMA (Tensor Memory Accelerator)
-    for async tile loads has no direct MI300X equivalent — the compiler must generate explicit DMA commands,
-    requiring different shared memory orchestration at the GPU dialect level. (3) **Library fallback gap**:
-    cuBLAS/cuDNN provide hand-tuned kernels for common shapes on NVIDIA. rocBLAS/MIOpen on AMD have less
-    coverage for exotic shapes (grouped GEMM for MoE, variable-length attention). The compiler must generate
-    these kernels from scratch rather than dispatching to libraries. The fix requires: re-running auto-tuning
-    on MI300X (~30 min), adding MI300X-specific tiling heuristics to the affine dialect passes, and writing
-    custom Triton kernels for the 5-10 operator shapes where rocBLAS falls short. After this work, expect
-    85-90% of equivalent H100 throughput, making the 30% cost savings real.'
-  common_mistake: '"MLIR''s whole point is retargetability — just swap the backend and it should work."
-    MLIR provides retargetability at the IR level, but performance portability requires hardware-specific
-    optimization at multiple levels, not just the final lowering.'
-  napkin_math: 'H100 training throughput (baseline): 100% (MFU ~55%). Naive MLIR retarget to MI300X: 60%
-    of H100 throughput. Breakdown of the 40% gap: tiling mismatch = ~15% (wrong working set sizes), missing
-    TMA codegen = ~10% (extra synchronization overhead), library coverage gap = ~15% (fallback to unoptimized
-    kernels). After dedicated optimization work (~2 engineer-weeks): 88% of H100 throughput. Net cost
-    savings: MI300X at 88% throughput × 70% cost = effective $0.80 per $1.00 H100-equivalent → 20% real
-    savings.'
+  realistic_solution: 'The retargetability promise breaks down at three levels: (1) **Tiling and memory hierarchy mismatch**: Tile sizes auto-tuned for H100 (80GB HBM3 at 3.35 TB/s, 50MB L2, 228KB shared memory per SM) are suboptimal for MI300X (192GB HBM3 at 5.3 TB/s, 256MB Infinity Cache, 64KB LDS per CU). MI300X''s much larger cache favors different working-set sizes. The tiling passes in the mid-level dialects must be re-tuned. (2) **Missing hardware primitives**: NVIDIA''s TMA (Tensor Memory Accelerator) for async tile loads has no direct MI300X equivalent — the compiler must generate explicit DMA commands, requiring different shared memory orchestration at the GPU dialect level. (3) **Library fallback gap**: cuBLAS/cuDNN provide hand-tuned kernels for common shapes on NVIDIA. rocBLAS/MIOpen on AMD have less coverage for exotic shapes (grouped GEMM for MoE, variable-length attention). The compiler must generate these kernels from scratch rather than dispatching to libraries. The fix requires: re-running auto-tuning on MI300X (~30 min), adding MI300X-specific tiling heuristics to the affine dialect passes, and writing custom Triton kernels for the 5-10 operator shapes where rocBLAS falls short. After this work, expect 85-90% of equivalent H100 throughput, making the 30% cost savings real.'
+  common_mistake: |
+    **The Pitfall:** Believing MLIR's retargetability promise equates to seamless performance portability.
+    **The Rationale:** MLIR is marketed as a multi-target compiler, leading engineers to think simply swapping the backend dialect will magically map to entirely different hardware architectures efficiently.
+    **The Consequence:** Migrations suffer massive throughput regressions because tile sizes, memory hierarchy utilizations, and custom kernels do not automatically translate across vendors without manual tuning.
+  napkin_math: |
+    - **Baseline Throughput:** NVIDIA baseline at 100%.
+    - **Naive MLIR Retarget:** 60% throughput.
+    - **Gap Breakdown:** ~15% from cache tiling mismatch + ~10% from missing TMA codegen + ~15% from library coverage gaps.
+    - **Post-Optimization Throughput:** ~88% of baseline.
+    - **Cost Economics:** At 88% throughput and 70% hardware cost = 0.70 / 0.88 = **~20% true cost savings** (not 30%).
   options:
   - 'MLIR retargetability is seamless; the performance gap is entirely due to PyTorch''s overhead on AMD GPUs, which can be fixed by switching to JAX.'
   - 'The gap is because AMD MI300X lacks Tensor Cores, so MLIR must fall back to slow CUDA core emulation for all matrix multiplications.'

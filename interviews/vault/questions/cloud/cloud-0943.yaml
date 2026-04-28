@@ -8,29 +8,19 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Mitigating Memory Fragmentation in Dynamic LLM Serving
-scenario: You are optimizing a production inference service for a 13B parameter LLM on a single A100 80GB
-  GPU. The service handles highly variable sequence lengths (128 to 2048 tokens). Despite the theoretical
-  peak memory usage for weights and KV cache being around 55GB, the system periodically crashes with 'CUDA
-  out of memory' when a 2048-token request arrives after a burst of 128-token requests. Profiling shows
-  heavy external fragmentation with hundreds of small idle blocks scattered in the framework's caching
-  allocator. Team A proposes disabling the caching allocator to manage memory manually via direct `cudaMalloc`
-  calls. Team B proposes padding all requests to 2048 tokens to standardize tensor allocation sizes. Evaluate
-  both proposals and design a better memory management strategy.
-question: "How would you evaluate disabling the allocator versus padding to 2048 tokens, and what memory strategy should replace them?"
+scenario: You are optimizing a production inference service for a 13B parameter LLM on a single A100 80GB GPU. The service handles highly variable sequence lengths (128 to 2048 tokens). Despite the theoretical peak memory usage for weights and KV cache being around 55GB, the system periodically crashes with 'CUDA out of memory' when a 2048-token request arrives after a burst of 128-token requests. Profiling shows heavy external fragmentation. Team A proposes disabling the caching allocator to manage memory manually via direct `cudaMalloc` calls. Team B proposes padding all requests to 2048 tokens to standardize allocation sizes.
+question: How would you evaluate disabling the allocator versus padding to 2048 tokens, and what memory strategy should replace them?
 details:
-  realistic_solution: Reject both proposals. Direct `cudaMalloc` (Team A) adds ~10-50us of CPU-GPU sync
-    latency per allocation, severely bottlenecking the CPU. Padding to 2048 (Team B) causes extreme compute
-    waste. The optimal solution is to tune the caching allocator to reduce block splitting (e.g., `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`)
-    to prevent tiny fragments, and implement PagedAttention to allocate the KV cache in fixed-size, non-contiguous
-    blocks (e.g., 16 tokens per block), structurally eliminating external fragmentation without padding
-    compute.
-  common_mistake: Candidates often accept Team B's padding strategy without calculating the massive quadratic
-    compute penalty, or agree with Team A without realizing that direct `cudaMalloc` calls introduce severe
-    CPU-GPU synchronization latency.
-  napkin_math: 'Team A latency: 1,000 allocations/step * 20us = 20ms sync overhead per step. Team B compute
-    waste: Padding an average 512-token sequence to 2048 increases attention FLOPs by (2048/512)^2 = 16x.
-    PagedAttention block size: 16 tokens * 40 heads * 128 head dim * 2 bytes = 163,840 bytes (160 KiB) per block for a
-    single K or V tensor, reducing external fragmentation to <4% with zero compute padding overhead.'
+  realistic_solution: Reject both proposals. Direct `cudaMalloc` (Team A) adds ~10-50us of CPU-GPU sync latency per allocation, severely bottlenecking the CPU. Padding to 2048 (Team B) causes extreme compute waste. The optimal solution is to tune the caching allocator to reduce block splitting (e.g., `PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128`) to prevent tiny fragments, and implement PagedAttention to allocate the KV cache in fixed-size, non-contiguous blocks (e.g., 16 tokens per block), structurally eliminating external fragmentation without padding compute.
+  common_mistake: |
+    **The Pitfall:** Accepting Team B's padding strategy or Team A's manual `cudaMalloc` approach.
+    **The Rationale:** Candidates fail to calculate the quadratic compute penalty of padding or the severe CPU-GPU synchronization latency introduced by direct memory allocation.
+    **The Consequence:** Padding results in massive compute waste, while manual allocation destroys throughput.
+  napkin_math: |
+    - **Analyze Team A latency:** Direct `cudaMalloc` adds overhead. 1,000 allocations/step * 20 \u00b5s = **20 ms sync overhead** per step.
+    - **Analyze Team B compute waste:** Padding an average 512-token sequence to 2048 increases attention FLOPs by `(2048/512)^2 = 16x`.
+    - **Calculate PagedAttention efficiency:** Using 16-token blocks: 16 tokens * 40 heads * 128 head dim * 2 bytes = **163,840 bytes (160 KiB)** per block.
+    - **Conclusion:** PagedAttention structurally limits external fragmentation to <4% with **zero** compute padding overhead.
 status: published
 provenance: imported
 requires_explanation: false

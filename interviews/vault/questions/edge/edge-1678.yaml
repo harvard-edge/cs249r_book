@@ -8,35 +8,19 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: Hailo-8 Streaming KV-Cache Architecture for Long-Context Transformers
-scenario: Your team is deploying a 1B parameter vision-language transformer on a robotic
-  platform using a Hailo-8 accelerator. The model requires processing video sequences
-  up to 4K tokens, but the Hailo-8 relies entirely on host memory streaming since
-  it lacks local DRAM. Design a dataflow architecture to mitigate the O(n²) attention
-  complexity and the massive host-to-accelerator bandwidth bottleneck caused by streaming
-  the KV-cache every token generation step while operating within the 2.5W power budget.
-question: How would you redesign attention dataflow for a 1B VLM on Hailo-8 to avoid
-  streaming a 4K-token KV cache every generation step?
+scenario: Your team is deploying a 1B parameter vision-language transformer on a robotic platform using a Hailo-8 accelerator. The model requires processing video sequences up to 4K tokens, but the Hailo-8 relies entirely on host memory streaming since it lacks local DRAM. Design a dataflow architecture to mitigate the O(n²) attention complexity and the massive host-to-accelerator bandwidth bottleneck caused by streaming the KV-cache every token generation step while operating within the 2.5W power budget.
+question: How would you redesign attention dataflow for a 1B VLM on Hailo-8 to avoid streaming a 4K-token KV cache every generation step?
 details:
-  realistic_solution: The optimal solution involves designing a fused, pipelined dataflow
-    graph that streams compressed or quantized KV-caches (e.g., INT4) from the host,
-    combined with a local temporal sliding window or token-dropping mechanism (like
-    StreamingLLM) to strictly bound the cache size. The attention mechanism must be
-    re-cast to map efficiently onto the 26 TOPS INT8 MAC array without stalling on
-    host memory reads.
-  common_mistake: Candidates often propose standard flash attention or sparse attention
-    without realizing these still require large memory footprints, or they ignore
-    the host-streaming bandwidth bottleneck completely. They might try to tile the
-    KV-cache assuming local SRAM can hold enough context, failing to account for the
-    continuous streaming requirement of the Hailo-8's architecture.
-  napkin_math: For a 1B parameter model, generating 1 token requires ~2 GOPs. At 26
-    TOPS INT8, compute time per token is ~0.08ms. The bottleneck is streaming the
-    KV-cache. A 4K token KV-cache (d_model=1024, 16 layers, INT8) is 4096 * 1024 *
-    16 * 2 * 1 byte = 134 MB. Streaming 134 MB from host memory over PCIe Gen3x4 (~3.9
-    GB/s) takes 134 / 3900 = 34.3 ms per token. The system would run at ~29 tokens/sec,
-    utilizing less than 0.3% of the compute capacity. By bounding the context window
-    to 512 tokens and using INT4 KV-quantization, the transfer drops to 8.4 MB (2.1
-    ms transfer), improving throughput to ~450 tokens/sec while maintaining the 2.5W
-    envelope.
+  realistic_solution: The optimal solution involves designing a fused, pipelined dataflow graph that streams compressed or quantized KV-caches (e.g., INT4) from the host, combined with a local temporal sliding window or token-dropping mechanism (like StreamingLLM) to strictly bound the cache size. The attention mechanism must be re-cast to map efficiently onto the 26 TOPS INT8 MAC array without stalling on host memory reads.
+  common_mistake: |
+    **The Pitfall:** Proposing standard flash attention or sparse attention algorithms.
+    **The Rationale:** Candidates correctly identify attention complexity as an issue but ignore the host-streaming bandwidth bottleneck caused by the lack of local DRAM.
+    **The Consequence:** Failing to realize that even optimized attention still requires continuous memory streaming, completely stalling the hardware.
+  napkin_math: |
+    - **Cache Size:** A 4K token INT8 KV-cache (d_model=1024, 16 layers) is 4096 $\times$ 1024 $\times$ 16 $\times$ 2 $\times$ 1 byte = 134 MB.
+    - **Streaming Cost:** Streaming 134 MB over PCIe Gen3x4 (~3.9 GB/s) takes 134 / 3900 = **34.3 ms per token**.
+    - **Throughput:** System runs at ~29 tokens/sec (using <0.3% compute).
+    - **Optimization:** Bounding context to 512 tokens and using INT4 KV-quantization drops transfer to 8.4 MB (2.1 ms), boosting throughput to **~450 tokens/sec**.
 status: published
 provenance: imported
 requires_explanation: true
@@ -45,18 +29,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The Napkin Math states 'A 4K token KV-cache (d_model=1024, 16 layers, INT8) is 4096
-  * 1024 * 16 * 2 * 1 byte = 134 MB' which implies 2 bytes for K and V combined (1
-  byte each), but for INT8, each would be 1 byte, so it should be 4096 * 1024 * 16
-  * 2 * 1 byte. This is correct as stated but the '(d_model=1024, 16 layers, INT8)'
-  is specific to a model not fully described in the scenario. The '2' factor for K/V
-  should be explicit if 1 byte/value is assumed.
-- The calculation 'Streaming 134 MB from host memory over PCIe Gen3x4 (~3.9 GB/s)
-  takes 134 / 3900 = 34.3 ms per token' uses 3.9 GB/s for PCIe, which is a plausible
-  practical bandwidth but should be stated as an assumption rather than a given fact.
-- The sentence 'utilizing less than 0.3% of the compute capacity. By bounding the
-  context window to 512 tokens and using IN' cuts off.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

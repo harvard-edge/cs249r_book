@@ -8,78 +8,24 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: H100 Memory Optimization for Knowledge Distillation Logit Matching
-scenario: You are tasked with distilling a 175B parameter teacher LLM into a 7B parameter
-  student LLM for deployment on NVIDIA H100 GPUs. Each NVIDIA H100 GPU features 80
-  GB HBM3, 989 TFLOPS FP16 dense performance, 3.35 TB/s memory bandwidth, and consumes
-  700W. Your goal is to achieve a 10x inference latency reduction for the student
-  model compared to the teacher. During logit matching, you need to capture teacher
-  logits (vocabulary size 50,000, sequence length 2048) and store them for each training
-  step. Assuming the student model's parameters, optimizer states, and activations
-  consume 60GB of the HBM3, calculate the maximum effective batch size (number of
-  sequences) you can process on a single H100 for the logit matching phase. Clearly
-  state your assumptions for logit precision and any strategies you employ to maximize
-  batch size while ensuring all necessary data fits into the remaining HBM3 memory.
-question: What maximum batch size fits for logit matching with 20 GB free HBM3, sequence
-  length 2048, vocab 50,000, and what logit precision would you use?
+scenario: You are tasked with distilling a 175B parameter teacher LLM into a 7B parameter student LLM for deployment on NVIDIA H100 GPUs. During logit matching, you need to capture teacher logits (vocabulary size 50,000, sequence length 2048) and store them for each training step. The student model's parameters, optimizer states, and activations consume 60GB of the HBM3.
+question: What maximum batch size fits for logit matching with 20 GB free HBM3, sequence length 2048, vocab 50,000, and what logit precision would you use?
 details:
-  realistic_solution: To maximize the effective batch size for logit matching on the
-    H100, the primary strategy involves aggressive quantization of the teacher's logits.
-    Given the 20GB remaining HBM3 after allocating 60GB for the student model, we
-    would convert the teacher's FP32 logits to INT8. This is feasible for logit matching
-    as the relative magnitudes are often more critical than absolute precision. The
-    distillation loss function would then operate on these INT8 logits. Additionally,
-    employing techniques like gradient accumulation would allow for processing larger
-    logical batches while keeping the physical batch size manageable within the HBM3,
-    ensuring compute units remain saturated without exceeding memory limits. Selective
-    distillation where only critical layers' outputs are matched can further save
-    memory.
-  common_mistake: A common mistake is to ignore the memory constraints of the GPU
-    and attempt to store full-precision (FP32) logits or excessively large intermediate
-    features for logit matching. This quickly exhausts HBM3, leading to out-of-memory
-    errors, or forces frequent CPU-GPU transfers, severely bottlenecking the distillation
-    process and wasting the H100's immense compute power. Another oversight is not
-    leveraging mixed-precision training or intelligent quantization for the logits
-    themselves.
-  napkin_math: 'Total HBM3 on H100: 80 GB
-
-    Memory allocated for student model (params, activations, optimizer states): 60
-    GB
-
-    Remaining HBM3 for teacher logits: 80 GB - 60 GB = 20 GB (or 20 * 1024 MB = 20480
-    MB)
-
-
-    Teacher logit dimensions:
-
-    Vocabulary Size: 50,000
-
-    Sequence Length: 2048
-
-
-    Logit size per sequence:
-
-    -   FP32 (4 bytes/value): 2048 * 50,000 * 4 bytes = 409,600,000 bytes ≈ 390.6
-    MB
-
-    -   FP16 (2 bytes/value): 2048 * 50,000 * 2 bytes = 204,800,000 bytes ≈ 195.3
-    MB
-
-    -   INT8 (1 byte/value): 2048 * 50,000 * 1 byte = 102,400,000 bytes ≈ 97.66 MB
-
-
-    To maximize batch size, we assume INT8 quantization for the teacher logits. This
-    significantly reduces the memory footprint while often retaining sufficient information
-    for distillation.
-
-
-    Maximum effective batch size = Remaining HBM3 / Logit size per INT8 sequence
-
-    Maximum effective batch size = 20480 MB / 97.66 MB/sequence ≈ 209 sequences
-
-
-    Thus, an effective batch size of approximately 209 sequences can be processed
-    on a single H100 for the logit matching phase by quantizing teacher logits to
-    INT8.'
+  realistic_solution: To maximize the effective batch size for logit matching on the H100, the primary strategy involves aggressive quantization of the teacher's logits. Given the 20GB remaining HBM3 after allocating 60GB for the student model, we would convert the teacher's FP32 logits to INT8. This is feasible for logit matching as the relative magnitudes are often more critical than absolute precision. The distillation loss function would then operate on these INT8 logits. Additionally, employing techniques like gradient accumulation would allow for processing larger logical batches while keeping the physical batch size manageable within the HBM3, ensuring compute units remain saturated without exceeding memory limits. Selective distillation where only critical layers' outputs are matched can further save memory.
+  common_mistake: |
+    **The Pitfall:** Attempting to store full-precision (FP32) logits for matching.
+    **The Rationale:** Assuming distillation requires perfect floating-point representations of the teacher's distribution.
+    **The Consequence:** Quickly exhausting the remaining 20GB of HBM3, forcing tiny batch sizes or catastrophic CPU-GPU memory thrashing that cripples the H100.
+  napkin_math: |
+    - **Total HBM3**: 80 GB.
+    - **Student memory**: 60 GB.
+    - **Remaining HBM3**: 20 GB (20,480 MB).
+    - **Teacher logit dims**: 50,000 vocab × 2048 seq length.
+    - **Logit size per sequence**:
+      - FP32 (4 bytes): 2048 × 50,000 × 4 = ~390.6 MB.
+      - FP16 (2 bytes): 2048 × 50,000 × 2 = ~195.3 MB.
+      - INT8 (1 byte): 2048 × 50,000 × 1 = ~97.66 MB.
+    - **Result**: Quantizing to INT8 allows a max effective batch size of 20,480 MB / 97.66 MB ≈ **209 sequences** per GPU.
 status: published
 provenance: imported
 requires_explanation: false

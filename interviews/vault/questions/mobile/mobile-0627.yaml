@@ -8,37 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: The Operator Fusion Fallacy
-scenario: Your team is deploying a new Transformer-based model to an Android phone using the Snapdragon
-  8 Gen 3 Hexagon NPU. `systrace` analysis reveals that although individual NPU operations are fast, the
-  end-to-end latency is poor. The trace shows a pattern of many short, high-frequency NPU dispatches with
-  significant idle gaps in between. A junior engineer proposes quantizing the model more aggressively,
-  from INT8 down to INT4, arguing that making each mathematical operation faster will reduce the overall
-  latency. Assess this proposal. Why is this approach likely to fail and potentially even make relative
-  performance worse, and what is the true, underlying system bottleneck?
-question: "Why is this approach likely to fail and potentially even make relative performance worse, and what is the true, underlying system bottleneck?"
+scenario: Your team is deploying a new Transformer-based model to an Android phone using the Snapdragon 8 Gen 3 Hexagon NPU. `systrace` analysis reveals that although individual NPU operations are fast, the end-to-end latency is poor. The trace shows a pattern of many short, high-frequency NPU dispatches with significant idle gaps in between. A junior engineer proposes quantizing the model more aggressively, from INT8 down to INT4, arguing that making each mathematical operation faster will reduce the overall latency.
+question: Why is aggressive quantization from INT8 to INT4 likely to fail to improve latency here, and what is the true underlying system bottleneck?
 details:
-  realistic_solution: The proposal is flawed because the bottleneck is not compute speed; it is dispatch
-    overhead. Each call from the CPU to the NPU incurs a fixed latency cost for context switching, driver
-    interaction, and data marshalling. For a Transformer with many small, sequential operations, this
-    dispatch tax is paid for every single layer or operation that isn't fused. Making the compute faster
-    with INT4 quantization only shortens the time the NPU is busy, which makes the fixed dispatch overhead
-    a *larger percentage* of the total time for each call. The true solution is Operator Fusion. The ML
-    compiler (e.g., via the device delegate) must be capable of analyzing the graph, identifying sequential
-    operations (like MatMul -> Add -> LayerNorm), and compiling them into a single, monolithic kernel.
-    This single kernel is dispatched once, amortizing the dispatch overhead over a much larger chunk of
-    computation and allowing the NPU to stay busy without constant CPU intervention.
-  common_mistake: Believing that faster individual operations directly translate to lower end-to-end latency.
-    The proposal focuses on the `T_compute` part of the latency equation while ignoring the dominant `T_dispatch`
-    component, a classic fallacy when moving from monolithic cloud GPUs to heterogeneous mobile SoCs.
-  napkin_math: Assume a simplified sequence of 3 operations in a Transformer block. Let NPU dispatch overhead
-    be ~30µs. Let each op on INT8 take 30µs. Without fusion, total latency = 3 × (T_dispatch + T_compute)
-    = 3 × (30µs + 30µs) = 180µs. With INT4, T_compute might drop to 15µs. The new latency is 3 × (30µs
-    + 15µs) = 135µs. While this is a speedup, the overhead is now 30/45 = 66% of the per-op time, up from
-    30/60 = 50%. With fusion, the entire 3-op block is dispatched once. The fused INT8 kernel might take
-    30µs × 3 = 90µs. Total fused latency = 1 × T_dispatch + T_fused_compute = 30µs + 90µs = 120µs. The
-    fused INT4 kernel might take 15µs × 3 = 45µs. Total fused latency = 30µs + 45µs = 75µs. The unfused
-    INT4 approach (135µs) is significantly slower than the fused INT8 approach (120µs) and dramatically
-    slower than the fused INT4 approach (75µs), proving fusion is the critical optimization.
+  realistic_solution: The proposal is flawed because the bottleneck is not compute speed; it is dispatch overhead. Each call from the CPU to the NPU incurs a fixed latency cost for context switching, driver interaction, and data marshalling. For a Transformer with many small, sequential operations, this dispatch tax is paid for every single layer or operation that isn't fused. Making the compute faster with INT4 quantization only shortens the time the NPU is busy, which makes the fixed dispatch overhead a *larger percentage* of the total time for each call. The true solution is Operator Fusion. The ML compiler (e.g., via the device delegate) must be capable of analyzing the graph, identifying sequential operations (like MatMul -> Add -> LayerNorm), and compiling them into a single, monolithic kernel. This single kernel is dispatched once, amortizing the dispatch overhead over a much larger chunk of computation and allowing the NPU to stay busy without constant CPU intervention.
+  common_mistake: |
+    **The Pitfall:** Believing that faster individual operations directly translate to lower end-to-end latency.
+    **The Rationale:** Candidates focus on the compute part of latency and ignore the dominant CPU-to-NPU dispatch overhead.
+    **The Consequence:** They spend time aggressively quantizing, which paradoxically can increase overhead percentage, instead of addressing kernel fusion.
+  napkin_math: |
+    - Unfused INT8 latency = 3 * (30µs dispatch + 30µs compute) = 180µs.
+    - Unfused INT4 latency = 3 * (30µs dispatch + 15µs compute) = 135µs (overhead is 66%).
+    - Fused INT8 latency = 1 * 30µs dispatch + 90µs compute = 120µs.
+    - Fused INT4 latency = 1 * 30µs dispatch + 45µs compute = 75µs.
+    - **The unfused INT4 approach (135µs) is slower than the fused INT8 approach (120µs), proving fusion is the critical optimization.**
 status: published
 provenance: imported
 requires_explanation: false

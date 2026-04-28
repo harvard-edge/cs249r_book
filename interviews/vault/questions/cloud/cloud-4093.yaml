@@ -7,31 +7,21 @@ topic: model-tensor-parallelism
 competency_area: parallelism
 bloom_level: evaluate
 phase: training
-title: 'TP Bubble: Synchronization Overhead in Practice'
-scenario: Your TP=8 training job on H100 nodes shows 72% MFU (Model FLOP Utilization).
-  Profiling reveals that AllReduce operations account for 15% of step time. Propose
-  two concrete strategies to reduce TP communication overhead without changing the
-  TP degree.
-question: What two concrete strategies would you use to reduce the 15% TP AllReduce
-  overhead without changing TP=8?
+title: TP Bubble: Synchronization Overhead in Practice
+scenario: 'Your TP=8 training job on H100 nodes shows 72% MFU (Model FLOP Utilization). Profiling reveals that AllReduce operations account for 15% of step time.'
+question: 'What two concrete strategies would you use to reduce the 15% TP AllReduce overhead without changing TP=8?'
 details:
-  realistic_solution: 'Strategy 1: Overlap communication with computation using CUDA
-    streams. While AllReduce runs for one sub-layer (e.g., attention output), the
-    independent Dropout/LayerNorm of the next sub-layer can execute concurrently.
-    Megatron-LM''s async TP does this, recovering 5-8% of the communication overhead.
-    Strategy 2: Use FP8 for TP communication (available on H100 Transformer Engine).
-    AllReduce message size drops by 2× vs BF16, halving communication time. The slight
-    precision loss in the collective is acceptable because LayerNorm immediately follows,
-    restoring numerical stability. Combined effect: 15% overhead → ~6-7% overhead,
-    pushing MFU from 72% to ~78-80%. Additional option: switch from ring AllReduce
-    to tree AllReduce on NVSwitch-connected H100s, reducing latency from O(P) to O(log
-    P) steps.'
-  common_mistake: Suggesting to simply reduce TP degree without considering that the
-    model may not fit in memory with fewer GPUs. Also suggesting async AllReduce without
-    understanding that TP AllReduces are on the critical path — next layer depends
-    on the result.
-  napkin_math: 'Current comm time: 15% of step. FP8 comms: halve message size → ~7.5%.
-    Overlap: recover ~3%. Net: ~4.5-6%. MFU improvement: 72% × (1 + 0.09) ≈ 78%.'
+  realistic_solution: 'Strategy 1: Overlap communication with computation using CUDA streams. While AllReduce runs for one sub-layer, the independent Dropout/LayerNorm of the next sub-layer can execute concurrently (Megatron-LM async TP). Strategy 2: Use FP8 for TP communication (available on H100 Transformer Engine). AllReduce message size drops by 2× vs BF16, halving communication time. The slight precision loss in the collective is acceptable because LayerNorm immediately follows. Combined effect pushes MFU from 72% to ~78-80%.'
+  common_mistake: |
+    **The Pitfall:** Suggesting to simply reduce the TP degree or blindly apply async AllReduce.
+    **The Rationale:** Assuming TP degree is arbitrary, or failing to understand that TP AllReduces are on the critical path.
+    **The Consequence:** OOMs from reduced TP degree, or logical errors/no speedup from poorly implemented async attempts.
+  napkin_math: |
+    - **Current Comm Time:** 15% of step time.
+    - **Strategy 2 (FP8 Comms):** Halving message size (FP16 -> FP8) drops comm time to ~7.5%.
+    - **Strategy 1 (Overlap):** Async CUDA streams recover ~3% by overlapping with independent operations.
+    - **Net Communication Overhead:** ~4.5% to 6%.
+    - **MFU Improvement:** 72% × (1 + 0.09) ≈ 78.5% MFU.
 status: published
 provenance: imported
 requires_explanation: false

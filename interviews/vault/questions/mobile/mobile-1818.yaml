@@ -8,32 +8,20 @@ competency_area: networking
 bloom_level: apply
 phase: inference
 title: SoC Die-to-Die Interconnect for Heterogeneous Inference
-scenario: The Snapdragon 8 Gen 3 splits a 7B model across its Hexagon NPU, Adreno
-  GPU, and Cortex-X4 CPU for heterogeneous inference. The NoC provides 60 GB/s NPU-to-memory,
-  40 GB/s GPU-to-memory, and 30 GB/s between NPU and GPU directly. Design the layer-to-accelerator
-  mapping that minimizes cross-accelerator data transfer.
-question: How would you design the layer-to-accelerator mapping that minimizes cross-accelerator
-  data transfer?
+scenario: The Snapdragon 8 Gen 3 splits a 7B model across its Hexagon NPU, Adreno GPU, and Cortex-X4 CPU for heterogeneous inference. The NoC provides 60 GB/s NPU-to-memory, 40 GB/s GPU-to-memory, and 30 GB/s between NPU and GPU directly.
+question: How would you design the layer-to-accelerator mapping that minimizes cross-accelerator data transfer?
 details:
-  realistic_solution: '7B model prefill (512 tokens): embedding (50M params) → 32 transformer
-    blocks → LM head. Each block: attention (QKV projection + output, FP16-heavy)
-    + FFN (INT8-quantizable). Mapping: (1) Embedding + LM head → CPU. Small matmuls
-    — CPU handles in 1-2ms. Data: 512 × 4096 × 2 = 4.1 MB output, sent to NPU at
-    30 GB/s = 0.1ms. (2) FFN layers (all 32) → NPU at INT8. FFN parameters = 2 ×
-    4096 × 11008 × 32 = 2.88B. Compute for 512 tokens = 512 × 2 × 2.88B = ~2.9T INT8 ops.
-    NPU at 45 TOPS: 2.9T / 45T = 64ms. (3) Attention layers → GPU at FP16. Attention
-    parameters = 4 × 4096² × 32 = 2.1B. Compute for 512 tokens = 512 × 2 × 2.1B = ~2.1T
-    FP16 ops. GPU at 4.6 TFLOPS: 2.1T / 4.6T = 460ms... too slow. Better: attention also
-    on NPU with FP16 fallback. Cross-accelerator transfer is minimal.'
-  common_mistake: Splitting the model by layer count (equal layers per accelerator).
-    Layers have vastly different compute profiles — attention is parallelizable (GPU),
-    FFN is INT8-efficient (NPU), and embedding lookup is cache-friendly (CPU). Split
-    by compute affinity, not layer count.
-  napkin_math: 'CPU embedding: 1ms compute + 0.1ms transfer = 1.1ms. NPU FFN (INT8):
-    2.9 TOPS (T-ops) / 45 TOPS = 64ms. NPU attention (FP16): 2.1 T-ops / 22.5 TFLOPS
-    (FP16 mode) = 93ms. Total: 1.1 + 64 + 93 = 158ms prefill. Cross-unit transfer:
-    4.1 MB × 2 (in/out) / 30 GB/s = 0.3ms. Transfer overhead is negligible. Splitting
-    computes by hardware affinity is better than splitting sequentially.'
+  realistic_solution: '7B model prefill (512 tokens): embedding (50M params) → 32 transformer blocks → LM head. Each block: attention (QKV projection + output, FP16-heavy) + FFN (INT8-quantizable). Mapping: (1) Embedding + LM head → CPU. Small matmuls — CPU handles in 1-2ms. Data: 512 × 4096 × 2 = 4.1 MB output, sent to NPU at 30 GB/s = 0.1ms. (2) FFN layers (all 32) → NPU at INT8. FFN parameters = 2 × 4096 × 11008 × 32 = 2.88B. Compute for 512 tokens = 512 × 2 × 2.88B = ~2.9T INT8 ops. NPU at 45 TOPS: 2.9T / 45T = 64ms. (3) Attention layers → GPU at FP16. Attention parameters = 4 × 4096² × 32 = 2.1B. Compute for 512 tokens = 512 × 2 × 2.1B = ~2.1T FP16 ops. GPU at 4.6 TFLOPS: 2.1T / 4.6T = 460ms... too slow. Better: attention also on NPU with FP16 fallback. Cross-accelerator transfer is minimal.'
+  common_mistake: |
+    **The Pitfall:** Splitting the model sequentially by layer count (e.g., first 16 layers on NPU, next 16 on GPU).
+    **The Rationale:** Candidates assume load balancing means equal layer distribution, failing to recognize that different layers have vastly different compute and numerical precision profiles.
+    **The Consequence:** The system runs inefficiently because hardware accelerators are forced to compute operations they are bad at (e.g., executing FP16 attention on the INT8-optimized NPU).
+  napkin_math: |
+    1. **CPU Mapping:** Embedding (cache-friendly). 1ms compute + 4.1MB/30GB/s (0.1ms) transfer = 1.1ms.
+    2. **NPU Mapping:** FFN layers (INT8-efficient). 2.88B params × 512 tokens × 2 = ~2.9T INT8 ops. At 45 TOPS = 64ms.
+    3. **GPU Mapping:** Attention layers (FP16 parallelizable). 2.1B params × 512 tokens × 2 = ~2.1T FP16 ops. GPU at 4.6 TFLOPS = 460ms (Too slow).
+    4. **Re-Mapping Attention:** Move Attention to NPU using its FP16 fallback mode (22.5 TFLOPS). 2.1T / 22.5 TFLOPS = 93ms.
+    **Result:** By mapping purely by compute affinity, cross-unit transfer overhead is negligible (**0.3ms**) and total prefill latency drops to **~158ms** entirely on the NPU/CPU.
 status: published
 provenance: imported
 requires_explanation: true

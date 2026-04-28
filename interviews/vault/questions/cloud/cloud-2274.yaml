@@ -8,29 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: The Caching Allocator Fragmentation Trap
-scenario: Your serving system runs a 13B model on an A100-80GB GPU. `nvidia-smi` reports 45GB used, and
-  `torch.cuda.memory_allocated()` shows 30GB. Yet when you try to allocate a 20GB KV-cache buffer, PyTorch
-  throws an OOM error despite 50GB appearing 'free' on the device. The ops team says 'the GPU has plenty
-  of memory.' Why does the allocation fail, and what is the role of PyTorch's caching allocator in this
-  failure?
+scenario: Your serving system runs a 13B model on an A100-80GB GPU. `nvidia-smi` reports 45GB used, and `torch.cuda.memory_allocated()` shows 30GB. Yet when you try to allocate a 20GB KV-cache buffer, PyTorch throws an OOM error despite 50GB appearing 'free' on the device.
 question: "Why does the allocation fail, and what is the role of PyTorch's caching allocator in this failure?"
 details:
-  realistic_solution: 'PyTorch''s caching allocator (CUDACachingAllocator) never returns memory to the
-    CUDA driver by default. When tensors are freed, their CUDA blocks go into a free list, fragmented
-    by size. The 15GB in the cache is split across many small blocks (e.g., thousands of 2MB and 8MB fragments
-    from previous forward passes). The 20GB KV-cache needs a single contiguous allocation that no combination
-    of cached fragments can satisfy. Diagnosis: `torch.cuda.memory_stats()` shows `allocated_bytes`, `reserved_bytes`,
-    and `num_alloc_retries`. Fix: (1) `torch.cuda.empty_cache()` returns all cached blocks to the CUDA
-    driver (but causes re-allocation overhead), (2) Pre-allocate the KV-cache at startup before fragmentation
-    occurs, (3) Use `max_split_size_mb` environment variable to limit block splitting, (4) Use memory-pool-aware
-    allocation like vLLM''s PagedAttention which manages KV-cache in fixed-size blocks.'
-  common_mistake: Confusing nvidia-smi's 'used memory' with PyTorch's allocated memory. The 15GB gap (45GB
-    - 30GB) is not 'free' — it's held by PyTorch's caching allocator as a pool of freed-but-not-returned
-    CUDA blocks.
-  napkin_math: '45GB reported by nvidia-smi = 30GB actively allocated + 15GB in caching allocator free
-    list. The 15GB free list might contain 3,000 blocks averaging 5MB each. Largest contiguous free block:
-    ~50MB. Needed: 20GB contiguous. Gap: 400×. Even `empty_cache()` may not help if CUDA driver memory
-    is itself fragmented from repeated alloc/free cycles.'
+  realistic_solution: 'PyTorch''s caching allocator (CUDACachingAllocator) never returns memory to the CUDA driver by default. When tensors are freed, their CUDA blocks go into a free list, fragmented by size. The 15GB in the cache is split across many small blocks (e.g., thousands of 2MB and 8MB fragments from previous forward passes). The 20GB KV-cache needs a single contiguous allocation that no combination of cached fragments can satisfy. Diagnosis: `torch.cuda.memory_stats()` shows `allocated_bytes`, `reserved_bytes`, and `num_alloc_retries`. Fix: (1) `torch.cuda.empty_cache()` returns all cached blocks to the CUDA driver (but causes re-allocation overhead), (2) Pre-allocate the KV-cache at startup before fragmentation occurs, (3) Use `max_split_size_mb` environment variable to limit block splitting, (4) Use memory-pool-aware allocation like vLLM''s PagedAttention which manages KV-cache in fixed-size blocks.'
+  common_mistake: |
+    **The Pitfall:** Confusing `nvidia-smi`'s 'used memory' with PyTorch's actual allocated memory.
+    **The Rationale:** Failing to understand that PyTorch uses a caching memory allocator that holds onto freed CUDA blocks instead of returning them to the driver.
+    **The Consequence:** Spending hours debugging phantom OOM errors caused by memory fragmentation within PyTorch's own cache.
+  napkin_math: |
+    * **SMI vs PyTorch:** 45GB (SMI) = 30GB (Allocated) + 15GB (Caching Allocator Free List).
+    * **Fragmentation:** The 15GB free list contains thousands of small blocks (e.g., 5MB each). Largest contiguous block ≈ 50MB.
+    * **Allocation Request:** KV-cache needs 20GB *contiguous*.
+    * **The Gap:** 20GB required vs 50MB available contiguous = 400x shortfall.
+    * **Conclusion:** **The 20GB allocation fails because PyTorch's 15GB cache is heavily fragmented, and the driver only has 35GB true free memory left.**
 status: published
 provenance: imported
 requires_explanation: false

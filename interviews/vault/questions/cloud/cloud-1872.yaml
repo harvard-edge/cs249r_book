@@ -8,28 +8,19 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: Architecting Shadow Deployments for Latency-Sensitive APIs
-scenario: You are evaluating architecture designs for a shadow deployment of a new Transformer-based fraud
-  detection model. Production (an XGBoost model) handles 5,000 QPS with a strict 50ms p99 SLA running
-  on 20 c5.4xlarge instances. The new model runs on NVIDIA L4 GPUs with an estimated 40ms p50, but unknown
-  tail latency. A junior engineer proposes modifying the application code to call both models concurrently,
-  return the XGBoost prediction as soon as it completes, and use a background application thread to wait
-  for the Transformer model before logging both results to an S3 bucket. Evaluate the system-level risks
-  of this design and propose a production-grade alternative.
-question: "What risks does application-layer shadowing create at 5,000 QPS, and what production-grade alternative should you use?"
+scenario: You are evaluating a shadow deployment for a new Transformer-based fraud detection model. Production (an XGBoost model) handles 5,000 QPS with a strict 50ms p99 SLA. The new model runs on NVIDIA L4s with unknown tail latency. An engineer proposes modifying the application code to call both models concurrently, returning the XGBoost prediction immediately, and using a background thread to wait for the Transformer model before logging to S3.
+question: What risks does application-layer shadowing create at 5,000 QPS, and what production-grade alternative should you use?
 details:
-  realistic_solution: Implement network-layer traffic mirroring (e.g., using Envoy, Istio, or an API Gateway)
-    to duplicate requests out-of-band. Alternatively, publish requests to a distributed log (like Kafka)
-    where the shadow model consumes events at its own pace, physically decoupling the shadow compute from
-    the primary API's resources.
-  common_mistake: Accepting application-layer asynchronous calls (e.g., async/await or background threads)
-    without recognizing the severe risks of thread pool exhaustion and memory pressure if the shadow model
-    experiences latency spikes or capacity constraints.
-  napkin_math: 'Using Little''s Law (Concurrency = QPS * Latency): At 5,000 QPS, if the shadow model''s
-    tail latency spikes to 500ms due to unoptimized GPU batching, the concurrency L = 5,000 * 0.5s = 2,500
-    active connections. The proposed application-layer approach would tie up 2,500 application threads
-    waiting for the shadow model. This would quickly exhaust a standard web server thread pool (e.g.,
-    typically 200-1000), causing legitimate production requests to queue and severely violating the 50ms
-    SLA.'
+  realistic_solution: Implement network-layer traffic mirroring (e.g., using Envoy, Istio, or an API Gateway) to duplicate requests out-of-band. Alternatively, publish requests to a distributed log (like Kafka) where the shadow model consumes events at its own pace, physically decoupling the shadow compute from the primary API's resources.
+  common_mistake: |
+    **The Pitfall:** Accepting application-layer async/await shadowing.
+    **The Rationale:** Candidates assume "background threads" or "async calls" are perfectly isolated and "free."
+    **The Consequence:** The shadow model's unoptimized tail latency causes thread starvation, taking down the primary production API.
+  napkin_math: |
+    *   **Little's Law:** Concurrency = QPS × Latency.
+    *   **Shadow latency spike:** Assume Transformer tail latency hits 500ms due to unoptimized batching.
+    *   **Concurrency calculation:** 5,000 QPS × 0.5s = 2,500 active connections.
+    *   **Result:** The application-layer threads quickly exhaust standard web server thread pools (typically 200-1000), causing production requests to queue and severely violating the **50ms SLA**.
 status: published
 provenance: imported
 requires_explanation: false

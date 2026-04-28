@@ -8,24 +8,21 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Preventing Thread Starvation in Ensembles
-scenario: A primary prediction service aggregates outputs from 4 different ML microservices (Models A,
-  B, C, D) using a thread pool of 500 threads. The strict SLA is 200ms. Model C suddenly experiences garbage
-  collection pauses, causing its response time to hit the 200ms timeout limit. Within seconds, the entire
-  aggregation service crashes, failing requests for all models.
-question: "How would you keep Model C's 200ms pauses from exhausting the 500-thread aggregation service?"
+scenario: A primary prediction service aggregates outputs from 4 different ML microservices (Models A, B, C, D) using a thread pool of 500 threads. The strict SLA is 200ms. Model C suddenly experiences garbage collection pauses, causing its response time to hit the 200ms timeout limit. Within seconds, the entire aggregation service crashes, failing requests for all models.
+question: How would you keep Model C's 200ms pauses from exhausting the 500-thread aggregation service?
 details:
-  realistic_solution: 'Implement the Bulkhead and Circuit Breaker patterns. The crash is caused by thread
-    exhaustion: requests waiting on Model C tie up all 500 threads, leaving none for incoming requests.
-    Architecture fix: 1) Partition the thread pool (Bulkhead) so Model C can use a maximum of 100 concurrent
-    threads. 2) Implement a Circuit Breaker for Model C that trips when the P99 latency exceeds 150ms
-    or error rate > 5%. 3) When the circuit is open, the aggregator instantly returns a default/fallback
-    value for Model C (or drops its contribution) without blocking, allowing Models A, B, and D to continue
-    serving successfully.'
-  common_mistake: Increasing the thread pool size to 2000 to handle the blocked threads.
-  napkin_math: Total throughput = 3,000 QPS. Model C latency jumps to 200ms (0.2s). By Little's Law, required
-    threads for Model C = L = λW = 3,000 * 0.2 = 600 threads. Since the pool only has 500 threads, it
-    exhausts in < 200ms. With a bulkhead of 100 threads for C, 400 threads remain for A, B, and D (which
-    take 20ms -> λW = 3000 * 0.02 = 60 threads needed). The system remains highly available.
+  realistic_solution: 'Implement the Bulkhead and Circuit Breaker patterns. The crash is caused by thread exhaustion: requests waiting on Model C tie up all 500 threads, leaving none for incoming requests. Architecture fix: 1) Partition the thread pool (Bulkhead) so Model C can use a maximum of 100 concurrent threads. 2) Implement a Circuit Breaker for Model C that trips when the P99 latency exceeds 150ms or error rate > 5%. 3) When the circuit is open, the aggregator instantly returns a default/fallback value for Model C (or drops its contribution) without blocking, allowing Models A, B, and D to continue serving successfully.'
+  common_mistake: |
+    **The Pitfall:** Increasing the overall thread pool size to handle the blocked threads.
+    **The Rationale:** A naive approach to thread exhaustion is to simply add more threads to the pool to compensate for the delayed responses.
+    **The Consequence:** The underlying blockage (Model C) will quickly consume the newly added threads as well, merely delaying the inevitable crash while increasing memory and context-switching overhead.
+  napkin_math: |
+    - **System Load:** Assume total throughput = 3,000 QPS.
+    - **Model C Degraded State:** Latency jumps to 200ms (0.2s).
+    - **Little's Law for Model C:** Required threads (L) = λ * W = 3,000 * 0.2 = 600 threads.
+    - **Exhaustion:** Since the pool only has 500 threads, it exhausts in < 200ms, causing a total crash.
+    - **Bulkhead Fix:** With a bulkhead of 100 threads for Model C, 400 threads remain for Models A, B, and D.
+    - **Healthy Models:** If A, B, D take 20ms -> λ * W = 3,000 * 0.02 = 60 threads needed. The system remains **highly available**.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,46 +8,21 @@ competency_area: optimization
 bloom_level: apply
 phase: both
 title: Triple-Buffering Pipeline Throughput Constraint
-scenario: A Cortex-M4 (256 KB SRAM) pipeline gathers a 2 KB sample window via SPI
-  DMA (5 ms), runs an ML model that uses a 12 KB activation tensor arena and produces
-  a 512 B output (10 ms compute), and transmits via BLE DMA (5 ms). To maximise throughput,
-  the team plans true triple-buffering - three frames are concurrently in flight at
-  all times. Frame N is being transmitted via BLE, frame N+1 is being computed, and
-  frame N+2 is being received via SPI.
-question: Apply a true triple-buffer (three-frames-in-flight) scheme. Compute the
-  strict SRAM footprint needed to keep three concurrent frames alive end-to-end -
-  separate input, activation-arena, and output regions per in-flight frame - and express
-  that as a fraction of the 256 KB MCU SRAM. Compare against the simpler ping-pong
-  (two-frames-in-flight) scheme and identify whether triple-buffering is feasible
-  here, or whether the activation arena forces a fallback.
+scenario: A Cortex-M4 (256 KB SRAM) pipeline gathers a 2 KB sample window via SPI DMA (5 ms), runs an ML model that uses a 12 KB activation tensor arena and produces a 512 B output (10 ms compute), and transmits via BLE DMA (5 ms). To maximise throughput, the team plans true triple-buffering - three frames are concurrently in flight at all times. Frame N is being transmitted via BLE, frame N+1 is being computed, and frame N+2 is being received via SPI.
+question: Apply a true triple-buffer scheme and compute the strict SRAM footprint needed, comparing it against ping-pong buffering.
 details:
-  realistic_solution: 'Triple-buffer SRAM accounting (3 frames in flight). Each I/O
-    interface needs 3 slots so that producer and consumer never collide: SPI DMA fills
-    one input slot while compute reads another and a third stays staged, and BLE DMA
-    drains one output slot while compute writes another and a third is queued. The
-    activation arena, however, is only live during the compute stage, and the Cortex-M4
-    runs compute sequentially - exactly one frame is in compute at any moment - so
-    a SINGLE 12 KB arena suffices regardless of how many frames are in flight on the
-    I/O sides. Triple-buffer SRAM = 3 * 2 KB (inputs) + 1 * 12 KB (arena, single copy)
-    + 3 * 0.5 KB (outputs) = 6 + 12 + 1.5 = 19.5 KB, or 7.6% of 256 KB SRAM - comfortably
-    feasible. Ping-pong (2 slots per interface, still single arena) = 2*2 + 12 + 2*0.5
-    = 17 KB (~6.6%). The throughput uplift of triple over double is essentially zero
-    in this 3-stage pipeline - both schemes are gated by the 10 ms compute stage,
-    so 100 fps maximum either way - so triple-buffering buys robustness to jitter
-    and DMA-completion-IRQ latency, not raw throughput. Sensitivity. If the activation
-    arena grows to 64 KB (larger model), the arena is still allocated once - triple-buffer
-    cost rises to 3*2 + 64 + 3*0.5 = 71.5 KB (~28% of SRAM), still feasible. The arena
-    only forces a fallback if the model itself does not fit, not because of buffering
-    multiplicity.'
-  common_mistake: Multiplying the activation arena by 3 along with the input/output
-    buffers - the arena is touched only during compute and only one frame is in compute
-    at any instant, so a single arena is needed regardless of buffer-pool depth. The
-    3x penalty applies only to producer-consumer interface buffers (SPI<->compute
-    and compute<->BLE), not to compute-internal scratch.
-  napkin_math: 'Inputs: 3 * 2 = 6 KB. Arena: 1 * 12 = 12 KB (single copy, compute
-    is sequential). Outputs: 3 * 0.5 = 1.5 KB. Triple-buffer total = 6 + 12 + 1.5
-    = 19.5 KB (~7.6% of 256 KB). Ping-pong = 17 KB (~6.6%). With 64 KB arena: 6 +
-    64 + 1.5 = 71.5 KB (~28%, still feasible).'
+  realistic_solution: 'Triple-buffer SRAM accounting (3 frames in flight). Each I/O interface needs 3 slots so that producer and consumer never collide: SPI DMA fills one input slot while compute reads another and a third stays staged, and BLE DMA drains one output slot while compute writes another and a third is queued. The activation arena, however, is only live during the compute stage, and the Cortex-M4 runs compute sequentially - exactly one frame is in compute at any moment - so a SINGLE 12 KB arena suffices regardless of how many frames are in flight on the I/O sides. Triple-buffer SRAM = 3 * 2 KB (inputs) + 1 * 12 KB (arena, single copy) + 3 * 0.5 KB (outputs) = 6 + 12 + 1.5 = 19.5 KB, or 7.6% of 256 KB SRAM - comfortably feasible. Ping-pong (2 slots per interface, still single arena) = 2*2 + 12 + 2*0.5 = 17 KB (~6.6%). The throughput uplift of triple over double is essentially zero in this 3-stage pipeline - both schemes are gated by the 10 ms compute stage, so 100 fps maximum either way - so triple-buffering buys robustness to jitter and DMA-completion-IRQ latency, not raw throughput. Sensitivity. If the activation arena grows to 64 KB (larger model), the arena is still allocated once - triple-buffer cost rises to 3*2 + 64 + 3*0.5 = 71.5 KB (~28% of SRAM), still feasible. The arena only forces a fallback if the model itself does not fit, not because of buffering multiplicity.'
+  common_mistake: |
+    **The Pitfall:** Multiplying the activation arena by 3 along with the input/output buffers.
+    **The Rationale:** Candidates incorrectly assume that every stage of the pipeline needs its own independent activation arena, ignoring that compute is strictly sequential.
+    **The Consequence:** This leads to drastically overestimating SRAM requirements, potentially causing the team to abandon a feasible buffering strategy.
+  napkin_math: |
+    1. **Inputs:** 3 * 2 = 6 KB.
+    2. **Arena:** 1 * 12 = 12 KB (single copy, compute is sequential).
+    3. **Outputs:** 3 * 0.5 = 1.5 KB.
+    4. **Triple-buffer total:** 6 + 12 + 1.5 = **19.5 KB** (~7.6% of 256 KB).
+    5. **Ping-pong total:** 2*2 + 12 + 2*0.5 = **17 KB** (~6.6%).
+    6. **With 64 KB arena:** 6 + 64 + 1.5 = **71.5 KB** (~28%, still feasible).
 status: published
 provenance: llm-draft
 expected_time_minutes: 7
@@ -56,9 +31,6 @@ validated: true
 math_verified: true
 human_reviewed:
   status: not-reviewed
-  by: null
-  date: null
-  notes: null
 tags:
 - gemini-generated
 - target-realization-L3

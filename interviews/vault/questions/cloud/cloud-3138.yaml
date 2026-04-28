@@ -8,24 +8,20 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: Specifying KV Cache Budget for PagedAttention
-scenario: 'You are writing the deployment spec for a Llama-3 70B model on 4x H100-80GB
-  with tensor parallelism. The model has 80 layers, 64 KV heads (GQA with 8 KV heads
-  per GPU), head_dim=128. Target: 512 concurrent requests, max_seq_len=8192. Specify
-  the PagedAttention block size, total block budget, and memory reservation.'
-question: What PagedAttention block size, block budget, and memory reservation would
-  you set for 512 requests at max_seq_len=8192 on 4 H100s?
+scenario: You are writing the deployment spec for a Llama-3 70B model on 4x H100 with tensor parallelism. The model has 80 layers, 64 KV heads (GQA with 8 KV heads per GPU), head_dim=128. The target is 512 concurrent requests with max_seq_len=8192.
+question: What PagedAttention block size, block budget, and memory reservation would you set for 512 requests at max_seq_len=8192 on 4 H100s?
 details:
-  realistic_solution: 'KV cache per token per GPU: 80 layers x 2 (K+V) x 8 KV_heads
-    x 128 dim x 2B = 320KB/token. With block_size=16: each block = 16 x 320KB = 5.12MB.
-    Max blocks per request = 8192/16 = 512. Total for 512 requests at avg 2048 tokens:
-    512 x 128 blocks = 65,536 blocks x 5.12MB = 327GB across 4 GPUs = 82GB/GPU. Model
-    weights in FP16: 70B x 2B / 4 = 35GB/GPU. Total: 35 + 82 = 117GB > 80GB. Solution:
-    reduce to 300 concurrent requests or use FP8 weights (17.5GB), leaving 62.5GB
-    for KV cache = ~12,200 blocks = 300 requests at avg 2048.'
-  common_mistake: Using the full 64 attention heads instead of the 8 GQA KV heads
-    per GPU. GQA dramatically reduces KV cache size — missing this leads to 8x overestimation.
-  napkin_math: 'KV/token/GPU: 80 x 2 x 8 x 128 x 2B = 320KB. Block(16 tokens) = 5.12MB.
-    Budget: (80GB - 35GB weights) / 5.12MB = 8,789 blocks = 8,789 x 16 = 140K token-slots.'
+  realistic_solution: 'KV cache per token per GPU: 80 layers x 2 (K+V) x 8 KV_heads x 128 dim x 2B = 320KB/token. With block_size=16: each block = 16 x 320KB = 5.12MB. Max blocks per request = 8192/16 = 512. Total for 512 requests at avg 2048 tokens: 512 x 128 blocks = 65,536 blocks x 5.12MB = 327GB across 4 GPUs = 82GB/GPU. Model weights in FP16: 70B x 2B / 4 = 35GB/GPU. Total: 35 + 82 = 117GB > 80GB. Solution: reduce to 300 concurrent requests or use FP8 weights (17.5GB), leaving 62.5GB for KV cache = ~12,200 blocks = 300 requests at avg 2048.'
+  common_mistake: |
+    **The Pitfall:** Overestimating the KV cache size by using the total number of attention heads.
+    **The Rationale:** Candidates often forget that Grouped-Query Attention (GQA) dramatically reduces the number of KV heads per GPU compared to standard Multi-Head Attention.
+    **The Consequence:** An 8x overestimation of memory requirements, leading to incorrect capacity planning or unnecessarily reducing concurrent request targets.
+  napkin_math: |
+    * KV/token/GPU: 80 layers * 2 * 8 heads * 128 dim * 2 bytes = 320 KB.
+    * Block size (16 tokens) = 16 * 320 KB = 5.12 MB.
+    * Weight memory: 70B * 2 bytes / 4 GPUs = 35 GB/GPU.
+    * Available for KV: 80 GB - 35 GB = 45 GB/GPU.
+    * Total block budget per GPU: 45 GB / 5.12 MB = **8,789 blocks** (or 140K token-slots).
 status: published
 provenance: imported
 requires_explanation: true

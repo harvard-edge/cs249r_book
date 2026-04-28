@@ -8,28 +8,19 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: The Operator Fusion Trap
-scenario: You are optimizing a custom inference chip (32 GB/s HBM, 16 TFLOPS). You fuse a sequence of
-  4 element-wise operations (Add, Mul, ReLU, Add) operating on a 100M element FP32 tensor. Unfused latency
-  was 100ms. You expected fusion to drop latency to 25ms by eliminating HBM roundtrips. Instead, the fused
-  kernel takes 150ms. Profiling shows ALU utilization is < 5%.
-question: "Why did fusing the four element-wise ops make the 100M-element FP32 kernel take 150ms instead of the expected 25ms?"
+scenario: You are optimizing a custom inference chip (32 GB/s HBM, 16 TFLOPS). You fuse a sequence of 4 element-wise operations (Add, Mul, ReLU, Add) operating on a 100M element FP32 tensor. Unfused latency was 100ms. You expected fusion to drop latency to 25ms by eliminating HBM roundtrips. Instead, the fused kernel takes 150ms. Profiling shows ALU utilization is < 5%.
+question: Why did fusing the four element-wise ops make the 100M-element FP32 kernel take 150ms instead of the expected 25ms?
 details:
-  realistic_solution: The failure is caused by catastrophic register spilling. While operator fusion theoretically
-    increases arithmetic intensity by keeping intermediate values in registers, fusing too many operations
-    (or operations with high variable counts) exceeds the physical register file size per thread block.
-    When registers are exhausted, the compiler spills variables to local memory, which is physically backed
-    by the slow HBM. Because these spills are often uncoalesced, the effective memory bandwidth drops
-    significantly below the theoretical maximum. The workload, already possessing low arithmetic intensity,
-    is now pinned against a severely degraded memory bandwidth ceiling on the Roofline model.
-  common_mistake: Assuming operator fusion always strictly reduces memory traffic without side effects
-    like register pressure.
-  napkin_math: 'Unfused: 100M * 4 bytes = 400MB per read/write. 4 ops = 4 reads, 4 writes. Total traffic
-    = 3.2GB. 3.2GB / 32 GB/s = 100ms.
-
-    Fused (Expected): 1 read, 1 write. Total traffic = 800MB. 800MB / 32 GB/s = 25ms.
-
-    Fused (Actual): Spilling causes ~12 uncoalesced reads/writes per element. Traffic = 4.8GB. Uncoalesced
-    access drops effective bandwidth to ~32 GB/s. 4.8GB / 32 GB/s = 150ms.'
+  realistic_solution: The failure is caused by catastrophic register spilling. While operator fusion theoretically increases arithmetic intensity by keeping intermediate values in registers, fusing too many operations (or operations with high variable counts) exceeds the physical register file size per thread block. When registers are exhausted, the compiler spills variables to local memory, which is physically backed by the slow HBM. Because these spills are often uncoalesced, the effective memory bandwidth drops significantly below the theoretical maximum. The workload, already possessing low arithmetic intensity, is now pinned against a severely degraded memory bandwidth ceiling on the Roofline model.
+  common_mistake: |
+    **The Pitfall:** Assuming operator fusion always strictly reduces memory traffic.
+    **The Rationale:** Ignoring the physical limits of the hardware's register file size per thread block.
+    **The Consequence:** Causing catastrophic register spilling that replaces sequential coalesced reads with fragmented, high-latency HBM accesses, ruining performance.
+  napkin_math: |
+    - **Unfused Memory Traffic:** 4 ops × (1 read + 1 write) × 400 MB = **3.2 GB**. 3.2 GB / 32 GB/s = **100 ms**.
+    - **Fused Expected:** 1 read + 1 write = **800 MB**. 800 MB / 32 GB/s = **25 ms**.
+    - **Fused Actual (Spilling):** ~12 uncoalesced access passes per element = **4.8 GB**.
+    - **Actual Latency:** 4.8 GB / 32 GB/s = **150 ms**.
 status: published
 provenance: imported
 requires_explanation: false

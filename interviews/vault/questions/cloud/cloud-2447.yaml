@@ -8,26 +8,21 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: MoE Routing at High Batch Size
-scenario: You replace a dense 30B parameter LLM with a 16x10B Mixture of Experts (MoE) model. Top-1 routing
-  is used, so active parameters per token is 10B. You serve this at a high batch size of 128 on an 8xH100
-  cluster. You expect the MoE to be 3x faster than the dense model because active FLOPs per token drop
-  from 30B to 10B. Instead, the MoE model is 30% slower than the 30B dense model.
-question: "Why is the 16x10B top-1 MoE 30% slower than the dense 30B model at batch size 128 despite 3x fewer active FLOPs?"
+scenario: You replace a dense 30B parameter LLM with a 16x10B Mixture of Experts (MoE) model. Top-1 routing is used, so active parameters per token is 10B. You serve this at a high batch size of 128 on an 8xH100 cluster. You expect the MoE to be 3x faster than the dense model because active FLOPs per token drop from 30B to 10B. Instead, the MoE model is 30% slower than the 30B dense model.
+question: Why is the 16x10B top-1 MoE 30% slower than the dense 30B model at batch size 128 despite 3x fewer active FLOPs?
 details:
-  realistic_solution: The root cause is a massive drop in arithmetic intensity caused by the MoE routing
-    mechanism. At batch size 128, a dense 30B model processes all 128 tokens against the same 30B parameters.
-    This yields an arithmetic intensity of ~128 FLOPs/byte, placing it firmly in the compute-bound regime
-    on the H100 roofline. In the MoE model, the 128 tokens are routed across 16 different experts. Assuming
-    an even distribution, each 10B expert processes only 8 tokens. The arithmetic intensity for the expert
-    layers plummets to 8 FLOPs/byte. This plunges the workload deep into the memory-bound regime. Furthermore,
-    to process the batch, the GPUs must now load the weights for all accessed experts (up to 160B parameters)
-    from HBM, taking significantly longer than loading the dense 30B model.
-  common_mistake: Calculating performance purely based on active FLOPs while ignoring how routing shatters
-    the batch size and destroys arithmetic intensity.
-  napkin_math: 'Dense 30B at BS=128: AI = 128. Compute time = (30B * 2 MACs * 128 tokens) / 989 TFLOPS
-    = 7.7 ms. Memory time = 60GB / 3.35 TB/s = 17.9 ms. (Memory bound, takes ~17.9ms). MoE 16x10B at BS=128:
-    8 tokens/expert. AI = 8. If all 16 experts are hit, we load 160B params (320GB). Memory time = 320GB
-    / 3.35 TB/s = 95.5 ms. 95.5 ms > 17.9 ms, hence it is significantly slower.'
+  realistic_solution: The root cause is a massive drop in arithmetic intensity caused by the MoE routing mechanism. At batch size 128, a dense 30B model processes all 128 tokens against the same 30B parameters. This yields an arithmetic intensity of ~128 FLOPs/byte, placing it firmly in the compute-bound regime on the H100 roofline. In the MoE model, the 128 tokens are routed across 16 different experts. Assuming an even distribution, each 10B expert processes only 8 tokens. The arithmetic intensity for the expert layers plummets to 8 FLOPs/byte. This plunges the workload deep into the memory-bound regime. Furthermore, to process the batch, the GPUs must now load the weights for all accessed experts (up to 160B parameters) from HBM, taking significantly longer than loading the dense 30B model.
+  common_mistake: |
+    **The Pitfall:** Calculating performance purely based on active FLOPs.
+    **The Rationale:** Candidates ignore how MoE routing shatters the batch size across experts.
+    **The Consequence:** They fail to realize that the arithmetic intensity drops severely, pushing the workload into a memory-bound regime.
+  napkin_math: |
+    - Dense 30B at BS=128: AI = 128. Compute time = (30B * 2 MACs * 128 tokens) / 989 TFLOPS = 7.7 ms.
+    - Memory time = 60GB / 3.35 TB/s = 17.9 ms. (Memory bound, takes ~17.9ms).
+    - MoE 16x10B at BS=128: ~8 tokens/expert. AI = 8.
+    - If all 16 experts are hit, load 160B params (320GB).
+    - Memory time = 320GB / 3.35 TB/s = 95.5 ms.
+    - **95.5 ms > 17.9 ms**, hence significantly slower.
 status: published
 provenance: imported
 requires_explanation: false

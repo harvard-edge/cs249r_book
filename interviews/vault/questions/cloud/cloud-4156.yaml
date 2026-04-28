@@ -8,30 +8,19 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: Fan-Out Tail Amplification in Mixture-of-Experts
-scenario: Your MoE model with 8 experts across 8 MI300X GPUs activates 2 experts per
-  token. Each expert has P99 = 20ms. A single token's latency is determined by the
-  slower of its 2 experts. For a batch of 128 tokens, each needing different expert
-  pairs, what is the expected P99 of the full batch, and how do you mitigate the amplification?
-question: For a batch of 128 tokens, each needing different expert pairs, what is
-  the expected P99 of the full batch, and how do you mitigate the amplification?
+scenario: 'Your MoE model with 8 experts across 8 MI300X GPUs activates 2 experts per token. Each expert has P99 = 20ms. A single token''s latency is determined by the slower of its 2 experts.'
+question: For a batch of 128 tokens, each needing different expert pairs, what is the expected P99 of the full batch, and how do you mitigate the amplification?
 details:
-  realistic_solution: 'Single token: P(both experts < 20ms) = 0.99² = 0.9801. So per-token
-    P99 ≈ P98 of single expert ≈ 18ms. But for 128 tokens across a batch: P(all 128
-    tokens fast) = 0.9801^128 = 0.079 — only 8% chance that no token hits tail. The
-    batch P99 is dominated by the worst token, which will almost certainly have at
-    least one expert hitting P99.9+, roughly 45ms. Mitigation: (1) Expert-parallel
-    AllToAll overlapped with compute so no token blocks others; (2) speculative expert
-    execution — run top-3 experts, use first 2 to respond; (3) expert replication
-    — place hot experts on multiple GPUs via Infinity Fabric to reduce queuing at
-    popular experts.'
-  common_mistake: Calculating P99 for a single token's 2-expert fan-out but forgetting
-    that the batch waits for the slowest token across all 128 tokens. The batch P99
-    is far worse than single-token P99.
-  napkin_math: 'Per-token: P99 with 2 experts = 1-(1-0.01)^2 ≈ 2% tail rate. Batch
-    of 128: P(≥1 tail) = 1-0.98^128 = 92%. Expected max latency ≈ P99.95 of single
-    expert ≈ 45ms. With expert replication (2× hot experts): tail rate per expert
-    halved, batch P99 ≈ 25ms. Infinity Fabric cost: 400 GB/s per MI300X link, expert
-    weights ~2 GB, replication takes 5ms one-time.'
+  realistic_solution: 'Single token: P(both experts < 20ms) = 0.99^2 = 0.9801. So per-token P99 ≈ P98 of single expert ≈ 18ms. But for 128 tokens across a batch: P(all 128 tokens fast) = 0.9801^128 = 0.079 - only 8% chance that no token hits tail. The batch P99 is dominated by the worst token, which will almost certainly have at least one expert hitting P99.9+, roughly 45ms. Mitigation: (1) Expert-parallel AllToAll overlapped with compute so no token blocks others; (2) speculative expert execution - run top-3 experts, use first 2 to respond; (3) expert replication - place hot experts on multiple GPUs via Infinity Fabric to reduce queuing at popular experts.'
+  common_mistake: |
+    **The Pitfall:** Calculating P99 latency for a single token's 2-expert fan-out, but forgetting that the entire batch waits for the slowest token.
+    **The Rationale:** Engineers ignore that in a batch of 128 tokens, the probability of *at least one* token hitting a tail latency is extremely high.
+    **The Consequence:** The observed batch P99 in production is drastically worse than the isolated per-token P99 estimates.
+  napkin_math: |
+    - **Single Token P99 (2 experts)**: `P(fast) = 0.99^2 = 0.9801`. Tail rate `\approx 2%`.
+    - **Batch of 128 Tokens**: `P(all 128 fast) = 0.9801^128 \approx 0.079`.
+    - **Tail Probability**: There is a **92% chance** (`1 - 0.079`) that the batch is delayed by at least one slow expert.
+    - **Final Result**: The expected batch latency jumps to the **~P99.95** of a single expert (~45ms), necessitating expert replication to mitigate.
 status: published
 provenance: imported
 requires_explanation: true

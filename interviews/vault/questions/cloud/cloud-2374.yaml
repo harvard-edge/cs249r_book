@@ -8,31 +8,18 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: FEC Latency in Distributed Inference
-scenario: You deploy a 1T parameter MoE model for ultra-low latency real-time voice translation. The model
-  is sharded across 16 nodes using Pipeline Parallelism. The network uses 800 Gbps Ethernet with PAM4
-  modulation, requiring KP4 Forward Error Correction (FEC) to achieve an acceptable Bit Error Rate (BER).
-  FEC adds 110ns of latency per hop. A single token generation requires traversing 15 network hops. Evaluate
-  the tradeoff between disabling FEC to reduce network latency versus keeping it enabled.
+scenario: 'You deploy a 1T parameter MoE model for ultra-low latency real-time voice translation, sharded across 16 nodes using Pipeline Parallelism. The network uses 800 Gbps Ethernet with PAM4 modulation, requiring KP4 Forward Error Correction (FEC) to achieve an acceptable Bit Error Rate (BER). FEC adds 110ns of latency per hop. A single token generation requires traversing 15 network hops.'
 question: "Should you disable KP4 FEC to save 110 ns per hop, or keep it enabled for the 15-hop token path?"
 details:
-  realistic_solution: "800G Ethernet achieves high throughput using PAM4 (Pulse Amplitude Modulation 4-level),\
-    \ which packs 2 bits per symbol. However, the voltage margins between PAM4 levels are extremely tight,\
-    \ resulting in a raw Bit Error Rate (BER) of around 1e-4. To make this usable, KP4 FEC is mandatory\
-    \ to bring the effective BER down to 1e-15. \n\nFEC processing requires buffering blocks of data to\
-    \ compute parity, inherently adding ~110ns of latency per switch hop. For 15 hops, this adds 15 *\
-    \ 110ns = 1.65 microseconds per token step. In an autoregressive generation of 1000 tokens, this is\
-    \ 1.65ms of cumulative delay. \n\nThe Tradeoff: If you disable FEC to save this 1.65us per step, the\
-    \ network operates at a raw BER of 1e-4. At 800 Gbps (100 GB/s), a BER of 1e-4 means you experience\
-    \ roughly 10 million bit errors per second. This will cause constant CRC failures, dropped packets,\
-    \ and RDMA/TCP retransmissions. A single RDMA retransmission timeout can take milliseconds, completely\
-    \ destroying the strict latency requirements of real-time voice translation. Therefore, the deterministic\
-    \ latency penalty of FEC (1.65us per token) is a mandatory tradeoff to avoid the catastrophic, non-deterministic\
-    \ tail latency spikes caused by uncorrected bit errors."
-  common_mistake: Disabling FEC strictly to save 1.65us of latency per token, ignoring that PAM4 without
-    FEC has a BER high enough to cause constant TCP/RDMA retransmissions, which ruins tail latency.
-  napkin_math: 'Hops = 15. FEC latency = 110ns. Total FEC delay per token = 1.65us. 1000 tokens = 1.65ms
-    delay. Raw BER 1e-4 at 800 Gbps: 8 * 10^11 bits/sec * 10^-4 = 8 * 10^7 bit errors per second. Without
-    FEC, virtually every large packet will contain an error and require retransmission.'
+  realistic_solution: "800G Ethernet achieves high throughput using PAM4 (Pulse Amplitude Modulation 4-level), which packs 2 bits per symbol. However, the voltage margins between PAM4 levels are extremely tight, resulting in a raw Bit Error Rate (BER) of around 1e-4. To make this usable, KP4 FEC is mandatory to bring the effective BER down to 1e-15. \n\nFEC processing requires buffering blocks of data to compute parity, inherently adding ~110ns of latency per switch hop. For 15 hops, this adds 15 * 110ns = 1.65 microseconds per token step. In an autoregressive generation of 1000 tokens, this is 1.65ms of cumulative delay. \n\nThe Tradeoff: If you disable FEC to save this 1.65us per step, the network operates at a raw BER of 1e-4. At 800 Gbps (100 GB/s), a BER of 1e-4 means you experience roughly 10 million bit errors per second. This will cause constant CRC failures, dropped packets, and RDMA/TCP retransmissions. A single RDMA retransmission timeout can take milliseconds, completely destroying the strict latency requirements of real-time voice translation. Therefore, the deterministic latency penalty of FEC (1.65us per token) is a mandatory tradeoff to avoid the catastrophic, non-deterministic tail latency spikes caused by uncorrected bit errors."
+  common_mistake: |
+    **The Pitfall:** Disabling FEC strictly to save static latency per token.
+    **The Rationale:** In ultra-low latency systems, engineers ruthlessly cut fixed overheads, assuming the network is reliable enough for brief transmissions.
+    **The Consequence:** PAM4 without FEC has a raw BER so high that constant TCP/RDMA retransmissions occur, completely destroying tail latency predictability and rendering real-time voice translation unusable.
+  napkin_math: |
+    1. **FEC Delay:** 15 hops * 110ns = 1.65μs per token. For 1000 tokens, delay is 1.65ms.
+    2. **Raw BER Impact:** At 800 Gbps (8 * 10^11 bits/sec) with a raw BER of 10^-4, there are 8 * 10^7 bit errors per second.
+    3. **Conclusion:** Without FEC, virtually every large packet will contain an error and require a retransmission (taking milliseconds), making the 1.65μs static penalty a **mandatory tradeoff**.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,34 +8,19 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Diagnosing Slow Distilled LLM Generation
-scenario: You deploy a 1B parameter distilled student LLM to a Google Tensor G3 device,
-  targeting the on-device TPU. The model easily fits within the 12 GB LPDDR5X memory.
-  However, during auto-regressive token generation, you observe that the latency is
-  barely faster than a 3B parameter pruned model, and the TPU's 7.5 TOPS are drastically
-  underutilized. What is the root cause of this symptom?
-question: Why is a 1B distilled LLM on Tensor G3 barely faster than a 3B pruned model
-  during autoregressive generation?
+scenario: You deploy a 1B parameter distilled student LLM to a Google Tensor G3 device, targeting the on-device TPU. The model easily fits within the 12 GB LPDDR5X memory. However, during auto-regressive token generation, you observe that the latency is barely faster than a 3B parameter pruned model, and the TPU's 7.5 TOPS are drastically underutilized.
+question: Why is a 1B distilled LLM on Tensor G3 barely faster than a 3B pruned model during autoregressive generation?
 details:
-  realistic_solution: The root cause is that auto-regressive token generation (batch
-    size 1) is fundamentally memory-bandwidth bound, not compute-bound. Reducing the
-    model size via distillation decreases the total memory footprint, but it does
-    not improve the arithmetic intensity. The G3 TPU spends most of its time waiting
-    for weights to load from the LPDDR5X memory rather than performing calculations,
-    which explains the low utilization of the 7.5 TOPS. The generation speed is bottlenecked
-    by the memory bus, making the latency difference between the 1B and 3B models
-    less dramatic than the compute reduction implies.
-  common_mistake: Candidates often assume the issue is a missing custom operator causing
-    a CPU fallback, or they might suspect that the feature distillation process introduced
-    unoptimized projection layers. They miss the fundamental hardware bottleneck of
-    auto-regressive decoding.
-  napkin_math: Google Tensor G3 TPU peak compute = 7.5 TOPS. LPDDR5X memory bandwidth
-    = ~51.2 GB/s. Required Arithmetic Intensity (AI) to be compute-bound = 7.5 TOPS
-    / 51.2 GB/s = ~146 Ops/Byte. For auto-regressive generation (batch size 1) with
-    INT8 weights (1 byte per weight), a vector-matrix multiply takes 2*N*M operations
-    and loads N*M bytes of memory. The AI is 2*N*M / N*M = 2 Ops/Byte. Since 2 Ops/Byte
-    << 146 Ops/Byte, the workload is severely memory-bandwidth bound. The 7.5 TOPS
-    peak compute is highly underutilized regardless of whether you use the 3B or 1B
-    model.
+  realistic_solution: The root cause is that auto-regressive token generation (batch size 1) is fundamentally memory-bandwidth bound, not compute-bound. Reducing the model size via distillation decreases the total memory footprint, but it does not improve the arithmetic intensity. The G3 TPU spends most of its time waiting for weights to load from the LPDDR5X memory rather than performing calculations, which explains the low utilization of the 7.5 TOPS. The generation speed is bottlenecked by the memory bus, making the latency difference between the 1B and 3B models less dramatic than the compute reduction implies.
+  common_mistake: |
+    **The Pitfall:** Assuming the issue is a missing custom operator causing a CPU fallback or unoptimized projection layers.
+    **The Rationale:** Candidates focus on compute bottlenecks, missing the fundamental hardware reality of auto-regressive decoding.
+    **The Consequence:** They spend weeks profiling and writing custom C++ operators that do not improve performance because the NPU is actually starved for data, not compute cycles.
+  napkin_math: |
+    1. **Hardware Specs:** Tensor G3 TPU = 7.5 TOPS. LPDDR5X bandwidth = ~51.2 GB/s.
+    2. **Ridge Point:** Required Arithmetic Intensity (AI) to be compute-bound = 7.5 TOPS / 51.2 GB/s = ~146 Ops/Byte.
+    3. **Workload AI:** For auto-regressive generation (batch size 1) with INT8 weights, a matrix-vector multiply does 2×N×M ops and loads N×M bytes. AI = 2 Ops/Byte.
+    **Result:** Because **2 Ops/Byte << 146 Ops/Byte**, the workload is severely memory-bandwidth bound. The 7.5 TOPS peak compute is highly underutilized regardless of whether it's a 1B or 3B model.
 status: published
 provenance: imported
 requires_explanation: false

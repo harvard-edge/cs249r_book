@@ -8,30 +8,20 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: 'AllReduce Topology Comparison: Ring vs Tree on H100 IB Cluster'
-scenario: A 64-GPU H100 cluster uses InfiniBand HDR100 (100 Gbps = 12.5 GB/s per link).
-  Gradient all-reduce with 26GB (13B model, FP16) per step. Compare ring all-reduce,
-  recursive halving-doubling (Rabenseifner), and a binary tree reduction. Which minimizes
-  wall-clock time?
-question: Which minimizes wall-clock time?
+scenario: A 64-GPU H100 cluster uses InfiniBand HDR100 (12.5 GB/s per link). A training step requires a gradient all-reduce of 26GB (13B model, FP16).
+question: Compare ring all-reduce, recursive halving-doubling, and a binary tree reduction: which minimizes wall-clock time for this payload?
 details:
-  realistic_solution: 'Ring all-reduce: time = 2×(N-1)/N × M/B = 2×63/64 × 26GB/12.5GB/s
-    = 2×0.984×2.08s = 4.09s. Recursive halving-doubling: for large bandwidth-bound
-    messages, transfers the same total data as ring: 2×(N-1)/N×M = 51.4GB per GPU,
-    at 12.5GB/s ≈ 4.1s. RHD''s formula 2×log2(N)×M/(N×B) gives the per-step bandwidth
-    allocation, not the total time for large messages. Binary tree: log2(64)=6 steps,
-    bottleneck at root = M/B = 26/12.5 = 2.08s per step but only reduces 1 link. Tree
-    time: 6×2.08/2 = ~6.24s worst case. Ring and RHD tie at ~4.09s for this 26GB bandwidth-bound
-    case; tree is slowest at ~6.24s. For large messages (>1GB), ring and RHD achieve
-    similar bandwidth-bound performance; RHD has lower overhead for small messages
-    due to fewer steps.'
-  common_mistake: Ignoring latency (α) in the α-β model for small messages; for large
-    messages like 26GB gradients, bandwidth (β) dominates and latency becomes negligible.
-  napkin_math: 'Ring: 2×(63/64)×26/12.5 = 4.09s. Halving-doubling: for large bandwidth-bound
-    messages, bandwidth-optimal AllReduce algorithms (including ring and RHD) achieve
-    the same asymptotic bandwidth: 2×(N-1)/N×M/B ≈ 4.09s. RHD reduces latency-bound
-    overhead (fewer steps: 2×log2(N)), but for 26GB both are bandwidth-bound ≈ 4.09s.
-    Tree: bottlenecked at root, ~6.24s. Ring and RHD tie for bandwidth-limited 26GB
-    sync.'
+  realistic_solution: 'For large messages (>1GB), bandwidth ($\\beta$) dominates and latency ($\\alpha$) is negligible. Both ring all-reduce and recursive halving-doubling (RHD) are bandwidth-optimal and transfer identical total data volumes, tying for performance. A naive binary tree bottlenecks at the root links and is significantly slower without pipelining.'
+  common_mistake: |
+    **The Pitfall:** Believing RHD is vastly superior to ring AllReduce for massive gradient payloads.
+    **The Rationale:** Engineers misapply the $O(\log N)$ latency advantage of RHD to bandwidth-bound massive payloads.
+    **The Consequence:** Rewriting topology routing or abandoning stable ring implementations for negligible gains on large message transfers.
+  napkin_math: |
+    1. **Ring AllReduce:** Time = $2 \times ((N-1)/N) \times (M/B)$.
+    2. $2 \times (63/64) \times (26\text{GB} / 12.5\text{GB/s}) \approx 4.09\text{s}$.
+    3. **Recursive Halving-Doubling (RHD):** For large messages, RHD is bandwidth-optimal and transfers the exact same data volume as ring. Its bandwidth-bound time is identical: $\approx 4.09\text{s}$.
+    4. **Binary Tree:** Bottlenecked at the root links. Without pipelining, $O(\log N)$ steps taking $\approx 12.48\text{s}$.
+    5. **Ring and RHD tie at ~4.09s for this bandwidth-limited 26GB synchronization.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -44,9 +34,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- Recursive halving-doubling transfers the exact same data volume as ring all-reduce.
-  The bandwidth-bound time should be identical to ring (4.09s), not 0.39s.
 human_reviewed:
   status: not-reviewed
   by: null

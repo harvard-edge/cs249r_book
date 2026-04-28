@@ -8,34 +8,24 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The Chatbot's Awkward Silence
-scenario: 'You are the Staff ML Engineer for a popular AI code assistant. Users are complaining that the
-  service ''thinks for too long'' before starting to generate a suggestion. Your dashboard shows conflicting
-  signals: GPU utilization is high (>90%), and overall token throughput (TPOT) is excellent. However,
-  the P99 Time-To-First-Token (TTFT) is over 800ms, violating the product team''s 100ms real-time deadline.
-  The service runs a 70B parameter LLM on H100 GPUs. The serving engine uses static batching, waiting
-  up to 500ms to collect a full batch of requests before running inference. Based on this data, diagnose
-  the most likely cause of the high TTFT.'
+scenario: You are the Staff ML Engineer for a popular AI code assistant. Users complain the service 'thinks for too long' before generating a suggestion. GPU utilization is high (>90%) and token throughput (TPOT) is excellent, but P99 Time-To-First-Token (TTFT) exceeds 800ms, violating the 100ms SLA. The service runs a 70B model on GPUs with a static batching strategy, waiting up to 500ms to collect a full batch.
 question: "What is causing P99 TTFT over 800ms despite high GPU utilization and excellent TPOT with a 500ms static batching window?"
 details:
-  realistic_solution: The root cause is the long, fixed 500ms timeout for static batching. This strategy
-    prioritizes throughput by creating large batches, but it does so at the direct expense of per-request
-    latency. A request arriving just after a batch has been dispatched must wait for nearly the full 500ms
-    timeout, which dominates the TTFT. The correct solution is to switch to a continuous batching (or
-    'in-flight batching') scheduler. This allows the server to add new requests to the current batch on
-    the fly, starting the prefill computation immediately without waiting for a timeout. This minimizes
-    queue time and dramatically reduces TTFT, satisfying the real-time deadline while dynamically creating
-    efficient batches.
-  common_mistake: Engineers often focus exclusively on throughput (TPOT) and GPU utilization. They see
-    high utilization and assume the system is optimized. However, they fail to see that the batching strategy
-    itself can introduce artificial latency that harms the user experience, even when the hardware is
-    running at full speed. They misdiagnose the problem as a hardware capacity issue (needing more GPUs)
-    or a model issue (prefill is too slow) instead of a queueing logic issue.
-  napkin_math: 'Let''s analyze the timeline for a single request. The serving engine has a static batching window of 500ms. If a request arrives right after a batch window starts, it waits 500ms just to be dispatched. If the prefill compute takes 200ms, the minimum TTFT for this request is 500ms + 200ms = 700ms. With any minor queueing or networking overhead, this easily exceeds the 800ms P99 TTFT observed, completely blowing past the 100ms SLA. The hardware compute (200ms) is fast enough, but the queueing logic introduces a massive 500ms artificial delay.'
+  realistic_solution: The root cause is the long, fixed 500ms timeout for static batching. This strategy prioritizes throughput by creating large batches, but it does so at the direct expense of per-request latency. A request arriving just after a batch has been dispatched must wait for nearly the full 500ms timeout, which dominates the TTFT. The correct solution is to switch to a continuous batching (or 'in-flight batching') scheduler. This allows the server to add new requests to the current batch on the fly, starting the prefill computation immediately without waiting for a timeout. This minimizes queue time and dramatically reduces TTFT, satisfying the real-time deadline while dynamically creating efficient batches.
+  common_mistake: |
+    **The Pitfall:** Focusing exclusively on throughput (TPOT) and GPU utilization.
+    **The Rationale:** Engineers see high utilization and assume the system is fully optimized, missing that the batching strategy itself introduces artificial latency.
+    **The Consequence:** The queueing logic problem is misdiagnosed as a hardware capacity issue, leading to wasted spend on new GPUs instead of fixing the scheduler.
+  napkin_math: |
+    - Static batching window: 500ms.
+    - Expected prefill compute time: ~200ms.
+    - If a request arrives right after a batch window starts, it waits 500ms just to be dispatched.
+    - Minimum TTFT for this request: 500ms (queue wait) + 200ms (prefill compute) = 700ms.
+    - **Result: The 500ms static wait completely dominates latency, rendering the 100ms real-time SLA impossible.**
   options:
   - The 70B model's prefill computation is too slow for the H100 GPU, creating a compute bottleneck.
   - The system needs more H100 GPUs to handle the request volume and reduce queueing delays.
-  - The static batching window (500ms) forces requests to wait artificially, which is the primary contributor
-    to TTFT.
+  - The static batching window (500ms) forces requests to wait artificially, which is the primary contributor to TTFT.
   - Network latency between the user and the datacenter is the most likely cause for the >800ms delay.
   correct_index: 2
 status: published

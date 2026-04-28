@@ -8,29 +8,22 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Overlap Efficiency Ceiling
-scenario: A training step on your 8-GPU node takes 200 ms for the backward pass and 40 ms for the AllReduce
-  of all gradients. With no overlap, total step time is 240 ms. Your team enables communication-computation
-  overlap (non-blocking AllReduce starting as early gradients become available). The profiler shows the
-  AllReduce is now fully overlapped — it completes before the backward pass finishes. But step time only
-  drops to 210 ms, not 200 ms. Where did the remaining 10 ms come from?
-question: "Where did the remaining 10 ms come from?"
+scenario: A training step on your 8-GPU node takes 200 ms for the backward pass and 40 ms for the AllReduce of all gradients. With no overlap, total step time is 240 ms. Your team enables communication-computation overlap. The profiler shows the AllReduce is now fully overlapped — it completes before the backward pass finishes. But step time only drops to 210 ms, not 200 ms.
+question: Where did the remaining 10 ms of execution time come from if communication is fully overlapped?
 details:
-  realistic_solution: 'The 10 ms overhead comes from three sources of resource contention that overlap
-    introduces. (1) **SM contention**: NCCL kernels consume 2-4 GPU SMs for data packing and signaling.
-    Those SMs are unavailable for backward pass compute kernels, slowing the backward pass itself. (2)
-    **Memory bandwidth contention**: The AllReduce reads gradient tensors from HBM at the same time backward
-    pass kernels are writing them. This contention reduces effective HBM bandwidth for both operations.
-    (3) **Synchronization overhead**: The backward pass must signal when each gradient bucket is ready.
-    The CUDA event/stream synchronization between compute and communication streams adds small but cumulative
-    overhead across hundreds of buckets. The overlap efficiency is: $\eta_{overlap} = \frac{T_{sequential}}{T_{overlapped}}
-    = \frac{240}{210} = 1.14\times$ — good, but not the theoretical $\frac{240}{200} = 1.20\times$.'
-  common_mistake: Assuming that 'fully overlapped' means zero communication cost. Engineers often ignore
-    that overlap requires the communication to share hardware resources (NVLink/PCIe bandwidth, GPU SMs
-    for NCCL kernels, memory bandwidth for gradient reads) with the backward pass computation.
-  napkin_math: '- Without overlap: 200 ms (backward) + 40 ms (AllReduce) = 240 ms | - Perfect overlap:
-    200 ms (communication hidden) | - Actual: 210 ms → 10 ms contention tax | - SM contention: ~4 SMs
-    / 132 total = 3% compute slowdown → 6 ms | - Memory BW contention: ~2 ms (shared HBM reads) | - Sync
-    overhead: ~2 ms (100 bucket events × 20 μs each)'
+  realistic_solution: 'The 10 ms overhead comes from three sources of resource contention that overlap introduces. (1) **SM contention**: NCCL kernels consume 2-4 GPU SMs for data packing and signaling. Those SMs are unavailable for backward pass compute kernels. (2) **Memory bandwidth contention**: The AllReduce reads gradient tensors from HBM at the same time backward pass kernels are writing them. (3) **Synchronization overhead**: The backward pass must signal when each gradient bucket is ready via CUDA events.'
+  common_mistake: |
+    **The Pitfall:** Assuming that "fully overlapped" literally means zero communication cost.
+    **The Rationale:** Diagrams often show computation and communication as perfectly parallel boxes on separate hardware.
+    **The Consequence:** Engineers ignore that overlap requires the communication tasks to share unified hardware resources (PCIe bandwidth, GPU SMs, HBM reads) with the computation, leading to unexplained performance ceilings.
+  napkin_math: |
+    * Without overlap: 200 ms (backward) + 40 ms (AllReduce) = 240 ms.
+    * Perfect theoretical overlap: 200 ms.
+    * Actual overlapped time: 210 ms (10 ms contention tax).
+    * Breakdown: SM contention takes ~4 SMs / 132 total = 3% compute slowdown → 6 ms.
+    * Memory BW contention (shared HBM reads) → 2 ms.
+    * Sync overhead (100 bucket events × 20 μs each) → 2 ms.
+    * **Total overhead cleanly accounts for the missing 10 ms.**
   options:
   - The 10 ms is overhead from SM contention, memory bandwidth contention, and CUDA synchronization introduced by overlapping communication and computation.
   - The AllReduce operation requires exactly 10 ms of pure CPU processing before it can be offloaded to the NCCL backend.

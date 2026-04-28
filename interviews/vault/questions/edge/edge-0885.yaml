@@ -8,26 +8,20 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Unpadded Batching Inefficiency
-scenario: A smart factory edge node (1x RTX A6000) runs continuous batching for 4 concurrent video-analysis
-  streams. When one stream submits a 3000-token prompt, the short 50-token prompts from the other 3 streams
-  take 600ms to process instead of their normal 20ms.
-question: "Why do 50-token prompts take 600ms when batched with one 3000-token prompt, and what batching or attention change fixes it?"
+scenario: A smart factory edge node runs continuous batching for 4 concurrent video-analysis streams. When one stream submits a 3000-token prompt, the short 50-token prompts from the other 3 streams take 600ms to process instead of their normal 20ms.
+question: Why do 50-token prompts take 600ms when batched with one 3000-token prompt, and what batching or attention change fixes it?
 details:
-  realistic_solution: The root cause is the usage of naive padded batching instead of FlashAttention or
-    unpadded (sequence-agnostic) continuous batching. When requests of vastly different lengths (3000
-    tokens vs 50 tokens) are grouped into a single batch without unpadded processing, the shorter sequences
-    must be padded with zeros to match the maximum sequence length in the batch (3000). Because standard
-    self-attention complexity is quadratic with respect to sequence length, the GPU wastes immense compute
-    cycles calculating attention scores for padding tokens. The solution is to implement an unpadded attention
-    mechanism (like FlashAttention with variable sequence lengths or xFormers' BlockDiagonalMask) that
-    flattens the batch into a 1D array of valid tokens and only computes attention within sequence boundaries,
-    completely eliminating padding waste.
-  common_mistake: Assuming the PCIe bus is locked by the large video stream prompt, delaying the execution
-    of the small prompts.
-  napkin_math: Max length = 3000. Batch size = 4. Total padded tokens = 12,000. Actual valid tokens =
-    3000 + 50 + 50 + 50 = 3150. Efficiency = 3150 / 12000 = 26%. Furthermore, attention is O(N^2). Padded
-    compute per short sequence is proportional to 3000^2 = 9,000,000 ops. Actual compute needed is 50^2
-    = 2500 ops. The system is doing 3600x more work than necessary for the short sequences.
+  realistic_solution: The root cause is the usage of naive padded batching instead of FlashAttention or unpadded (sequence-agnostic) continuous batching. When requests of vastly different lengths (3000 tokens vs 50 tokens) are grouped into a single batch without unpadded processing, the shorter sequences must be padded with zeros to match the maximum sequence length in the batch (3000). Because standard self-attention complexity is quadratic with respect to sequence length, the GPU wastes immense compute cycles calculating attention scores for padding tokens. The solution is to implement an unpadded attention mechanism (like FlashAttention with variable sequence lengths or xFormers' BlockDiagonalMask) that flattens the batch into a 1D array of valid tokens and only computes attention within sequence boundaries, completely eliminating padding waste.
+  common_mistake: |
+    **The Pitfall:** Assuming the PCIe bus is locked by the large video stream prompt.
+    **The Rationale:** Candidates incorrectly guess system-level I/O blocking instead of algorithmic inefficiencies.
+    **The Consequence:** Failing to address the quadratic computational waste of attention padding.
+  napkin_math: |
+    - Max length = 3000. Batch size = 4. Total padded tokens = 12,000.
+    - Actual valid tokens = 3000 + 50 + 50 + 50 = 3150. Efficiency = 3150 / 12000 = 26%.
+    - Attention is $O(N^2)$. Padded compute per short sequence $\propto 3000^2 = 9,000,000$ ops.
+    - Actual compute needed $\propto 50^2 = 2500$ ops.
+    - System is doing **3600x more work** than necessary for short sequences.
 status: published
 provenance: imported
 requires_explanation: false

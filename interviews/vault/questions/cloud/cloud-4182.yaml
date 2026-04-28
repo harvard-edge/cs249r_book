@@ -8,30 +8,21 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: PCIe Gen5 vs NVLink for Mixed Workloads
-scenario: A server has 4 A100 GPUs. GPUs 0-1 are connected via NVLink (600 GB/s),
-  and GPUs 2-3 are connected via NVLink (600 GB/s), but the two pairs only connect
-  via PCIe Gen4 (32 GB/s through the root complex). You want to run 4-way tensor parallelism.
-  Calculate the AllReduce time for a 100 MB activation tensor and identify the bottleneck.
-question: What is the 4-way tensor-parallel AllReduce time for a 100 MB activation
-  tensor, and which link is the bottleneck?
+scenario: A server has 4 A100 GPUs. GPUs 0-1 are connected via NVLink (600 GB/s), and GPUs 2-3 are connected via NVLink (600 GB/s), but the two pairs only connect via PCIe Gen4 (32 GB/s through the root complex). You want to run 4-way tensor parallelism.
+question: What is the 4-way tensor-parallel AllReduce time for a 100 MB activation tensor, and which link is the bottleneck?
 details:
-  realistic_solution: 'Step 1: Intra-pair reduce-scatter via NVLink. GPUs 0-1 exchange
-    50 MB at 600 GB/s = 0.083ms. GPUs 2-3 same = 0.083ms. Parallel, total = 0.083ms.
-    Step 2: Cross-pair AllReduce via PCIe. GPU 0 sends 50 MB to GPU 2 via PCIe at
-    32 GB/s = 1.56ms (bidirectional, so GPU 2 also sends to GPU 0). Step 3: Intra-pair
-    all-gather via NVLink = 0.083ms. Total: 0.083 + 1.56 + 0.083 = 1.73ms. If all
-    4 had NVLink: 2 × 100 MB × 3/4 / 600 GB/s = 0.25ms. PCIe bottleneck makes it 6.9×
-    slower. This is why nvidia-smi topo -m is critical before choosing parallelism
-    strategy. Alternative: use 2-way TP (within NVLink pair) + 2-way PP (across PCIe)
-    — PP only sends activations once per layer, not every layer''s AllReduce.'
-  common_mistake: Assuming NVLink connects all 4 GPUs in a full mesh. In many server
-    configurations, NVLink only connects GPU pairs within the same physical slot group.
-    Cross-pair communication falls back to PCIe, creating a severe bandwidth asymmetry.
-  napkin_math: 'NVLink pair: 50 MB / 600 GB/s = 0.083ms. PCIe crossing: 50 MB / 32
-    GB/s = 1.56ms. Total hierarchical: 1.73ms. Full NVLink mesh: 0.25ms. PCIe penalty:
-    6.9×. For 80 layers: PCIe path = 80 × 1.73 = 138ms overhead. NVLink mesh: 80 ×
-    0.25 = 20ms. TP(2)+PP(2) alternative: PCIe transfer once per stage (not per layer):
-    100 MB / 32 GB/s = 3.1ms per stage boundary × 2 stages = 6.2ms total.'
+  realistic_solution: 'Step 1: Intra-pair reduce-scatter via NVLink. GPUs 0-1 exchange 50 MB at 600 GB/s = 0.083ms. GPUs 2-3 same = 0.083ms. Parallel, total = 0.083ms. Step 2: Cross-pair AllReduce via PCIe. GPU 0 sends 50 MB to GPU 2 via PCIe at 32 GB/s = 1.56ms (bidirectional, so GPU 2 also sends to GPU 0). Step 3: Intra-pair all-gather via NVLink = 0.083ms. Total: 0.083 + 1.56 + 0.083 = 1.73ms. If all 4 had NVLink: 2 × 100 MB × 3/4 / 600 GB/s = 0.25ms. PCIe bottleneck makes it 6.9× slower. This is why nvidia-smi topo -m is critical before choosing parallelism strategy. Alternative: use 2-way TP (within NVLink pair) + 2-way PP (across PCIe) — PP only sends activations once per layer, not every layer''s AllReduce.'
+  common_mistake: |
+    **The Pitfall:** Assuming NVLink connects all 4 GPUs in a full mesh.
+    **The Rationale:** Candidates abstract away the physical server topology and assume "NVLink is available" means full-bandwidth connectivity everywhere.
+    **The Consequence:** Designing a 4-way TP layout that violently degrades performance due to silent PCIe bottlenecks.
+  napkin_math: |
+    - **Intra-Pair NVLink (Reduce-Scatter):** GPUs 0-1 exchange 50 MB at 600 GB/s = 0.083 ms.
+    - **Cross-Pair PCIe (AllReduce):** GPU 0 sends 50 MB to GPU 2 via PCIe at 32 GB/s = 1.56 ms.
+    - **Intra-Pair NVLink (All-Gather):** 0.083 ms.
+    - **Total PCIe Bottlenecked Time:** `0.083 + 1.56 + 0.083` = **1.73 ms**.
+    - **Full NVLink Mesh Time (Ideal):** `2 * 100 MB * (3/4) / 600 GB/s` = 0.25 ms.
+    - **Penalty:** The PCIe path makes the operation **6.9x slower**.
 status: published
 provenance: imported
 requires_explanation: false

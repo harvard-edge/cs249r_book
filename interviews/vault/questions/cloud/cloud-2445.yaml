@@ -8,27 +8,19 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: FlashAttention Head Dimension Spillage
-scenario: A researcher designs a custom Transformer on H100s (3.35 TB/s HBM, 228KB SRAM per SM). They
-  change the attention head dimension from $d=128$ to $d=256$, while halving the number of heads to keep
-  the total hidden dimension and FLOPs exactly identical to the baseline. They use FlashAttention-2. Despite
-  identical FLOPs and parameter counts, the training step time increases by 45%.
-question: "Why does doubling attention head dimension from 128 to 256 slow FlashAttention-2 training by 45% despite identical FLOPs?"
+scenario: A researcher designs a custom Transformer on H100s. They change the attention head dimension from d=128 to d=256, while halving the number of heads to keep the total hidden dimension and FLOPs exactly identical to the baseline. Despite using FlashAttention-2 and identical FLOP counts, the training step time increases by 45%.
+question: Why does doubling the attention head dimension from 128 to 256 slow FlashAttention-2 training by 45% despite identical FLOPs?
 details:
-  realistic_solution: The root cause is SRAM capacity overflow leading to a degradation in effective arithmetic
-    intensity. FlashAttention achieves its speedup by tiling the Q, K, and V blocks into the fast but
-    limited SRAM on the GPU's Streaming Multiprocessors (SMs), avoiding roundtrips to HBM. The size of
-    these tiles is dictated by the head dimension $d$. When $d$ is doubled to 256, the minimum memory
-    required for a single token's Q, K, V vectors doubles. To fit within the strict 228KB SRAM limit of
-    an H100 SM, the block size (sequence dimension chunk) must be significantly reduced. Smaller block
-    sizes mean the outer loops of the attention computation must execute more times, drastically increasing
-    the number of times the K and V matrices are read from HBM. This drops the operation from being compute-bound
-    back down the roofline slope into the memory-bandwidth bound regime.
-  common_mistake: Assuming that keeping total FLOPs constant will guarantee identical performance without
-    considering the SRAM capacity and tiling constraints of fused kernels.
-  napkin_math: HBM accesses in FlashAttention scale with O(N^2 * d / M), where N is sequence length, d
-    is head dimension, and M is SRAM size. If d doubles from 128 to 256, and M is fixed at 228KB, the
-    memory traffic (HBM reads/writes) approximately doubles. Effective Arithmetic Intensity drops by 50%,
-    hitting the 3.35 TB/s HBM bandwidth ceiling.
+  realistic_solution: The root cause is SRAM capacity overflow leading to a degradation in effective arithmetic intensity. FlashAttention tiles the Q, K, and V blocks into the fast but limited SRAM on the GPU's Streaming Multiprocessors (SMs). When d is doubled to 256, the minimum memory required for a single token's Q, K, V vectors doubles. To fit within the strict 228KB SRAM limit of an H100 SM, the block size must be significantly reduced, drastically increasing the number of times the K and V matrices are read from HBM.
+  common_mistake: |
+    **The Pitfall:** Assuming that identical FLOP counts guarantee identical performance.
+    **The Rationale:** Candidates forget to consider the strict SRAM capacity constraints of fused kernels like FlashAttention.
+    **The Consequence:** Deploying suboptimal model dimensions that silently spill to HBM and bottleneck training.
+  napkin_math: |
+    - **Memory Traffic Scaling:** HBM accesses in FlashAttention scale with O(N² * d / M), where N is sequence length, d is head dimension, and M is SRAM size.
+    - **Dimension Doubling:** When d doubles from 128 to 256, with M fixed at 228KB (H100 SM size).
+    - **Traffic Impact:** The memory traffic (HBM reads/writes) approximately doubles.
+    - **Result:** Effective Arithmetic Intensity drops by **50%**, hitting the **3.35 TB/s HBM bandwidth ceiling**.
 status: published
 provenance: imported
 requires_explanation: false

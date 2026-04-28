@@ -8,29 +8,21 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: Strict SLA Fraud Detection Ensembling
-scenario: A payment processor evaluates every transaction against an ensemble of 5 ML models (including
-  a 2ms XGBoost model and a 30ms Graph Neural Network). The system must meet a strict 50ms end-to-end
-  SLA at 50,000 QPS. If traffic unexpectedly spikes to 80,000 QPS, how do you design the serving system
-  to guarantee the 50ms SLA without failing or dropping transactions?
-question: "If traffic unexpectedly spikes to 80,000 QPS, how do you design the serving system to guarantee the 50ms SLA without failing or dropping transactions?"
+scenario: A payment processor evaluates every transaction against an ensemble of 5 ML models (including a 2ms XGBoost model and a 30ms Graph Neural Network). The system must meet a strict 50ms end-to-end SLA at 50,000 QPS.
+question: "If traffic unexpectedly spikes to 80,000 QPS, how do you design the serving system to guarantee the 50ms SLA without dropping transactions?"
 details:
-  realistic_solution: Implement a DAG-based inference router with asynchronous gRPC execution and strict
-    queuing theory-based timeouts. Send requests to all 5 models in parallel. To handle the 80k QPS spike,
-    implement priority-based load shedding and graceful degradation. Assign a strict queue wait-time timeout
-    for the heavy GNN model. If the GNN queue wait time plus its 30ms compute time exceeds 45ms, the router
-    drops the GNN request (load shedding) and returns the ensemble result based *only* on the faster models
-    (XGBoost, etc.). This ensures 100% of transactions complete within 50ms, trading off a slight precision
-    drop for guaranteed availability. Implement dynamic batching on the GNN with a strict 5ms batch window
-    to maximize throughput.
-  common_mistake: Synchronously waiting for all 5 models to finish, causing the slowest model's queue
-    buildup during spikes to breach the 50ms SLA and fail transactions entirely.
-  napkin_math: 'Normal capacity: 50K QPS. GNN compute latency: 30ms. At 80K QPS spike, deficit = 30K QPS
-    above normal capacity. By Little''s Law (L = lambda * W): to meet the 50ms SLA, max wait time W =
-    50ms - 30ms compute - 5ms network = 15ms. At 80K QPS arrival rate to GNN: max queue length L = 80,000
-    * 0.015 = 1,200 items. If GNN can only drain 50K QPS, queue grows at 30K/s. Queue exceeds capacity
-    in 1200/30000 = 40ms. The router must shed the excess 30K req/sec (37.5% of traffic) from the GNN
-    queue, routing them to the fast-path ensemble (XGBoost at 2ms) to maintain 100% SLA compliance. Fast-path
-    latency: 2ms + 5ms network = 7ms (well within 50ms).'
+  realistic_solution: Implement a DAG-based inference router with asynchronous gRPC execution and strict queuing theory-based timeouts. Send requests to all 5 models in parallel. To handle the 80k QPS spike, implement priority-based load shedding and graceful degradation. Assign a strict queue wait-time timeout for the heavy GNN model. If the GNN queue wait time plus its 30ms compute time exceeds 45ms, the router drops the GNN request (load shedding) and returns the ensemble result based *only* on the faster models (XGBoost, etc.). This ensures 100% of transactions complete within 50ms, trading off a slight precision drop for guaranteed availability. Implement dynamic batching on the GNN with a strict 5ms batch window to maximize throughput.
+  common_mistake: |
+    **The Pitfall:** Synchronously waiting for all 5 models to finish.
+    **The Rationale:** Ensembles normally require all votes, and queues naturally buffer spikes.
+    **The Consequence:** The slowest model's queue builds up, breaching the 50ms SLA and causing total transaction failures across the board.
+  napkin_math: |
+    - **SLA Deadline**: 50ms. GNN Compute = 30ms. Network = 5ms.
+    - **Max Wait Time (W)**: 50ms - 30ms - 5ms = 15ms.
+    - **Traffic Spike**: 80K QPS arrival rate to GNN.
+    - **Max Queue Length (Little's Law)**: L = 80,000 * 0.015s = 1,200 items.
+    - **Queue Exhaustion**: Deficit is 30K/s. Queue hits 1200 in 40ms.
+    - **Conclusion**: The router must shed **30K requests/sec** (37.5%) from the GNN queue to the fast-path ensemble to maintain 100% SLA.
 status: published
 provenance: imported
 requires_explanation: true

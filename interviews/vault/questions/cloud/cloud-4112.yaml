@@ -8,32 +8,19 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Gang Scheduling for Distributed Training
-scenario: A distributed training job using 32 GPUs across 4 nodes hangs intermittently.
-  Investigation reveals that 31 of 32 processes start within seconds, but the last
-  process sometimes waits 10+ minutes for its GPU allocation. What scheduling concept
-  prevents this, and why is it critical for distributed training?
-question: What scheduling concept prevents this, and why is it critical for distributed
-  training?
+scenario: A distributed training job using 32 GPUs across 4 nodes hangs intermittently. Investigation reveals that 31 of 32 processes start within seconds, but the last process sometimes waits 10+ minutes for its GPU allocation.
+question: What scheduling concept prevents this, and why is it critical for distributed training?
 details:
-  realistic_solution: 'Gang scheduling ensures all processes of a distributed job
-    are launched simultaneously (or not at all). Without it: 31 GPUs enter NCCL initialization
-    and block on ncclCommInitRank waiting for all 32 ranks. If rank 31 waits 10 minutes
-    for its GPU, the other 31 GPUs sit idle — wasting 31 × 10 = 310 GPU-minutes. With
-    gang scheduling: the scheduler reserves all 32 GPUs atomically before launching
-    any process. If 32 GPUs are not available, the job waits in the queue. No GPU
-    is allocated until all are ready. Implementation: Slurm provides gang scheduling
-    via sched/gang plugin. Kubernetes uses kube-batch or Volcano scheduler with PodGroup
-    CRD that specifies minMember=32. The tradeoff: gang scheduling can reduce cluster
-    utilization because large jobs hold back until their full allocation is available,
-    while smaller jobs could have used those GPUs. Combining gang scheduling with
-    backfill mitigates this.'
-  common_mistake: Thinking the issue is just a slow node. The real problem is that
-    without gang scheduling, some processes start and enter their first AllReduce
-    barrier while others have not launched. This wastes GPU compute on the 31 started
-    processes, which are blocked waiting for the straggler.
-  napkin_math: '32 GPUs idle for 10 min = 5.3 GPU-hours wasted per occurrence. If
-    this happens 3× daily: 16 GPU-hours/day = $48/day at $3/GPU-hr. Gang scheduling
-    eliminates this entirely.'
+  realistic_solution: 'Gang scheduling ensures all processes of a distributed job are launched simultaneously (or not at all). Without it: 31 GPUs enter NCCL initialization and block on ncclCommInitRank waiting for all 32 ranks. If rank 31 waits 10 minutes for its GPU, the other 31 GPUs sit idle — wasting 31 × 10 = 310 GPU-minutes. With gang scheduling: the scheduler reserves all 32 GPUs atomically before launching any process. If 32 GPUs are not available, the job waits in the queue. No GPU is allocated until all are ready. Implementation: Slurm provides gang scheduling via sched/gang plugin. Kubernetes uses kube-batch or Volcano scheduler with PodGroup CRD that specifies minMember=32. The tradeoff: gang scheduling can reduce cluster utilization because large jobs hold back until their full allocation is available, while smaller jobs could have used those GPUs. Combining gang scheduling with backfill mitigates this.'
+  common_mistake: |
+    **The Pitfall:** Thinking the issue is just a slow node.
+    **The Rationale:** Engineers fail to realize that processes without gang scheduling will start and block at the first AllReduce barrier, wasting compute.
+    **The Consequence:** Wasted GPU compute hours as active processes idle while waiting for stragglers.
+  napkin_math: |
+    1. Calculate wasted time per occurrence: 31 GPUs idle for 10 min = 310 GPU-minutes (5.16 GPU-hours).
+    2. Calculate daily cost (e.g., 3 occurrences): 15.5 GPU-hours/day.
+    3. Estimate monetary waste: At $3/GPU-hr, this is ~$46.50/day.
+    **Final Result: Gang scheduling eliminates 310 GPU-minutes of wasted compute per occurrence.**
 status: published
 provenance: imported
 requires_explanation: false

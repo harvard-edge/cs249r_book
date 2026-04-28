@@ -8,27 +8,22 @@ competency_area: reliability
 bloom_level: analyze
 phase: training
 title: Analyzing Silent Data Corruption Propagation in 3D Parallelism
-scenario: You are training a 175B parameter LLM on 2048 H100 GPUs using 3D parallelism (TP=8, PP=8, DP=32).
-  At iteration 50,000, the global loss suddenly spikes to NaN. You suspect a Silent Data Corruption (SDC)
-  event, such as an undetected ALU bit-flip, on a single GPU. To avoid blindly rolling back and risking
-  immediate recurrence on the same faulty node, you must construct an error model to trace how a localized
-  FP16 fault propagates through the communication topologies to isolate the exact failing hardware.
-question: "How would you trace a single-GPU FP16 silent data corruption through TP=8, PP=8, DP=32 to isolate the failing H100?"
+scenario: You are training a 175B parameter LLM on 2048 H100 GPUs using 3D parallelism (TP=8, PP=8, DP=32). At iteration 50,000, the global loss suddenly spikes to NaN. You suspect a Silent Data Corruption (SDC) event, such as an undetected ALU bit-flip, on a single GPU.
+question: How would you trace a single-GPU FP16 silent data corruption through TP=8, PP=8, DP=32 to isolate the failing H100?
 details:
-  realistic_solution: Construct a topology-aware error propagation model. First, intercept gradient norms
-    across the DP=32 ranks *before* the DP AllReduce sync; the isolated DP group with exploding gradients
-    holds the fault. Within that DP group, examine the PP=8 pipeline stages; the earliest stage outputting
-    NaNs restricts the search space to its specific TP=8 group. Finally, within those 8 GPUs, run targeted
-    deterministic fault-injection diagnostics (e.g., multiplying large known matrices) to identify the
-    specific H100 producing the SDC.
-  common_mistake: Candidates often assume standard cluster telemetry will immediately flag the hardware
-    fault, or they fail to mathematically map the propagation sequence, mistakenly thinking they must
-    run fault-injection on all 2048 GPUs individually to find the culprit.
-  napkin_math: A single Silent Data Corruption (SDC) on one H100 ALU propagates instantly. A Tensor Parallel
-    (TP=8) All-Reduce corrupts 8 local GPUs. The Pipeline Parallel (PP=8) forward/backward pass poisons
-    7 downstream stages (56 GPUs). Finally, the Data Parallel (DP=32) gradient All-Reduce broadcasts the
-    NaN to 56 * 32 = 1792 GPUs. Within a single iteration (<5s), the local fault brings down the entire
-    cluster.
+  realistic_solution: Construct a topology-aware error propagation model. First, intercept gradient norms across the DP=32 ranks *before* the DP AllReduce sync; the isolated DP group with exploding gradients holds the fault. Within that DP group, examine the PP=8 pipeline stages; the earliest stage outputting NaNs restricts the search space to its specific TP=8 group. Finally, within those 8 GPUs, run targeted deterministic fault-injection diagnostics (e.g., multiplying large known matrices) to identify the specific H100 producing the SDC.
+  common_mistake: |
+    **The Pitfall:** Assuming standard hardware telemetry will trivially flag the bit-flip, or deciding to randomly run diagnostics across all 2048 nodes.
+    
+    **The Rationale:** System administrators often overestimate the scope of hardware ECC and blindly trust dashboards, failing to leverage the strict mathematical boundaries of the 3D-parallel topology to narrow the search space.
+    
+    **The Consequence:** The team wastes days running exhaustive diagnostics across thousands of GPUs, hemorrhaging millions of dollars in idle cluster time while searching for a needle in a haystack.
+  napkin_math: |
+    - **Instant SDC**: A bit-flip on one H100 ALU turns a value to NaN.
+    - **TP Spread**: A Tensor Parallel (TP=8) All-Reduce instantly corrupts 8 local GPUs.
+    - **PP Spread**: The Pipeline Parallel (PP=8) forward/backward pass poisons the remaining 7 downstream stages (56 GPUs total).
+    - **DP Spread**: The Data Parallel (DP=32) collective broadcasts the NaN to 56 * 32 = 1792 GPUs.
+    - **Result**: Within a single <5s iteration, a single faulty ALU successfully brings down **1792 GPUs**, making topology-based traceback the only viable diagnostic.
 status: published
 provenance: imported
 requires_explanation: false

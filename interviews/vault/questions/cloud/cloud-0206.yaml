@@ -8,29 +8,19 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: The Inference Server Autoscaling
-scenario: Our LLM endpoint on Kubernetes has a scale-to-zero policy to save money overnight. But the first
-  morning request takes 45 seconds. The SRE team proposes keeping 1 warm replica 24/7. The finance team
-  says that wastes $2,500/month. Who's right? Show me the break-even math.
+scenario: Our LLM endpoint on Kubernetes has a scale-to-zero policy to save money overnight. But the first morning request takes 45 seconds. The SRE team proposes keeping 1 warm replica 24/7. The finance team says that wastes $2,500/month.
 question: "Is keeping one warm 70B replica 24/7 worth the $2,500/month, and what is the break-even versus scale-to-zero?"
 details:
-  realistic_solution: 'The answer depends on the traffic pattern. For bursty workloads with predictable
-    schedules (e.g., business-hours traffic), use scheduled scaling — spin up replicas 15 minutes before
-    peak and scale to zero overnight. For unpredictable but sparse traffic, use a tiered approach: keep
-    a small quantized model (7B on CPU or A10G) as a "warm fallback" while the full model cold-starts,
-    then route to the full model once it''s ready.'
-  common_mistake: '"Always keep warm replicas — cold starts are unacceptable." This ignores workloads
-    with genuinely sparse traffic where paying for 24/7 idle GPUs is pure waste.'
-  napkin_math: '70B model on 2× H100: | **Cold start breakdown:** Container pull (5s) + weight download
-    from S3 (140 GB / 10 GB/s = 14s) + CUDA context init (3s) + model load to GPU (140 GB / 64 GB/s PCIe
-    = 2.2s) + warmup inference (2s) = **~26 seconds**. | **1 warm replica 24/7:** 2 × $3.50/hr × 730 hr
-    = **$5,110/month** (note: finance estimated $2,500/month — they likely quoted single-GPU cost without
-    tensor parallelism overhead). | **Scale-to-zero, 50 cold starts/day:** 50 × 26s = 1,300s of user-facing
-    delay/day. If each delayed request costs $0.50 in user churn: 50 × $0.50 × 30 = **$750/month in churn
-    cost**. | **Break-even:** Warm replica costs $5,110 vs cold-start churn costs $750. Scale-to-zero
-    wins **unless** cold-start churn exceeds ~$170/day (340 impacted requests/day). | **Hybrid:** Keep
-    1 A10G ($548/month) running a 7B fallback model. Cold-start the H100s on first request. Users get
-    a fast (if lower-quality) response in 200ms while the full model loads. Total cost: $548/month + near-zero
-    churn.'
+  realistic_solution: The answer depends on the traffic pattern. For bursty workloads with predictable schedules, use scheduled scaling — spin up replicas 15 minutes before peak. For unpredictable sparse traffic, use a tiered approach: keep a small quantized model (7B on CPU or cheap GPU) as a "warm fallback" while the full model cold-starts.
+  common_mistake: |
+    **The Pitfall:** Blindly asserting "always keep warm replicas — cold starts are unacceptable."
+    **The Rationale:** Candidates prioritize latency above all else, ignoring the massive cloud cost for idle workloads.
+    **The Consequence:** The company burns thousands of dollars a month on idle compute for sparsely utilized internal endpoints.
+  napkin_math: |
+    1. **Cold start breakdown:** Pull (5s) + S3 weights download (14s) + CUDA init (3s) + load to GPU (2.2s) + warmup (2s) = ~26 seconds.
+    2. **Warm replica cost:** 2 GPUs * $3.50/hr * 730 hr = **$5,110/month** (finance estimated low).
+    3. **Scale-to-zero cost:** 50 cold starts/day * 26s = 1,300s of delay/day. If churn costs $0.50 per delay: 50 * $0.50 * 30 = **$750/month**.
+    4. **Break-even:** Warm costs $5,110 vs cold costs $750. Scale-to-zero wins unless churn exceeds **~$170/day**.
 status: published
 provenance: imported
 requires_explanation: false

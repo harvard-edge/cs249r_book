@@ -8,32 +8,21 @@ competency_area: data
 bloom_level: evaluate
 phase: both
 title: Multimodal Sharded Storage Architecture
-scenario: Design the storage format and data loading architecture for training a vision-language
-  model on a cluster of 1024 H100 GPUs (128 nodes, 8 GPUs/node). The dataset is 50
-  billion samples (2 MB average per sample, compressed image + text), currently stored
-  as individual JSON and JPEG files in cloud object storage. Each H100 processes 64
-  samples per second. Each node has 2 TB of local NVMe SSD (6 GB/s read) and dual
-  InfiniBand NDR connections. Architect a system that avoids storage I/O bottlenecks
-  and minimizes object storage API costs.
-question: How would you store and load the 50B-sample vision-language dataset so 1024
-  H100s avoid I/O bottlenecks and object-store costs?
+scenario: You are training a vision-language model on a cluster of 1024 GPUs (128 nodes, 8 GPUs/node). The dataset is 50 billion samples (2 MB average per sample, compressed image + text), currently stored as individual JSON and JPEG files in cloud object storage. Each GPU processes 64 samples per second. Each node has 2 TB of local NVMe SSD (6 GB/s read) and dual InfiniBand NDR connections.
+question: How would you architect the storage format and data loading to avoid I/O bottlenecks and minimize object storage costs?
 details:
-  realistic_solution: 'Use a sequential row-based format like WebDataset (TAR) or
-    TFRecord, packing ~500-1000 samples into 1-2 GB shards. Implement a two-tier pipeline:
-    a background process streams these large shards from object storage to the local
-    NVMe SSD cache. The training loop sequentially reads from the local NVMe. This
-    converts millions of small random reads into large sequential reads, easily handled
-    by the local 6 GB/s NVMe while minimizing object storage GET requests.'
-  common_mistake: Candidates often suggest columnar formats like Parquet, which are
-    inefficient for large unstructured binary blobs, or propose streaming millions
-    of small files directly from object storage, hitting IOPS limits and incurring
-    massive API GET costs.
-  napkin_math: Throughput per GPU = 64 samples/s * 2 MB = 128 MB/s. Node throughput
-    = 8 * 128 MB/s = 1.02 GB/s. Total cluster throughput = 128 nodes * 1.02 GB/s =
-    ~131 GB/s. Small file GETs = 512 GETs/s per node (costly, high latency). Sharding
-    into 1.02 GB files reduces this to 1 GET/s per node. The local NVMe (6 GB/s) easily
-    supports the 1.02 GB/s read requirement plus asynchronous 1.02 GB/s writes from
-    the network.
+  realistic_solution: 'Use a sequential row-based format like WebDataset (TAR) or TFRecord, packing ~500-1000 samples into 1-2 GB shards. Implement a two-tier pipeline: a background process streams these large shards from object storage to the local NVMe SSD cache. The training loop sequentially reads from the local NVMe. This converts millions of small random reads into large sequential reads, easily handled by the local 6 GB/s NVMe while minimizing object storage GET requests.'
+  common_mistake: |
+    **The Pitfall:** Suggesting columnar formats like Parquet, or streaming millions of small files directly from object storage.
+    **The Rationale:** Parquet is standard for tabular data, and direct streaming seems simplest for cloud-native architectures.
+    **The Consequence:** Parquet is highly inefficient for large unstructured binary blobs, and small-file streaming hits IOPS limits and incurs massive API GET costs, starving the GPUs.
+  napkin_math: |
+    1. Calculate per-GPU throughput: 64 samples/s * 2 MB = 128 MB/s.
+    2. Calculate node throughput: 8 GPUs * 128 MB/s = 1.02 GB/s.
+    3. Calculate small file API load: Reading individual files requires 512 GETs/s per node, creating massive latency and API costs.
+    4. Analyze sharded approach: Packing into 1.02 GB files (e.g., WebDataset/TFRecord) reduces this to 1 GET/s per node.
+    5. Evaluate local I/O bounds: The background process streams 1.02 GB/s to local NVMe, and the training loop reads at 1.02 GB/s.
+    6. Conclude: The local NVMe (6 GB/s) easily supports the **~2.04 GB/s combined read/write requirement**.
 status: published
 provenance: imported
 requires_explanation: true

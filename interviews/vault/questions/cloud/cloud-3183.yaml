@@ -8,31 +8,23 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Speculative Decoding for Batched Multi-Turn Chat
-scenario: In a multi-turn chat system on 4x H100 (70B model, 7B draft), requests arrive
-  with conversation history averaging 8K tokens. The draft model's KV cache for the
-  history adds memory overhead. With 100 concurrent sessions, analyze whether
-  speculation's memory overhead for the draft model's KV cache limits the system's
-  capacity.
-question: Does the 7B draft KV cache for 8K-token histories limit capacity for 100
-  concurrent chat sessions on 4x H100?
+scenario: 'A multi-turn chat system on 4x H100 requires 100 concurrent sessions. Requests arrive with conversation history averaging 8K tokens. The draft model''s KV cache for the history adds memory overhead.'
+question: 'Does the 7B draft KV cache for 8K-token histories limit capacity for 100 concurrent chat sessions on 4x H100?'
 details:
-  realistic_solution: 'Target KV per request per GPU (70B, 8 total GQA KV heads -> 2 per GPU, 80 layers,
-    8K tokens): 80 x 2 x 2 x 128 x 8192 x 2B = 0.67GB. Draft KV per request per
-    GPU (7B, 32 total KV heads -> 8 per GPU, 32 layers, 8K tokens): 32 x 2 x 8 x 128 x 8192 x 2B =
-    1.07GB. Total KV: 1.74GB/request/GPU. Model weights: target 35GB + draft 3.5GB
-    = 38.5GB/GPU. Budget: 80 - 38.5 = 41.5GB for KV. Max concurrent (global, since TP=4): 41.5/1.74 =
-    23 requests. Without speculation: 41.5/0.67 = 61 requests.
-    Speculation reduces capacity by 62%. At 100 concurrent requirement: neither works in FP16.
-    Solution: use FP8 KV quantization: target KV halves to 0.33GB, draft to 0.53GB.
-    Total: 0.86GB. Max concurrent with speculation: 41.5/0.86 = 48. Still under 100.
-    (Note: without speculation, FP8 allows 41.5/0.33 = 125, meeting the goal).
-    To use speculation at 100 concurrent: add draft KV eviction or switch to a GQA draft model.
-    Draft prefill for 8K context: 2 x 7B x 8K / 989T = 113ms
-    — too slow to regenerate every round. Compromise: keep draft KV for active sessions, regenerate for others.'
-  common_mistake: Only accounting for the target model's KV cache, or incorrectly multiplying per-GPU batch capacity by the TP degree. In Tensor Parallelism, the maximum batch size is bound by the memory of a single GPU; you do not multiply the batch size by 4.
-  napkin_math: 'Target KV: 0.67GB. Draft KV: 1.07GB. Total: 1.74GB. Without spec:
-    61 concurrent. With spec: 23. Spec costs 62% capacity. FP8 KV with spec: 48 concurrent.
-    Without spec FP8: 125 concurrent (meets goal). Need 100 with spec: add draft KV eviction policy or drop speculation.'
+  realistic_solution: 'Target KV per request per GPU (70B, 8 total GQA KV heads -> 2 per GPU, 80 layers, 8K tokens): 80 x 2 x 2 x 128 x 8192 x 2B = 0.67GB. Draft KV per request per GPU (7B, 32 total KV heads -> 8 per GPU, 32 layers, 8K tokens): 32 x 2 x 8 x 128 x 8192 x 2B = 1.07GB. Total KV: 1.74GB/request/GPU. Model weights: target 35GB + draft 3.5GB = 38.5GB/GPU. Budget: 80 - 38.5 = 41.5GB for KV. Max concurrent (global, since TP=4): 41.5/1.74 = 23 requests. Without speculation: 41.5/0.67 = 61 requests. Speculation reduces capacity by 62%. At 100 concurrent requirement: neither works in FP16. Solution: use FP8 KV quantization: target KV halves to 0.33GB, draft to 0.53GB. Total: 0.86GB. Max concurrent with speculation: 41.5/0.86 = 48. Still under 100. (Note: without speculation, FP8 allows 41.5/0.33 = 125, meeting the goal). To use speculation at 100 concurrent: add draft KV eviction or switch to a GQA draft model. Draft prefill for 8K context: 2 x 7B x 8K / (4 x 989T) = 28ms — too slow to regenerate every round. Compromise: keep draft KV for active sessions, regenerate for others.'
+  common_mistake: |
+    **The Pitfall:** Multiplying per-GPU batch capacity by the TP degree.
+    **The Rationale:** Candidates correctly calculate the memory footprint per request but mistakenly think Tensor Parallelism multiplies the total batch size across GPUs.
+    **The Consequence:** They overestimate the system's concurrency capacity by a factor of the TP degree, leading to out-of-memory errors in production.
+  napkin_math: |
+    * **Target KV (70B):** 0.67 GB per request.
+    * **Draft KV (7B):** 1.07 GB per request.
+    * **Total memory per request:** 1.74 GB.
+    * **Capacity without speculation:** 41.5 GB available / 0.67 GB = 61 concurrent requests.
+    * **Capacity with speculation:** 41.5 GB available / 1.74 GB = 23 concurrent requests.
+    * **Cost of speculation:** Capacity drops by **62%**.
+    * **FP8 resolution:** Target (0.33 GB) + Draft (0.53 GB) = 0.86 GB. Capacity = 48 concurrent.
+    * **Conclusion:** Still fails 100-session SLA without draft KV eviction policies.
 status: published
 provenance: imported
 requires_explanation: false

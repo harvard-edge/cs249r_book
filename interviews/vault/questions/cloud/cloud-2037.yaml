@@ -8,27 +8,20 @@ competency_area: deployment
 bloom_level: analyze
 phase: both
 title: The Cascading Retry Storm
-scenario: Your user-facing app calls an API gateway, which calls an orchestrator that sequentially queries
-  an embedding service, a vector DB, and an LLM. Each layer (client, gateway, orchestrator) has a 30-second
-  timeout and 3 retries. During a brief LLM latency spike (P99 goes from 2s to 15s), your entire system
-  goes down for 20 minutes even though the LLM recovers after 3 minutes. What happened?
-question: "What happened?"
+scenario: 'Your user-facing app calls an API gateway, which calls an orchestrator that sequentially queries an embedding service, a vector DB, and an LLM. Each layer (client, gateway, orchestrator) has a 30-second timeout and 3 retries. During a brief LLM latency spike (P99 goes from 2s to 15s), your entire system goes down for 20 minutes even though the LLM recovers after 3 minutes.'
+question: "Why did the system go down for 20 minutes when the LLM only spiked for 3 minutes?"
 details:
-  realistic_solution: 'Cascading retry amplification. When the LLM slows down, the orchestrator retries
-    the LLM call 3×. However, the client application and API gateway also have 30s timeouts and 3 retries.
-    When the orchestrator blocks on the LLM, the API gateway times out and retries the *entire pipeline*,
-    causing new requests to the embedding service, vector DB, and eventually the LLM. With 1000 QPS incoming,
-    the nested retries generate up to 27× amplification (3 client × 3 gateway × 3 orchestrator) = 27,000
-    QPS to the LLM. When the LLM recovers, it''s buried under the retry backlog. The fix: (1) implement
-    circuit breakers, (2) use exponential backoff, (3) pass a distributed timeout budget (e.g., if client
-    allows 5s, the orchestrator gives retrieval 500ms and LLM whatever time is left), (4) only retry at
-    a single layer of the stack.'
-  common_mistake: Assuming the system should recover as soon as the LLM recovers. 'If the downstream service
-    is healthy, everything should be fine.'
-  napkin_math: '1000 QPS × 3 client retries × 3 gateway retries × 3 orchestrator retries = 27,000 QPS
-    worst case. LLM at 15s latency with 27K QPS: queue depth = 27,000 × 15 = 405,000 requests. At normal
-    2000 QPS throughput, draining the backlog takes 405K / 2K = 202 seconds ≈ 3.4 minutes after recovery
-    — if no new retries arrive.'
+  realistic_solution: 'Cascading retry amplification. When the LLM slows down, the orchestrator retries the LLM call 3×. However, the client application and API gateway also have 30s timeouts and 3 retries. When the orchestrator blocks on the LLM, the API gateway times out and retries the entire pipeline, causing new requests to the embedding service, vector DB, and eventually the LLM. With 1000 QPS incoming, the nested retries generate up to 27× amplification. When the LLM recovers, it''s buried under the retry backlog. The fix: (1) implement circuit breakers, (2) use exponential backoff, (3) pass a distributed timeout budget, (4) only retry at a single layer of the stack.'
+  common_mistake: |
+    **The Pitfall:** Assuming system recovery maps linearly to downstream component recovery.
+    **The Rationale:** "If the downstream service is healthy, everything should be fine."
+    **The Consequence:** Ignoring the massive queuing effect of amplified retries, leaving the system effectively down long after the root cause is resolved.
+  napkin_math: |
+    1. **Retry Amplification:** 1000 QPS × 3 client retries × 3 gateway retries × 3 orchestrator retries = 27,000 QPS worst case.
+    2. **Queue Buildup:** During the 15s latency state, queue depth = 27,000 QPS × 15s = 405,000 requests.
+    3. **Recovery Time:** At the normal 2000 QPS maximum throughput, draining the backlog takes 405,000 / 2,000 = 202.5 seconds (≈ 3.4 minutes) AFTER the LLM recovers, assuming no further retries arrive.
+    
+    **Final Result: The cascading retries generate a 405,000-request backlog, massively prolonging the outage.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -41,8 +34,6 @@ math_verified: true
 math_status: WARN
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 405K / 2K is 202.5, rounded to 202 seconds
 human_reviewed:
   status: not-reviewed
   by: null

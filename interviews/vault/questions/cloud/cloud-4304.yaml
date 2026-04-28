@@ -8,35 +8,19 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Variable Output Length and Decode Pool Imbalance
-scenario: 'Your decode pool uses static round-robin assignment: each incoming prefill
-  completion is assigned to the next decode GPU in sequence. You observe that some
-  decode GPUs are at 95% memory utilization while others sit at 40%. Users with long
-  outputs (>2000 tokens) report degraded TPOT. Root-cause this imbalance and propose
-  a work-stealing or rebalancing mechanism.'
-question: Why does round-robin create 95% vs 40% decode memory imbalance, and how
-  would you rebalance or steal work?
+scenario: Your decode pool uses static round-robin assignment: each incoming prefill completion is assigned to the next decode GPU in sequence. You observe that some decode GPUs are at 95% memory utilization while others sit at 40%. Users with long outputs (>2000 tokens) report degraded TPOT.
+question: Why does round-robin assignment create such extreme decode memory imbalance, and how would you redesign the system to rebalance work?
 details:
-  realistic_solution: 'Round-robin does not account for output length variance. A
-    2000-token output occupies a KV slot for 2000 steps; a 50-token output frees its
-    slot in 50 steps. If requests arrive in bursts where long outputs cluster on the
-    same GPU (e.g., during batch processing jobs), those GPUs fill up while others
-    stay empty. Solutions: (1) Least-loaded-first assignment at transfer time: assign
-    each new KV to the decode GPU with the most free HBM KV blocks. (2) Work-stealing:
-    decode GPUs at <30% utilization advertise capacity; overloaded GPUs migrate completed
-    KV sequences mid-flight to underloaded neighbors (requires live KV transfer over
-    InfiniBand — same mechanism as prefill→decode transfer). (3) Output length prediction:
-    use a draft model or heuristic to estimate output length at prefill time and bin
-    requests into short/long queues served by different decode GPU subsets.'
-  common_mistake: Adding more decode GPUs to fix the imbalance — this treats the symptom,
-    not the cause. The root cause is that round-robin ignores output length heterogeneity,
-    causing long-running sequences to cluster.
-  napkin_math: 'Assume 10 decode MI300X GPUs, 38 GB KV pool each. 380 GB total KV.
-    Round-robin at 500 req/s: each GPU gets 50 req/s. If 10% are long (2000 tok ×
-    384MB/4096tok = 188 MB each): 5 long req/s per GPU × 188 MB = 940 MB/s KV accumulation;
-    at steady state with mean 10s long jobs: 9.4 GB pinned. 10% short (50 tok): frees
-    in 0.1s. Imbalance variance depends on burst pattern — binomial variance in long-job
-    assignment → hot GPU gets 3σ = 3×√(50×0.1×0.9) = 3×2.1 = 6.3 extra long jobs →
-    6.3 × 188 MB = 1.2 GB extra pressure.'
+  realistic_solution: 'Round-robin does not account for output length variance. A 2000-token output occupies a KV slot for 2000 steps; a 50-token output frees its slot in 50 steps. If requests arrive in bursts where long outputs cluster on the same GPU (e.g., during batch processing jobs), those GPUs fill up while others stay empty. Solutions: (1) Least-loaded-first assignment at transfer time: assign each new KV to the decode GPU with the most free HBM KV blocks. (2) Work-stealing: decode GPUs at <30% utilization advertise capacity; overloaded GPUs migrate completed KV sequences mid-flight to underloaded neighbors (requires live KV transfer over InfiniBand — same mechanism as prefill→decode transfer). (3) Output length prediction: use a draft model or heuristic to estimate output length at prefill time and bin requests into short/long queues served by different decode GPU subsets.'
+  common_mistake: |
+    **The Pitfall:** Adding more decode GPUs to the cluster to fix the imbalance.
+    **The Rationale:** Treating the symptom (high utilization on some GPUs) rather than the root cause (unaware load balancing).
+    **The Consequence:** Wasting hardware resources while long-running sequences continue to cluster and cause localized OOMs or TPOT degradation.
+  napkin_math: |
+    *   **System Setup:** 10 decode GPUs, 38 GB KV pool each.
+    *   **Round-Robin Arrival:** 500 req/s means each GPU gets 50 req/s.
+    *   **Output Variance:** A 2000-token request pins ~188 MB of KV cache for an extended time. A 50-token request frees its slot almost instantly.
+    *   **Imbalance Accumulation:** If 10% of jobs are long, a GPU receives 5 long jobs/sec (940 MB/s). If long jobs cluster on a GPU (binomial variance), it might receive 3$\sigma$ extra long jobs (+1.2 GB extra pressure) while others sit empty.
 status: published
 provenance: imported
 requires_explanation: false

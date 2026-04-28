@@ -8,34 +8,23 @@ competency_area: parallelism
 bloom_level: create
 phase: training
 title: PowerSGD Low-Rank Gradient Compression
-scenario: PowerSGD compresses gradients by projecting them onto a low-rank approximation.
-  For a weight matrix W ∈ ℝ^{4096×4096} (a Transformer layer), PowerSGD uses rank
-  r=4, sending two small matrices P ∈ ℝ^{4096×4} and Q ∈ ℝ^{4096×4} instead of the
-  full gradient. Calculate the compression ratio, AllReduce time savings on 256 H100s,
-  and the approximation error bound.
-question: For PowerSGD rank 4 on a 4096×4096 gradient, what are the compression ratio,
-  AllReduce savings on 256 H100s, and approximation error?
+scenario: PowerSGD compresses gradients by projecting them onto a low-rank approximation. For a weight matrix W ∈ ℝ^{4096×4096} (a Transformer layer), PowerSGD uses rank r=4, sending two small matrices P ∈ ℝ^{4096×4} and Q ∈ ℝ^{4096×4} instead of the full gradient.
+question: For PowerSGD rank 4 on a 4096×4096 gradient, what are the compression ratio, AllReduce savings on 256 H100s, and approximation error?
 details:
-  realistic_solution: 'Full gradient: 4096 × 4096 × 2 bytes (FP16) = 32MB. PowerSGD
-    with rank r=4: P = 4096×4×2 = 32KB, Q = 4096×4×2 = 32KB. Total communicated: 64KB.
-    Compression ratio: 32MB / 64KB = 512×. AllReduce time (256 H100s, 400Gbps): Full
-    gradient: 2 × 255/256 × 32MB / 50GB/s = 1.27ms. PowerSGD: 2 × (2 × 255/256 × 32KB
-    / 50GB/s) = 2 × 1.27μs = 2.54μs for AllReduce, plus local MM: (1) Q_t = G × P_{t-1},
-    AllReduce Q_t. (2) Orthogonalize Q_t. (3) P_t = G^T × Q_t, AllReduce P_t. Local
-    compute: two matrix multiplies of (4096×4096) × (4096×4) = 134M FLOPs each = 268M
-    FLOPs total. On H100 at 989 TFLOPS FP16: 268M / 990T = 0.27μs. Negligible. Total
-    PowerSGD time: ~3μs vs 1.27ms = 423× faster. Approximation error: the rank-4 approximation
-    captures the top-4 singular vectors. Error = ||G - G_r||_F / ||G||_F ≈ σ₅/σ₁ for
-    typical gradient spectra. Transformer gradients have rapidly decaying spectra;
-    rank-4 typically captures >90% of Frobenius norm.'
-  common_mistake: Forgetting that PowerSGD requires two AllReduce operations (one
-    for P and one for Q) plus a local matrix multiplication between them. The total
-    cost is 2× AllReduce of smaller matrices plus local compute, not just 1× AllReduce
-    of the compressed representation.
-  napkin_math: 'Compression: 32MB → 64KB = 512×. AllReduce speedup: ~423×. But PowerSGD
-    adds per-iteration local compute cost of 268M FLOPs (negligible on H100). Net
-    communication savings: from 1.27ms to 3μs per layer. For 96 Transformer layers:
-    from 122ms to 0.29ms total AllReduce time.'
+  realistic_solution: 'Full gradient: 4096 × 4096 × 2 bytes (FP16) = 32MB. PowerSGD with rank r=4: P = 4096×4×2 = 32KB, Q = 4096×4×2 = 32KB. Total communicated: 64KB. Compression ratio: 32MB / 64KB = 512×. AllReduce time (256 H100s, 400Gbps): Full gradient: 2 × 255/256 × 32MB / 50GB/s = 1.27ms. PowerSGD: 2 × (2 × 255/256 × 32KB / 50GB/s) = 2 × 1.27μs = 2.54μs for AllReduce, plus local MM: (1) Q_t = G × P_{t-1}, AllReduce Q_t. (2) Orthogonalize Q_t. (3) P_t = G^T × Q_t, AllReduce P_t. Local compute: two matrix multiplies of (4096×4096) × (4096×4) = 134M FLOPs each = 268M FLOPs total. On H100 at 989 TFLOPS FP16: 268M / 990T = 0.27μs. Negligible. Total PowerSGD time: ~3μs vs 1.27ms = 423× faster. Approximation error: the rank-4 approximation captures the top-4 singular vectors. Error = ||G - G_r||_F / ||G||_F ≈ σ₅/σ₁ for typical gradient spectra. Transformer gradients have rapidly decaying spectra; rank-4 typically captures >90% of Frobenius norm.'
+  common_mistake: |
+    **The Pitfall:** Forgetting that PowerSGD requires two distinct AllReduce operations per step.
+    **The Rationale:** Candidates assume that simply compressing to a low-rank matrix means you only run AllReduce once.
+    **The Consequence:** They underestimate the communication latency and ignore the required intermediate local matrix multiplication steps entirely.
+  napkin_math: |
+    - Full gradient size: 4096 × 4096 × 2 bytes = 32 MB.
+    - PowerSGD (Rank 4): P = 4096×4×2 bytes = 32 KB, Q = 4096×4×2 bytes = 32 KB.
+    - Compression Ratio: 32 MB / 64 KB = 512x.
+    - Full AllReduce (256 H100s at 50GB/s): 2 × (255/256) × 32 MB / 50 GB/s ≈ 1.27 ms.
+    - PowerSGD AllReduce (2 ops): 2 × (2 × 32 KB / 50 GB/s) ≈ 2.54 μs.
+    - Local Compute (2 Matrix Muls): 2 × 134M FLOPs = 268M FLOPs.
+    - Compute Time (H100): 268M FLOPs / 989 TFLOPS ≈ 0.27 μs.
+    - **Conclusion:** Total time drops from 1.27 ms to ~3 μs (423x speedup).
 status: published
 provenance: imported
 requires_explanation: false

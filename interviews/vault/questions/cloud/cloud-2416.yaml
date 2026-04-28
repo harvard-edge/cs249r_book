@@ -8,26 +8,19 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: FP8 Quantization on Tensor Cores
-scenario: Deploying a 70B parameter model on H100 GPUs using FP8. You use the E4M3 format (4 exponent
-  bits, 3 mantissa) for both weights and activations. The model throughput increases by 1.8x, but accuracy
-  drops by 22%. Profiling shows massive overflow errors in the activation tensors during attention computation.
-question: "What FP8 formats should you use for weights and activations on H100, and why is E4M3 failing in attention?"
+scenario: Deploying a 70B parameter model on H100 GPUs using FP8. You use the E4M3 format (4 exponent bits, 3 mantissa) for both weights and activations. The model throughput increases by 1.8x, but accuracy drops by 22%. Profiling shows massive overflow errors in the activation tensors during attention computation.
+question: What FP8 formats should you use for weights and activations on H100, and why is E4M3 failing in attention?
 details:
-  realistic_solution: The issue is a mismatch between the numeric format and the statistical distribution
-    of LLM activations. E4M3 has a very limited dynamic range (max value ~448). LLM activations notoriously
-    contain massive outliers (values > 1000) that overflow E4M3. The tradeoff is precision (mantissa)
-    versus dynamic range (exponent) mapped to hardware capabilities. Hopper Tensor Cores support mixed
-    FP8 formats natively in a single MMA (Matrix Multiply-Accumulate) instruction. The co-design solution
-    is to use E4M3 for the weights (which are normally distributed and bounded) and E5M2 (max value ~57344)
-    for the activations. This preserves the dynamic range needed for outliers while maintaining the 2x
-    throughput of FP8 Tensor Cores over FP16.
-  common_mistake: Switching entirely back to FP16, losing the entire throughput advantage of the Hopper
-    FP8 Tensor Cores.
-  napkin_math: FP8 E4M3 (4 exponent bits) has a maximum representable value of 448. FP8 E5M2 (5 exponent
-    bits) maxes out at 57,344. 70B LLMs heavily rely on rare, massive activation outliers (e.g., values
-    >1000) for attention routing. In E4M3, a 1200 outlier is hard-clipped to 448, destroying 62% of its
-    magnitude and wrecking accuracy. E5M2 safely stores 1200 without clipping. LLM activations often need
-    E5M2.
+  realistic_solution: The issue is a mismatch between the numeric format and the statistical distribution of LLM activations. E4M3 has a very limited dynamic range (max value ~448). LLM activations notoriously contain massive outliers (values > 1000) that overflow E4M3. The tradeoff is precision (mantissa) versus dynamic range (exponent) mapped to hardware capabilities. Hopper Tensor Cores support mixed FP8 formats natively in a single MMA (Matrix Multiply-Accumulate) instruction. The co-design solution is to use E4M3 for the weights (which are normally distributed and bounded) and E5M2 (max value ~57344) for the activations. This preserves the dynamic range needed for outliers while maintaining the 2x throughput of FP8 Tensor Cores over FP16.
+  common_mistake: |
+    **The Pitfall:** Switching entirely back to FP16 when FP8 training accuracy degrades.
+    **The Rationale:** FP8 numerics are tricky, and falling back to FP16 guarantees convergence.
+    **The Consequence:** Losing the entire 2x throughput advantage of the Hopper FP8 Tensor Cores instead of properly co-designing the numerical format for the workload.
+  napkin_math: |
+    - **FP8 E4M3:** 4 exponent bits. Maximum representable value is **448**.
+    - **FP8 E5M2:** 5 exponent bits. Maximum representable value is **57,344**.
+    - **LLM Activations:** Frequently contain rare, massive outliers (>1000) critical for attention routing.
+    - **Conclusion:** In E4M3, a 1200 outlier is hard-clipped to 448, destroying 62% of its magnitude and wrecking accuracy. E5M2 safely stores 1200 without clipping.
 status: published
 provenance: imported
 requires_explanation: false

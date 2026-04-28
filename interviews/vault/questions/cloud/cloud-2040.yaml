@@ -8,27 +8,19 @@ competency_area: deployment
 bloom_level: analyze
 phase: both
 title: The Reranker Bottleneck Inversion
-scenario: Your RAG pipeline retrieves top-100 from vector search (8ms), then uses a cross-encoder reranker
-  to select the best 5 documents. The reranker is a 330M-parameter model running on a GPU. After adding
-  the reranker, retrieval quality improved by 15%, but P99 latency doubled from 250ms to 500ms. The reranker
-  itself only takes 40ms on average. Where is the extra 210ms coming from?
-question: "Where is the extra 210ms coming from?"
+scenario: Your RAG pipeline retrieves top-100 documents (8ms), then uses a 330M-parameter cross-encoder reranker on a GPU to select the top 5. After adding the reranker, retrieval quality improved 15%, but P99 latency doubled from 250ms to 500ms. The reranker compute takes 40ms on average.
+question: Where is the extra 210ms coming from?
 details:
-  realistic_solution: 'The reranker P99 is much higher than P50 due to GPU contention. The reranker shares
-    GPU resources with other services (or even the LLM). Under load, reranker requests queue behind LLM
-    inference batches. The GPU scheduler batches reranker requests, but batch formation adds queuing delay.
-    At P99: 40ms compute + 160ms queue wait + 50ms batch formation = 250ms total reranker latency added.
-    Additionally, the reranker processes 100 query-document pairs sequentially (or in small batches),
-    and each pair requires tokenization. 100 pairs × 256 avg tokens = 25,600 tokens of cross-encoder input.
-    Fix: (1) dedicate a small GPU (T4) exclusively for reranking — no contention, (2) reduce candidates
-    to top-30 instead of top-100, (3) use a distilled reranker (30M params) that runs on CPU in 5ms per
-    pair, (4) pre-filter with a cheap score threshold before reranking.'
-  common_mistake: Blaming the reranker's compute time. At 40ms average, it shouldn't cause 250ms of additional
-    latency.
-  napkin_math: '100 pairs × 256 tokens × 330M params: ~40ms on H100 at batch=100. But P99 queue time at
-    80% GPU utilization ≈ 4× average (Little''s Law + heavy tails): 4 × 40ms = 160ms. Plus 50ms batch
-    formation and 40ms compute = 250ms total reranker latency. Reducing to 30 candidates: 30 × 256 tokens ≈ 15ms compute,
-    P99 queue ≈ 60ms.'
+  realistic_solution: 'The reranker P99 is much higher than P50 due to GPU contention. The reranker shares GPU resources with other services (or even the LLM). Under load, reranker requests queue behind LLM inference batches. The GPU scheduler batches reranker requests, but batch formation adds queuing delay. At P99: 40ms compute + 160ms queue wait + 50ms batch formation = 250ms total reranker latency added. Additionally, the reranker processes 100 query-document pairs sequentially (or in small batches), and each pair requires tokenization. 100 pairs × 256 avg tokens = 25,600 tokens of cross-encoder input. Fix: (1) dedicate a small GPU (T4) exclusively for reranking — no contention, (2) reduce candidates to top-30 instead of top-100, (3) use a distilled reranker (30M params) that runs on CPU in 5ms per pair, (4) pre-filter with a cheap score threshold before reranking.'
+  common_mistake: |
+    **The Pitfall:** Blaming the reranker's pure compute time and attempting to optimize its weights.
+    **The Rationale:** If a new model increases latency, engineers assume the forward pass is too slow.
+    **The Consequence:** Missing the fact that GPU contention and batch queueing are the true bottlenecks, leaving tail latency unsolved.
+  napkin_math: |
+    - **Compute Time**: 100 pairs × 256 tokens = 25,600 tokens ≈ 40ms compute on H100.
+    - **Queue Wait**: Under heavy load (80% util), P99 queue time ≈ 4× average wait (Little's Law) = 160ms.
+    - **Batch Formation**: Adds ~50ms.
+    - **Total Latency**: 40ms (compute) + 160ms (queue) + 50ms (batching) = **250ms total reranker latency**.
 status: published
 provenance: imported
 requires_explanation: false

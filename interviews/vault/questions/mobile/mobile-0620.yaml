@@ -8,23 +8,19 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: The JNI Boundary Crossing
-scenario: You write a highly optimized C++ inference engine using XNNPACK for Android. Your Java app calls
-  `runInference(float[] image)` natively via JNI. The C++ code executes in 5ms. However, the app measures
-  18ms per frame. What is JNI doing that consumes 13ms of overhead?
-question: "What is JNI doing that consumes 13ms of overhead?"
+scenario: You write a highly optimized C++ inference engine using XNNPACK for Android. Your Java app calls `runInference(float[] image)` natively via JNI. The C++ code executes in 5ms. However, the app measures 18ms per frame.
+question: What is JNI doing that consumes 13ms of overhead?
 details:
-  realistic_solution: 'JNI''s GetByteArrayElements copies the entire Java byte array into native memory
-    (6.2 MB for 1080p). After inference, results are copied back via SetByteArrayRegion. Two 6.2 MB memcpy
-    operations on a mobile CPU at ~2 GB/s take ~6ms each, totaling ~12ms. Add JNI call overhead and GC
-    pressure from pinning: 13ms total. Fix: use a DirectByteBuffer (zero-copy — Java and C++ share the
-    same memory pointer), or allocate a persistent native buffer via Android''s HardwareBuffer/AHardwareBuffer.
-    This eliminates both copies, reducing overhead from 13ms to <0.5ms.'
-  common_mistake: '"JNI function calls are just slow." The function call itself takes microseconds. The
-    massive overhead comes from data marshaling.'
-  napkin_math: 1080p RGB = 1920*1080*3 = 6.2MB. JNI array copy requires reading and writing. 6.2MB * 2
-    (read+write) = 12.4MB. Across two boundaries (in/out) = 24.8MB. On Cortex-X4 (~30GB/s memcpy), that's
-    ~0.8ms ideal, but cache misses and JNI pinning overhead drag this to 10-13ms. Zero-copy DirectByteBuffer
-    is required.
+  realistic_solution: 'JNI''s GetByteArrayElements copies the entire Java byte array into native memory (6.2 MB for 1080p). After inference, results are copied back via SetByteArrayRegion. Two 6.2 MB memcpy operations on a mobile CPU at ~2 GB/s take ~6ms each, totaling ~12ms. Add JNI call overhead and GC pressure from pinning: 13ms total. Fix: use a DirectByteBuffer (zero-copy — Java and C++ share the same memory pointer), or allocate a persistent native buffer via Android''s HardwareBuffer/AHardwareBuffer. This eliminates both copies, reducing overhead from 13ms to <0.5ms.'
+  common_mistake: |
+    **The Pitfall:** Blaming JNI function call overhead instead of memory marshalling.
+    **The Rationale:** Developers assume crossing the Java/native boundary is fundamentally slow due to context switching.
+    **The Consequence:** They spend time optimizing function arguments rather than addressing the massive 24.8 MB memory copy operation, which is easily solved by using zero-copy DirectByteBuffers.
+  napkin_math: |
+    - 1080p RGB image size: 1920 * 1080 * 3 bytes ≈ 6.2 MB.
+    - JNI array copy requires reading and writing (in and out): 6.2 MB * 2 = 12.4 MB per copy.
+    - Total data moved across boundaries: 12.4 MB * 2 (input to C++, output to Java) = 24.8 MB.
+    - Cache misses and JNI pinning push this memory movement to **~12-13ms**.
 status: published
 provenance: imported
 requires_explanation: false

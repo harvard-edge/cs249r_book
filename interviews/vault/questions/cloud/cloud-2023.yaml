@@ -8,25 +8,26 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Debugging TensorRT Precision Fallbacks and Fusion Breaks
-scenario: You are deploying a custom 7B parameter Transformer model on NVIDIA A10G GPUs (24GB VRAM, 600
+scenario: >-
+  You are deploying a custom 7B parameter Transformer model on NVIDIA A10G GPUs (24GB VRAM, 600
   GB/s bandwidth) using TensorRT. You compile the engine with the FP16 flag enabled. However, load testing
   reveals the latency is 2x higher than expected. Profiling with Nsight Systems shows that memory bandwidth
   utilization is surprisingly low, and the trace reveals frequent memory formatting nodes (casting FP16
   to FP32 and back) inserted between otherwise fused Transformer blocks.
-question: "Why is the FP16 TensorRT engine 2x slower than expected, and how would you eliminate the formatting nodes?"
+question: >-
+  Why is the FP16 TensorRT engine 2x slower than expected, and how would you eliminate the formatting nodes?
 details:
-  realistic_solution: Analyze the TensorRT engine build logs (verbose mode) to pinpoint the exact operations
-    falling back to FP32. Replace unsupported operations (like custom activations) with standard supported
-    equivalents, or implement a custom TensorRT plugin in CUDA to maintain continuous FP16 execution and
-    allow vertical kernel fusion.
-  common_mistake: Assuming the FP16 build flag guarantees end-to-end half-precision execution, failing
-    to realize that unsupported custom layers or dynamic tensor shapes force TensorRT to fall back to
-    FP32 execution, which silently breaks kernel fusion.
-  napkin_math: 'For a [Batch=8, Seq=1024, Hidden=4096] tensor: An FP16 activation is 8*1024*4096*2 bytes
-    ≈ 67MB. A single fallback forces a VRAM roundtrip: writing 67MB (FP16), reading 134MB (FP32), writing
-    134MB (FP32), and reading 67MB (FP16). Total wasted traffic = 402MB per fallback. On an A10G (600
-    GB/s), this adds ~0.67ms of pure memory latency per fallback, easily doubling inference time for a
-    32-layer model.'
+  realistic_solution: 'Analyze the TensorRT engine build logs (verbose mode) to pinpoint the exact operations falling back to FP32. Replace unsupported operations (like custom activations) with standard supported equivalents, or implement a custom TensorRT plugin in CUDA to maintain continuous FP16 execution and allow vertical kernel fusion.'
+  common_mistake: |
+    **The Pitfall:** Assuming the FP16 build flag guarantees end-to-end half-precision execution.
+    **The Rationale:** Candidates fail to realize that unsupported custom layers force TensorRT to fall back to FP32 execution, which silently breaks kernel fusion and incurs massive memory I/O penalties.
+    **The Consequence:** Deploying an "optimized" engine that actually runs slower than standard PyTorch execution.
+  napkin_math: |
+    1. **Tensor shape:** [Batch=8, Seq=1024, Hidden=4096].
+    2. **Activation size:** 8 × 1024 × 4096 × 2 bytes (FP16) ≈ 67 MB.
+    3. **Fallback VRAM roundtrip:** Write 67MB (FP16), read 134MB (FP32), write 134MB (FP32), read 67MB (FP16).
+    4. **Wasted traffic:** Total = 402 MB per fallback.
+    5. **Latency penalty:** On an A10G (600 GB/s), this adds **~0.67 ms of pure memory latency** per fallback.
 status: published
 provenance: imported
 requires_explanation: false

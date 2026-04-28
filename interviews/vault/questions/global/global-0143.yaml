@@ -8,27 +8,20 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: Chunked Prefill Latency Spikes
-scenario: Serving Mixtral 8x7B on 2xH100s, your decode TPOT is a stable 30ms. To prevent long prompts
-  (up to 16k tokens) from blocking decodes, you enable chunked prefill with a chunk size of 4096 tokens.
-  P99 TTFT improves, but active decode requests suddenly experience severe jitter, with TPOT repeatedly
-  spiking to 116ms whenever a chunked prefill is processed alongside them.
-question: "Why do 4096-token prefill chunks make active Mixtral decode TPOT spike from 30ms to 116ms?"
+scenario: Serving Mixtral 8x7B on 2xH100s, your decode TPOT is a stable 30ms. To prevent long prompts (up to 16k tokens) from blocking decodes, you enable chunked prefill with a chunk size of 4096 tokens. P99 TTFT improves, but active decode requests suddenly experience severe jitter, with TPOT repeatedly spiking to 116ms whenever a chunked prefill is processed alongside them.
+question: Why do 4096-token prefill chunks make active Mixtral decode TPOT spike from 30ms to 116ms?
 details:
-  realistic_solution: The latency spikes are caused by co-scheduling a heavily compute-bound task (the
-    4096-token prefill chunk) with memory-bound tasks (the decode steps). While chunked prefill prevents
-    a massive 16k token prefill from stalling the system for seconds, a 4096-token chunk still represents
-    a massive dense matrix multiplication. The GPU's Streaming Multiprocessors (SMs) become completely
-    saturated executing the prefill GEMMs. Because the decode tokens are batched together with this prefill
-    chunk, they must wait for the entire prefill chunk's forward pass to complete before the next iteration
-    can begin. To fix this, the chunk size must be tuned down (e.g., to 512 or 1024 tokens) to balance
-    the compute saturation with the strict TPOT latency SLA.
-  common_mistake: Thinking the chunk size is too small and causing attention overhead, or that the KV
-    cache is fragmenting.
-  napkin_math: Mixtral 8x7B active parameters per token = ~14B. FLOPs for a 4096 token prefill chunk =
-    2 * 14B * 4096 = ~114.688 TFLOPs. On H100 (assuming ~989 TFLOPS achievable BF16 compute), this prefill
-    chunk takes exactly 114.688 / 989 = 0.116s = 116ms. Because the decode step (which only takes 30ms
-    of memory-bound work) is fused in the same execution engine step as the prefill chunk, the decode
-    tokens are delayed by the 116ms prefill execution, resulting in the observed 116ms TPOT spikes.
+  realistic_solution: The latency spikes are caused by co-scheduling a heavily compute-bound task (the 4096-token prefill chunk) with memory-bound tasks (the decode steps). While chunked prefill prevents a massive 16k token prefill from stalling the system for seconds, a 4096-token chunk still represents a massive dense matrix multiplication. The GPU's Streaming Multiprocessors (SMs) become completely saturated executing the prefill GEMMs. Because the decode tokens are batched together with this prefill chunk, they must wait for the entire prefill chunk's forward pass to complete before the next iteration can begin. To fix this, the chunk size must be tuned down (e.g., to 512 or 1024 tokens) to balance the compute saturation with the strict TPOT latency SLA.
+  common_mistake: |
+    **The Pitfall:** Assuming the KV cache is fragmenting or the chunk size is too small.
+    **The Rationale:** Misinterpreting the latency spike as memory management overhead.
+    **The Consequence:** Tuning the system incorrectly instead of reducing the chunk size to balance SM compute saturation with the TPOT SLA.
+  napkin_math: |
+    - Mixtral 8x7B active parameters per token ≈ 14B.
+    - FLOPs for 4096-token prefill chunk: 2 × 14B × 4096 = ~114.7 TFLOPs.
+    - H100 BF16 compute: ~989 TFLOPS.
+    - Chunk compute time: 114.7 TFLOPs / 989 TFLOPS = **0.116s (116ms)**.
+    - **Conclusion:** The decode step must wait 116ms for the fused prefill GEMM to finish, causing the spike.
 status: published
 provenance: imported
 requires_explanation: false

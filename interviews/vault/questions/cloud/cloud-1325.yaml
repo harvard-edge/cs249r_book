@@ -8,24 +8,20 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Diagnosing torch.compile Graph Breaks
-scenario: Your team is optimizing a transformer model on an NVIDIA A100 GPU using PyTorch 2.0's `torch.compile`.
-  To implement an early exit condition during generation, a developer adds a data-dependent `if` statement
-  to check intermediate activation values. Immediately, inference throughput plummets from 3,500 tokens/sec
-  to 800 tokens/sec, and GPU utilization drops from 95% to 35%, while the main CPU thread hits 100% utilization.
-  Diagnose the root cause of this performance collapse.
+scenario: Your team is optimizing a transformer model on an NVIDIA GPU using PyTorch 2.0's `torch.compile`. To implement an early exit condition during generation, a developer adds a data-dependent `if` statement to check intermediate activation values. Immediately, inference throughput plummets from 3,500 tokens/sec to 800 tokens/sec, and GPU utilization drops from 95% to 35%, while the main CPU thread hits 100% utilization.
 question: "Why did adding a data-dependent if statement to the torch.compile Transformer collapse throughput from 3,500 to 800 tokens/sec, and how should you fix it?"
 details:
-  realistic_solution: Use `TORCH_LOGS="graph_breaks"` to identify the exact line causing the fallback.
-    Refactor the data-dependent `if` statement into a tensor operation using `torch.where` or `torch.cond`
-    to ensure the entire forward pass remains a single compiled, fused graph.
-  common_mistake: Candidates often assume the early exit logic itself is computationally expensive or
-    causes uncoalesced memory access, missing that the data-dependent Python control flow forced a graph
-    break, causing a fallback to eager execution and exposing severe CPU dispatch overhead.
-  napkin_math: In eager mode, 100 small operations incur 100 * 5µs (CUDA launch overhead) = 500µs. A fully
-    compiled fused kernel incurs only 1 * 5µs = 5µs overhead. If the actual tensor math takes 100µs, the
-    compiled step takes 105µs. A graph break forces the remaining ops to run eagerly, reintroducing the
-    500µs overhead, which increases step time from 105µs to >600µs, directly explaining the ~4.5x throughput
-    drop.
+  realistic_solution: Use `TORCH_LOGS="graph_breaks"` to identify the exact line causing the fallback. Refactor the data-dependent `if` statement into a tensor operation using `torch.where` or `torch.cond` to ensure the entire forward pass remains a single compiled, fused graph.
+  common_mistake: |
+    **The Pitfall:** Assuming the early exit logic itself is computationally expensive or causes uncoalesced memory access.
+    **The Rationale:** The data-dependent Python control flow forced a graph break, causing a fallback to eager execution and exposing severe CPU dispatch overhead.
+    **The Consequence:** Massive performance regression due to lost graph fusion and high CPU overhead.
+  napkin_math: |
+    - In eager mode, 100 small operations incur 100 * 5μs (CUDA launch overhead) = 500μs.
+    - A fully compiled fused kernel incurs only 1 * 5μs = 5μs overhead.
+    - If the actual tensor math takes 100μs, the compiled step takes 105μs.
+    - A graph break forces the remaining ops to run eagerly, reintroducing the 500μs overhead.
+    - Step time increases from 105μs to >600μs, directly explaining the **~4.5x throughput drop**.
 status: published
 provenance: imported
 requires_explanation: false

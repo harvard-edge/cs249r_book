@@ -8,35 +8,25 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: The Kernel Launch Storm
-scenario: You are tasked with optimizing a CNN-based object detection model on a Jetson AGX Orin. The
-  model is fully quantized to INT8. Your profiler reports that while the GPU is constantly active, end-to-end
-  latency is poor, and overall TOPS utilization is less than 10% of the Orin's 275 TOPS peak. A deeper
-  look reveals that the execution graph consists of hundreds of sequential, very short-duration kernel
-  calls (e.g., Conv, Add, ReLU), each taking 20-50µs. What is the most effective first step to solve this
-  performance bottleneck?
-question: "What is the most effective first step to solve this performance bottleneck?"
+scenario: You are tasked with optimizing a CNN-based object detection model on a Jetson AGX Orin. The model is fully quantized to INT8. Your profiler reports that while the GPU is constantly active, end-to-end latency is poor, and overall TOPS utilization is less than 10% of the Orin's 275 TOPS peak. A deeper look reveals that the execution graph consists of hundreds of sequential, very short-duration kernel calls (e.g., Conv, Add, ReLU), each taking 20-50μs.
+question: What is the most effective first step to solve this performance bottleneck?
 details:
-  realistic_solution: The primary bottleneck is the combination of kernel launch overhead and memory bandwidth
-    limitations from repeatedly reading/writing intermediate tensors to/from LPDDR5 DRAM for each separate
-    operation. Even though each operation is fast, the cumulative overhead is massive. The most effective
-    solution is to apply operator fusion. By fusing sequential operations like 'Conv -> Add -> ReLU' into
-    a single, larger kernel, you launch one kernel instead of three, and the intermediate data stays hot
-    in the GPU's much faster on-chip SRAM/registers, drastically reducing DRAM traffic and launch overhead.
-  common_mistake: Engineers often see low TOPS utilization and immediately blame the model architecture
-    or batch size, thinking the GPU isn't being 'fed' enough math. They fail to account for the overhead
-    of launching a kernel and moving data from DRAM for each of those tiny operations, which can dominate
-    the actual compute time.
-  napkin_math: Let's analyze the overhead for one small intermediate tensor of 4MB (e.g., a 256x256x64
-    INT8 tensor).
+  realistic_solution: The primary bottleneck is the combination of kernel launch overhead and memory bandwidth limitations from repeatedly reading/writing intermediate tensors to/from LPDDR5 DRAM for each separate operation. By fusing sequential operations like 'Conv -> Add -> ReLU' into a single, larger kernel, you launch one kernel instead of three, and the intermediate data stays hot in the GPU's much faster on-chip SRAM/registers, drastically reducing DRAM traffic and launch overhead.
+  common_mistake: |
+    **The Pitfall:** Blaming the model architecture or batch size.
+    **The Rationale:** Engineers see low TOPS utilization and assume the GPU simply isn't being 'fed' enough parallel math.
+    **The Consequence:** Unnecessary architectural redesigns, while ignoring the massive kernel launch and DRAM overhead that dominates the actual compute time.
+  napkin_math: |
+    1. **Tensor Size:** A 256x256x64 INT8 tensor requires 4 MB.
+    2. **Hardware Limit:** Orin bandwidth is 204.8 GB/s.
+    3. **Transfer Latency:** Moving 4 MB takes 4 MB / 204.8 GB/s = ~20µs.
+    4. **Unfused Overhead:** Reading and writing this tensor multiple times for Conv, Add, and ReLU creates 60-100µs of pure memory I/O latency, dominating the tiny compute time.
+    5. **Fusion Benefit:** Operator fusion eliminates these intermediate DRAM trips, drastically reducing kernel launch overhead and bringing execution time back to the compute limit (**>5x speedup**).
   options:
-  - The model's arithmetic intensity is too low for the hardware; the batch size must be increased to
-    provide more parallel work.
-  - The model needs to be pruned more aggressively to reduce the total number of FLOPs, as the compute
-    is clearly the bottleneck.
-  - The system is bottlenecked by kernel launch overhead and DRAM traffic; apply operator fusion to combine
-    sequential operations into single kernels.
-  - The model is not properly quantized, and using FP16 would provide better hardware mapping on the Tensor
-    Cores.
+  - The model's arithmetic intensity is too low for the hardware; the batch size must be increased to provide more parallel work.
+  - The model needs to be pruned more aggressively to reduce the total number of FLOPs, as the compute is clearly the bottleneck.
+  - The system is bottlenecked by kernel launch overhead and DRAM traffic; apply operator fusion to combine sequential operations into single kernels.
+  - The model is not properly quantized, and using FP16 would provide better hardware mapping on the Tensor Cores.
   correct_index: 2
 status: published
 provenance: imported

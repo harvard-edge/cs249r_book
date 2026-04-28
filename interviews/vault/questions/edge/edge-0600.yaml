@@ -8,34 +8,22 @@ competency_area: precision
 bloom_level: evaluate
 phase: inference
 title: The Headlight Overflow Failure
-scenario: 'You are the ML Systems lead for a new autonomous driving platform. Your team has successfully
-  deployed a 3D object detection model on an NVIDIA Jetson AGX Orin, which has a hard real-time deadline
-  of 33ms per frame. To achieve this, the model was converted from FP32 to INT8 using Post-Training Static
-  Quantization (PTQ), with a calibration set of 10,000 representative daytime driving images. During daytime
-  validation, the system is flawless. However, during night-time testing, you encounter a critical, non-linear
-  failure: the perception system completely stops detecting any objects for several seconds whenever a
-  car with modern, bright LED headlights directly approaches the camera. Evaluate the situation. Why is
-  the system failing catastrophically, rather than just seeing a graceful drop in mean average precision
-  (mAP), and what specific, ordered steps would you take to create a robust fix?'
-question: "Why is the system failing catastrophically, rather than just seeing a graceful drop in mean average precision (mAP), and what specific, ordered steps would you take to create a robust fix?"
+scenario: You are the ML Systems lead for a new autonomous driving platform deploying a 3D object detection model on an NVIDIA Jetson AGX Orin with a hard real-time deadline of 33ms per frame. The model was converted from FP32 to INT8 using Post-Training Static Quantization (PTQ), calibrated on 10,000 representative daytime driving images. During daytime validation, the system is flawless. However, during night-time testing, the perception system completely stops detecting any objects for several seconds whenever a car with modern, bright LED headlights directly approaches the camera.
+question: Why is the system failing catastrophically instead of showing a graceful mAP drop, and what specific steps would you take to fix it?
 details:
-  realistic_solution: The root cause is **INT8 Activation Overflow**. Static quantization determines the
-    scaling factor from a small calibration dataset. Daytime images have a relatively limited and predictable
-    dynamic range. The intense, localized brightness from LED headlights against a dark background creates
-    activation values in the early convolutional layers that massively exceed the calibrated range. When
-    these values are quantized to INT8, they 'overflow' the `[-128, 127]` range and 'wrap around' (e.g.,
-    a large positive value becomes a large negative one). This instantly corrupts the feature maps, and
-    the corruption cascades through the network, leading to nonsensical outputs (i.e., zero detections).
-  common_mistake: This is a simple domain gap; the model just needs to be retrained on night-time images.
-    The training data didn't include headlights. This is a data science problem." While partially true,
-    this answer completely misses the systems-level mechanism of the failure. It diagnoses the 'what'
-    (data mismatch) but not the 'why' (catastrophic hardware-level overflow) and therefore leads to an
-    incomplete solution. A simple retrain and requantize might still fail if the calibration ranges aren't
-    handled carefully.
-  napkin_math: 'Orin delivers 275 INT8 TOPS but ~137 FP16 TFLOPS. If a 4 TFLOP model runs in FP16, compute
-    time is 4T / 137T = 29.2ms. Add memory fetch for 100M params (200MB): 200MB / 204.8GB/s = 0.97ms.
-    Total ~30ms (dangerously close to 33ms). Mixed precision converts 80% to INT8: (3.2T / 275T) + (0.8T
-    / 137T) = 11.6ms + 5.8ms = 17.4ms. Memory drops to 120MB (0.58ms fetch). Safe margin achieved!'
+  realistic_solution: The root cause is INT8 Activation Overflow. Static quantization determines the scaling factor from a small calibration dataset. Daytime images have a relatively limited and predictable dynamic range. The intense, localized brightness from LED headlights against a dark background creates activation values in the early convolutional layers that massively exceed the calibrated range. When these values are quantized to INT8, they 'overflow' the [-128, 127] range and 'wrap around', immediately corrupting feature maps and leading to nonsensical zero detections.
+  common_mistake: |
+    **The Pitfall:** Dismissing it as a simple domain gap or training data issue.
+    **The Rationale:** Candidates often state, "The training data didn't include headlights, just retrain it," diagnosing the 'what' (data mismatch) but completely missing the 'why' (catastrophic hardware-level overflow).
+    **The Consequence:** Applying a simple retrain and requantize strategy that still fails if the activation calibration ranges aren't explicitly robust to extreme outliers.
+  napkin_math: |
+    1. Orin delivers 275 INT8 TOPS but ~137 FP16 TFLOPS.
+    2. **FP16 Compute Time:** 4 TFLOP / 137 TFLOPS = 29.2ms.
+    3. **FP16 Memory Fetch:** 200MB / 204.8GB/s = 0.97ms.
+    4. Total FP16 = ~30ms (dangerously close to 33ms).
+    5. **Mixed Precision (80% INT8, 20% FP16 for sensitive layers):** (3.2T / 275T) + (0.8T / 137T) = 11.6ms + 5.8ms = 17.4ms.
+    6. **Memory Fetch (120MB):** 120MB / 204.8GB/s = 0.58ms.
+    **Result: Mixed precision safely achieves ~18ms, preventing overflow while maintaining real-time performance.**
 status: published
 provenance: imported
 requires_explanation: false

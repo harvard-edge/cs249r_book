@@ -8,25 +8,20 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Optimizing a Compiled Inference Graph for Throughput
-scenario: Your torch.compile'd model achieves 85% of peak TFLOPS during prefill but only 15% during decode.
-  Decode dominates total latency for long outputs. Profile shows hundreds of tiny elementwise kernels
-  during decode with high launch overhead. Design a compilation optimization strategy for decode.
-question: "How would you design a compilation optimization strategy for decode?"
+scenario: Your torch.compile'd model achieves 85% of peak TFLOPS during prefill but only 15% during decode. Decode dominates total latency for long outputs. Profile shows hundreds of tiny elementwise kernels during decode with high launch overhead.
+question: How would you design a compilation optimization strategy for decode?
 details:
-  realistic_solution: 'Decode optimization plan: (1) CUDA Graphs: capture the entire decode step as a
-    single graph. Eliminates per-kernel launch overhead (~10μs × 100s of kernels = 1-2ms saved per step).
-    This alone can give 10-20% speedup. (2) Aggressive operator fusion for decode path: fuse all elementwise
-    ops (LayerNorm → Linear → GELU → Linear → Residual) into mega-kernels. torch.compile with mode=''max-autotune''
-    enables this. (3) Custom CUDA kernel for decode attention: FlashDecoding parallelizes across the KV
-    cache sequence dimension, maximizing memory bandwidth utilization. (4) KV cache in contiguous memory
-    (PagedAttention compatible with CUDA Graphs): reduces scattered memory access. (5) INT8 KV cache:
-    halves memory traffic for attention. Combined: CUDA graphs (15%) + fusion (20%) + FlashDecoding (30%)
-    + INT8 KV (40% for attention) → decode throughput ~2-3×.'
-  common_mistake: Focusing on compute optimization when decode is memory-bound. The tiny kernels aren't
-    slow because of compute — they're slow because each one triggers an HBM round-trip and kernel launch
-    overhead.
-  napkin_math: '100 kernel launches × 10μs = 1ms overhead per step. CUDA graphs: 0. Fusion: 3 HBM round-trips
-    → 1 = 3× for fused ops. FlashDecoding: 2× for long sequences. Net decode speedup: 2-3×.'
+  realistic_solution: 'Decode optimization plan: (1) CUDA Graphs: capture the entire decode step as a single graph. Eliminates per-kernel launch overhead (~10\mu s \times 100s of kernels = 1-2ms saved per step). This alone can give 10-20% speedup. (2) Aggressive operator fusion for decode path: fuse all elementwise ops (LayerNorm → Linear → GELU → Linear → Residual) into mega-kernels. torch.compile with mode=''max-autotune'' enables this. (3) Custom CUDA kernel for decode attention: FlashDecoding parallelizes across the KV cache sequence dimension, maximizing memory bandwidth utilization. (4) KV cache in contiguous memory (PagedAttention compatible with CUDA Graphs): reduces scattered memory access. (5) INT8 KV cache: halves memory traffic for attention. Combined: CUDA graphs (15%) + fusion (20%) + FlashDecoding (30%) + INT8 KV (40% for attention) → decode throughput ~2-3\times.'
+  common_mistake: |
+    **The Pitfall:** Focusing on compute optimization when decode is memory-bound.
+    **The Rationale:** Candidates assume low TFLOPS means inefficient math kernels, failing to realize the issue is kernel launch overhead and HBM round-trips.
+    **The Consequence:** Writing faster math kernels that provide zero speedup because the operations are entirely bound by memory latency.
+  napkin_math: |
+    - 100 kernel launches * 10 us = 1ms overhead per step.
+    - CUDA graphs: 0ms overhead.
+    - Fusion: 3 HBM round-trips -> 1 = 3x for fused ops.
+    - FlashDecoding: 2x for long sequences.
+    - **Net decode speedup from composite optimizations: 2-3x.**
 status: published
 provenance: imported
 requires_explanation: false

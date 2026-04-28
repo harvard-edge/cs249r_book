@@ -8,33 +8,21 @@ competency_area: reliability
 bloom_level: create
 phase: training
 title: The Fault-Tolerant Training Framework
-scenario: You're training a 175B model on 2,048 H100 GPUs for 90 days. At this scale, the mean time between
-  failures (MTBF) for any single GPU is ~1,000 hours, but with 2,048 GPUs, the cluster MTBF is under 30
-  minutes. Design a fault-tolerant training framework that achieves >95% effective utilization despite
-  continuous hardware failures.
-question: "What fault-tolerant training framework would achieve >95% effective utilization with 2,048 GPUs and a cluster MTBF under 30 minutes?"
+scenario: You're training a 175B model on 2,048 H100 GPUs for 90 days. At this scale, the mean time between failures (MTBF) for any single GPU is ~1,000 hours, but with 2,048 GPUs, the cluster MTBF is under 30 minutes.
+question: What fault-tolerant training framework would achieve >95% effective utilization with 2,048 GPUs and a cluster MTBF under 30 minutes?
 details:
-  realistic_solution: 'A fault-tolerant framework at this scale needs five mechanisms: (1) **In-memory
-    redundant checkpointing** — replicate optimizer state across nodes so a failure doesn''t require disk
-    I/O. Each node stores its shard + one neighbor''s shard in CPU RAM. Recovery: <30 seconds. (2) **Elastic
-    training** — when a node fails, the surviving nodes redistribute work without stopping. Requires a
-    topology-aware parallelism planner that can re-shard TP/PP/DP groups on the fly. (3) **Hot spare pool**
-    — maintain 3–5% spare GPUs pre-loaded with the model. When a failure occurs, the spare swaps in while
-    the failed node is replaced. (4) **Hierarchical health monitoring** — heartbeat every 5 seconds, with
-    local (intra-node NVLink) and global (inter-node InfiniBand) failure domains. Detect failures in <10
-    seconds. (5) **Asynchronous checkpointing** — overlap checkpoint writes with training computation.
-    Write to local NVMe first (fast), then async replicate to distributed storage.'
-  common_mistake: '"Checkpoint frequently and restart from the last checkpoint." At 30-minute MTBF, traditional
-    checkpoint-restart spends more time recovering than training. Each restart requires: detect failure,
-    drain pipeline, load checkpoint, re-warm data loaders, re-establish NCCL communicators — easily 10–20
-    minutes per event.'
-  napkin_math: '2,048 GPUs, MTBF per GPU = 1,000 hrs. Cluster MTBF = 1,000 / 2,048 ≈ 0.49 hrs ≈ **29 minutes**.
-    Failures per 90-day run: 90 × 24 / 0.49 ≈ 4,408 failures. **Naive checkpoint-restart:** 15 min recovery
-    × 4,408 = 1,102 hours lost. Training time: 90 × 24 = 2,160 hrs. Effective utilization: (2,160 − 1,102)
-    / 2,160 = **49%**. **With elastic training + hot spares:** 30 sec recovery × 4,408 = 37 hours lost.
-    Spare pool: 100 GPUs × 90 days = overhead. Effective utilization: (2,160 − 37) / 2,160 = **98.3%**.
-    Cost of spare pool: 100 GPUs × 2,160 hrs × \$3.50 = \$756k. Cost of 49% utilization loss: 1,102 hrs
-    × 2,048 GPUs × \$3.50 = \$7.9M. **Spare pool ROI: 10.4×.**'
+  realistic_solution: 'A fault-tolerant framework at this scale needs five mechanisms: (1) **In-memory redundant checkpointing** — replicate optimizer state across nodes so a failure doesn''t require disk I/O. Each node stores its shard + one neighbor''s shard in CPU RAM. Recovery: <30 seconds. (2) **Elastic training** — when a node fails, the surviving nodes redistribute work without stopping. Requires a topology-aware parallelism planner that can re-shard TP/PP/DP groups on the fly. (3) **Hot spare pool** — maintain 3–5% spare GPUs pre-loaded with the model. When a failure occurs, the spare swaps in while the failed node is replaced. (4) **Hierarchical health monitoring** — heartbeat every 5 seconds, with local (intra-node NVLink) and global (inter-node InfiniBand) failure domains. Detect failures in <10 seconds. (5) **Asynchronous checkpointing** — overlap checkpoint writes with training computation. Write to local NVMe first (fast), then async replicate to distributed storage.'
+  common_mistake: |
+    **The Pitfall:** Relying on traditional infrequent checkpoint-restart.
+    **The Rationale:** Engineers use the same fault tolerance strategy that worked for 8-GPU jobs, failing to realize the math breaks at scale.
+    **The Consequence:** The cluster spends more time recovering from checkpoints than actually training the model, plunging utilization below 50%.
+  napkin_math: |
+    *   **Cluster MTBF:** 1,000 hours / 2,048 GPUs ≈ 0.49 hours ≈ 29 minutes.
+    *   **Failures in 90 Days:** 2,160 hours / 0.49 ≈ 4,408 failures.
+    *   **Naive Restart Cost:** 15 mins recovery × 4,408 = 1,102 hours lost.
+    *   **Naive Utilization:** (2,160 - 1,102) / 2,160 = 49%.
+    *   **Hot Spare Restart Cost:** 30 sec recovery × 4,408 = 37 hours lost.
+    *   **Hot Spare Utilization:** (2,160 - 37) / 2,160 = **98.3% effective utilization.**
 status: published
 provenance: imported
 requires_explanation: true

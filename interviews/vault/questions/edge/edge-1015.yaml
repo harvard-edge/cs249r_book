@@ -7,32 +7,20 @@ topic: cnn-efficient-design
 competency_area: architecture
 bloom_level: apply
 phase: both
-title: 'Realization: deploy EfficientNet-Lite2 on Jetson Orin for multi-stream video
-  inference'
-scenario: A smart city deployment requires processing 8 simultaneous 1080p camera
-  streams at 15 FPS each on a single Jetson Orin (275 TOPS, 60W). Each stream runs
-  EfficientNet-Lite2 (6.9M params, 0.87 GFLOPs, 260×260 input) for traffic classification.
-  Realize the multi-stream pipeline with GPU preprocessing and batched inference.
-question: How would you build the GPU preprocessing and batched TensorRT pipeline
-  for 8 1080p streams at 15 FPS on one Jetson Orin?
+title: 'Realization: deploy EfficientNet-Lite2 on Jetson Orin for multi-stream video inference'
+scenario: A smart city deployment requires processing 8 simultaneous 1080p camera streams at 15 FPS each on a single Jetson Orin (275 TOPS, 60W). Each stream runs EfficientNet-Lite2 (6.9M params, 0.87 GFLOPs, 260x260 input) for traffic classification.
+question: How would you build the GPU preprocessing and batched TensorRT pipeline for 8 1080p streams at 15 FPS on one Jetson Orin?
 details:
-  realistic_solution: 'Single TRT engine with dynamic batch shapes supporting batch=1
-    to batch=16. Pipeline: (1) 8 GStreamer streams → nvv4l2decoder (hardware H.264
-    decoder) → NvBufSurface (GPU memory) → nvinfer batch accumulator; (2) at each
-    66ms frame interval, collect all 8 frames → single TRT inference call at batch=8;
-    (3) post-process results in CPU. Hardware decoders: Jetson Orin has 1× NVDEC supporting
-    4K30. TRT batch=8 EfficientNet-Lite2: 8×0.87G = 6.96 GFLOPs. At Jetson Orin 60%
-    GPU utilization: 275×0.6 = 165 TOPS → 6.96G/165T = 0.042ms. Total latency: decode
-    + batching + inference < 10ms per frame.'
-  common_mistake: Running 8 separate TensorRT engines in 8 threads, causing GPU context
-    switching and memory fragmentation; instead of batching all 8 streams into a single
-    engine call.
-  napkin_math: '8 streams × 15 FPS = 120 inferences/sec. Throughput needed: 120 ×
-    0.87G = 104.4 GOPS. Jetson Orin 275 TOPS INT8 at 40% efficiency (depthwise-heavy
-    model): 110 TOPS. 104.4G / 110T = 0.95ms/batch. Frame interval: 1/15 = 66ms. GPU
-    duty cycle: 0.95/66 = 1.4% — virtually idle! Power: 60W × 1.4% GPU fraction ≈
-    2W GPU power + 5W SoC base = 7W total. Well under 60W thermal envelope. Can handle
-    4 times more streams (32 cameras) at 15 FPS within the 60W budget.'
+  realistic_solution: 'Use a single TRT engine with dynamic batch shapes (batch=1 to 16). Pipeline: (1) 8 GStreamer streams -> nvv4l2decoder -> NvBufSurface -> nvinfer batch accumulator; (2) at each 66ms frame interval, collect all 8 frames -> single TRT inference call at batch=8; (3) post-process results in CPU.'
+  common_mistake: |
+    **The Pitfall:** Running 8 separate TensorRT engines in 8 threads.
+    **The Rationale:** Engineers often default to a multi-threaded 'one engine per stream' architecture typical of CPU applications.
+    **The Consequence:** Causes severe GPU context switching and memory fragmentation, breaking the latency budget.
+  napkin_math: |
+    - **Throughput Needed:** 8 streams × 15 FPS = 120 inferences/sec. 120 × 0.87G = 104.4 GOPS.
+    - **Hardware Efficiency:** Jetson Orin 275 TOPS INT8 at 40% efficiency (depthwise-heavy model) ≈ 110 TOPS.
+    - **Latency:** 104.4G / 110T = ~0.95ms/batch. Frame interval is 1/15 = 66ms.
+    - **Final Result:** **GPU duty cycle is 0.95/66 = 1.4% (virtually idle). GPU power is ~2W + 5W SoC base = 7W total, safely within the 60W envelope.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,29 +8,23 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: The Gradient Synchronization Overlap
-scenario: Your profiler shows that for a 7B model on 64 A100 GPUs with DDP, the backward pass takes 800
-  ms and the AllReduce takes 600 ms, giving a step time of 1400 ms. Your colleague claims 'we should be
-  able to overlap them and get close to 800 ms.' Under what conditions is this true, and when does the
-  overlap break down?
-question: "Under what conditions is this true, and when does the overlap break down?"
+scenario: 'Your profiler shows that for a 7B model on 64 A100 GPUs with DDP, the backward pass takes 800 ms and the AllReduce takes 600 ms, giving a step time of 1400 ms. A colleague claims you should be able to fully overlap them and get close to an 800 ms step time.'
+question: 'Under what conditions is this true, and when does the overlap break down?'
 details:
-  realistic_solution: 'PyTorch DDP partitions gradients into buckets (default 25 MB) and fires AllReduce
-    for each bucket as soon as all gradients in that bucket are computed. Overlap works when: (1) the
-    backward pass produces gradients steadily across time (not all at the end), and (2) the network can
-    drain each bucket''s AllReduce before the next bucket arrives. Overlap breaks down when: (a) the model
-    has a few very large layers that produce most gradients at the end of backward (e.g., large embedding
-    layers), (b) the network is too slow to drain buckets before they accumulate, or (c) the last bucket''s
-    AllReduce cannot overlap because there''s no more computation to hide behind.'
-  common_mistake: '"AllReduce always overlaps perfectly with backward — just enable the flag in PyTorch
-    DDP." Candidates assume overlap is free and complete, missing the fundamental constraint: you can
-    only AllReduce a gradient bucket *after* its backward computation finishes.'
-  napkin_math: '7B params × 2 bytes = 14 GB of gradients. At 25 MB/bucket: 560 buckets. 64 GPUs on 400
-    Gbps IB: ring AllReduce per bucket = $2 \times 25\text{MB} \times 63/64 / 50\text{GB/s} \approx 0.98\text{
-    ms}$ per bucket. Total sequential AllReduce: 560 × 0.98 ms = 549 ms ≈ 600 ms (matches). Backward produces
-    buckets over 800 ms → ~0.7 buckets/ms. Network drains at ~1/0.98 ≈ 1.02 buckets/ms. Since drain rate
-    > production rate, **overlap is nearly perfect** — except the last ~50 buckets (the "tail") have no
-    computation to hide behind: tail = 50 × 0.98 = **49 ms exposed**. Achievable step time: ~800 + 49
-    = **849 ms**, not 800 ms.'
+  realistic_solution: 'PyTorch DDP partitions gradients into buckets (default 25 MB) and fires AllReduce for each bucket as soon as all gradients in that bucket are computed. Overlap works when: (1) the backward pass produces gradients steadily across time (not all at the end), and (2) the network can drain each bucket''s AllReduce before the next bucket arrives. Overlap breaks down when: (a) the model has a few very large layers that produce most gradients at the end of backward (e.g., large embedding layers), (b) the network is too slow to drain buckets before they accumulate, or (c) the last bucket''s AllReduce cannot overlap because there''s no more computation to hide behind.'
+  common_mistake: |
+    **The Pitfall:** Assuming AllReduce always perfectly overlaps with the backward pass.
+    **The Rationale:** Candidates see that PyTorch DDP supports overlapping and assume it is a free, completely hidden operation.
+    **The Consequence:** They miss the fundamental constraint that a gradient bucket can only be reduced *after* its corresponding backward computation finishes, leading to unrealistic performance expectations.
+  napkin_math: |
+    * **Gradient volume:** 7B params * 2 bytes = 14 GB. At 25 MB/bucket = 560 buckets.
+    * **AllReduce per bucket:** ~0.98 ms.
+    * **Total sequential AllReduce:** 560 * 0.98 ms = 549 ms (≈ 600 ms).
+    * **Backward pass rate:** 560 buckets / 800 ms = ~0.7 buckets/ms produced.
+    * **Network drain rate:** ~1.02 buckets/ms drained.
+    * **The Tail Problem:** The network is fast enough to overlap, but the final ~50 buckets have no remaining computation to hide behind.
+    * **Exposed time:** 50 buckets * 0.98 ms = 49 ms.
+    * **Realistic step time:** 800 ms + 49 ms = **849 ms**.
 status: published
 provenance: imported
 requires_explanation: false

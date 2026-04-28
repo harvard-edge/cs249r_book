@@ -8,17 +8,24 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The Sluggish Voice Assistant
-scenario: You are an ML systems engineer on a team building an in-car voice assistant powered by an on-device LLM. The system runs on a modern automotive SoC with a 45 TOPS NPU. Users report the assistant feels 'sluggish'—there is a long, noticeable pause before the first word of its response appears (Time to First Token, or TTFT), but subsequent words generate quickly (fast Time Per Output Token, or TPOT). The voice assistant shares the NPU with a continuous background task (e.g., a 150ms music identifier that runs periodically).
-question: "Why does the in-car voice assistant have slow TTFT even though subsequent tokens generate quickly?"
+scenario: 'You are an ML systems engineer on a team building an in-car voice assistant powered by an on-device LLM. Users report the assistant feels ''sluggish''—there is a long, noticeable pause before the first word of its response appears (Time to First Token, or TTFT), but subsequent words generate quickly (fast Time Per Output Token, or TPOT). The voice assistant shares the NPU with a continuous background task.'
+question: 'Why does the in-car voice assistant have slow TTFT even though subsequent tokens generate quickly?'
 details:
-  realistic_solution: The root cause is head-of-line blocking in the simple FIFO queue. A low-priority, long-running task (the 150ms music ID) blocks the high-priority, latency-sensitive task (the 80ms voice prefill). The user's request is forced to wait for the entire background task to finish before it can even begin.
-  common_mistake: Engineers often focus only on the compute cost of the task itself (the prefill), assuming it's the bottleneck because it's computationally heavy. They forget that in a real system with multiple concurrent requests, the scheduling and queueing discipline (how tasks wait for the shared processor) often dominates the end-user-perceived latency. They misattribute the symptom (latency) to the task instead of the system's management of tasks.
-  napkin_math: 'The voice prefill alone takes 80ms. However, if it arrives right after the 150ms music ID task starts, it must wait in the FIFO queue. TTFT = 150ms (wait) + 80ms (prefill) = 230ms. This 230ms delay is highly noticeable to a user waiting for a voice response, whereas an 80ms TTFT would feel instant. The fast TPOT (e.g., 20ms/token) only happens after this initial 230ms bottleneck clears.'
+  realistic_solution: 'The root cause is head-of-line blocking in the simple FIFO queue. A low-priority, long-running background task blocks the high-priority, latency-sensitive voice prefill. The user''s request is forced to wait for the entire background task to finish before it can even begin.'
+  common_mistake: |
+    **The Pitfall:** Misattributing TTFT latency directly to the model's compute weight rather than system scheduling.
+    **The Rationale:** Engineers assume that if a response is slow, the model must be too large, ignoring the impacts of the task orchestrator.
+    **The Consequence:** Wasting time pruning the LLM when the actual fix is implementing preemptive priority scheduling for the NPU.
+  napkin_math: |
+    1. **Pre-fill Cost:** The voice prefill alone takes 80ms.
+    2. **Background Task:** The music ID task takes 150ms and cannot be preempted.
+    3. **Worst-Case Wait:** If the voice query arrives instantly after music ID starts, it waits in FIFO. TTFT = 150ms wait + 80ms prefill = **230ms**.
+    4. **Impact:** A 230ms delay is noticeable jank, whereas an isolated 80ms TTFT would feel instant.
   options:
-  - The prompt prefill computation is too large, exceeding the NPU's per-operation compute budget and causing a hardware fault.
-  - The system is running out of on-chip memory when both tasks are loaded, forcing slow data swaps from main DRAM during prefill.
-  - The FIFO queue is causing head-of-line blocking; the high-priority voice query is stuck waiting for the entire low-priority background task to complete.
-  - The fast TPOT generation for the previous task is saturating the memory bus, preventing the voice prompt from being loaded onto the NPU.
+  - 'The prompt prefill computation is too large, exceeding the NPU''s per-operation compute budget and causing a hardware fault.'
+  - 'The system is running out of on-chip memory when both tasks are loaded, forcing slow data swaps from main DRAM during prefill.'
+  - 'The FIFO queue is causing head-of-line blocking; the high-priority voice query is stuck waiting for the entire low-priority background task to complete.'
+  - 'The fast TPOT generation for the previous task is saturating the memory bus, preventing the voice prompt from being loaded onto the NPU.'
   correct_index: 2
 status: published
 provenance: imported

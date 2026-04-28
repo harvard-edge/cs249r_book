@@ -8,27 +8,20 @@ competency_area: data
 bloom_level: create
 phase: training
 title: The ISP/NPU Hardware Synchronization
-scenario: Your AR headset uses a dedicated Image Signal Processor (ISP) and an NPU.
-  You want zero-copy memory between them. You allocate a hardware buffer. The ISP
-  writes a frame to it, then the NPU reads it. It works, but occasionally the ML model
-  outputs complete garbage. The image visually looks fine if you save it to disk right
-  after the ISP finishes. What hardware synchronization mechanism did you forget?
-question: What sync primitive prevents an NPU from reading an ISP hardware buffer
-  before DMA writes are visible?
+scenario: Your AR headset uses a dedicated Image Signal Processor (ISP) and an NPU. You allocate a hardware buffer for zero-copy memory between them. The ISP writes a frame to it, then the NPU reads it. It works, but occasionally the ML model outputs complete garbage. The image visually looks fine if you save it to disk right after the ISP finishes.
+question: What hardware synchronization mechanism prevents an NPU from reading an ISP hardware buffer before DMA writes are visible?
 details:
-  realistic_solution: 'You forgot a hardware sync fence between the ISP''s DMA write
-    and the NPU''s DMA read. The ISP signals ''frame complete'' to the CPU before
-    its final DMA flush finishes (0.5ms remaining). The CPU immediately signals the
-    NPU, which reads partially-written memory — the bottom portion of the image contains
-    stale data from the previous frame, corrupting the ML input tensor. Fix: insert
-    an Android SyncFence or iOS Metal Event between ISP output and NPU input. The
-    fence guarantees all DMA writes are visible in DRAM before the NPU begins reading.
-    Cost: <10us latency, zero CPU involvement.'
-  common_mistake: '"You didn''t flush the CPU cache." The CPU isn''t touching this
-    memory—it''s a direct ISP to NPU transfer. The issue is between the hardware blocks.'
-  napkin_math: An ISP might process a frame in 10ms. The final DMA flush to RAM takes
-    0.5ms. If the CPU signals the NPU in 0.1ms, the NPU reads memory that is 400 microseconds
-    out of date, destroying the spatial consistency of the image tensor.
+  realistic_solution: 'You forgot a hardware sync fence between the ISP''s DMA write and the NPU''s DMA read. The ISP signals ''frame complete'' to the CPU before its final DMA flush finishes (0.5ms remaining). The CPU immediately signals the NPU, which reads partially-written memory — the bottom portion of the image contains stale data from the previous frame, corrupting the ML input tensor. Fix: insert an Android SyncFence or iOS Metal Event between ISP output and NPU input. The fence guarantees all DMA writes are visible in DRAM before the NPU begins reading. Cost: <10us latency, zero CPU involvement.'
+  common_mistake: |
+    **The Pitfall:** Assuming this is a CPU cache coherency issue (e.g., forgetting to flush the cache).
+    **The Rationale:** Developers incorrectly involve the CPU, but this is a direct hardware-to-hardware DMA transfer where the CPU never touches the memory.
+    **The Consequence:** Attempting to flush the CPU cache won't fix the issue and adds unnecessary overhead, leaving the race condition unresolved.
+  napkin_math: |
+    - **ISP processing time:** ~10ms per frame.
+    - **Final DMA flush to RAM:** Takes ~0.5ms.
+    - **CPU signaling delay:** The ISP signals the CPU early, which signals the NPU in ~0.1ms.
+    - **Race condition:** The NPU begins reading 0.4ms before the DMA flush is complete.
+    - **Conclusion:** The NPU reads memory that is **400 microseconds out of date**, destroying the spatial consistency of the image tensor.
 status: published
 provenance: imported
 requires_explanation: true

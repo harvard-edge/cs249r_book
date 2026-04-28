@@ -8,24 +8,21 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: The Network Congestion Collapse
-scenario: You have 256 H100 GPUs across 32 nodes, connected by a 2-tier fat-tree with 400 Gbps InfiniBand.
-  During a 70B model AllReduce, your monitoring shows aggregate switch throughput drops from 90% link
-  utilization to 35% as you scale from 64 to 256 GPUs. The switches aren't dropping packets. What's happening?
-question: "What's happening?"
+scenario: You have 256 GPUs across 32 nodes, connected by a 2-tier fat-tree with 400 Gbps InfiniBand. During a 70B model AllReduce, your monitoring shows aggregate switch throughput drops from 90% link utilization to 35% as you scale from 64 to 256 GPUs. The switches aren't dropping packets.
+question: What is happening to cause this throughput drop?
 details:
-  realistic_solution: 'You''re experiencing **congestion spreading** via InfiniBand''s credit-based flow
-    control. When multiple flows converge on a single switch port (incast), the receiver''s buffer fills.
-    The switch stops issuing credits to the senders, which back-pressures upstream switches, which stop
-    issuing credits to *their* senders. This "credit stall" propagates backwards through the fat-tree,
-    throttling even flows that don''t traverse the congested port (head-of-line blocking at the switch
-    level). At 256 GPUs, the AllReduce traffic pattern creates many-to-one incast at every tier of the
-    fat-tree simultaneously. Solutions: adaptive routing (NVIDIA SHARP, or switch-level adaptive routing),
-    AllReduce decomposition into smaller sub-groups, or using in-network reduction (SHARP) to reduce traffic
-    at the switch.'
-  common_mistake: '"If no packets are dropped, the network is healthy — the problem must be on the GPU
-    side." Zero packet loss doesn''t mean zero congestion. Credit-based flow control (InfiniBand) prevents
-    drops by *throttling senders*, which is exactly the problem.'
-  napkin_math: '70B model, FP16 gradients = 140 GB. Ring AllReduce with 256 GPUs: each GPU sends and receives 2 × 140 GB × (255/256) ≈ 278.9 GB. Aggregate data transferred: 256 × 278.9 GB ≈ 71.4 TB. The total network link capacity at the spine is 256 × 400 Gbps = 102.4 Tbps = 12.8 TB/s. At 90% efficiency (e.g., at 64 GPUs), the communication is fast. But at 256 GPUs, credit stalls and incast drop network efficiency to 35%, making the AllReduce take roughly 71.4 TB / (12.8 TB/s × 0.35) ≈ 15.9 seconds instead of the ideal ~5.6s. The 4× GPU increase yields drastically diminishing returns.'
+  realistic_solution: 'You''re experiencing **congestion spreading** via InfiniBand''s credit-based flow control. When multiple flows converge on a single switch port (incast), the receiver''s buffer fills. The switch stops issuing credits to the senders, which back-pressures upstream switches, which stop issuing credits to *their* senders. This "credit stall" propagates backwards through the fat-tree, throttling even flows that don''t traverse the congested port (head-of-line blocking at the switch level). At 256 GPUs, the AllReduce traffic pattern creates many-to-one incast at every tier of the fat-tree simultaneously. Solutions: adaptive routing (NVIDIA SHARP, or switch-level adaptive routing), AllReduce decomposition into smaller sub-groups, or using in-network reduction (SHARP) to reduce traffic at the switch.'
+  common_mistake: |
+    **The Pitfall:** Assuming zero packet loss implies a healthy network.
+    **The Rationale:** Candidates conclude that if the network isn't dropping packets, the bottleneck must be on the GPU compute side.
+    **The Consequence:** Ignoring credit-based flow control (InfiniBand), which prevents drops by throttling senders, leading to severe under-utilization.
+  napkin_math: |
+    1. 70B model, FP16 gradients = 140 GB.
+    2. Ring AllReduce with 256 GPUs: each GPU sends and receives 2 * 140 GB * (255/256) ≈ 278.9 GB.
+    3. Aggregate data transferred: 256 * 278.9 GB ≈ 71.4 TB.
+    4. Total network link capacity at the spine is 256 * 400 Gbps = 102.4 Tbps = 12.8 TB/s.
+    5. At 90% efficiency (e.g., at 64 GPUs), communication is fast.
+    **Result:** At 256 GPUs, credit stalls drop network efficiency to 35%, making the AllReduce take roughly 71.4 TB / (12.8 TB/s * 0.35) ≈ 15.9 seconds instead of the ideal ~5.6s.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,26 +8,19 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: Hybrid Interconnect MoE Routing
-scenario: 'You are architecting the deployment for an 8x100B Mixture-of-Experts model on a cloud instance
-  with 8 GPUs. The GPUs are connected via a hybrid topology: pairs of GPUs have NVLink bridges (100 GB/s
-  bidirectional), but pairs connect to each other via a central PCIe Gen4 switch (32 GB/s). The MoE token
-  routing requires an All-to-All collective of 2 GB per GPU per layer. The training throughput is currently degraded
-  by 60% compared to dense models of similar FLOPs.'
-question: "How would you map the 2GB-per-GPU MoE All-to-All onto the NVLink-pair plus PCIe-switch topology to reduce the 60% throughput loss?"
+scenario: You are architecting the deployment for an 8x100B Mixture-of-Experts model on a cloud instance with 8 GPUs. The GPUs are connected via a hybrid topology: pairs of GPUs have NVLink bridges (100 GB/s bidirectional), but pairs connect to each other via a central PCIe Gen4 switch (32 GB/s). The MoE token routing requires an All-to-All collective of 2 GB per GPU per layer. The training throughput is currently degraded by 60% compared to dense models of similar FLOPs.
+question: How would you map the 2GB-per-GPU MoE All-to-All onto the NVLink-pair plus PCIe-switch topology to reduce the 60% throughput loss?
 details:
-  realistic_solution: 'The architectural requirement is to map the logical MoE token routing to the physical
-    asymmetric interconnect. A standard, flat All-to-All treats all links equally, causing severe congestion
-    on the slower PCIe switch while underutilizing the NVLink bridges. The solution is to architect a
-    Hierarchical All-to-All algorithm: Phase 1 involves a local exchange within the NVLink-connected pairs
-    to aggregate tokens destined for other pairs. Phase 2 performs a reduced exchange across the PCIe
-    switch. Phase 3 distributes the tokens locally again. This drastically minimizes the volume of data
-    crossing the oversubscribed PCIe links, optimizing for the 3.1x bandwidth asymmetry.'
-  common_mistake: Using a standard NCCL All-to-All collective, which assumes a uniform bandwidth topology
-    and treats all peer-to-peer links as equal.
-  napkin_math: 'Flat All-to-All on 8 GPUs: each GPU sends 7/8 of its data to peers. For 2 GB per GPU, each
-    GPU sends 1.75 GB. 6/8 of this (1.5 GB) goes over the PCIe switch. 1.5 GB / 32 GB/s = ~47ms per layer.
-    With hierarchical routing, messages are aggregated, and the total data traversing the slow PCIe bottleneck
-    is reduced, improving the time spent in communication by up to the asymmetry ratio (~3x).'
+  realistic_solution: 'The architectural requirement is to map the logical MoE token routing to the physical asymmetric interconnect. A standard, flat All-to-All treats all links equally, causing severe congestion on the slower PCIe switch while underutilizing the NVLink bridges. The solution is to architect a Hierarchical All-to-All algorithm: Phase 1 involves a local exchange within the NVLink-connected pairs to aggregate tokens destined for other pairs. Phase 2 performs a reduced exchange across the PCIe switch. Phase 3 distributes the tokens locally again. This drastically minimizes the volume of data crossing the oversubscribed PCIe links, optimizing for the 3.1x bandwidth asymmetry.'
+  common_mistake: |
+    **The Pitfall:** Using a standard, flat NCCL All-to-All collective for MoE routing.
+    **The Rationale:** Standard collectives assume a uniform bandwidth topology and treat all peer-to-peer links equally.
+    **The Consequence:** Severe congestion on the slower PCIe switch while massively underutilizing the high-speed NVLink bridges, causing a severe training bottleneck.
+  napkin_math: |
+    - Flat All-to-All on 8 GPUs: each GPU sends 7/8 of its 2 GB to peers = 1.75 GB.
+    - 6/8 of this (1.5 GB) goes over the slow PCIe switch.
+    - Time over PCIe: 1.5 GB / 32 GB/s = ~46.9 ms per layer.
+    - **A Hierarchical All-to-All aggregates tokens locally over NVLink first, reducing the data volume traversing the 32 GB/s PCIe bottleneck and cutting communication time by up to 3x.**
 status: published
 provenance: imported
 requires_explanation: true

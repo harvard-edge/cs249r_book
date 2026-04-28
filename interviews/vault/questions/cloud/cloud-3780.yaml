@@ -8,33 +8,19 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: 'FlashAttention on TPU: XLA Attention vs Pallas Kernels'
-scenario: Your team trains a 40B model on TPU v5e pods. The XLA compiler generates
-  attention kernels automatically, but they materialize the full attention matrix
-  in HBM (16 GB per chip). A colleague suggests writing custom FlashAttention-style
-  kernels using JAX Pallas. What are the architectural differences between GPU SRAM-based
-  FlashAttention and TPU's approach, and is the manual kernel worth the effort?
-question: What architectural differences matter for FlashAttention-style kernels on
-  TPU v5e versus GPUs, and is a manual JAX Pallas kernel worth it?
+scenario: "Your team trains a 40B model on TPU v5e pods. The XLA compiler generates attention kernels automatically, but they materialize the full attention matrix in HBM (16 GB per chip). A colleague suggests writing custom FlashAttention-style kernels using JAX Pallas."
+question: "What architectural differences matter for FlashAttention-style kernels on TPU v5e versus GPUs, and is a manual JAX Pallas kernel worth it?"
 details:
-  realistic_solution: 'Key architectural differences: (1) TPU v5e VMEM is 16 MB per
-    core — 62× larger than GPU''s 256 KB SRAM per SM. This allows much larger tiles,
-    reducing the number of tiling rounds. (2) TPU uses systolic arrays optimized for
-    matrix multiplies, not general CUDA cores. Tiling must align with the systolic
-    array''s preferred dimensions (typically 128×128). (3) XLA''s default attention
-    fuses softmax but may still materialize the N×N matrix in HBM for large N. JAX
-    Pallas allows writing TPU-native tiled attention that keeps all intermediates
-    in VMEM. (4) TPU''s MXU (Matrix Multiply Unit) achieves >90% utilization for well-shaped
-    tiles, vs ~70% for FlashAttention-2 on GPU. Is it worth it? For seq_len > 2048,
-    yes — Pallas FlashAttention avoids the O(N²) HBM traffic. For shorter sequences,
-    XLA''s auto-generated kernels are competitive because the attention matrix fits
-    in VMEM at small N. Google''s internal models use Pallas-based attention for all
-    long-context training.'
-  common_mistake: 'Assuming TPU''s FlashAttention implementation is identical to GPU''s.
-    TPU v5e has a different memory hierarchy: 16 MB of VMEM (vector memory) per core
-    vs 256 KB SRAM per GPU SM, and uses a systolic array rather than CUDA cores.'
-  napkin_math: 'TPU v5e: 16 MB VMEM. Attention tile (B_r=B_c=512, d=128, BF16): Q=128KB,
-    K=128KB, S=512KB, V=128KB = ~900KB. Fits easily in 16 MB. GPU (256 KB SRAM): B_r=B_c=128
-    → Q=32KB, K=32KB, S=32KB = ~160KB. TPU can use 4× larger tiles → 4× fewer rounds.'
+  realistic_solution: "Key architectural differences: (1) TPU v5e VMEM is 16 MB per core — 62x larger than GPU's 256 KB SRAM per SM. This allows much larger tiles, reducing the number of tiling rounds. (2) TPU uses systolic arrays optimized for matrix multiplies, not general CUDA cores. Tiling must align with the systolic array's preferred dimensions (typically 128x128). (3) XLA's default attention fuses softmax but may still materialize the NxN matrix in HBM for large N. JAX Pallas allows writing TPU-native tiled attention that keeps all intermediates in VMEM. (4) TPU's MXU (Matrix Multiply Unit) achieves >90% utilization for well-shaped tiles, vs ~70% for FlashAttention-2 on GPU. Is it worth it? For seq_len > 2048, yes — Pallas FlashAttention avoids the O(N²) HBM traffic. For shorter sequences, XLA's auto-generated kernels are competitive because the attention matrix fits in VMEM at small N. Google's internal models use Pallas-based attention for all long-context training."
+  common_mistake: |
+    **The Pitfall:** Assuming a TPU's FlashAttention implementation is identical to a GPU's.
+    **The Rationale:** Ignorance of the TPU's massive 16MB VMEM and systolic array layout versus the GPU's tiny 256KB SRAM and CUDA cores.
+    **The Consequence:** Sub-optimal tile sizing that fails to leverage the TPU's architecture, missing out on massive matrix multiply unit (MXU) utilization gains.
+  napkin_math: |
+    *   **TPU v5e Memory:** 16 MB VMEM per core (62x larger than a GPU's 256 KB SRAM).
+    *   **TPU Tile Capacity:** Tile sizes like B=512, d=128 need ~900KB, easily fitting in VMEM.
+    *   **GPU Tile Capacity:** Tile sizes are restricted to ~128x128 (needs ~160KB).
+    *   **Result:** **TPU can use 4x larger tiles, requiring fewer HBM read/write rounds. Pallas is worth it for sequences > 2048 to avoid O(N²) HBM traffic.**
 status: published
 provenance: imported
 requires_explanation: true

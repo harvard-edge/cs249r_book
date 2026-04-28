@@ -8,11 +8,8 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: 'On-Device LoRA Training: Gradient Checkpointing on Mobile'
-scenario: A mobile application wants to fine-tune a small 1B model on-device using
-  LoRA for user personalization. Training on a device with 8GB unified memory causes
-  OOM errors at batch size 1, sequence length 128. Diagnose and fix.
-question: Why does LoRA training for a 1B model OOM at batch 1 and sequence length
-  128 on an 8 GB phone, and how do you fix it?
+scenario: A mobile application fine-tunes a 1B model on-device using LoRA. Training on an 8GB device causes OOM errors at batch size 1, sequence length 128.
+question: Why does LoRA training for a 1B model OOM at batch 1 on an 8GB phone, and how do you fix it?
 details:
   realistic_solution: 'Memory breakdown for 1B model LoRA training (r=4, Q+V only):
     (1) Model weights FP16: 2GB. (2) LoRA adapter weights: ~0.78MB (negligible). (3)
@@ -25,16 +22,17 @@ details:
     for all base model parameters; (2) Use gradient checkpointing for LoRA forward
     (torch.utils.checkpoint); (3) Use torch.compile with dynamic=True to avoid recompilation;
     (4) Delete JIT compilation cache after first run.'
-  common_mistake: Immediately reducing sequence length or model size to fit in memory.
-    For on-device LoRA training, the dominant memory cost is often the ML runtime
-    loading overhead and activation tape, not the model weights. Gradient checkpointing
-    can reduce activation memory by 80% at the cost of an extra forward pass.
-  napkin_math: '1B model BF16: 2GB. LoRA adapter + optimizer: ~2MB total. Activations
-    without grad on base, with grad only on LoRA paths: 12 layers * 128 * 2048 * 2B
-    per LoRA intermediate = 6MB. JIT compilation overhead: PyTorch traces the model
-    creating ~2-3x model size cache = 4-6GB. Total peak: 2 + 6MB + 5GB JIT = ~7GB.
-    Causes OOM at 6GB usable. Fix: use torch.inference_mode() for base, only enable
-    grad for LoRA params. Peak drops to: 2 + 0.01 + 0.5 = 2.5GB — comfortably fits.'
+  common_mistake: |
+    **The Pitfall:** Immediately reducing model size or sequence length to save memory.
+    **The Rationale:** Assuming activation tensors or weights are the culprit, ignoring the massive memory overhead of ML runtime JIT compilation.
+    **The Consequence:** Degrading model quality unnecessarily while failing to address the actual framework-level memory leak.
+  napkin_math: |
+    - **Model Weights (BF16):** 2 GB.
+    - **LoRA Adapter + Optimizer:** ~2 MB.
+    - **Activations (LoRA paths only):** 12 layers * 128 * 2048 * 2 bytes = ~6 MB.
+    - **JIT Compilation Cache Overhead:** PyTorch tracing clones the model = 4-5 GB.
+    - **Total Peak Memory:** 2 GB + 6 MB + 5 GB JIT ≈ 7 GB (exceeds 6GB usable).
+    - **Result:** **JIT cache causes the OOM**; fix by disabling grad on the base model and purging the JIT cache.
 status: published
 provenance: imported
 requires_explanation: false

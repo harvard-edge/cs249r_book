@@ -8,31 +8,19 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Scheduler Interaction with NCCL Timeout
-scenario: Your 64-GPU training job fails with NCCL timeout errors (default 30 minutes).
-  The scheduler log shows all 64 GPUs were allocated, but 4 GPUs on one node had a
-  prior job's cleanup process still running. How does a stale process cause NCCL timeout,
-  and what scheduler improvement prevents this?
-question: How can stale CUDA processes on 4 allocated GPUs cause a 64-GPU NCCL timeout,
-  and what scheduler checks prevent it?
+scenario: Your 64-GPU training job fails with NCCL timeout errors (default 30 minutes). The scheduler log shows all 64 GPUs were allocated, but 4 GPUs on one node had a prior job's cleanup process still running.
+question: How can stale CUDA processes on 4 allocated GPUs cause a 64-GPU NCCL timeout, and what scheduler checks prevent it?
 details:
-  realistic_solution: 'The chain of events: (1) Previous job on the node was killed
-    but left zombie CUDA processes holding GPU memory. (2) Scheduler marked GPUs as
-    ''free'' based on job completion, not GPU state. (3) New job''s 4 ranks on the
-    affected node call torch.cuda.init() but fail (CUDA_ERROR_NOT_INITIALIZED or CUDA_ERROR_OUT_OF_MEMORY).
-    (4) These 4 ranks never call ncclCommInitRank. (5) The other 60 ranks block in
-    ncclCommInitRank waiting for all 64. (6) After 30 minutes: NCCL timeout. Prevention:
-    (a) Epilogue scripts: Slurm''s task/cgroup plugin with TaskEpilog that runs nvidia-smi
-    -r (GPU reset) or kills all processes with GPU contexts after each job. (b) Health
-    checks: before allocating a GPU, run a quick CUDA initialization test (allocate
-    and free 1 MB). If it fails, mark the GPU as ''draining'' and schedule repair.
-    (c) NCCL_ASYNC_ERROR_HANDLING=1: fail fast instead of waiting 30 minutes. Each
-    rank detects the timeout quickly and reports which ranks are missing.'
-  common_mistake: Assuming NCCL timeout means a network issue. In this case, the 4
-    GPUs have their CUDA contexts locked by stale processes, so the new training job's
-    4 ranks on that node cannot initialize CUDA, and the other 60 ranks block in ncclCommInitRank
-    waiting for all 64.
-  napkin_math: '30-minute NCCL timeout × 60 working GPUs = 30 GPU-hours wasted. With
-    epilogue cleanup: 0 waste. With health check: <1 min detection = 1 GPU-hour wasted.'
+  realistic_solution: 'The chain of events: (1) Previous job on the node was killed but left zombie CUDA processes holding GPU memory. (2) Scheduler marked GPUs as ''free'' based on job completion, not GPU state. (3) New job''s 4 ranks on the affected node call torch.cuda.init() but fail (CUDA_ERROR_NOT_INITIALIZED or CUDA_ERROR_OUT_OF_MEMORY). (4) These 4 ranks never call ncclCommInitRank. (5) The other 60 ranks block in ncclCommInitRank waiting for all 64. (6) After 30 minutes: NCCL timeout. Prevention: (a) Epilogue scripts: Slurm''s task/cgroup plugin with TaskEpilog that runs nvidia-smi -r (GPU reset) or kills all processes with GPU contexts after each job. (b) Health checks: before allocating a GPU, run a quick CUDA initialization test (allocate and free 1 MB). If it fails, mark the GPU as ''draining'' and schedule repair. (c) NCCL_ASYNC_ERROR_HANDLING=1: fail fast instead of waiting 30 minutes. Each rank detects the timeout quickly and reports which ranks are missing.'
+  common_mistake: |
+    **The Pitfall:** Assuming an NCCL timeout inherently means there is an InfiniBand or physical networking failure.
+    **The Rationale:** Because NCCL is a communication library, engineers jump straight to debugging network fabrics, forgetting that NCCL blocks completely if a subset of GPUs fail to initialize their local CUDA contexts.
+    **The Consequence:** Massive amounts of cluster time are wasted debugging networks when the issue is local zombie processes holding GPU memory.
+  napkin_math: |
+    - **Waste Calculation:** $30\text{-minute timeout} \times 60\text{ working GPUs} = 30\text{ GPU-hours}$ wasted per incident.
+    - **Epilogue Cleanup:** A `nvidia-smi -r` or task killer reduces waste to 0.
+    - **Health Check:** Pre-flight CUDA initialization test detects it in $<1\text{ min} = <1\text{ GPU-hour}$ wasted.
+    - **Conclusion:** **Health checks and Epilogue scripts prevent massive timeout waste.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,44 +8,26 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: The SRAM Budget Overflow
-scenario: You are a TinyML engineer tasked with shrinking a standard CNN layer for a person-detection
-  model to run on a Cortex-M7 based MCU with 2MB of SRAM. The layer in question takes a 48x48x64 feature
-  map as input and uses a 3x3 kernel to produce a 48x48x128 output. Your colleague suggests replacing
-  it with a depthwise separable convolution. Apply this change and diagnose if it will solve the memory
-  problem, assuming this layer's activations are the primary memory consumer.
-question: "Does replacing the layer with a depthwise separable convolution solve peak activation SRAM usage, and why?"
+scenario: You are shrinking a CNN layer for a person-detection model on a Cortex-M7 with 2MB of SRAM. The layer takes a 48x48x64 feature map and uses a 3x3 kernel to produce a 48x48x128 output. A colleague suggests replacing it with a depthwise separable convolution to solve an SRAM overflow.
+question: Does replacing the layer with a depthwise separable convolution solve peak activation SRAM usage?
 details:
-  realistic_solution: 'The described layer''s peak activation memory is ~432 KiB (input 144 KiB + output
-    288 KiB for INT8), which fits comfortably within the 2 MB SRAM of the Cortex-M7. There is no SRAM
-    overflow to solve for this specific layer. A depthwise separable convolution reduces parameters by
-    8.4× (73,728 → 8,768) and FLOPs by ~8×, but does NOT reduce peak activation memory — the input and
-    output tensor sizes remain identical. To actually reduce peak SRAM usage, you would need to: (1) reduce
-    spatial resolution (add stride-2 or pooling before this layer), (2) reduce channel count, or (3) use
-    in-place operations or operator fusion (e.g., TFLite Micro''s memory planner can reuse buffers across
-    non-overlapping lifetimes).'
-  common_mistake: Engineers often assume that the reduction in parameters translates directly to an identical
-    reduction in peak memory usage. They forget that the total memory footprint includes not just weights,
-    but also the input and output activation tensors, which can dominate SRAM on these devices. Another
-    common mistake is to only calculate the parameter reduction and not the FLOPs, which impacts latency.
-  napkin_math: 'Activation memory (the real constraint): Input: 48×48×64 × 1 byte (INT8) = 147,456 B =
-    144 KiB. Output: 48×48×128 × 1 = 294,912 B = 288 KiB. Peak SRAM for this layer (input + output live
-    simultaneously): 144 + 288 = 432 KiB. With depthwise separable: Step 1 (depthwise 3×3): input 48×48×64
-    = 147,456 KiB, output 48×48×64 = 147,456 KiB. Peak = 288 KiB. Step 2 (pointwise 1×1): input 48×48×64
-    = 147,456 KiB, output 48×48×128 = 294,912 KiB. Peak = 432 KiB. Peak activation memory is identical
-    at 432 KiB — both exceed the 2 MB budget? No, 432 KiB fits in 2 MB. The scenario''s premise is flawed:
-    this layer''s activations (432 KiB) fit easily in 2 MB SRAM. The real SRAM overflow would require
-    a much larger layer or a much smaller MCU. Parameter savings (affects Flash, not SRAM): Standard:
-    3×3×64×128 = 73,728. Depthwise separable: (3×3×64) + (1×1×64×128) = 576 + 8,192 = 8,768. Reduction:
-    8.4×.'
+  realistic_solution: 'The described layer''s peak activation memory is ~432 KiB (input 144 KiB + output 288 KiB for INT8), which fits comfortably within the 2 MB SRAM of the Cortex-M7. There is no SRAM overflow to solve for this specific layer. A depthwise separable convolution reduces parameters by 8.4× (73,728 → 8,768) and FLOPs by ~8×, but does NOT reduce peak activation memory — the input and output tensor sizes remain identical. To actually reduce peak SRAM usage, you would need to: (1) reduce spatial resolution (add stride-2 or pooling before this layer), (2) reduce channel count, or (3) use in-place operations or operator fusion (e.g., TFLite Micro''s memory planner can reuse buffers across non-overlapping lifetimes).'
+  common_mistake: |
+    **The Pitfall:** Assuming parameter reduction equals activation memory reduction.
+    **The Rationale:** Engineers correctly calculate an 8.4x parameter reduction but wrongly assume it shrinks the input/output tensors.
+    **The Consequence:** They perform complex NAS searches that reduce flash footprint but do absolutely nothing to reduce peak SRAM usage.
+  napkin_math: |
+    - **Input Size:** 48 * 48 * 64 * 1 B (INT8) = 144 KiB.
+    - **Output Size:** 48 * 48 * 128 * 1 B (INT8) = 288 KiB.
+    - **Peak Activation Memory:** 144 KiB + 288 KiB = 432 KiB.
+    - **SRAM Constraint:** 2 MB. 432 KiB easily fits.
+    - **Depthwise Parameter Reduction:** Standard 3x3 weights = 73,728. Depthwise = 8,768 (8.4x reduction).
+    - **Conclusion:** The premise is flawed. Peak activation memory is identical at **432 KiB**, which already comfortably fits in the 2 MB SRAM.
   options:
-  - The parameter count is reduced by ~8.4x, so both memory and latency will decrease by ~8.4x, solving
-    the problem.
-  - The layer is memory-bound; since parameters are stored in Flash, not SRAM, the change has no effect
-    on the memory issue.
-  - The change reduces parameters and FLOPs by ~8.4x, but peak activation memory is unchanged at ~432
-    KiB; nevertheless, this already fits within the 2 MB SRAM.
-  - The FLOPs are reduced from ~339 MFLOPS to ~40 MFLOPS, but this increases latency because more, smaller
-    operations are less efficient.
+  - The parameter count is reduced by ~8.4x, so both memory and latency will decrease by ~8.4x, solving the problem.
+  - The layer is memory-bound; since parameters are stored in Flash, not SRAM, the change has no effect on the memory issue.
+  - The change reduces parameters and FLOPs by ~8.4x, but peak activation memory is unchanged at ~432 KiB; nevertheless, this already fits within the 2 MB SRAM.
+  - The FLOPs are reduced from ~339 MFLOPS to ~40 MFLOPS, but this increases latency because more, smaller operations are less efficient.
   correct_index: 2
 status: published
 provenance: imported
@@ -60,10 +42,8 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_status_pro: ERROR
 validation_issues_pro:
-- The scenario's premise is flawed; the described layer's activations (peak usage ~1.7MB) fit within the
-  2MB SRAM, so there is no 'SRAM Budget Overflow' to solve.
-- The 'Napkin Math' section discusses FLOPs and latency, which is irrelevant to the question about memory
-  usage.
+- The scenario's premise is flawed; the described layer's activations (peak usage ~1.7MB) fit within the 2MB SRAM, so there is no 'SRAM Budget Overflow' to solve.
+- The 'Napkin Math' section discusses FLOPs and latency, which is irrelevant to the question about memory usage.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

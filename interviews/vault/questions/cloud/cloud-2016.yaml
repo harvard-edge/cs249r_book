@@ -8,27 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Transposed Tensor Bandwidth Collapse
-scenario: Your team deployed a custom CUDA kernel for a novel attention mechanism on an H100 GPU cluster.
-  When the FP16 input tensor of shape [Batch=32, Heads=16, Seq=4096, Dim=128] is passed directly from
-  a linear projection, the kernel achieves 85% memory bandwidth utilization. However, when the tensor
-  is first transposed to [Batch=32, Seq=4096, Heads=16, Dim=128] for a routing operation and then passed
-  to the exact same kernel, memory bandwidth utilization plummets to 12%, and overall latency spikes by
-  6x. Profiling indicates massive L2 cache thrashing. Diagnose the root cause of this performance collapse.
-question: "Why does transposing the [32,16,4096,128] tensor before the custom kernel destroy memory bandwidth, and how would you fix it?"
+scenario: Your team deployed a custom CUDA kernel for a novel attention mechanism on an H100 GPU cluster. When the FP16 input tensor of shape [Batch=32, Heads=16, Seq=4096, Dim=128] is passed directly, the kernel achieves 85% memory bandwidth utilization. When the tensor is first transposed to [Batch=32, Seq=4096, Heads=16, Dim=128] and passed to the exact same kernel, bandwidth utilization plummets to 12%, and overall latency spikes by 6x.
+question: Why does transposing the [32,16,4096,128] tensor before the custom kernel destroy memory bandwidth, and how would you fix it?
 details:
-  realistic_solution: Identify that .transpose() only modifies the tensor metadata (shape and strides),
-    creating a non-contiguous view. The linear memory layout remains [B, H, S, D]. Reading along the transposed
-    'Heads' dimension causes massive stride jumps, destroying spatial locality and resulting in completely
-    uncoalesced global memory reads. The solution is to call .contiguous() before the kernel to physically
-    repack the data in memory, trading a one-time memory copy cost for fully coalesced accesses during
-    the compute-intensive kernel.
-  common_mistake: Assuming .transpose() physically moves data in memory, or believing the hardware cache
-    hierarchy will automatically absorb non-sequential memory access patterns without penalty.
-  napkin_math: Original strides for [B, H, S, D] are (8388608, 524288, 128, 1). Transposed shape [B, S,
-    H, D] has strides (8388608, 128, 524288, 1). A warp (32 threads) reading along the 'Heads' dimension
-    (stride=524288 elements = 1MB for FP16) requests 32 distinct addresses separated by 1MB. Each request
-    pulls a 128-byte cache line to use only 2 bytes, resulting in 1.56% (2/128) transaction efficiency
-    and massive L2 thrashing.
+  realistic_solution: Identify that .transpose() only modifies the tensor metadata (shape and strides), creating a non-contiguous view. The linear memory layout remains [B, H, S, D]. Reading along the transposed 'Heads' dimension causes massive stride jumps, destroying spatial locality and resulting in completely uncoalesced global memory reads. The solution is to call .contiguous() before the kernel to physically repack the data in memory, trading a one-time memory copy cost for fully coalesced accesses during the compute-intensive kernel.
+  common_mistake: |
+    **The Pitfall:** Assuming `.transpose()` physically moves data in memory to match the new shape.
+    **The Rationale:** Candidates believe the hardware cache hierarchy will automatically absorb non-sequential memory access patterns, not realizing transpose only changes stride metadata.
+    **The Consequence:** Reading along the transposed dimension causes massive stride jumps, destroying spatial locality and resulting in uncoalesced global memory reads.
+  napkin_math: |
+    - Original strides for [B, H, S, D]: (8388608, 524288, 128, 1).
+    - Transposed shape [B, S, H, D] strides: (8388608, 128, 524288, 1).
+    - A warp (32 threads) reading along the 'Heads' dimension requests 32 distinct addresses separated by 524,288 elements (1 MB).
+    - Each request pulls a 128-byte cache line to use only 2 bytes (FP16).
+    - **Transaction efficiency is 2/128 = 1.56%, causing massive L2 thrashing. Calling `.contiguous()` repacks the data to restore fully coalesced accesses.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -41,7 +34,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 math_verified: true
-math_status: UNCHECKED
+math_status: CORRECT
 human_reviewed:
   status: not-reviewed
   by: null

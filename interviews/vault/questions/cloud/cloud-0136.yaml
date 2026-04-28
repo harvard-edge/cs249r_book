@@ -8,36 +8,25 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: 'The Chatbot Latency Spike: Model Serving Infrastructure'
-scenario: You are an ML Systems Engineer diagnosing a performance issue in a new AI chatbot. The service
-  uses a Llama 70B model served on H100 GPUs and has a strict P99 Time-To-First-Token (TTFT) SLA of 300ms.
-  Your team chose a static batching strategy, collecting requests for up to 50ms before dispatching a
-  batch to the GPU. During load testing with spiky user traffic, your dashboard shows that while average
-  TTFT is acceptable (~200ms), the P99 TTFT balloons to over 800ms. During these spikes, GPU utilization
-  is pegged at 100% and the incoming request queue grows rapidly. Based on this data, diagnose the most
-  likely cause of the SLA violation.
+scenario: You are an ML Systems Engineer diagnosing a performance issue in a new AI chatbot. The service uses a Llama 70B model served on H100 GPUs and has a strict P99 Time-To-First-Token (TTFT) SLA of 300ms. Your team chose a static batching strategy, collecting requests for up to 50ms before dispatching a batch to the GPU. During load testing with spiky user traffic, average TTFT is acceptable (~200ms), but P99 TTFT balloons to over 800ms. GPU utilization is pegged at 100% and the incoming request queue grows rapidly.
 question: "What is the most likely cause of the P99 TTFT ballooning over 800ms under spiky traffic with static batching?"
 details:
-  realistic_solution: The root cause is head-of-line blocking induced by the static batching policy. Static
-    batching optimizes for throughput by waiting to form a full batch, but this imposes a waiting 'tax'
-    on every request. Under spiky load, a large number of requests can arrive just after a batch has been
-    dispatched, forcing them to wait for the entire duration of the current batch's processing *plus*
-    their own batch formation time. This delay cascades, causing the request queue to grow and P99 latency
-    to explode. The correct solution is to switch to a continuous batching (or 'in-flight' batching) scheduler,
-    which adds incoming requests to the currently running batch, minimizing queue time and decoupling
-    TTFT from batch formation.
-  common_mistake: Engineers often blame the most expensive component first. They'll claim the H100 GPU
-    is too slow, the model is too big, or the network is the bottleneck. This ignores the fact that the
-    system's queueing strategy, not just the raw hardware speed, governs tail latency.
-  napkin_math: 'If the prefill compute takes 200ms and the batching window is 50ms, a request arriving during a burst may wait behind multiple batches. Waiting for 3 prior batches to complete: 3 * (200ms prefill + 50ms window) = 750ms in the queue. Add its own prefill (200ms), and TTFT hits 950ms. The GPU is fast (e.g. 1.7ms NVLink overhead per token), but static batching creates cascading head-of-line blocking that dominates the latency.'
+  realistic_solution: The root cause is head-of-line blocking induced by the static batching policy. Static batching optimizes for throughput by waiting to form a full batch, but this imposes a waiting 'tax' on every request. Under spiky load, a large number of requests can arrive just after a batch has been dispatched, forcing them to wait for the entire duration of the current batch's processing *plus* their own batch formation time. This delay cascades, causing the request queue to grow and P99 latency to explode. The correct solution is to switch to a continuous batching (or 'in-flight' batching) scheduler, which adds incoming requests to the currently running batch, minimizing queue time and decoupling TTFT from batch formation.
+  common_mistake: |
+    **The Pitfall:** Blaming the hardware speed or model size instead of the queueing strategy.
+    **The Rationale:** Engineers see 100% GPU utilization and assume the bottleneck is raw compute capacity.
+    **The Consequence:** Teams spend money scaling out the GPU fleet when a simple switch to continuous batching would eliminate the queueing latency.
+  napkin_math: |
+    - Prefill compute: ~200ms. Batching window: 50ms.
+    - Under spiky load, a request might wait behind 3 prior batches.
+    - Queue wait time: 3 * (200ms prefill + 50ms window) = 750ms.
+    - Total TTFT: 750ms wait + 200ms prefill = 950ms.
+    - **Result: Static batching creates cascading head-of-line blocking that completely dominates latency under bursty traffic.**
   options:
-  - The H100's memory bandwidth is insufficient to handle the KV cache for a large batch, causing contention
-    and delaying token generation.
-  - The static batching policy creates head-of-line blocking, causing extreme queueing delays under spiky
-    traffic patterns.
-  - The network connection between the load balancer and the inference server is saturated, preventing
-    requests from reaching the server in time.
-  - The Llama 70B model is too compute-intensive for the H100, and the ~200ms prefill time for a batch
-    is the fundamental bottleneck.
+  - The H100's memory bandwidth is insufficient to handle the KV cache for a large batch, causing contention and delaying token generation.
+  - The static batching policy creates head-of-line blocking, causing extreme queueing delays under spiky traffic patterns.
+  - The network connection between the load balancer and the inference server is saturated, preventing requests from reaching the server in time.
+  - The Llama 70B model is too compute-intensive for the H100, and the ~200ms prefill time for a batch is the fundamental bottleneck.
   correct_index: 1
 status: deleted
 provenance: imported

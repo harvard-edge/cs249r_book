@@ -8,29 +8,20 @@ competency_area: architecture
 bloom_level: create
 phase: training
 title: Combining Pipeline and Tensor Parallelism for 1T Parameter Model
-scenario: You need to train a 1 trillion parameter model on 1024 H100 GPUs (80GB HBM3,
-  3.35 TB/s, 700W). Design the 3D parallelism strategy (data × tensor × pipeline)
-  that maximizes training throughput while keeping each GPU's HBM usage under 70 GB.
-  Justify every dimension of the parallelism factoring.
-question: What data, tensor, and pipeline parallelism factors would you choose for
-  a 1T-parameter model on 1024 H100s under a 70GB HBM limit, and why?
+scenario: You need to train a 1 trillion parameter model on 1024 H100 GPUs (80GB HBM3).
+question: What data, tensor, and pipeline parallelism factors would you choose for a 1T-parameter model on 1024 H100s under a 70GB HBM limit, and why?
 details:
-  realistic_solution: 'Use 3D parallelism: Tensor Parallelism (TP=8) within a node
-    (NVLink bandwidth 900 GB/s), Pipeline Parallelism (PP=16) across nodes (IB bandwidth),
-    Data Parallelism (DP=8) for global batch scaling. 8×16×8 = 1024 GPUs. Model sharding:
-    1T / (TP × PP) = 1T / 128 ≈ 7.8B params/GPU × 2 bytes = 15.6 GB. Optimizer states:
-    7.8B × 12 bytes = 93.6 GB — use ZeRO-1 to shard across DP=8 → 93.6/8 = 11.7 GB/GPU.
-    Total: 15.6 (weights) + 15.6 (gradients) + 11.7 (optimizer) + activations < 70 GB.'
-  common_mistake: 'Using only pipeline parallelism for 1T parameter models. Pipeline
-    parallelism alone on 1024 GPUs with 1T model: each GPU holds 1T / 1024 ≈ 1B params
-    × 16 bytes (weights + gradients + Adam) ≈ 16 GB. This seems fine, but ignores that activation
-    memory scales with model width and the pipeline bubble would be enormous without
-    tensor parallelism to split within-layer computation.'
-  napkin_math: '1T params × 2 bytes BF16 = 2 TB total model. Per GPU (TP=8, PP=16):
-    2 TB / 128 = 15.6 GB. Gradients take another 15.6 GB. Adam optimizer states (FP32 master, m, v): 1T / 128 ≈ 7.8B
-    params/GPU × 12 bytes = 93.6 GB → ZeRO-1 shards across DP=8: 93.6 / 8 = 11.7 GB/GPU
-    optimizer state. Total: 15.6 (weights) + 15.6 (gradients) + 11.7 (optimizer) + ~15 GB activations = 57.9 GB. Well under 70 GB.
-    Pipeline bubble with m=32, p=16: (15)/(47) = 31.9%.'
+  realistic_solution: 'Use 3D parallelism: Tensor Parallelism (TP=8) within a node (NVLink bandwidth 900 GB/s), Pipeline Parallelism (PP=16) across nodes (IB bandwidth), Data Parallelism (DP=8) for global batch scaling. 8×16×8 = 1024 GPUs. Model sharding: 1T / (TP × PP) = 1T / 128 ≈ 7.8B params/GPU × 2 bytes = 15.6 GB. Optimizer states: 7.8B × 12 bytes = 93.6 GB — use ZeRO-1 to shard across DP=8 → 93.6/8 = 11.7 GB/GPU. Total: 15.6 (weights) + 15.6 (gradients) + 11.7 (optimizer) + activations < 70 GB.'
+  common_mistake: |
+    **The Pitfall:** Using only pipeline parallelism for massive 1T parameter models.
+    **The Rationale:** Candidates assume pipeline parallelism scales cleanly, ignoring that activation memory scales with model width and the pipeline bubble becomes enormous without tensor parallelism to split computation.
+    **The Consequence:** Severe memory fragmentation and idle GPU time (massive pipeline bubbles) destroy training throughput.
+  napkin_math: |
+    1. **Model Weights:** 1T params × 2 bytes BF16 = 2 TB total model.
+    2. **Per GPU Distribution:** With TP=8, PP=16 (128 slices), weights are 2 TB / 128 = 15.6 GB. Gradients are another 15.6 GB.
+    3. **Optimizer States:** Adam (FP32 master, m, v) = 1T / 128 ≈ 7.8B params/GPU × 12 bytes = 93.6 GB.
+    4. **ZeRO-1 Sharding:** 93.6 GB shards across DP=8: 93.6 / 8 = 11.7 GB/GPU.
+    **Total per GPU: 15.6 (weights) + 15.6 (grad) + 11.7 (opt) + ~15 GB (act) = 57.9 GB (under 70GB limit). Pipeline bubble with m=32, p=16 is 31.9%.**
 status: published
 provenance: imported
 requires_explanation: true

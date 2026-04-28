@@ -8,22 +8,19 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: SRAM Spills in Aggressive Fusion
-scenario: You deploy MobileNetV2 on an edge NPU with 2MB of SRAM. A new compiler pass aggressively fuses
-  Depthwise Conv + 1x1 Conv to reduce DRAM trips. Unexpectedly, latency increases from 5ms to 18ms, and
-  DRAM bandwidth usage triples compared to the unfused version.
-question: "Why did fusing Depthwise Conv + 1x1 Conv on the 2MB-SRAM NPU increase latency from 5ms to 18ms and triple DRAM use?"
+scenario: You deploy MobileNetV2 on an edge NPU with 2MB of SRAM. A new compiler pass aggressively fuses Depthwise Conv + 1x1 Conv to reduce DRAM trips. Unexpectedly, latency increases from 5ms to 18ms, and DRAM bandwidth usage triples compared to the unfused version.
+question: Why did fusing Depthwise Conv + 1x1 Conv on the 2MB-SRAM NPU increase latency from 5ms to 18ms and triple DRAM use?
 details:
-  realistic_solution: The aggressive fusion creates a monolithic kernel that requires materializing the
-    large intermediate activation tensor (between the Depthwise and 1x1 Convs) entirely in SRAM. Because
-    this intermediate tensor exceeds the 2MB SRAM limit, the memory planner is forced to spill the tensor
-    to DRAM per tile. The unfused version executed sequentially, allowing smaller memory footprints that
-    fit entirely within SRAM without spilling.
-  common_mistake: Believing operator fusion always strictly reduces memory bandwidth by keeping intermediate
-    activations in registers.
-  napkin_math: 'Intermediate tensor at early layer: 112x112 spatial x 144 channels x 2 bytes (FP16) =
-    3,612,672 bytes (~3.44 MB). Since 3.44 MB > 2 MB SRAM, the compiler spills. Spill/Fill adds (3.44MB
-    * 2) / 10GB/s DRAM bandwidth = ~0.68ms per tile. Across 10 tiles, this adds ~6.8ms + high overhead,
-    crippling performance.'
+  realistic_solution: The aggressive fusion creates a monolithic kernel that requires materializing the large intermediate activation tensor (between the Depthwise and 1x1 Convs) entirely in SRAM. Because this intermediate tensor exceeds the 2MB SRAM limit, the memory planner is forced to spill the tensor to DRAM per tile. The unfused version executed sequentially, allowing smaller memory footprints that fit entirely within SRAM without spilling.
+  common_mistake: |
+    **The Pitfall:** Believing operator fusion always strictly reduces memory bandwidth by keeping activations in registers.
+    **The Rationale:** Candidates forget that aggressive fusion creates massive monolithic kernels. If the intermediate tensor exceeds local SRAM capacity, the planner is forced to spill it back to DRAM.
+    **The Consequence:** The "optimized" fused kernel causes a massive spike in DRAM traffic, tripling memory bandwidth usage and degrading latency.
+  napkin_math: |
+    - Intermediate tensor: 112x112 spatial * 144 channels * 2 bytes (FP16) = 3,612,672 bytes (~3.44 MB).
+    - Because 3.44 MB > 2 MB SRAM limit, the compiler spills.
+    - Spill/Fill penalty: (3.44 MB * 2) / 10 GB/s DRAM bandwidth = ~0.68ms per tile.
+    **Conclusion: Across 10 tiles, this spilling adds ~6.8ms of pure DRAM latency overhead, completely crippling performance compared to the unfused sequential execution.**
 status: published
 provenance: imported
 requires_explanation: false

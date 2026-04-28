@@ -8,26 +8,21 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: Diagnosing Accuracy Collapse in INT8 LLM Deployments
-scenario: You are deploying an INT8 post-training quantized Llama-2-70B model on a cluster of A100 GPUs
-  to increase serving throughput. Despite applying per-channel quantization to the weights, you observe
-  severe perplexity degradation and erratic generations. Upon inspecting the linear layers, you notice
-  massive activation outliers (sometimes >100x the median magnitude) in a small percentage of channels.
-  How do you analyze and resolve this bottleneck without incurring the massive latency overhead of dynamic
-  per-channel activation quantization?
-question: "How do you analyze and resolve this bottleneck without incurring the massive latency overhead of dynamic per-channel activation quantization?"
+scenario: You are deploying an INT8 post-training quantized Llama-2-70B model on a cluster of A100 GPUs to increase serving throughput. Despite applying per-channel quantization to the weights, you observe severe perplexity degradation and erratic generations. Upon inspecting the linear layers, you notice massive activation outliers (sometimes >100x the median magnitude) in a small percentage of channels.
+question: How do you analyze and resolve this bottleneck without incurring the massive latency overhead of dynamic per-channel activation quantization?
 details:
-  realistic_solution: Implement SmoothQuant to mathematically migrate the outlier difficulty from the
-    activations to the weights offline. By introducing a per-channel scaling factor $s$, you divide the
-    activations by $s$ (smoothing them) and multiply the weights by $s$. This allows standard per-tensor
-    activation quantization to succeed without clipping, while preserving the original $Y = XW$ output.
-  common_mistake: Candidates often suggest implementing per-channel quantization for activations, failing
-    to realize this requires dynamic accumulation and scaling per channel which is not efficiently supported
-    by standard matrix multiplication hardware (like Tensor Cores) and destroys serving latency.
-  napkin_math: Let $Y = XW$. We rewrite as $Y = (X \cdot \text{diag}(s)^{-1}) \cdot (\text{diag}(s) \cdot
-    W) = \hat{X}\hat{W}$. If an activation outlier channel has max magnitude 100 and the corresponding
-    weight channel max is 1, using $s_j = \max(|X_j|)^{0.5} / \max(|W_j|)^{0.5} = 10 / 1 = 10$. The new
-    smoothed activation max is $100 / 10 = 10$, and new weight max is $1 \times 10 = 10$. Both now fit
-    comfortably in INT8 range without severe precision loss.
+  realistic_solution: Implement SmoothQuant to mathematically migrate the outlier difficulty from the activations to the weights offline. By introducing a per-channel scaling factor $s$, you divide the activations by $s$ (smoothing them) and multiply the weights by $s$. This allows standard per-tensor activation quantization to succeed without clipping, while preserving the original $Y = XW$ output.
+  common_mistake: |
+    **The Pitfall:** Suggesting per-channel quantization for activations during live inference.
+    **The Rationale:** Candidates logically extend weight quantization strategies to activations, failing to realize that dynamic accumulation and scaling per channel is exceptionally slow on Tensor Cores.
+    **The Consequence:** The model's serving latency spikes catastrophically, negating any throughput benefits gained from INT8 compression.
+  napkin_math: |
+    - **Equation:** Y = XW.
+    - **SmoothQuant Transformation:** Y = (X · diag(s)⁻¹) · (diag(s) · W) = X̂Ŵ.
+    - **Scaling Example:** Outlier activation X_max = 100. Corresponding weight W_max = 1.
+    - **Scale Factor (s):** s = sqrt(X_max) / sqrt(W_max) = 10 / 1 = 10.
+    - **Smoothed Values:** New activation max = 100 / 10 = 10. New weight max = 1 × 10 = 10.
+    - **Result:** Both tensors are mathematically scaled to fit comfortably within the strict INT8 dynamic range without clipping.
 status: published
 provenance: imported
 requires_explanation: false

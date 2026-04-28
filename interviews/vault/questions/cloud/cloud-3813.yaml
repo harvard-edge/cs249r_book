@@ -8,33 +8,22 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: 'Expert Offloading: CPU-GPU Expert Swapping for Inference'
-scenario: You want to serve Mixtral 8×7B (93.4 GB FP16) on a single A100 (80 GB HBM2e,
-  2 TB/s). The model doesn't fit in GPU memory. A colleague proposes keeping shared
-  layers on GPU and swapping experts from CPU RAM over PCIe 4.0 (32 GB/s). Is this
-  viable for interactive serving (< 50ms/token target)?
-question: Is CPU expert swapping over PCIe 4.0 viable for serving Mixtral 8×7B under
-  a 50 ms/token interactive latency target?
+scenario: You want to serve Mixtral 8×7B (93.4 GB FP16) on a single A100 (80 GB HBM2e, 2 TB/s). The model doesn't fit in GPU memory. A colleague proposes keeping shared layers on GPU and swapping experts from CPU RAM over PCIe 4.0 (32 GB/s).
+question: Is CPU expert swapping over PCIe 4.0 viable for serving Mixtral 8×7B under a 50 ms/token interactive latency target?
 details:
-  realistic_solution: 'Shared attention layers: ~7B params = 14 GB FP16, stays on
-    GPU. Each expert MLP: ~5.3B params = 10.6 GB FP16. At batch size 1, top-2: need
-    to load 2 experts from CPU. Transfer time per expert: 10.6 GB / 32 GB/s (PCIe
-    4.0 x16) = 331ms. Two experts: 662ms. This far exceeds the 50ms/token target —
-    not viable for interactive serving with FP16. With INT4 quantization: each expert
-    = 2.65 GB. Transfer: 2.65 / 32 = 83ms per expert. Two experts: 166ms. Still too
-    slow. With speculative expert prefetch: predict likely experts for the next token
-    based on current routing patterns. If prediction accuracy is >80%, amortize loads
-    across tokens. But mispredictions add latency. Viable approach: INT4 quantization
-    (total = 23.4 GB) fits entirely on A100. No swapping needed. Alternatively, use
-    2 A100s with tensor parallelism: 93.4 GB / 2 = 46.7 GB per GPU, fits with room
-    for KV cache. Expert offloading is only viable for throughput-oriented batch inference
-    (large batch, many tokens, amortized swap cost).'
-  common_mistake: Assuming you can swap experts in parallel with computation. The
-    GPU needs the expert weights before it can compute the MLP — this is a serial
-    dependency. Prefetching the next token's experts helps, but routing is data-dependent
-    and unpredictable.
-  napkin_math: 'FP16 expert swap: 10.6 GB / 32 GB/s = 331ms. × 2 experts = 662ms/token.
-    Target: 50ms. Gap: 13×. INT4: 2.65 GB / 32 GB/s = 83ms × 2 = 166ms. Still 3× over
-    target. Full INT4 model: 23.4 GB fits on 80 GB A100. No swapping needed.'
+  realistic_solution: 'Shared attention layers: ~7B params = 14 GB FP16, stays on GPU. Each expert MLP: ~5.3B params = 10.6 GB FP16. At batch size 1, top-2: need to load 2 experts from CPU. Transfer time per expert: 10.6 GB / 32 GB/s = 331ms. Two experts: 662ms. This far exceeds the 50ms/token target — not viable for interactive serving with FP16. With INT4 quantization: each expert = 2.65 GB. Transfer: 2.65 / 32 = 83ms per expert. Two experts: 166ms. Still too slow. Viable approach: INT4 quantization (total = 23.4 GB) fits entirely on A100. No swapping needed. Alternatively, use 2 A100s with tensor parallelism. Expert offloading is only viable for throughput-oriented batch inference.'
+  common_mistake: |
+    **The Pitfall:** Assuming you can swap experts continuously in parallel with computation without stalling.
+    **The Rationale:** Engineers rely on theoretical pre-fetching, ignoring that routing is data-dependent and unpredictable token-to-token.
+    **The Consequence:** The GPU idles while waiting for the serial PCIe transfer of the exact required expert, completely blowing past latency SLAs.
+  napkin_math: |
+    * FP16 expert size: 10.6 GB.
+    * PCIe 4.0 transfer time: 10.6 GB / 32 GB/s = 331 ms.
+    * Loading 2 experts (top-2 routing): 331 ms * 2 = 662 ms/token.
+    * SLA target: 50 ms. Gap is >13x.
+    * INT4 expert size: 2.65 GB.
+    * INT4 transfer: 2.65 GB / 32 GB/s = 83 ms * 2 = 166 ms (still 3x over target).
+    * **Full INT4 model (23.4 GB) fits directly on an 80 GB A100, eliminating the need to swap.**
 status: published
 provenance: imported
 requires_explanation: false

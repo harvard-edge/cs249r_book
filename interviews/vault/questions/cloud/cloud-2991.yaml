@@ -8,29 +8,20 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: 'Kernel Fusion: Implement Fused LayerNorm + Linear on H100'
-scenario: Implement a fused LayerNorm + Linear kernel for H100 (80GB HBM3, 3.35 TB/s)
-  processing a 7B model with hidden size 4096. Batch size 1 (decode mode), sequence
-  length 1. Quantify the memory bandwidth reduction vs unfused implementation and
-  expected latency improvement.
-question: For batch=1 decode, how much HBM traffic does fusing LayerNorm + Linear
-  save for hidden size 4096, and what latency gain should you expect?
+scenario: You need to implement a fused LayerNorm + Linear kernel for an H100 GPU (80GB HBM3, 3.35 TB/s) processing a 7B model with hidden size 4096. This is for batch size 1 (decode mode) and sequence length 1.
+question: For batch=1 decode, how much HBM traffic does fusing LayerNorm + Linear save for hidden size 4096, and what latency gain should you expect?
 details:
-  realistic_solution: 'Fused kernel: load weight matrix once, compute LayerNorm statistics
-    on-the-fly from input, apply normalization, multiply by weight matrix — all without
-    writing intermediate LayerNorm output to HBM.'
-  common_mistake: Implementing fusion for batch=1 decode without noting that GEMM
-    (Linear) at batch=1 is already memory-bound — fusion helps even more here than
-    in training.
-  napkin_math: 'Batch=1, seq=1, hidden=4096. Input tensor: 1 × 4096 × 2B = 8KB. LayerNorm
-    output: 8KB (if written to HBM). Linear weight: 4096 × 4096 × 2B = 32MB. Unfused:
-    read input (8KB) + write LayerNorm output (8KB) + read LayerNorm output (8KB)
-    + read weights (32MB) + write output (8KB) = 32MB + 32KB ≈ 32.03MB HBM. Fused:
-    read input (8KB) + read weights (32MB) + write output (8KB) = 32.02MB HBM. Savings:
-    only 16KB saved (the LayerNorm intermediate is tiny vs 32MB weights). Insight:
-    at batch=1, weights dominate. Fusion savings are minimal for Linear (compute/weights
-    dominate). Savings = 16KB / 32MB = 0.05%. But: eliminating kernel launch overhead
-    (2-3 µs saved) matters more at this size. Useful fusion targets: fusing multiple
-    small elementwise ops, not LayerNorm+Linear.'
+  realistic_solution: 'Fused kernel: load weight matrix once, compute LayerNorm statistics on-the-fly from input, apply normalization, multiply by weight matrix - all without writing intermediate LayerNorm output to HBM.'
+  common_mistake: |
+    **The Pitfall:** Overestimating memory bandwidth savings for fused kernels at small batch sizes.
+    **The Rationale:** Engineers know fusion saves memory bandwidth during training, and assume the same massive savings apply to batch=1 inference.
+    **The Consequence:** They spend significant engineering effort fusing LayerNorm+Linear, not realizing the actual data movement is overwhelmingly dominated by reading the model weights, making the fusion savings negligible.
+  napkin_math: |
+    - **Calculate Input/Output size:** Batch=1, seq=1, hidden=4096. `1 * 4096 * 2B = 8 KB`.
+    - **Calculate Weight size:** Linear weight: `4096 * 4096 * 2B = 32 MB`.
+    - **Calculate Unfused Traffic:** Read input (8KB) + write LN out (8KB) + read LN out (8KB) + read weights (32MB) + write out (8KB) = **32.03 MB**.
+    - **Calculate Fused Traffic:** Read input (8KB) + read weights (32MB) + write out (8KB) = **32.02 MB**.
+    - **Conclusion:** Fusion only saves 16KB of intermediate writes/reads, a **0.05% bandwidth savings**. The primary benefit is simply eliminating kernel launch overhead (2-3 \u03bcs).
 status: published
 provenance: imported
 requires_explanation: false

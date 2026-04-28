@@ -8,23 +8,19 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: torch.compile Recompilation Storm
-scenario: After enabling torch.compile, your inference server's latency spikes to 5× normal every few
-  minutes before returning to baseline. GPU memory gradually increases. Profiling shows the compiler is
-  triggered repeatedly. What causes this and how do you fix it?
-question: "What causes this and how do you fix it?"
+scenario: After enabling torch.compile, your inference server's latency spikes to 5x normal every few minutes before returning to baseline. GPU memory gradually increases. Profiling shows the compiler is triggered repeatedly.
+question: What causes this compilation storm and how do you fix it?
 details:
-  realistic_solution: 'torch.compile traces a graph specialized to specific tensor shapes. When a new
-    shape arrives, it triggers recompilation (expensive: seconds to tens of seconds). In inference serving,
-    varying request lengths produce diverse shapes, causing a ''recompilation storm.'' Fixes: (1) Use
-    torch.compile(dynamic=True) to generate shape-generic kernels (slight perf loss but no recompilation).
-    (2) Pad inputs to a small set of bucket sizes (e.g., 128, 256, 512, 1024, 2048) so only 5 graphs are
-    compiled. (3) Set torch._dynamo.config.cache_size_limit to cap memory. (4) Pre-warm the cache with
-    representative shapes during server startup. The fundamental tradeoff: specialized kernels are faster
-    but shape-specific; generic kernels are slower but compile once.'
-  common_mistake: Thinking torch.compile compiles once. Dynamic shapes (varying sequence lengths, batch
-    sizes) trigger recompilation, and each compiled graph is cached — consuming memory.
-  napkin_math: 'Each compiled graph: 50-500 MB. 20 unique shapes = 1-10 GB of compiled cache. Recompile
-    time: 5-30s per graph. If shapes repeat, amortizes over time; if not, the overhead is constant.'
+  realistic_solution: torch.compile traces a graph specialized to specific tensor shapes. When a new shape arrives, it triggers recompilation (expensive: seconds to tens of seconds). In inference serving, varying request lengths produce diverse shapes, causing a recompilation storm. Fixes: (1) Use torch.compile(dynamic=True) to generate shape-generic kernels (slight perf loss but no recompilation). (2) Pad inputs to a small set of bucket sizes (e.g., 128, 256, 512, 1024, 2048) so only 5 graphs are compiled. (3) Set torch._dynamo.config.cache_size_limit to cap memory. (4) Pre-warm the cache with representative shapes during server startup. The fundamental tradeoff: specialized kernels are faster but shape-specific; generic kernels are slower but compile once.
+  common_mistake: |
+    **The Pitfall:** Thinking torch.compile compiles once and handles dynamic shapes efficiently by default.
+    **The Rationale:** Candidates assume compilation behaves like static graph compilation in older frameworks, not realizing dynamic shapes trigger recompilation.
+    **The Consequence:** The server experiences severe latency spikes and OOM crashes in production due to the unbounded compiled cache.
+  napkin_math: |
+    *   **Graph Size:** 50 - 500 MB per compiled graph.
+    *   **Cache Size:** 20 unique shapes = 1 - 10 GB of compiled cache.
+    *   **Recompile Time:** 5 - 30s per graph.
+    *   **Conclusion:** Unbounded recompilation overhead is **constant** if shapes don't repeat, leading to sustained latency spikes.
 status: published
 provenance: imported
 requires_explanation: false

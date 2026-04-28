@@ -8,37 +8,19 @@ competency_area: networking
 bloom_level: evaluate
 phase: inference
 title: The Sensor Fusion PCIe Trap
-scenario: Your team is building the perception stack for an autonomous vehicle. The system uses two Jetson
-  AGX Orin modules connected via a PCIe Gen4 x8 link. GPU 0 processes LiDAR data, and GPU 1 processes
-  a high-resolution camera stream. For sensor fusion, GPU 1 sends a 128 MB feature map to GPU 0. The current
-  end-to-end latency is 25ms, safely within the 33ms hard real-time budget. A new camera sensor is proposed
-  that would double the feature map size to 256 MB. The camera team assumes this will increase latency,
-  but that it will remain within budget. Evaluate this assumption. Predict the new end-to-end latency
-  and justify why the system might face a catastrophic failure—latency far exceeding a simple 2x increase—rather
-  than a linear degradation. Furthermore, critique a junior engineer's suggestion to 'add more bandwidth'
-  by using an external InfiniBand link between the two modules.
-question: "What happens if the camera feature map grows from 128MB to 256MB over PCIe Gen4 x8, and why isn’t an external InfiniBand link the right fix?"
+scenario: Your team is building the perception stack for an autonomous vehicle. The system uses two Jetson AGX Orin modules connected via a PCIe Gen4 x8 link. GPU 0 processes LiDAR data, and GPU 1 processes a high-resolution camera stream. For sensor fusion, GPU 1 sends a 128 MB feature map to GPU 0. The current end-to-end latency is 25ms, safely within the 33ms hard real-time budget. A new camera sensor is proposed that would double the feature map size to 256 MB.
+question: What happens if the camera feature map grows from 128MB to 256MB over PCIe Gen4 x8, and why isn't an external InfiniBand link the right fix?
 details:
-  realistic_solution: The assumption of linear scaling is dangerously flawed. While the theoretical transfer
-    time does halve (vs a 256MB transfer), the catastrophic failure arises from system-level side effects.
-    A long, sustained PCIe transfer can monopolize the receiving GPU's DMA engine and memory controller.
-    This can starve the GPU's own processing tasks (like the LiDAR pipeline on GPU 0) of memory access,
-    effectively stalling them. This creates a 'head-of-line blocking' scenario on the PCIe bus, where
-    a single large transfer prevents other critical, smaller transfers from completing. The non-linear
-    latency spike occurs when this blocking causes the LiDAR pipeline to miss its own internal deadlines,
-    leading to a cascade failure where the fusion step receives stale or no data. The system doesn't just
-    get slower; the perception task itself can crash or reset.
-  common_mistake: Engineers often make two mistakes here. First, they perform a simple linear bandwidth
-    calculation (double the data, double the transfer time) and assume the rest of the pipeline is unaffected.
-    This ignores second-order effects and system-level interactions. Second, they see a bandwidth problem
-    and reach for a higher-bandwidth tool (like InfiniBand) without evaluating its latency cost at the
-    specific scale of the problem, confusing datacenter-scale solutions with embedded system-on-module
-    (SOM) interconnects.
-  napkin_math: PCIe Gen4 x8 bandwidth = 16 GB/s. New 256 MB feature map transfer =
-    256 MB / 16 GB/s = 16 ms. Orin DRAM bandwidth = 204.8 GB/s. During this entire
-    16 ms DMA transfer, the PCIe controller steals 16 GB/s of DRAM bandwidth (8%).
-    This prolonged memory starvation over 16 ms throttles concurrent LiDAR GPU compute
-    performance, causing the deadline miss and potentially crashing the perception task.
+  realistic_solution: The assumption of linear scaling is dangerously flawed. A long, sustained PCIe transfer can monopolize the receiving GPU's DMA engine and memory controller. This can starve the GPU's own processing tasks (like the LiDAR pipeline on GPU 0) of memory access, effectively stalling them. This non-linear latency spike causes the LiDAR pipeline to miss its deadlines, leading to cascade failure where the fusion step receives stale or no data.
+  common_mistake: |
+    **The Pitfall:** Assuming linear degradation and treating SOMs like Datacenters.
+    **The Rationale:** Engineers perform a simple linear bandwidth calculation (double data = double time) and assume the rest of the pipeline is unaffected, ignoring head-of-line blocking. They then recommend InfiniBand without realizing it's inappropriate for embedded SOM interconnects.
+    **The Consequence:** The perception task crashes due to internal memory starvation, and the hardware fix (InfiniBand) introduces completely unworkable form-factor and latency penalties.
+  napkin_math: |
+    1. **PCIe Gen4 x8 bandwidth:** 16 GB/s.
+    2. **256 MB transfer time:** 256 MB / 16 GB/s = 16 ms.
+    3. **Memory Starvation:** During this 16 ms DMA transfer, the PCIe controller steals memory bandwidth.
+    **Result: Prolonged 16 ms starvation throttles concurrent LiDAR GPU compute, causing deadline misses and perception crashes.**
 status: published
 provenance: imported
 requires_explanation: false

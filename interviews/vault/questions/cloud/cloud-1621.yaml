@@ -8,27 +8,19 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Batched PRNG Collisions in Logit Watermarking
-scenario: You deploy a 70B LLM on 4x H100 GPUs using continuous batching. To protect intellectual property
-  against model extraction, you implement a standard Kirchenbauer logit watermark (green-list ratio γ=0.5,
-  bias δ=2.0). The pseudo-random number generator (PRNG) for the green-list partition is seeded using
-  the hash of each sequence's preceding token. In single-stream staging (batch size B=1), the watermark
-  is highly detectable (average z-score > 6.0 for 200-token outputs). However, in production with dynamic
-  batch sizes reaching B=64, the average z-score of the generated text plummets to ~0.1 (undetectable),
-  even though text quality remains optimal and throughput is high. Diagnose the root cause of the watermark
-  failure.
-question: "Why does the watermark z-score collapse from >6 at batch size 1 to ~0.1 under continuous batching with B=64?"
+scenario: You deploy a 70B LLM on 4x H100 GPUs using continuous batching. To protect intellectual property against model extraction, you implement a standard Kirchenbauer logit watermark (green-list ratio γ=0.5, bias δ=2.0). The pseudo-random number generator (PRNG) for the green-list partition is seeded using the hash of each sequence's preceding token. In single-stream staging (batch size B=1), the watermark is highly detectable (average z-score > 6.0 for 200-token outputs). However, in production with dynamic batch sizes reaching B=64, the average z-score of the generated text plummets to ~0.1 (undetectable), even though text quality remains optimal and throughput is high.
+question: Why does the watermark z-score collapse from >6 at batch size 1 to ~0.1 under continuous batching with B=64?
 details:
-  realistic_solution: The PRNG state for the green-list generation is inadvertently synchronized across
-    the batch dimension. If the implementation seeds a global PRNG using only the first sequence's token
-    (e.g., seed=hash(last_tokens[0])), sequence 0 gets a valid watermark, but sequences 1 to 63 get uncorrelated
-    noise, destroying their watermarks. The fix is to vectorize the PRNG generation so each sequence applies
-    a uniquely seeded green-list mask based on its own last_token[i].
-  common_mistake: Assuming that PagedAttention is mixing KV cache states across the batch, or that precision
-    degradation from KV cache quantization is washing out the logit biases.
-  napkin_math: For N=200 tokens and γ=0.5, baseline expected green tokens μ = 100, standard deviation
-    σ = √(200 * 0.5 * 0.5) ≈ 7.1. A correctly watermarked sequence hits ~145 green tokens (z = (145-100)/7.1
-    = 6.3). Uncorrelated sequences hit ~100 green tokens (z = 0). At B=64, if only index 0 is valid, the
-    batch average z-score is (6.3 + 63 * 0) / 64 ≈ 0.1.
+  realistic_solution: The PRNG state for the green-list generation is inadvertently synchronized across the batch dimension. If the implementation seeds a global PRNG using only the first sequence's token (e.g., seed=hash(last_tokens[0])), sequence 0 gets a valid watermark, but sequences 1 to 63 get uncorrelated noise, destroying their watermarks. The fix is to vectorize the PRNG generation so each sequence applies a uniquely seeded green-list mask based on its own last_token[i].
+  common_mistake: |
+    **The Pitfall:** Blaming PagedAttention or KV cache quantization for the loss of watermarks.
+    **The Rationale:** Candidates assume that memory optimizations in modern serving engines inherently corrupt the precise logit adjustments needed for watermarking.
+    **The Consequence:** They pursue complex architectural workarounds instead of addressing the simple state management bug in the PRNG initialization.
+  napkin_math: |
+    1. **Baseline Distribution:** For N=200 tokens and γ=0.5, expected green tokens μ = 100. Standard deviation σ = √(200 * 0.5 * 0.5) ≈ 7.1.
+    2. **Valid Watermark:** A correctly watermarked sequence hits ~145 green tokens (z = (145-100)/7.1 ≈ 6.3).
+    3. **Invalid Watermark:** Uncorrelated sequences hit ~100 green tokens (z = 0).
+    4. **Batch Average:** At B=64, if only index 0 is valid, the batch average z-score is (6.3 + 63 * 0) / 64 ≈ **0.1**.
 status: published
 provenance: imported
 requires_explanation: false

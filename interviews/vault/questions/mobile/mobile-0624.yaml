@@ -8,33 +8,21 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: The Quantization Slowdown Paradox
-scenario: Your team is optimizing a new generative text model for an on-device summarization feature.
-  To reduce memory and accelerate inference, you apply post-training INT8 quantization using CoreML/TFLite.
-  A microbenchmark running only the core model shows a 2x speedup per token. However, when integrated
-  into the app, the total time to generate a 100-token summary is now 50% *slower* than the original FP16
-  model. The quantization seems to have backfired. Evaluate the potential causes of this system-level
-  slowdown, despite the core operation getting faster.
-question: "How would you evaluate the potential causes of this system-level slowdown, despite the core operation getting faster?"
+scenario: Your team is optimizing a new generative text model for an on-device summarization feature. To reduce memory and accelerate inference, you apply post-training INT8 quantization using CoreML/TFLite. A microbenchmark running only the core model shows a 2x speedup per token. However, when integrated into the app, the total time to generate a 100-token summary is now 50% slower than the original FP16 model.
+question: How would you evaluate the potential causes of this system-level slowdown, despite the core operation getting faster?
 details:
-  realistic_solution: The most likely cause is a 'Delegation Mismatch' or 'Graph-Splitting Overhead.'
-    The NPU (like Apple's ANE or Qualcomm's Hexagon) can only execute operations it supports. If the model
-    contains even a few unsupported ops (e.g., a specific attention variant, a novel activation function),
-    the execution graph is split. The system runs the supported ops on the NPU, but then must copy the
-    intermediate activation tensors to the CPU or GPU to run the unsupported op, and then copy the result
-    back to the NPU to continue. This CPU-NPU round trip (2 copies for a single CPU segment) involves
-    driver calls, memory copies, and context switching. If each copy takes 2.5ms, a single round trip adds 5ms
-    of overhead. If the model graph is split multiple times (e.g., 2 CPU segments meaning 4 copies), the 10ms
-    cumulative overhead from these round trips can easily overwhelm the speedup gained from the INT8 compute itself,
-    leading to a net 50% slowdown.
-  common_mistake: Engineers often focus solely on the compute speedup of the quantized operations, assuming
-    the whole model benefits equally. They might blame 'Python overhead' or 'the OS scheduler,' which
-    are orders of magnitude too small to explain such a large regression.
-  napkin_math: "Let's model a single token generation. The original FP16 model runs entirely on the mobile
-    GPU at 12ms/token. The quantized INT8 model splits the graph into 5 segments: 3 run on the NPU (taking
-    8ms total), and 2 unsupported ops run on the CPU (taking 0ms compute but triggering splits). Total compute is
-    8ms (a 1.5x speedup). However, the graph splitting forces 4 memory copies between NPU and CPU (two NPU->CPU,
-    two CPU->NPU). If each copy takes 2.5ms of driver overhead and memory bandwidth, the total transfer time is
-    10ms. Final latency: 8ms compute + 10ms transfer = 18ms/token — exactly 50% slower than the original 12ms."
+  realistic_solution: The most likely cause is a 'Delegation Mismatch' or 'Graph-Splitting Overhead.' The NPU can only execute operations it supports. If the model contains unsupported ops, the execution graph is split. The system must copy intermediate activation tensors to the CPU to run the unsupported op, then back to the NPU. This CPU-NPU round trip involves driver calls, memory copies, and context switching, easily overwhelming the INT8 compute speedup.
+  common_mistake: |
+    **The Pitfall:** Focusing solely on the compute speedup of the quantized operations.
+    **The Rationale:** Assuming the whole model benefits equally and blaming 'Python overhead' or 'the OS scheduler'.
+    **The Consequence:** Missing the massive overhead from NPU-CPU graph splitting and memory copies.
+  napkin_math: |
+    - Original FP16 compute: 12 ms/token (all on GPU).
+    - INT8 compute: 8 ms/token (NPU) + 0 ms (CPU triggers).
+    - Graph splitting overhead: 4 memory copies per token (2 NPU->CPU, 2 CPU->NPU).
+    - Copy time: 4 copies * 2.5 ms/copy = 10 ms transfer time.
+    - Total INT8 latency: 8 ms compute + 10 ms transfer = 18 ms/token.
+    - **18 ms is exactly 50% slower than the original 12 ms/token.**
 status: published
 provenance: imported
 requires_explanation: false

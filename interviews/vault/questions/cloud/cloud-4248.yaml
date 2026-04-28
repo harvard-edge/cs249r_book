@@ -8,24 +8,20 @@ competency_area: optimization
 bloom_level: create
 phase: training
 title: Implementing gradient checkpointing for a custom attention mechanism
-scenario: You have a custom chunked attention mechanism for processing 100K-token
-  sequences on H100 (80GB). Standard torch.utils.checkpoint.checkpoint() wraps your
-  attention block, but you notice the recompute during backward is 3× slower than
-  the original forward because it also recomputes the KV cache generation that should
-  be shared across chunks.
-question: How would you checkpoint the 100K-token chunked attention so backward
-  does not recompute shared KV projections?
+scenario: You have a custom chunked attention mechanism for processing 100K-token sequences on an 80GB H100. Standard torch.utils.checkpoint.checkpoint() wraps your attention block, but the recompute during backward is 3x slower than the original forward because it also recomputes the KV cache generation that should be shared across chunks.
+question: How would you checkpoint the 100K-token chunked attention so backward does not recompute shared KV projections?
 details:
-  realistic_solution: 'Split the checkpointed region: pre-compute and save KV projections
-    outside the checkpointed block (they are memory-cheap), checkpoint only the attention
-    score computation (memory-expensive: O(seq_len × window_size)). Use checkpoint with use_reentrant=False
-    for better gradient correctness with nested checkpoints. Verify with torch.autograd.graph.saved_tensors_hooks()
-    that the right tensors are being offloaded vs retained.'
-  common_mistake: Wrapping the entire attention function (including KV projection)
-    in checkpoint, causing KV projections to be recomputed for every window during
-    backward even though they could be cached. The chunked design shares KV
-    states across windows but checkpointing destroys this sharing.
-  napkin_math: 'Attention scores (e.g., 100K × 4096 window × 32 heads × 2 bytes) = 26GB per layer. With 32 layers: 832GB — obviously cannot store all. KV projections (with GQA, e.g., 1024 dim): 100K × 1024 × 2 (K,V) × 2 bytes = 400MB per layer, 12.8GB total. Checkpointing only attention scores (recompute) saves 832GB; keeping KV avoids the 3× recompute penalty and fits in HBM (12.8GB).'
+  realistic_solution: 'Split the checkpointed region: pre-compute and save KV projections outside the checkpointed block (they are memory-cheap), checkpoint only the attention score computation (memory-expensive: O(seq_len × window_size)). Use checkpoint with use_reentrant=False for better gradient correctness with nested checkpoints. Verify with torch.autograd.graph.saved_tensors_hooks() that the right tensors are being offloaded vs retained.'
+  common_mistake: |
+    **The Pitfall:** Wrapping the entire attention function (including KV projection) in the checkpoint.
+    **The Rationale:** Developers often treat the entire attention block as a black box for checkpointing, overlooking that intermediate tensors like KV projections are small enough to keep in memory.
+    **The Consequence:** KV projections are redundantly recomputed for every window during the backward pass, imposing a massive 3x latency penalty that destroys training throughput.
+  napkin_math: |
+    - **Attention Scores:** $100\text{K} \times 4096\text{ window} \times 32\text{ heads} \times 2\text{ bytes} = 26\text{ GB}$ per layer.
+    - **Total Attention Memory:** 32 layers $\times 26\text{ GB} = 832\text{ GB}$ (Must recompute, exceeds HBM).
+    - **KV Projections:** $100\text{K} \times 1024\text{ dim} \times 2 (\text{K,V}) \times 2\text{ bytes} = 400\text{ MB}$ per layer.
+    - **Total KV Memory:** 32 layers $\times 400\text{ MB} = 12.8\text{ GB}$.
+    - **Conclusion:** **Saving 12.8GB of KV projections in HBM** avoids the 3x recompute penalty while fitting well within the 80GB budget.
 status: published
 provenance: imported
 requires_explanation: false

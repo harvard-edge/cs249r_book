@@ -8,43 +8,25 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: The Real-Time Vision Stall
-scenario: You are an ML Systems Engineer on an automotive team, tasked with optimizing a driver-drowsiness
-  detection model running on a Jetson AGX Orin. The system has a hard real-time requirement to process
-  frames at 30 FPS (33.3ms deadline). Your model is meeting the deadline *on average*, but you observe
-  frequent latency spikes that miss the deadline, causing safety system alerts. You run the profiler and
-  see the GPU timeline is a long sequence of dozens of tiny, distinct kernels (e.g., Conv2D, BatchNorm,
-  ReLU) separated by small but significant gaps. Each individual operation is very fast (< 15µs), but
-  the end-to-end latency is too high. Given this profile, what is the most effective optimization to consistently
-  meet the deadline?
-question: "Given this profile, what is the most effective optimization to consistently meet the deadline?"
+scenario: You are an ML Systems Engineer on an automotive team, tasked with optimizing a driver-drowsiness detection model running on a Jetson AGX Orin. The system has a hard real-time requirement to process frames at 30 FPS (33.3ms deadline). Your model is meeting the deadline on average, but you observe frequent latency spikes that miss the deadline. You run the profiler and see the GPU timeline is a long sequence of dozens of tiny, distinct kernels (e.g., Conv2D, BatchNorm, ReLU) separated by small but significant gaps. Each individual operation is very fast (< 15µs), but the end-to-end latency is too high.
+question: Given this profile, what is the most effective optimization to consistently meet the deadline?
 details:
-  realistic_solution: The correct solution is to apply **Operator Fusion**. The profiler is clearly indicating
-    that kernel launch overhead is a dominant factor. Each time the CPU schedules a kernel on the GPU,
-    there's a fixed latency cost (typically 5-10µs). When operations are very fast (e.g., an element-wise
-    ReLU), this launch overhead can be as large or larger than the actual computation. Operator fusion,
-    typically done with a graph compiler like NVIDIA's TensorRT or Apache TVM, combines a sequence of
-    layers (like Conv2D -> BatchNorm -> ReLU) into a single, larger, more efficient kernel. This fused
-    kernel is launched only once, drastically reducing the total launch overhead. As a critical secondary
-    benefit, the intermediate data between the fused ops can be kept in fast on-chip SRAM/registers instead
-    of being written out to and read back from much slower LPDDR5 DRAM, which significantly reduces memory
-    access latency and power consumption.
-  common_mistake: 'Engineers often misdiagnose the bottleneck. They might see a ''death by a thousand
-    cuts'' and assume the model is simply too large, leading them to apply pruning or quantization. While
-    these techniques reduce compute, they don''t address the fundamental problem shown in the profiler:
-    the overhead of launching many tiny, separate kernels. Another mistake is to blame the hardware''s
-    raw performance, failing to see that the GPU is actually spending much of its time waiting for the
-    next kernel to be launched by the CPU.'
-  napkin_math: 'Let''s analyze a single `Conv -> BN -> ReLU` block. Assume a conservative kernel launch
-    overhead of 5µs on the Orin. Without fusion: 3 kernel launches × 5µs = 15µs overhead. If each operation
-    takes only 2µs of actual compute, total = 3 × (2µs + 5µs) = 21µs. With fusion: 1 kernel launch × 5µs
-    + 6µs compute = 11µs. Across 50 such blocks in the model: unfused = 50 × 21µs = 1.05ms; fused = 50
-    × 11µs = 0.55ms. Accumulated overhead across all layers explains the intermittent deadline misses
-    when GPU clock frequency varies.'
+  realistic_solution: The correct solution is to apply **Operator Fusion**. The profiler is clearly indicating that kernel launch overhead is a dominant factor. Each time the CPU schedules a kernel on the GPU, there's a fixed latency cost (typically 5-10µs). When operations are very fast (e.g., an element-wise ReLU), this launch overhead can be as large or larger than the actual computation. Operator fusion, typically done with a graph compiler like NVIDIA's TensorRT or Apache TVM, combines a sequence of layers (like Conv2D -> BatchNorm -> ReLU) into a single, larger, more efficient kernel. This fused kernel is launched only once, drastically reducing the total launch overhead. As a critical secondary benefit, the intermediate data between the fused ops can be kept in fast on-chip SRAM/registers instead of being written out to and read back from much slower LPDDR5 DRAM, which significantly reduces memory access latency and power consumption.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing kernel launch overhead as a model size issue.
+    **The Rationale:** Engineers might see a 'death by a thousand cuts' and assume the model is simply too large, leading them to apply pruning or quantization, which doesn't solve the launch overhead issue.
+    **The Consequence:** Wasting time on model compression techniques that degrade accuracy without actually fixing the latency spikes caused by CPU-GPU synchronization.
+  napkin_math: |
+    * **Assume:** Conservative kernel launch overhead of 5µs on Orin.
+    * **Unfused Block (Conv -> BN -> ReLU):** 3 launches * 5µs = 15µs overhead. If compute is 2µs/op, total = 3 * (2µs + 5µs) = 21µs.
+    * **Fused Block:** 1 launch * 5µs = 5µs overhead. Compute = 6µs. Total = 11µs.
+    * **Across 50 blocks:**
+      * Unfused: 50 * 21µs = 1.05ms
+      * Fused: 50 * 11µs = **0.55ms** (Nearly 2x faster execution by eliminating gaps).
   options:
   - Aggressively prune more filters from the convolutional layers to reduce the model's overall FLOPs.
   - Increase the GPU's clock frequency to reduce the execution time of each individual kernel.
-  - Apply operator fusion using a graph compiler like TensorRT to combine sequential layers into single
-    kernels.
+  - Apply operator fusion using a graph compiler like TensorRT to combine sequential layers into single kernels.
   - Increase the number of CPU worker threads in the data loading pipeline to feed the GPU faster.
   correct_index: 2
 status: published

@@ -8,30 +8,20 @@ competency_area: parallelism
 bloom_level: analyze
 phase: both
 title: Diagnosing MoE Routing and OOM Bottlenecks
-scenario: You are serving an 8x7B Mixture of Experts (MoE) model (56B total parameters, 14B active per
-  token) across an 8x A100 80GB node using Expert Parallelism (1 expert per GPU). The total model weights
-  are ~112GB in FP16, easily fitting in the 640GB cluster memory. However, at a batch size of 256 and
-  sequence length of 2048, you experience intermittent Out-of-Memory (OOM) crashes on specific GPUs and
-  massive tail latency spikes. Standard metrics show average cluster GPU utilization is below 40%. Diagnose
-  the root cause of the OOM crashes and the latency degradation.
+scenario: You are serving an 8x7B Mixture of Experts (MoE) model (56B total parameters, 14B active per token) across an 8x A100 80GB node using Expert Parallelism (1 expert per GPU). The total model weights are ~112GB in FP16, easily fitting in the 640GB cluster memory. However, at a batch size of 256 and sequence length of 2048, you experience intermittent Out-of-Memory (OOM) crashes on specific GPUs and massive tail latency spikes. Standard metrics show average cluster GPU utilization is below 40%.
 question: "Why do specific GPUs OOM and tail latency spike under expert parallelism, and how should you fix the 8x7B MoE serving path?"
 details:
-  realistic_solution: The root cause is severe load imbalance (token skew) where the router sends a disproportionate
-    number of tokens to a single expert. This causes the target GPU to exceed its 80GB VRAM limit due
-    to localized activation and KV cache spikes, and serializes compute, causing tail latency. The fix
-    is to implement a strict expert capacity limit (token dropping/overflow to other experts) and combine
-    Expert Parallelism with Tensor Parallelism to distribute the hot expert's memory footprint.
-  common_mistake: Candidates often blame the total KV cache size or general all-to-all communication overhead,
-    missing that Expert Parallelism makes individual GPU memory and compute dependent on dynamic routing
-    distributions. They often suggest global batch size reduction instead of addressing expert imbalance.
-  napkin_math: 'Total VRAM: 8x80GB = 640GB. Model: 56B * 2B = 112GB (14GB/GPU). Remaining VRAM/GPU:
-    66 GB. Per-token activation+KV cost for the 8x7B MoE layer ≈ 0.13 MB/token (hidden=4096, seq=2048,
-    BF16, with KV cache and FFN intermediates). Balanced load: 524k tokens / 8 = 65.5k tokens on each
-    GPU → ~8.5 GB activation+KV per GPU. Skewed routing (95% of tokens to Expert 2): GPU 2 processes
-    498k tokens → 64.7 GB of activation+KV. Combined with the 14 GB expert weights, GPU 2 needs 78.7
-    GB *just for the MoE block* — plus router state, attention state, and PyTorch workspace overhead
-    (typically 8-15 GB), pushing total well past the 80 GB ceiling and OOMing GPU 2 while GPUs 0, 1,
-    3-7 sit at ~22 GB each.'
+  realistic_solution: The root cause is severe load imbalance (token skew) where the router sends a disproportionate number of tokens to a single expert. This causes the target GPU to exceed its 80GB VRAM limit due to localized activation and KV cache spikes, and serializes compute, causing tail latency. The fix is to implement a strict expert capacity limit (token dropping/overflow to other experts) and combine Expert Parallelism with Tensor Parallelism to distribute the hot expert's memory footprint.
+  common_mistake: |
+    **The Pitfall:** Blaming the total KV cache size or general all-to-all communication overhead.
+    **The Rationale:** KV cache is the usual suspect for OOMs in standard LLM serving.
+    **The Consequence:** Suggesting global batch size reduction instead of fixing the MoE routing imbalance, which drops throughput.
+  napkin_math: |
+    1. Total VRAM: 8x80GB = 640GB. Model: 56B * 2B = 112GB (14GB/GPU). Remaining VRAM/GPU: 66 GB.
+    2. Per-token activation+KV cost ≈ 0.13 MB/token.
+    3. Balanced load: 524k tokens / 8 = 65.5k tokens/GPU → ~8.5 GB activation+KV.
+    4. Skewed routing (95% to Expert 2): GPU 2 processes 498k tokens → 64.7 GB of activation+KV.
+    5. GPU 2 needs 14 GB + 64.7 GB + PyTorch overhead ≈ **80+ GB (OOM)**, while others sit at ~22 GB.
 status: published
 provenance: imported
 requires_explanation: false

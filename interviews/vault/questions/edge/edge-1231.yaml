@@ -8,37 +8,20 @@ competency_area: networking
 bloom_level: apply
 phase: inference
 title: Dataflow Accelerator Round-Robin Degradation
-scenario: We are deploying a real-time computer vision system on an edge gateway equipped
-  with 4 Hailo-8 dataflow accelerators (each providing 26 TOPS INT8 at 2.5W). The
-  Hailo-8 has no local DRAM and streams data directly from host memory. We initially
-  route incoming 1080p video frames (2MB per frame) from 8 concurrent camera streams
-  using a dynamic round-robin load balancer across the 4 accelerators. We observe
-  that our 99th percentile inference latency spikes by 40% compared to a static routing
-  policy where each camera stream is permanently pinned to a specific accelerator.
-  Why does dynamic round-robin routing cause this performance degradation on this
-  specific hardware?
-question: Why does dynamic round-robin routing cause this performance degradation
-  on this specific hardware?
+scenario: We are deploying a real-time computer vision system on an edge gateway equipped with 4 Hailo-8 dataflow accelerators (each providing 26 TOPS INT8 at 2.5W). The Hailo-8 has no local DRAM and streams data directly from host memory. We initially route incoming 1080p video frames (2MB per frame) from 8 concurrent camera streams using a dynamic round-robin load balancer across the 4 accelerators. We observe that our 99th percentile inference latency spikes by 40% compared to a static routing policy where each camera stream is permanently pinned to a specific accelerator.
+question: Why does dynamic round-robin routing cause this performance degradation on this specific hardware?
 details:
-  realistic_solution: The performance degradation is caused by host memory access
-    patterns and PCIe contention. Because the Hailo-8 lacks local DRAM, it streams
-    weights and activations from the host. Round-robin routing scatters sequential
-    frames from the same camera across different host memory buffers and PCIe endpoints,
-    destroying host CPU cache locality and forcing continuous, unoptimized PCIe DMA
-    setup. Pinned routing (or consistent hashing by stream ID) maintains cache locality
-    in host memory and allows continuous dataflow streaming without tearing down and
-    rebuilding DMA descriptors.
-  common_mistake: Candidates often blame the software overhead of the load balancer
-    itself or assume the Hailo-8 compute (TOPS) limits are being exceeded. They fail
-    to analyze the memory architecture, missing that the Hailo-8 relies entirely on
-    streaming from host memory over PCIe.
-  napkin_math: 8 cameras at 30 FPS = 240 FPS total. Each 1080p frame is 2MB, requiring
-    480 MB/s of bandwidth. A single Hailo-8 (26 TOPS) can process ~1000 FPS for standard
-    models, so compute is not the bottleneck (240 FPS requires < 10 TOPS). With round-robin,
-    the host CPU must manage 240 distinct DMA transfer setups per second across 4
-    different PCIe endpoints, adding ~15us of interrupt/setup overhead per frame (240
-    * 15us = 3.6ms overhead per second), while destroying host L3 cache hits for the
-    decoded video buffers.
+  realistic_solution: The performance degradation is caused by host memory access patterns and PCIe contention. Because the Hailo-8 lacks local DRAM, it streams weights and activations from the host. Round-robin routing scatters sequential frames from the same camera across different host memory buffers and PCIe endpoints, destroying host CPU cache locality and forcing continuous, unoptimized PCIe DMA setup. Pinned routing (or consistent hashing by stream ID) maintains cache locality in host memory and allows continuous dataflow streaming without tearing down and rebuilding DMA descriptors.
+  common_mistake: |
+    **The Pitfall:** Blaming the software overhead of the load balancer or assuming compute limits are exceeded.
+    **The Rationale:** Candidates fail to analyze the memory architecture, missing that the Hailo-8 relies entirely on streaming from host memory over PCIe, where DMA and cache locality dominate performance.
+    **The Consequence:** Misdiagnosing the latency spike, leading to pointless code optimization instead of fixing the destructive memory routing strategy.
+  napkin_math: |
+    * Workload: 8 cameras * 30 FPS = 240 FPS total.
+    * Bandwidth: 240 FPS * 2MB = 480 MB/s.
+    * Round-robin overhead: The host CPU must manage 240 distinct DMA transfer setups per second across 4 different PCIe endpoints.
+    * Delay penalty: 240 * 15µs interrupt/setup overhead = 3.6ms overhead per second.
+    * Constant switching destroys host L3 cache hits for the decoded video buffers, forcing slow main memory accesses and driving up the 99th percentile latency by 40%.
 status: published
 provenance: imported
 requires_explanation: false

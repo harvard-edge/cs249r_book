@@ -8,26 +8,20 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Diagnosing GEMM Memory Bandwidth Bottlenecks
-scenario: 'Your team has written a custom Triton GEMM kernel for a linear layer (M=4096, N=4096, K=4096)
-  on an NVIDIA A100 GPU (40MB L2, 2.0 TB/s HBM bandwidth). Despite a high theoretical arithmetic intensity,
-  Nsight Compute reveals the kernel is memory-bound, achieving only 25% of peak TFLOPS. The profile shows
-  excessive HBM write traffic. The kernel uses a naive tile-based nested loop: iterating over M (outer),
-  then N, then K (inner), loading tiles of A and B to shared memory, computing the product, and writing
-  the partial sum of C directly back to HBM in each inner step. How do you diagnose the root cause and
-  optimize the dataflow?'
+scenario: Your team has written a custom Triton GEMM kernel for a linear layer (M=4096, N=4096, K=4096) on an NVIDIA A100 GPU. Despite a high theoretical arithmetic intensity, Nsight Compute reveals the kernel is memory-bound, achieving only 25% of peak TFLOPS. The kernel uses a naive tile-based nested loop: iterating over M (outer), then N, then K (inner), loading tiles of A and B to shared memory, computing the product, and writing the partial sum of C directly back to HBM in each inner step.
 question: "How do you diagnose the root cause and optimize the dataflow?"
 details:
-  realistic_solution: Adopt an Output Stationary dataflow. By keeping the K dimension in the innermost
-    loop and accumulating the partial sums of C entirely in fast registers or SRAM, you only write the
-    final computed tile of C back to HBM once the K loop finishes.
-  common_mistake: Candidates often suggest increasing the tile size to maximize theoretical arithmetic
-    intensity or tuning thread block sizes, failing to recognize that writing partial sums to HBM in the
-    inner loop dominates the memory bandwidth.
-  napkin_math: Output matrix C is 4096x4096 in FP16 = 4096^2 * 2 bytes = 33.55 MB. In a naive K-loop with
-    tile_K=64, C is loaded and stored (4096 / 64) = 64 times. Total redundant HBM write traffic = 33.55
-    MB * 64 = 2.14 GB. On an A100 with 2.0 TB/s HBM bandwidth, just performing these redundant writes
-    consumes 2.14 GB / 2.0 TB/s = 1.07 ms. Output stationary blocking keeps C in SRAM, saving this 1.07
-    ms.
+  realistic_solution: Adopt an Output Stationary dataflow. By keeping the K dimension in the innermost loop and accumulating the partial sums of C entirely in fast registers or SRAM, you only write the final computed tile of C back to HBM once the K loop finishes. The naive implementation causes massive redundant writes to HBM.
+  common_mistake: |
+    **The Pitfall:** Suggesting increasing the tile size to maximize theoretical arithmetic intensity.
+    **The Rationale:** Candidates rely on standard cache-blocking advice without identifying the specific bottleneck of inner-loop accumulation writes.
+    **The Consequence:** The kernel remains memory-bound because the redundant HBM writes persist, and larger tiles might cause register spilling.
+  napkin_math: |
+    1. **Output matrix C size:** 4096 x 4096 in FP16 = 4096^2 * 2 bytes = 33.55 MB.
+    2. **Naive K-loop steps:** With tile_K=64, C is loaded and stored (4096 / 64) = 64 times.
+    3. **Redundant HBM writes:** 33.55 MB * 64 = **2.14 GB** of write traffic.
+    4. **Bandwidth cost:** On a 2.0 TB/s HBM, these redundant writes alone consume 2.14 GB / 2.0 TB/s = **~1.07 ms**.
+    5. **Result:** Output stationary blocking eliminates this 1.07 ms penalty.
 status: published
 provenance: imported
 requires_explanation: false

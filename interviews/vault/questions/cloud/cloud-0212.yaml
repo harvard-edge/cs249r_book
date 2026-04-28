@@ -8,33 +8,20 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: The Continuous Batching Scheduler
-scenario: 'We serve a 13B model with static batching: we collect 32 requests, run them together, and return
-  all results when the longest sequence finishes. Average latency is 4 seconds, but P99 is 12 seconds.
-  The team wants to try vLLM''s continuous batching. Explain the systems mechanism and quantify the improvement.'
+scenario: 'We serve a 13B model with static batching: we collect 32 requests, run them together, and return all results when the longest sequence finishes. Average latency is 4 seconds, but P99 is 12 seconds. The team wants to try vLLM''s continuous batching.'
 question: "How does continuous batching reduce the 13B model's static-batching latency, and what improvement should you expect?"
 details:
-  realistic_solution: 'In static batching, all requests in a batch must wait for the longest sequence
-    to finish generating. If 31 requests finish in 2 seconds but one request generates a 500-token response
-    taking 10 seconds, all 31 completed requests sit in memory waiting — wasting both GPU cycles (padding
-    with no-ops) and user time. Continuous batching (also called iteration-level scheduling) operates
-    at the granularity of individual decode steps. After each token generation step, the scheduler can:
-    (1) evict completed requests immediately (freeing their KV-cache memory); (2) admit new requests from
-    the queue into the freed slots. The GPU is never idle and never wasting cycles on completed requests.
-    The result: short requests return immediately upon completion (latency improvement), and the freed
-    memory slots are instantly reused for new requests (throughput improvement).'
-  common_mistake: '"Continuous batching just means we use a bigger batch size, so throughput goes up."
-    This misses the fundamental scheduling innovation — it''s not about batch *size*, it''s about batch
-    *dynamics*.'
-  napkin_math: '**Static batching (batch=32):** Sequence lengths vary: 20% generate 50 tokens (~1 s),
-    60% generate 200 tokens (~4 s), 20% generate 500 tokens (~10 s). All 32 requests wait for the slowest:
-    **10 s** per batch. Throughput: 32 requests / 10 s = **3.2 req/s**. GPU utilization: after 1 s, 6
-    requests are done but still occupying slots → 19% waste. After 4 s, 26 requests done → 81% waste.
-    Average utilization: ~**40%**. **Continuous batching:** Short requests (50 tokens) complete in **1
-    s** and exit immediately. Their slots are filled by new requests from the queue. Medium requests complete
-    in **4 s**. Long requests complete in **10 s**. Average latency: $0.2 \times 1 + 0.6 \times 4 + 0.2
-    \times 10 = $ **4.6 s** (vs 10 s static). But crucially, the GPU processes new requests in freed slots:
-    effective throughput ≈ 32 slots × continuous fill ≈ **7-8 req/s** — a **2-2.5× throughput improvement**.
-    P99 drops from 12 s to ~10 s (the inherent generation time), and P50 drops from 4 s to ~2 s.'
+  realistic_solution: 'In static batching, all requests in a batch must wait for the longest sequence to finish generating. If 31 requests finish in 2 seconds but one request generates a 500-token response taking 10 seconds, all 31 completed requests sit in memory waiting — wasting both GPU cycles (padding with no-ops) and user time. Continuous batching (also called iteration-level scheduling) operates at the granularity of individual decode steps. After each token generation step, the scheduler can: (1) evict completed requests immediately (freeing their KV-cache memory); (2) admit new requests from the queue into the freed slots. The GPU is never idle and never wasting cycles on completed requests. The result: short requests return immediately upon completion (latency improvement), and the freed memory slots are instantly reused for new requests (throughput improvement).'
+  common_mistake: |
+    **The Pitfall:** Claiming that continuous batching simply uses a larger batch size to increase throughput.
+    **The Rationale:** Candidates confuse the static concept of 'batch size' with the scheduling dynamics of 'iteration-level' slot reuse.
+    **The Consequence:** Engineers might attempt to just increase the static batch size, which worsens P99 latency and memory fragmentation without solving the idle-slot problem.
+  napkin_math: |
+    1. Under static batching (batch=32), the entire batch waits for the longest request (e.g., 10 seconds). Throughput: 32 requests / 10s = 3.2 req/s.
+    2. GPU utilization drops rapidly: after 1 second, short requests finish, and their slots sit idle (wasting memory and compute).
+    3. Continuous batching evicts requests immediately upon completion, freeing the slot for a new request from the queue.
+    4. Short requests finish in 1s, medium in 4s, long in 10s, reducing the average latency to ~4.6s (down from 10s).
+    **By immediately backfilling slots, effective throughput jumps to 7-8 req/s (a 2-2.5x improvement) and P99 latency drops.**
 status: published
 provenance: imported
 requires_explanation: false

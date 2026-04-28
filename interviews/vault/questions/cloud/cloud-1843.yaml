@@ -8,25 +8,18 @@ competency_area: data
 bloom_level: evaluate
 phase: both
 title: Evaluating Streaming Formats for VLM Training
-scenario: You are training a vision-language model on a node with 8x H100 GPUs. Your dataset consists
-  of 100 million image-text pairs (average 50KB per pair, totaling 5TB), currently stored as Parquet files
-  on local NVMe SSDs capable of 12 GB/s sequential read bandwidth. However, your training loop is starving
-  for data, only achieving 3 GB/s aggregate read bandwidth across all DataLoader workers. Profiling reveals
-  high CPU utilization spent decoding Parquet footers, dictionaries, and column chunks. Evaluate the architectural
-  trade-offs of migrating the entire 5TB dataset to a bespoke sequential streaming format like WebDataset
-  (TAR archives) versus tuning the existing Parquet setup.
-question: "Should you migrate the 5TB image-text dataset from Parquet to WebDataset/TAR, or tune Parquet, and why?"
+scenario: You are training a VLM on 8x H100 GPUs with a 5TB dataset (100M image-text pairs) stored as Parquet files on local NVMe SSDs (12 GB/s read bandwidth). The training loop is starved, achieving only 3 GB/s read bandwidth. Profiling shows high CPU utilization from decoding Parquet footers and chunks.
+question: Should you migrate the 5TB dataset to a sequential streaming format like WebDataset (TAR) or tune Parquet, and why?
 details:
-  realistic_solution: Migrate to a row-based, metadata-free sequential format like WebDataset (TAR). This
-    allows the data loader to execute zero-overhead, purely sequential I/O, bypassing CPU-heavy metadata
-    decoding and fully saturating the 12 GB/s NVMe bandwidth.
-  common_mistake: Suggesting throwing more CPU cores at the data loaders or upgrading the storage hardware,
-    without realizing that Parquet's columnar layout and internal metadata inherently disrupt contiguous
-    sequential reads required for row-based multimodal training.
-  napkin_math: 'Parquet read overhead for a 50KB sample involves seeking and decoding multiple column
-    chunks. With purely sequential TAR reads: 5TB / 12 GB/s NVMe bandwidth = ~416 seconds to read the
-    dataset. Current Parquet bottleneck: 5TB / 3 GB/s = ~1666 seconds. A sequential format reclaims the
-    lost 9 GB/s by eliminating seek and decode taxes.'
+  realistic_solution: Migrate to a row-based, metadata-free sequential format like WebDataset (TAR). This allows the data loader to execute zero-overhead, purely sequential I/O, bypassing CPU-heavy metadata decoding and saturating the NVMe bandwidth.
+  common_mistake: |
+    **The Pitfall:** Suggesting throwing more CPU cores at the data loaders or upgrading storage hardware.
+    **The Rationale:** Candidates fail to realize that Parquet's columnar layout and internal metadata inherently disrupt the contiguous sequential reads required for VLM training.
+    **The Consequence:** Overspending on hardware while the CPU decoding bottleneck persists.
+  napkin_math: |
+    - **Sequential WebDataset (TAR):** 5TB / 12 GB/s NVMe bandwidth = ~416 seconds per epoch.
+    - **Current Parquet Bottleneck:** 5TB / 3 GB/s = ~1666 seconds per epoch.
+    - **Result:** Migrating to a sequential format reclaims the **lost 9 GB/s**, speeding up data loading by **4x**.
 status: published
 provenance: imported
 requires_explanation: true

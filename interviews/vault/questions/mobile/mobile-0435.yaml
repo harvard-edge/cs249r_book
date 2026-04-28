@@ -8,38 +8,20 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: 'The Smart Reply Latency Puzzle: NAS vs. MoE'
-scenario: You're an ML systems engineer on a mobile AI team building an on-device 'smart reply' feature.
-  The model must have a P99 latency under 20ms. To handle diverse conversation styles, one proposal is
-  a small Mixture-of-Experts (MoE) model with 4 experts, where only the top 1 expert is activated per
-  input. An alternative is a single, dense model discovered via Neural Architecture Search (NAS) for your
-  target mobile SoC. Your profiler shows that while the MoE model has 75% fewer active parameters per
-  inference, its total latency is 25ms, exceeding the budget. The NAS model, despite having more active
-  parameters, meets the 20ms budget. Diagnose why the theoretically-efficient MoE model is slower in practice
-  on mobile hardware.
-question: "How would you diagnose why the theoretically-efficient MoE model is slower in practice on mobile hardware?"
+scenario: You're an ML systems engineer on a mobile AI team building an on-device 'smart reply' feature. The model must have a P99 latency under 20ms. To handle diverse conversation styles, one proposal is a small Mixture-of-Experts (MoE) model with 4 experts, where only the top 1 expert is activated per input. An alternative is a single, dense model discovered via Neural Architecture Search (NAS) for your target mobile SoC. Your profiler shows that while the MoE model has 75% fewer active parameters per inference, its total latency is 25ms, exceeding the budget. The NAS model, despite having more active parameters, meets the 20ms budget.
+question: How would you diagnose why the theoretically-efficient MoE model is slower in practice on mobile hardware?
 details:
-  realistic_solution: The MoE model's latency budget is being spent on systems overhead, not useful computation.
-    The core problem is the dynamic, data-dependent control flow. First, the gating network must run.
-    Second, the CPU must interpret the gate's output. Third, the system must then dynamically load the
-    weights for the chosen expert from main memory (LPDDR5) into the NPU's much faster local SRAM. This
-    break in the execution pipeline, the CPU-NPU synchronization, and the latency of fetching a non-contiguous
-    memory block for the expert weights add significant overhead. A NAS-discovered model is a single,
-    monolithic graph. Its weights and instructions can be loaded once, allowing the NPU to execute it
-    from start to finish without interruption, maximizing hardware utilization and hiding memory latency.
-  common_mistake: Attributing the latency to the raw FLOPs of the expert, the app's binary size, or assuming
-    a bug where all experts are running. The key issue is not the arithmetic cost but the systems overhead
-    of implementing the MoE's dynamic routing on a mobile hardware architecture.
-  napkin_math: 'MoE overhead: Gate network ~0.5ms + CPU dispatch ~0.5ms + expert weight load from DRAM.
-    Expert = 75% of model params. If model = 50M params INT8, expert = 12.5M = 12.5MB. LPDDR5 bandwidth
-    ~51GB/s, load = 12.5MB/51GB/s = 0.24ms. But cache-miss + dispatch overhead adds ~5-10ms. Total ~25ms.
-    NAS dense model: single contiguous graph, all weights prefetched, zero dispatch overhead => 20ms.'
-  options:
-  - The MoE model's total parameter count is too large, exceeding the device's RAM capacity.
-  - The gating network is too computationally expensive and is the primary bottleneck.
-  - A bug is causing all 4 experts to run for every inference instead of just one.
-  - The latency overhead comes from dynamic control flow and the time taken to load the selected expert's
-    weights from main memory into the NPU.
-  correct_index: 3
+  realistic_solution: The MoE model's latency budget is being spent on systems overhead, not useful computation. The core problem is the dynamic, data-dependent control flow. First, the gating network must run. Second, the CPU must interpret the gate's output. Third, the system must then dynamically load the weights for the chosen expert from main memory (LPDDR5) into the NPU's much faster local SRAM. This break in the execution pipeline, the CPU-NPU synchronization, and the latency of fetching a non-contiguous memory block for the expert weights add significant overhead. A NAS-discovered model is a single, monolithic graph. Its weights and instructions can be loaded once, allowing the NPU to execute it from start to finish without interruption, maximizing hardware utilization and hiding memory latency.
+  common_mistake: |
+    **The Pitfall:** Attributing the latency overhead to raw FLOPs, app binary size, or a bug where all experts are accidentally running.
+    **The Rationale:** Candidates assume that lower active parameter count directly translates to lower latency, forgetting the systems overhead of dynamic control flow on mobile architectures.
+    **The Consequence:** They fail to diagnose that dynamic expert routing requires costly CPU-NPU synchronization and non-contiguous memory fetches, breaking the execution pipeline.
+  napkin_math: |
+    1. **MoE Model Size:** Assume a 50M parameter model in INT8. 75% of parameters are in the experts, so one expert is 12.5M params (12.5 MB).
+    2. **Memory Transfer:** Mobile LPDDR5 bandwidth is ~51 GB/s. Loading 12.5 MB takes 12.5 MB / 51,000 MB/s ≈ 0.24ms.
+    3. **Systems Overhead:** The dynamic routing requires CPU-NPU synchronization. Gate network (~0.5ms) + CPU dispatch (~0.5ms) + cache-miss/dispatch overhead (~5-10ms).
+    4. **Total MoE Latency:** Base compute + 0.24ms memory + ~10ms dispatch overhead ≈ 25ms.
+    **Result:** The dense NAS model is a single contiguous graph with zero dispatch overhead, achieving **20ms**, while MoE is bottlenecked by **~10ms of dispatch and synchronization overhead**.
 status: published
 provenance: imported
 requires_explanation: false
@@ -50,8 +32,7 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_status_pro: WARN
 validation_issues_pro:
-- The 'Napkin Math' section is titled 'Let's model the latency breakdown' but is empty, leaving the explanation
-  purely qualitative.
+- The 'Napkin Math' section is titled 'Let's model the latency breakdown' but is empty, leaving the explanation purely qualitative.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

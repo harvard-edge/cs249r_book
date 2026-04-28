@@ -8,28 +8,21 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Topology-Aware AllReduce Algorithm Selection
-scenario: 'Your 128-GPU cluster has a 2-level topology: 8 GPUs per node connected
-  by NVLink (900 GB/s), 16 nodes connected by InfiniBand NDR (400 Gbps = 50 GB/s).
-  Compare ring AllReduce, hierarchical AllReduce, and NCCL''s tree AllReduce for a
-  2 GB gradient buffer. Which algorithm minimizes total AllReduce time?'
-question: Which algorithm minimizes total AllReduce time?
+scenario: 'Your 128-GPU cluster has a 2-level topology: 8 GPUs per node connected by NVLink (900 GB/s), 16 nodes connected by InfiniBand NDR (400 Gbps = 50 GB/s). You must synchronize a 2 GB gradient buffer.'
+question: Compare ring AllReduce, hierarchical AllReduce, and NCCL's tree AllReduce; which algorithm minimizes total AllReduce time?
 details:
-  realistic_solution: 'Flat ring AllReduce: 128 GPUs in a single ring. Bottleneck
-    = InfiniBand at 50 GB/s. Time = 2 * 2 GB * 127/128 / 50 GB/s = 80ms. This is terrible
-    because NVLink (900 GB/s) is wasted — all data traverses IB links. Hierarchical
-    AllReduce: (1) Intra-node reduce-scatter on NVLink: 2 GB * 7/8 / 900 GB/s = 1.94ms.
-    Result: 250 MB per GPU. (2) Inter-node AllReduce on IB: 16 nodes, each GPU 0 does
-    ring AllReduce of 250 MB: 2 * 250 MB * 15/16 / 50 GB/s = 9.38ms. (3) Intra-node
-    all-gather on NVLink: 2 GB * 7/8 / 900 GB/s = 1.94ms. Total: 1.94 + 9.38 + 1.94
-    = 13.26ms. NCCL tree: pipelined tree bandwidth cost is bounded by 2 * Size / BW.
-    On IB, this takes 2 * 2 GB / 50 GB/s = ~80ms. Hierarchical is optimal for 2-level topology.'
-  common_mistake: Using a flat ring AllReduce that ignores the topology. A ring across
-    128 GPUs treats NVLink and InfiniBand hops identically, bottlenecking on the slowest
-    link (InfiniBand at 50 GB/s) even for intra-node transfers.
-  napkin_math: 'Flat ring: 2 * 2 GB * 127/128 / 50 GB/s = 80ms. Hierarchical: intra-node
-    reduce-scatter = 1.94ms + inter-node = 9.38ms + intra-node all-gather = 1.94ms = 13.26ms. Speedup:
-    80 / 13.26 = 6.0x. Tree: pipelined tree bandwidth cost is 2 * Size / BW = 2 * 2 GB / 50 GB/s = 80ms latency.
-    Hierarchical is optimal for 2-level topology.'
+  realistic_solution: 'Flat ring AllReduce: 128 GPUs in a single ring. Bottleneck = InfiniBand at 50 GB/s. Time = 2 * 2 GB * 127/128 / 50 GB/s = 80ms. This is terrible because NVLink (900 GB/s) is wasted — all data traverses IB links. Hierarchical AllReduce: (1) Intra-node reduce-scatter on NVLink: 2 GB * 7/8 / 900 GB/s = 1.94ms. Result: 250 MB per GPU. (2) Inter-node AllReduce on IB: 16 nodes, each GPU 0 does ring AllReduce of 250 MB: 2 * 250 MB * 15/16 / 50 GB/s = 9.38ms. (3) Intra-node all-gather on NVLink: 2 GB * 7/8 / 900 GB/s = 1.94ms. Total: 1.94 + 9.38 + 1.94 = 13.26ms. NCCL tree: pipelined tree bandwidth cost is bounded by 2 * Size / BW. On IB, this takes 2 * 2 GB / 50 GB/s = ~80ms. Hierarchical is optimal for 2-level topology.'
+  common_mistake: |
+    **The Pitfall:** Choosing a flat ring AllReduce that ignores the physical 2-level network topology.
+    **The Rationale:** Engineers default to the mathematically simplest algorithm without realizing that a flat ring forces intra-node data to travel over the slow inter-node links.
+    **The Consequence:** The blazing fast 900 GB/s NVLink is completely bypassed, and the entire cluster bottlenecks on the 50 GB/s InfiniBand switches.
+  napkin_math: |
+    1. Flat Ring Time: 2 * 2 GB * (127/128) / 50 GB/s (IB Bottleneck) = ~80ms.
+    2. Hierarchical Intra-Node Reduce-Scatter: 2 GB * (7/8) / 900 GB/s = 1.94ms. (Yields 250 MB chunk per GPU).
+    3. Hierarchical Inter-Node AllReduce: 2 * 250 MB * (15/16) / 50 GB/s = 9.38ms.
+    4. Hierarchical Intra-Node All-Gather: 2 GB * (7/8) / 900 GB/s = 1.94ms.
+    5. Total Hierarchical Time: 1.94ms + 9.38ms + 1.94ms = 13.26ms.
+    **Hierarchical AllReduce is 6x faster (80ms vs 13.26ms) because it fully leverages the fast NVLink domain.**
 status: published
 provenance: imported
 requires_explanation: false

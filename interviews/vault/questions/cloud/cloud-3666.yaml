@@ -8,31 +8,19 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: 'Tensor Parallelism Correctness: Dropout and Random State Synchronization'
-scenario: A 13B model trained with TP=4 on A100 (80GB HBM2e, 2TB/s) produces different
-  loss values than the baseline single-GPU training run, even with the same random
-  seed. The model uses dropout in the MLP layers. The differences are small (0.01%)
-  but accumulate over training, causing divergence after 10K steps.
-question: Why can TP=4 training with dropout diverge from the single-GPU baseline
-  despite the same seed, and how would you fix it?
+scenario: A 13B model trained with TP=4 on A100 (80GB HBM2e, 2TB/s) produces different loss values than the baseline single-GPU training run, even with the same random seed. The model uses dropout in the MLP layers. The differences are small (0.01%) but accumulate over training, causing divergence after 10K steps.
+question: Why can TP=4 training with dropout diverge from the single-GPU baseline despite the same seed, and how would you fix it?
 details:
-  realistic_solution: In Megatron-LM, model-parallel regions use a separate RNG state
-    (model_parallel_rng) that is synchronized across TP ranks, ensuring identical
-    dropout masks within a tensor-parallel region. Use torch.cuda.manual_seed_all()
-    to seed all GPUs identically for dropout. Verify by logging the dropout mask checksum
-    across ranks. Alternatively, move dropout to post-all-reduce positions where the
-    full tensor is available.
-  common_mistake: Using a shared random seed across all TP ranks without understanding
-    which operations need identical vs independent random states. Dropout applied
-    to tensor-parallel shards must generate consistent masks — or be intentionally
-    independent — depending on the parallelism scheme.
-  napkin_math: '13B model, TP=4, dropout p=0.1 in MLP. Without synchronized RNG: each
-    GPU applies independent dropout to its shard. After all-reduce, the effective
-    dropout rate per element is: P(dropped by at least one GPU) = 1 - (1-0.1)^1 =
-    0.1 (each element is only on one GPU — column-parallel). Actually each element
-    belongs to exactly one GPU, so dropout rate is correct per-GPU. The bug is subtler:
-    if dropout is applied before the all-reduce in row-parallel, the effective rate
-    after summation differs from applying after. Profile forward pass outputs at each
-    layer.'
+  realistic_solution: In Megatron-LM, model-parallel regions use a separate RNG state (model_parallel_rng) that is synchronized across TP ranks, ensuring identical dropout masks within a tensor-parallel region. Use torch.cuda.manual_seed_all() to seed all GPUs identically for dropout. Verify by logging the dropout mask checksum across ranks. Alternatively, move dropout to post-all-reduce positions where the full tensor is available.
+  common_mistake: |
+    **The Pitfall:** Using a shared random seed across all TP ranks without understanding operation-specific RNG requirements.
+    **The Rationale:** Candidates assume `torch.manual_seed()` is sufficient, forgetting that dropout applied to tensor-parallel shards must generate consistent masks—or be intentionally independent—depending on the parallelism scheme.
+    **The Consequence:** Subtle model divergence over thousands of steps that is notoriously difficult to debug.
+  napkin_math: |
+    - **Setup:** 13B model, TP=4, dropout p=0.1 in MLP.
+    - **Without synchronized RNG:** Each GPU applies independent dropout to its shard.
+    - **Row-parallel issue:** If dropout is applied before the all-reduce in row-parallel, the effective rate after summation differs from applying it after.
+    - **Result:** **The effective dropout mask must be identical across ranks for the region, otherwise the synchronized all-reduce sums outputs that had different elements dropped, causing 0.01% divergence.**
 status: published
 provenance: imported
 requires_explanation: false

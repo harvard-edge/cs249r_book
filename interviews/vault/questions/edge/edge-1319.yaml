@@ -8,36 +8,20 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Encoder vs Decoder on Edge TPU
-scenario: We are deploying a low-latency intent classification and entity extraction
-  model for an offline smart home hub. The target hardware is a Google Coral Edge
-  TPU via a USB accelerator, which operates on a strict 2W power budget, requires
-  full INT8 quantization, and provides 4 TOPS of compute. You must choose between
-  an encoder-only model (like a 25M-parameter MobileBERT) and a small decoder-only
-  model (like a 125M-parameter quantized GPT). Evaluate the tradeoffs and recommend
-  the best architecture for this deployment.
-question: Should the offline smart home hub use a MobileBERT-style encoder or a small
-  quantized GPT-style decoder on the Coral Edge TPU?
+scenario: We are deploying a low-latency intent classification and entity extraction model for an offline smart home hub. The target hardware is a Google Coral Edge TPU via a USB accelerator. You must choose between an encoder-only model (like a 25M-parameter MobileBERT) and a small decoder-only model (like a 125M-parameter quantized GPT).
+question: Should the offline smart home hub use a MobileBERT-style encoder or a small quantized GPT-style decoder on the Coral Edge TPU?
 details:
-  realistic_solution: The encoder-only architecture is the correct choice. Encoder
-    models run a single forward pass with static sequence lengths, mapping perfectly
-    to the Edge TPU compiler's requirement for fixed-shape, fully supported INT8 operators.
-    Decoder models require autoregressive step-by-step generation, necessitating dynamic
-    memory access (KV cache) and unsupported ops, which triggers CPU fallbacks that
-    break the 2W power budget and ruin latency.
-  common_mistake: Candidates often choose the decoder-only model due to recent industry
-    trends, assuming it can handle the task via few-shot prompting. They fail to account
-    for the Edge TPU's static graph requirements and lack of support for dynamic operations,
-    which makes autoregressive decoding and KV caching extremely inefficient or impossible
-    without falling back to the host CPU.
-  napkin_math: For a 25M parameter encoder model at INT8, the weights take ~25MB,
-    fitting entirely in memory. Processing a 128-token sequence requires roughly 2
-    * 25M * 128 = 6.4 GOPS. At the Edge TPU's peak 4 TOPS (4000 GOPS), the compute
-    time is theoretically 6.4 / 4000 = 1.6 ms per inference. In contrast, a 125M decoder
-    model generating just 10 tokens requires 10 separate forward passes (totaling
-    125MB * 10 reads) which is heavily memory-bandwidth bound. Furthermore, any unsupported
-    dynamic op in the decoder forces data transfer over the USB 2.0/3.0 bus to the
-    CPU, adding tens of milliseconds of I/O latency per token and exceeding the 2W
-    constraint.
+  realistic_solution: The encoder-only architecture is the correct choice. Encoder models run a single forward pass with static sequence lengths, mapping perfectly to the Edge TPU compiler's requirement for fixed-shape, fully supported INT8 operators. Decoder models require autoregressive step-by-step generation, necessitating dynamic memory access (KV cache) and unsupported ops, which triggers CPU fallbacks that break the 2W power budget and ruin latency.
+  common_mistake: |
+    **The Pitfall:** Choosing the decoder-only model due to recent generative AI trends.
+    **The Rationale:** Candidates falsely assume small GPTs can run efficiently anywhere, ignoring the TPU's requirement for static graphs and lack of dynamic KV cache support.
+    **The Consequence:** Autoregressive decoding triggers continuous USB/CPU fallbacks, destroying latency and exceeding the 2W power budget.
+  napkin_math: |
+    - Encoder compute (25M params, 128 tokens): 2 * 25M * 128 = 6.4 GOPS.
+    - Encoder compute time: 6.4 GOPS / 4000 GOPS = 1.6 ms per inference.
+    - Decoder memory bound (125M params, 10 tokens): 10 separate forward passes requiring heavy memory I/O.
+    - Dynamic op penalty: Transmitting KV cache state over USB fallback adds tens of milliseconds.
+    **The encoder executes entirely on TPU in ~1.6ms, while the decoder forces fatal CPU fallbacks.**
 status: published
 provenance: imported
 requires_explanation: false

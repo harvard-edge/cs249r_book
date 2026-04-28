@@ -8,33 +8,20 @@ competency_area: reliability
 bloom_level: evaluate
 phase: inference
 title: The Watchdog Reboot Loop
-scenario: Your team has deployed a fleet of battery-powered acoustic sensors to detect pest infestations
-  in crops. The devices use a Cortex-M7 and a small CNN. To prevent freezes, an aggressive 20ms hardware
-  watchdog timer is enabled. Field reports show that devices at one specific farm are getting stuck in
-  a reboot loop, draining their batteries in hours. Your on-call playbook suggests the first step is to
-  'remotely update the watchdog timeout to 50ms'. Evaluate this playbook action. Why might the system
-  be failing in this non-linear way, and why is the playbook's recommendation likely wrong for this specific
-  failure? Justify your reasoning with a quantitative analysis.
-question: "Why might the system be failing in this non-linear way, and why is the playbook's recommendation likely wrong for this specific failure?"
+scenario: Your team has deployed a fleet of battery-powered acoustic sensors to detect pest infestations in crops. The devices use a Cortex-M7 and a small CNN. To prevent freezes, an aggressive 20ms hardware watchdog timer is enabled. Field reports show that devices at one specific farm are getting stuck in a reboot loop, draining their batteries in hours. Your on-call playbook suggests the first step is to remotely update the watchdog timeout to 50ms.
+question: Why might the system be failing in this non-linear way, and why is the playbook's recommendation likely wrong for this specific failure?
 details:
-  realistic_solution: The playbook action is a temporary patch that masks the real problem and should
-    be rejected. The reboot loop is likely caused by 'hard' audio inputs from this specific farm (e.g.,
-    sounds of irrigation equipment, which have a very different frequency profile than pests) that trigger
-    a pathological inference case. This corner case's inference time exceeds the 20ms watchdog timeout,
-    causing a reset. Upon reboot, the device re-reads the same 'hard' sample from its audio buffer, triggering
-    the same long inference, leading to another reset. The correct solution is not to lengthen the timeout,
-    but to make the boot-up logic more robust. The device should use a few bytes of flash or RTC backup
-    RAM to implement a boot counter. If the counter exceeds a threshold (e.g., 3 reboots in 1 minute),
-    on the next boot it should discard the problematic sample from the buffer, send a diagnostic packet
-    with the corrupted input, and then resume normal operation. This prevents the reboot loop and captures
-    the causal data for debugging.
-  common_mistake: The playbook is right; there must be a software bug causing an infinite loop, so a longer
-    timeout will let it finish. This ignores that inference time itself can be data-dependent, especially
-    with certain hardware accelerations or complex audio features.
-  napkin_math: 'M7@480MHz=960 MFLOPS. CNN: 1.5M FLOPs, normal inference=1.56ms (under 20ms WDT). Hard
-    audio triggers worst-case path: inference spikes to ~25ms>20ms → WDT reboot. Same audio in buffer
-    → repeat. Lengthening WDT to 50ms: next hard input at 55ms = same failure. Fix: boot counter in RTC
-    RAM; 3 reboots in 60s → discard buffer, log diagnostic, resume.'
+  realistic_solution: The playbook action is a temporary patch that masks the real problem and should be rejected. The reboot loop is likely caused by 'hard' audio inputs from this specific farm (e.g., sounds of irrigation equipment, which have a very different frequency profile than pests) that trigger a pathological inference case. This corner case's inference time exceeds the 20ms watchdog timeout, causing a reset. Upon reboot, the device re-reads the same 'hard' sample from its audio buffer, triggering the same long inference, leading to another reset. The correct solution is not to lengthen the timeout, but to make the boot-up logic more robust. The device should use a few bytes of flash or RTC backup RAM to implement a boot counter. If the counter exceeds a threshold (e.g., 3 reboots in 1 minute), on the next boot it should discard the problematic sample from the buffer, send a diagnostic packet with the corrupted input, and then resume normal operation. This prevents the reboot loop and captures the causal data for debugging.
+  common_mistake: |
+    **The Pitfall:** Assuming the hang is a standard software bug and following the playbook to increase the watchdog timeout.
+    **The Rationale:** Engineers often treat watchdog reboots as generic lockups rather than data-dependent execution spikes, especially when complex feature extraction or inference times vary by input.
+    **The Consequence:** Lengthening the timeout to 50ms just delays the same reboot if the pathological audio still takes longer, keeping the device in a continuous crash loop and draining the battery.
+  napkin_math: |
+    - **Normal Inference:** ~1.56 ms (well under 20ms WDT).
+    - **Pathological Input:** 'Hard' audio triggers worst-case execution paths, spiking inference to ~25 ms.
+    - **Current Behavior:** 25 ms > 20 ms timeout -> WDT reboot. Device re-reads same audio from buffer upon boot -> reboot loop.
+    - **Proposed Fix (50ms WDT):** Next 'hard' input taking >50 ms will trigger the exact same failure.
+    - **Conclusion:** **Lengthening the WDT masks the issue; the fix requires a boot counter to discard problematic samples causing >20ms inferences.**
 status: published
 provenance: imported
 requires_explanation: false

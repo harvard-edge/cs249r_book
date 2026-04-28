@@ -8,27 +8,21 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: Evaluating JIT Compilation for Dynamic Shapes
-scenario: Your team is deploying a Transformer-based NLP inference service on NVIDIA A10G GPUs. The model
-  handles highly dynamic user queries with sequence lengths ranging from 10 to 512 tokens. In eager mode,
-  the average inference latency is 15ms per request. To meet a strict 5ms P99 latency SLA, an engineer
-  proposes wrapping the model in a JIT compiler (e.g., `torch.compile`). However, during load testing,
-  the service experiences severe latency spikes of up to 500ms for almost every new request. Evaluate
-  the architectural trade-offs of this JIT approach for dynamic workloads and propose a quantitative solution
-  to meet the SLA.
+scenario: Your team is deploying a Transformer-based NLP inference service on NVIDIA A10G GPUs. The model handles highly dynamic user queries with sequence lengths ranging from 10 to 512 tokens. In eager mode, the average inference latency is 15ms per request. To meet a strict 5ms P99 latency SLA, an engineer proposes wrapping the model in a JIT compiler (e.g., `torch.compile`). However, during load testing, the service experiences severe latency spikes of up to 500ms for almost every new request.
 question: "How should you use JIT compilation for 10-to-512-token dynamic queries to meet the 5ms P99 SLA without 500ms recompilation spikes?"
 details:
-  realistic_solution: 'Implement input sequence bucketization (e.g., padding to nearest powers of 2: 16,
-    32, 64, 128, 256, 512) alongside compiler dynamic shape support. This restricts the total compiled
-    graphs to 6 buckets (6 * 500ms = 3000ms compile time) instead of potentially 500 unique lengths. After
-    warmup, all requests hit cached compiled graphs at 4ms each. Total time for 1000 requests drops from
-    15,000ms (eager) to 7,000ms (bucketized JIT) — over 2x faster with amortized P99 of 4ms.'
-  common_mistake: Assuming JIT compilation always provides unconditional speedup without accounting for
-    recompilation overhead. Candidates often miss that tracing JIT with dynamic input shapes triggers
-    recompilation on every new shape, which can be orders of magnitude slower than eager mode.
-  napkin_math: 'Eager mode (1,000 requests): 1,000 * 15ms = 15,000ms total. Naive JIT (worst case, 500
-    unique lengths): 500 * 500ms (compile) + 1,000 * 4ms (infer) = 254,000ms. Bucketized JIT (6 buckets):
-    6 * 500ms (compile) + 1,000 * 4ms (infer) = 3,000ms + 4,000ms = 7,000ms (over 2x faster than eager,
-    with amortized P99 latency dropping to 4ms after warmup).'
+  realistic_solution: 'Implement input sequence bucketization (e.g., padding to nearest powers of 2: 16, 32, 64, 128, 256, 512) alongside compiler dynamic shape support. This restricts the total compiled graphs to 6 buckets (6 * 500ms = 3000ms compile time) instead of potentially 500 unique lengths. After warmup, all requests hit cached compiled graphs at 4ms each. Total time for 1000 requests drops from 15,000ms (eager) to 7,000ms (bucketized JIT) — over 2x faster with amortized P99 of 4ms.'
+  common_mistake: |
+    **The Pitfall:** Assuming JIT compilation unconditionally speeds up inference without accounting for graph recompilation overhead.
+    **The Rationale:** Failing to understand that tracing JITs recompile the graph from scratch every time a novel dynamic input shape is encountered.
+    **The Consequence:** Severe P99 latency spikes (500ms+) for every unique token length, completely violating SLA constraints.
+  napkin_math: |
+    * **Eager Mode:** 1,000 requests * 15ms = 15,000ms.
+    * **Naive JIT:** 500 unique lengths * 500ms (compile) + 1,000 * 4ms (infer) = 254,000ms.
+    * **Bucketized JIT (6 powers-of-2):** 6 compiles * 500ms = 3,000ms.
+    * **Bucketized Inference:** 1,000 requests * 4ms = 4,000ms.
+    * **Total Bucketized Time:** 3,000ms + 4,000ms = 7,000ms.
+    * **Conclusion:** **Bucketizing sequence lengths strictly bounds compilation overhead, achieving a stable 4ms amortized latency.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,33 +8,20 @@ competency_area: compute
 bloom_level: evaluate
 phase: both
 title: Shared Memory Bank Conflicts in Reduction Kernels
-scenario: Your LayerNorm kernel on H100 computes a parallel reduction over 4096 elements
-  using shared memory. Each warp reduces 128 elements, but profiling shows 8-way bank
-  conflicts during the reduction phase. The shared memory has 32 banks, each 4 bytes
-  wide. Diagnose the conflict pattern and fix it.
-question: What shared-memory bank conflict pattern causes the 8-way slowdown in the
-  LayerNorm reduction, and how would you fix it?
+scenario: Your LayerNorm kernel on H100 computes a parallel reduction over 4096 elements using shared memory. Each warp reduces 128 elements, but profiling shows 8-way bank conflicts during the reduction phase. The shared memory has 32 banks, each 4 bytes wide. Diagnose the conflict pattern and fix it.
+question: What shared-memory bank conflict pattern causes the 8-way slowdown in the LayerNorm reduction, and how would you fix it?
 details:
-  realistic_solution: 'Shared memory: 32 banks, 4 bytes wide. Address maps to bank:
-    (address / 4) % 32. During tree reduction, thread i accesses element i and element
-    i + stride. At stride = 4: threads 0,4,8,12,16,20,24,28 all read from banks 0,4,8,12,16,20,24,28
-    (no conflict). But threads 0,4,8,12,16,20,24,28 reading i+stride=4,8,12,16,20,24,28,32:
-    bank pattern 4,8,12,16,20,24,28,0 — still no conflict. The 8-way conflict occurs
-    at stride = 32: thread 0 reads index 0 (bank 0) and index 32 (bank 0). Threads
-    0-31 all read from bank (i % 32) for the first operand AND bank ((i+32) % 32)
-    = same bank for the second. Fix: (1) Add a 1-element padding per row: declare
-    shared mem as float smem[128+1]. Now bank(i) = (i + i/32) % 32, breaking the conflict
-    pattern. (2) Use warp shuffle (__shfl_down_sync) instead of shared memory for
-    intra-warp reduction — zero bank conflicts, ~2× faster.'
-  common_mistake: Using a stride of 32 (the number of banks) for reduction, thinking
-    it avoids conflicts. A stride of 32 means every thread accesses the same bank
-    — maximum conflict. The correct approach uses stride 1 (sequential) for initial
-    loading, then tree reduction with proper indexing.
-  napkin_math: 'Without conflicts: 32 threads × 1 cycle = 1 cycle per step, 7 steps
-    for 128→1 = 7 cycles. With 8-way bank conflict at stride 32: 8 serial accesses
-    per cycle = 8 cycles per step × 7 steps = 56 cycles. Warp shuffle: 0 shared memory
-    accesses, 5 cycles for 32→1 reduction. 128 elements: shared mem load (1 cycle)
-    + shuffle (5 cycles) = 6 cycles. Speedup over conflicted: 56/6 = 9.3×.'
+  realistic_solution: 'Shared memory: 32 banks, 4 bytes wide. Address maps to bank: (address / 4) % 32. During tree reduction, thread i accesses element i and element i + stride. At stride = 4: threads 0,4,8,12,16,20,24,28 all read from banks 0,4,8,12,16,20,24,28 (no conflict). But threads 0,4,8,12,16,20,24,28 reading i+stride=4,8,12,16,20,24,28,32: bank pattern 4,8,12,16,20,24,28,0 — still no conflict. The 8-way conflict occurs at stride = 32: thread 0 reads index 0 (bank 0) and index 32 (bank 0). Threads 0-31 all read from bank (i % 32) for the first operand AND bank ((i+32) % 32) = same bank for the second. Fix: (1) Add a 1-element padding per row: declare shared mem as float smem[128+1]. Now bank(i) = (i + i/32) % 32, breaking the conflict pattern. (2) Use warp shuffle (__shfl_down_sync) instead of shared memory for intra-warp reduction — zero bank conflicts, ~2× faster.'
+  common_mistake: |
+    **The Pitfall:** Using a stride of 32 for reduction in shared memory.
+    **The Rationale:** Thinking it avoids conflicts, but a stride of 32 maps to the exact same bank across threads.
+    **The Consequence:** Maximum bank conflict leading to massive latency.
+  napkin_math: |
+    - Reduction of 128 elements requires 7 steps.
+    - Step 1 (64 ops) requires 2 cycles per warp; steps 2-7 require 1 cycle each. Total = 8 cycles without conflicts.
+    - With an 8-way bank conflict, the first steps take 8x longer.
+    - Warp shuffle avoids shared memory entirely.
+    - Result: **Warp shuffle is significantly faster by avoiding all bank conflicts.**
 status: deleted
 provenance: imported
 requires_explanation: false

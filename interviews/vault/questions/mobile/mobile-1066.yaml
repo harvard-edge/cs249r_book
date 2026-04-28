@@ -8,20 +8,20 @@ competency_area: compute
 bloom_level: analyze
 phase: inference
 title: Diagnose Attention Softmax Precision Loss on Mobile NPU
-scenario: 'A Snapdragon 8 Gen 3 mobile LLM deployment shows coherent output for short
-  prompts (<128 tokens) but produces repetitive or incoherent text for 512+ token
-  contexts. Accuracy on a 128-token benchmark: 89%. Accuracy on 512-token benchmark:
-  61%. The model uses INT8 activations throughout, including attention logits before
-  softmax. The Hexagon NPU performs softmax in INT8 with range [-128, 127]. Diagnose
-  the precision failure mode.'
-question: Why do INT8 attention logits on Snapdragon 8 Gen 3 degrade a mobile LLM
-  from 89% at 128 tokens to 61% at 512 tokens?
+scenario: 'A Snapdragon 8 Gen 3 mobile LLM deployment shows coherent output for short prompts (<128 tokens) but produces repetitive or incoherent text for 512+ token contexts. Accuracy on a 128-token benchmark: 89%. Accuracy on 512-token benchmark: 61%. The model uses INT8 activations throughout, including attention logits before softmax. The Hexagon NPU performs softmax in INT8 with range [-128, 127]. Diagnose the precision failure mode.'
+question: Why do INT8 attention logits on Snapdragon 8 Gen 3 degrade a mobile LLM from 89% at 128 tokens to 61% at 512 tokens?
 details:
   realistic_solution: 'Attention logits before softmax: QK^T / sqrt(d_head). At d_head=64, the logits typically have a standard deviation around 1.0. To safely store the maximum possible logit (which grows with context length, often reaching 4-6 at 512 tokens) in INT8 [-128, 127], the quantization scale must be relatively large (e.g., step size of 0.05 to 0.1). Because softmax exponentiates these values, even small quantization errors in the logits (±0.05) translate to large multiplicative errors in the attention weights (e^0.05 ≈ 1.05, a 5% error per token). Over 512 tokens, this noise accumulates in the softmax denominator, severely distorting the attention distribution and causing the model to lose focus. Fix: (1) Keep attention logits in FP16/BF16 before softmax. (2) Use an online softmax (flash attention style) to compute softmax directly from the INT32 accumulator without intermediate INT8 quantization.'
-  common_mistake: Attributing the degradation to model capability (thinking the model
-    'can't handle' long context); the actual issue is accumulated quantization noise from INT8 softmax
-    at long sequence lengths.
-  napkin_math: 'At 512 tokens, the maximum attention logit is roughly 4.5. To avoid saturation, an INT8 scale of ~0.05 might be used (127 × 0.05 = 6.35 max). A logit of 4.5 quantizes to 90. However, the step size is 0.05, meaning up to ±0.025 of quantization error. Error in exp(x): exp(x + 0.025) ≈ exp(x) × 1.025 (2.5% error per logit). When summing 512 of these exponentiated values for the softmax denominator, the accumulated variance from this quantization noise becomes substantial, destroying the normalized probability distribution. FP16 prevents this.'
+  common_mistake: |
+    **The Pitfall:** Quantizing attention logits before softmax.
+    **The Rationale:** Candidates assume INT8 is safe everywhere since the model is small, including the accumulator prior to softmax exponentiation.
+    **The Consequence:** The small quantization error is exponentially magnified by the softmax function, destroying the model's focus at longer context lengths.
+  napkin_math: |
+    - Max attention logit at 512 tokens: ~4.5.
+    - INT8 quantization scale to avoid clipping 4.5: ~0.05 (127 * 0.05 = 6.35).
+    - Max quantization error: ±0.025.
+    - Error magnification in Softmax: exp(x + 0.025) ≈ exp(x) * 1.025 (**2.5% error per logit**).
+    - Over 512 tokens, this 2.5% multiplicative noise accumulates in the denominator, destroying the probability distribution.
 status: published
 provenance: imported
 requires_explanation: false

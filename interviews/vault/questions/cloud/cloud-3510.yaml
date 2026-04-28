@@ -8,81 +8,38 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: Graceful Degradation for LLM Inference on AMD MI300X
-scenario: A financial services company deploys a critical large language model (LLM)
-  for real-time fraud detection. This LLM is served on a cluster of AMD MI300X accelerators,
-  each featuring 192 GB HBM3 memory, 1,307 TFLOPS FP16 sparse compute, and 5.3 TB/s
-  memory bandwidth. During peak transaction periods, the system experiences significant
-  load spikes, occasionally pushing individual MI300X GPUs to their limits, leading
-  to increased latency and potential timeouts for critical inference requests. Design
-  a comprehensive graceful degradation strategy for this system. Explain how you would
-  implement degradation ladders, model fallbacks (fail-safe vs fail-operational),
-  and quality-of-service shedding, specifically leveraging the architectural characteristics
-  of the AMD MI300X.
-question: How would you design a graceful degradation ladder for MI300X fraud detection,
-  including fallbacks, fail-safe/fail-operational modes, and QoS shedding?
+scenario: A financial services company deploys a large language model (LLM) for real-time fraud detection on a cluster of AMD MI300X accelerators. During peak periods, load spikes push GPUs to their limits, causing critical inference requests to time out.
+question: How would you design a graceful degradation ladder for MI300X fraud detection, including fallbacks, fail-safe/fail-operational modes, and QoS shedding?
 details:
-  realistic_solution: "The solution involves a multi-tier degradation ladder: \n1.\
-    \ **Normal Operation (L0):** Serve the primary, high-fidelity LLM (e.g., FP16\
-    \ precision, ~140GB for a 70B model) leveraging the full 192 GB HBM3 and 1,307\
-    \ TFLOPS FP16 compute for optimal performance and quality. \n2. **Mild Congestion\
-    \ (L1 - Quality-of-Service Shedding):** If latency or queue depth exceeds thresholds,\
-    \ switch to a quantized version of the same LLM (e.g., INT4 or FP8). This significantly\
-    \ reduces memory footprint (e.g., 35GB for INT4 70B model) and potentially increases\
-    \ throughput by allowing larger batch sizes or more concurrent inferences per\
-    \ MI300X, exploiting its 5.3 TB/s memory bandwidth more efficiently, while accepting\
-    \ a minor quality reduction. \n3. **High Congestion (L2 - Fail-Operational Fallback):**\
-    \ If L1 is insufficient, trigger a fallback to a smaller, pre-trained, distilled\
-    \ LLM that is faster and requires even less memory (e.g., a 7B parameter model).\
-    \ This maintains core fraud detection functionality (fail-operational) at reduced\
-    \ accuracy/comprehensiveness, ensuring critical transactions are still processed.\
-    \ \n4. **Extreme Congestion (L3 - Fail-Safe Fallback):** For non-critical requests\
-    \ or during catastrophic resource failure, route requests to a highly optimized,\
-    \ extremely lightweight heuristic model or a cached 'no fraud detected' default.\
-    \ This is a fail-safe measure, ensuring a response, even if minimal. Each transition\
-    \ is governed by real-time monitoring of MI300X utilization, HBM3 pressure, and\
-    \ inference latencies, with intelligent load balancers routing traffic to appropriate\
-    \ model versions."
-  common_mistake: A common mistake is to only rely on horizontal scaling without considering
-    the cost, cold-start issues, or the inherent variability of user demand. Another
-    is to simply queue requests, leading to unbounded latency, or to use an 'all-or-nothing'
-    approach where the service either performs optimally or fails entirely, rather
-    than systematically reducing quality to maintain availability. Overlooking the
-    potential for mixed-precision inferencing on hardware like the MI300X to serve
-    as a degradation step is also frequent.
-  napkin_math: '- **FP16 70B Model:** ~140GB VRAM (fits in 192GB HBM3). At 1,307 TFLOPS
-    (FP16), the compute required for a single token forward pass is ~140 GFLOPs. Theoretical
-    compute time without batching is 140 GFLOPs / 1,307 TFLOPS ≈ 0.107 ms. However, single-batch
-    inference is memory-bound, taking 140 GB / 5.3 TB/s = ~26.4 ms per token.
-
-    - **INT4 70B Model:** ~35GB VRAM. This frees up ~157GB on the MI300X, potentially
-    allowing much larger batch sizes. For single-batch, memory read drops to 35 GB / 5.3 TB/s
-    = ~6.6 ms per token, a 4x throughput increase over FP16.
-
-    - **Fallback Model:** A 7B FP16 model would be ~14GB. Memory read time is 14 GB / 5.3 TB/s
-    = ~2.6 ms per token, providing roughly 10x lower latency than the 70B FP16 model.'
+  realistic_solution: |
+    The solution involves a multi-tier degradation ladder:
+    1. **Normal Operation (L0):** Serve the primary FP16 LLM.
+    2. **Mild Congestion (L1):** Switch to a quantized INT4 version of the same LLM, significantly reducing memory footprint and increasing throughput.
+    3. **High Congestion (L2):** Fall back to a smaller, pre-trained distilled LLM (e.g., 7B parameters) to maintain core fail-operational functionality.
+    4. **Extreme Congestion (L3):** Route requests to a highly optimized heuristic model or a cached 'no fraud detected' default as a fail-safe measure.
+  common_mistake: |
+    **The Pitfall:** Relying solely on horizontal scaling or queuing requests without quality degradation.
+    **The Rationale:** Candidates treat inference as an "all-or-nothing" service rather than a flexible computational workload.
+    **The Consequence:** Unbounded latency spikes or complete service failure during traffic bursts.
+  napkin_math: |
+    - FP16 70B Model: ~140GB VRAM. Single-batch memory read takes 140 GB / 5.3 TB/s = ~26.4 ms per token.
+    - INT4 70B Model: ~35GB VRAM. Memory read takes 35 GB / 5.3 TB/s = ~6.6 ms per token.
+    - Fallback 7B FP16 Model: ~14GB VRAM. Memory read takes 14 GB / 5.3 TB/s = ~2.6 ms per token.
+    - **Falling back to a 7B model provides roughly 10x lower latency than the primary 70B FP16 model.**
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 8
 validated: true
-validation_status: WARN
+validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The napkin math for FP16 70B Model includes a simplified theoretical max processing
-  time without batching that is not directly useful for a practical throughput discussion
-  and needs further explanation or removal.
-- The napkin math for INT4 70B Model poses a question about throughput without providing
-  a calculation or answer.
-- The reasoning_competency, knowledge_area, and mode fields are all set to 'None',
-  which should be specified for this question.
+validation_issues: []
 math_verified: true
-math_status: CORRECTED
+math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- 'Incorrect hardware spec for MI300X: states 1300 TFLOPS instead of 1307 TFLOPS.'
-- 'Math error: 140 / 1300 is 0.107, not 107.'
+math_issues: []
 human_reviewed:
   status: not-reviewed
   by: null

@@ -8,24 +8,19 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: Interrupt Shielding vs NIC Coalescing for P99 Latency
-scenario: You are deploying a high-throughput inference service on nodes equipped with 8x NVIDIA A100
-  GPUs, a 128-core CPU, and dual 200GbE NICs. While the average latency is 5ms, the P99 latency frequently
-  spikes to 35ms, breaching the strict 20ms SLO. Profiling shows that CPU threads launching CUDA kernels
-  are being unpredictably preempted by NIC hardware interrupts (SoftIRQs) distributed evenly across all
-  cores by the OS. You must evaluate whether to implement strict CPU core isolation (interrupt shielding)
-  or tune NIC interrupt coalescing to stabilize the P99 latency.
+scenario: You are deploying a high-throughput inference service on nodes equipped with 8x NVIDIA A100 GPUs, a 128-core CPU, and dual 200GbE NICs. While the average latency is 5ms, the P99 latency frequently spikes to 35ms, breaching the strict 20ms SLO. Profiling shows that CPU threads launching CUDA kernels are being unpredictably preempted by NIC hardware interrupts (SoftIRQs) distributed evenly across all cores by the OS.
 question: "Should you use strict CPU core isolation or NIC interrupt coalescing to stabilize P99 latency under the 20ms SLO, and why?"
 details:
-  realistic_solution: Implement interrupt shielding by pinning CUDA launch threads to specific cores (e.g.,
-    cores 16-127) using `taskset` or `cgroups`, and restricting NIC/NVMe interrupts to a disjoint set
-    of dedicated non-inference cores (e.g., cores 0-15) using `/proc/irq/default_smp_affinity`.
-  common_mistake: Candidates often suggest increasing NIC interrupt coalescing (batching packets before
-    interrupting the CPU), failing to realize this directly increases the baseline average latency for
-    all requests and doesn't solve the preemption of the CUDA launch threads.
-  napkin_math: At 200,000 packets/sec spread across 16 NIC queues, a core handles ~12,500 interrupts/sec.
-    Even if an interrupt handler only takes 3µs (37.5ms/sec total CPU time), preempting a CUDA launch
-    thread precisely when the GPU is idle can stall the GPU for the entire duration of the context switch,
-    causing cascading queue build-ups and massive P99 spikes (10ms+).
+  realistic_solution: Implement interrupt shielding by pinning CUDA launch threads to specific cores (e.g., cores 16-127) using `taskset` or `cgroups`, and restricting NIC/NVMe interrupts to a disjoint set of dedicated non-inference cores (e.g., cores 0-15) using `/proc/irq/default_smp_affinity`.
+  common_mistake: |
+    **The Pitfall:** Suggesting an increase in NIC interrupt coalescing to reduce CPU load.
+    **The Rationale:** Batching packets before interrupting the CPU seems like a logical way to reduce context switching overhead.
+    **The Consequence:** This directly increases the baseline average latency for all requests and fails to solve the unpredictable preemption of CUDA launch threads, missing the P99 SLO.
+  napkin_math: |
+    * At 200,000 packets/sec spread across 16 NIC queues, a core handles ~12,500 interrupts/sec.
+    * Each interrupt takes ~3 µs, totaling 37.5 ms of CPU time per second.
+    * If an interrupt preempts a CUDA launch thread exactly when the GPU is idle, the GPU stalls for the entire duration of the context switch.
+    * **This causes cascading queue build-ups and massive P99 spikes (10ms+), which are only solved by isolating interrupts from CUDA launch cores.**
 status: published
 provenance: imported
 requires_explanation: false

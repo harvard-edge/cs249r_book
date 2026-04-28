@@ -8,42 +8,20 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: The Custom Op Compiler Co-Design
-scenario: 'Your research team invents a novel ''Gated Linear Attention'' (GLA) operator that replaces
-  softmax attention. It achieves great accuracy but runs 2× slower than FlashAttention-2 on H100 despite
-  having lower theoretical FLOP count. The operator involves a recurrent scan over sequence positions
-  that cannot be expressed as a single GEMM call. Evaluate the compiler-hardware co-design challenge:
-  why is the compiler failing to generate efficient code for this operator, and design a strategy to close
-  the performance gap.'
+scenario: 'Your research team invents a novel ''Gated Linear Attention'' (GLA) operator that replaces softmax attention. It achieves great accuracy but runs 2× slower than FlashAttention-2 on H100 despite having lower theoretical FLOP count. The operator involves a recurrent scan over sequence positions that cannot be expressed as a single GEMM call.'
 question: "Why can't the compiler generate efficient H100 code for GLA, and how would you close the gap with FlashAttention-2?"
 details:
-  realistic_solution: 'The performance gap has three sources rooted in compiler-hardware mismatch: (1)
-    **No hardware primitive**: FlashAttention maps to HMMA Tensor Core instructions because it is fundamentally
-    a sequence of GEMMs. GLA''s recurrent scan maps to no hardware primitive — the compiler generates
-    scalar FFMA loops, underutilizing the Tensor Cores by ~15×. (2) **Suboptimal memory access pattern**:
-    The scan''s recurrent state (a d×d matrix per head, updated at each position) creates a loop-carried
-    dependency. The compiler cannot tile across the sequence dimension because each position depends on
-    the previous one. This forces sequential shared memory reads with no opportunity for the TMA to prefetch.
-    (3) **Missing fusion opportunity**: The compiler cannot fuse the scan with the preceding linear projection
-    because the scan has a data-dependent loop structure that breaks standard fusion patterns. Strategy
-    to close the gap: (a) Implement a chunkwise parallel scan — process the sequence in chunks of 64 positions,
-    compute intra-chunk with a parallel scan (maps to warp-level reductions), then propagate inter-chunk
-    state serially. This converts O(L) serial steps to O(L/64) serial steps with O(64) parallel work per
-    step. (b) Write a custom Triton kernel that fuses the linear projection with the chunked scan, manually
-    managing the recurrent state in shared memory. (c) Register the fused operator with the compiler so
-    it appears as a single opaque node that is not lowered through standard passes. Expected result: 1.3-1.5×
-    slower than FlashAttention instead of 2× — the residual gap is the irreducible cost of the serial
-    dependency.'
-  common_mistake: '"The operator is just inherently slower — recurrence is fundamentally sequential."
-    While recurrence introduces serial dependencies, parallel scan algorithms can parallelize it, and
-    the real bottleneck is often the compiler''s inability to map the scan to hardware primitives.'
-  napkin_math: 'FlashAttention-2 on H100 at seq_len=4096, d=128, 32 heads: ~0.8ms (Tensor Core-bound,
-    85% utilization). Naive GLA scan: 4096 sequential steps. Instead of summing across heads (which run
-    in parallel on the SMs), the true bottleneck is the loop-carried dependency forcing 4096 irreducible
-    serial HBM reads per head. At ~200ns latency per read, 4096 × 200ns = ~0.8ms of purely sequential
-    memory stall time. With scalar FFMA and uncoalesced read/write overheads, the naive kernel takes ~1.6ms
-    (2× FA2). Chunked scan (chunk=64): 64 inter-chunk serial steps × ~200ns = ~12.8μs stall + 64-way parallel
-    intra-chunk computation. With Triton fusion to eliminate intermediate HBM writes, it achieves ~1.0-1.1ms.
-    Gap: 1.1/0.8 = 1.4× — close to the theoretical minimum imposed by the residual serial dependency.'
+  realistic_solution: 'The performance gap has three sources rooted in compiler-hardware mismatch: (1) **No hardware primitive**: FlashAttention maps to HMMA Tensor Core instructions because it is fundamentally a sequence of GEMMs. GLA''s recurrent scan maps to no hardware primitive — the compiler generates scalar FFMA loops, underutilizing the Tensor Cores by ~15×. (2) **Suboptimal memory access pattern**: The scan''s recurrent state (a d×d matrix per head, updated at each position) creates a loop-carried dependency. The compiler cannot tile across the sequence dimension because each position depends on the previous one. This forces sequential shared memory reads with no opportunity for the TMA to prefetch. (3) **Missing fusion opportunity**: The compiler cannot fuse the scan with the preceding linear projection because the scan has a data-dependent loop structure that breaks standard fusion patterns. Strategy to close the gap: (a) Implement a chunkwise parallel scan — process the sequence in chunks of 64 positions, compute intra-chunk with a parallel scan (maps to warp-level reductions), then propagate inter-chunk state serially. This converts O(L) serial steps to O(L/64) serial steps with O(64) parallel work per step. (b) Write a custom Triton kernel that fuses the linear projection with the chunked scan, manually managing the recurrent state in shared memory. (c) Register the fused operator with the compiler so it appears as a single opaque node that is not lowered through standard passes. Expected result: 1.3-1.5× slower than FlashAttention instead of 2× — the residual gap is the irreducible cost of the serial dependency.'
+  common_mistake: |
+    **The Pitfall:** Assuming the operator is just inherently slower because recurrence is fundamentally sequential.
+    **The Rationale:** Developers often blame algorithmic complexity without analyzing how loop-carried dependencies prevent TMA prefetching and compiler unrolling.
+    **The Consequence:** Accepting a 2x slowdown instead of employing parallel scan algorithms and chunking to map the problem onto warp-level reductions.
+  napkin_math: |
+    1. FlashAttention-2 on H100 at seq_len=4096, d=128: ~0.8ms.
+    2. Naive GLA scan: 4096 sequential steps. At ~200ns latency per HBM read, 4096 * 200ns = ~0.8ms of purely sequential memory stall time.
+    3. With scalar FFMA overheads, naive kernel takes ~1.6ms (2x slower).
+    4. Chunked scan (chunk=64): 64 inter-chunk serial steps * ~200ns = ~12.8μs stall + parallel intra-chunk computation.
+    5. **With Triton fusion, it achieves ~1.0-1.1ms. The 1.4x gap is the irreducible cost of the serial dependency.**
   options:
   - 'The compiler is limited by the HBM bandwidth. The GLA operator is fundamentally memory-bound, so no compiler optimization can improve its speed over FlashAttention without hardware changes.'
   - 'The compiler lacks hardware primitives for recurrent scans. It lowers the scan to scalar loops with serial memory dependencies. The gap can be closed by chunking the sequence to parallelize intra-chunk computation and using a custom Triton kernel to fuse the linear projection.'

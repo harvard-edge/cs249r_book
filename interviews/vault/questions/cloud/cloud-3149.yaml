@@ -8,29 +8,20 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: PagedAttention Block Size Tradeoff
-scenario: After switching from block_size=16 to block_size=1 in vLLM's PagedAttention
-  on A100, you observe that memory utilization improves from 92% to 99% but decode
-  latency increases by 35%. Diagnose the root cause of this latency regression.
-question: Why did switching PagedAttention from block_size=16 to block_size=1 improve
-  memory utilization but increase decode latency by 35%?
+scenario: After switching from block_size=16 to block_size=1 in vLLM's PagedAttention on A100, you observe memory utilization improves from 92% to 99%, but decode latency increases by 35%.
+question: Why did switching PagedAttention from block_size=16 to block_size=1 improve memory utilization but increase decode latency by 35%?
 details:
-  realistic_solution: 'With block_size=1, each token''s KV is a separate allocation.
-    For a 4096-context request with 40 layers x 2 x 40 heads x 128 dim x 2B = 800KB
-    per token, the block table has 4096 entries pointing to scattered 800KB blocks.
-    During attention, the GPU must gather K/V values from 4096 random memory locations
-    per head per layer. This creates non-coalesced memory accesses: instead of sequential
-    128B cache-line reads, each access fetches from a different page. L2 cache hit
-    rate drops from ~70% (contiguous) to ~15% (scattered). At block_size=16, there
-    are only 256 blocks with 12.8MB each — large enough for coalesced access patterns.
-    Optimal block sizes balance fragmentation (smaller = less waste) against access
-    locality (larger = better coalescing): block_size=16-64 is the sweet spot.'
-  common_mistake: Blaming the block table lookup overhead. The real issue is that
-    block_size=1 creates thousands of tiny non-contiguous memory segments, destroying
-    GPU memory access coalescing and L2 cache locality.
-  napkin_math: 'Block_size=1: 4096 random accesses per head. Block_size=16: 256 sequential
-    reads. L2 hit rate: 15% vs 70%. Effective bandwidth at 15% hit: 2TB/s x 0.15 +
-    (random penalty) ~ 0.8 TB/s vs 1.7 TB/s. Decode regression: 1.7/0.8 = 2.1x, but
-    partially masked by compute = net 35%.'
+  realistic_solution: With block_size=1, each token's KV is a separate allocation. During attention, the GPU must gather K/V values from random memory locations, creating non-coalesced memory accesses and destroying L2 cache locality. Optimal block sizes balance fragmentation against access locality.
+  common_mistake: |
+    **The Pitfall:** Blaming the CPU overhead of looking up entries in the block table.
+    **The Rationale:** Candidates don't understand how GPU memory coalescing and L2 cache locality work for small block sizes.
+    **The Consequence:** Attempting to optimize data structures rather than tuning the block size to balance fragmentation and memory coalescing.
+  napkin_math: |
+    - **Block_size=1**: 4,096 random 800 KB accesses per head. L2 hit rate drops to ~15%.
+    - **Block_size=16**: 256 sequential 12.8 MB reads. L2 hit rate remains ~70%.
+    - **Effective bandwidth**: ~0.8 TB/s (block_size=1) vs ~1.7 TB/s (block_size=16).
+    - **Decode regression**: 1.7 / 0.8 = 2.1x slower memory access, partially masked by compute.
+    - **Conclusion**: **The non-coalesced access patterns result in the 35% net latency increase.**
 status: published
 provenance: imported
 requires_explanation: false

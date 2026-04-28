@@ -8,29 +8,21 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Latency Spikes from NPU Graph Shattering
-scenario: You deploy a 2 GOPS vision model to a mobile SoC (NPU rated at 4 TOPS) using an NPU-delegated
-  inference runtime. Expected latency is <5ms. Instead, inference takes 85ms per frame, and CPU utilization
-  spikes to 100% on a big core. The runtime logs report that all 40 convolution layers successfully delegated
-  to the NPU.
-question: "If all 40 convolutions are delegated but latency is 85ms with 100% CPU, what is the likely root cause and fix?"
+scenario: You deploy a 2 GOPS vision model to a mobile SoC (NPU rated at 4 TOPS) using an NPU-delegated inference runtime. Expected latency is <5ms. Instead, inference takes 85ms per frame, and CPU utilization spikes to 100% on a big core. The runtime logs report that all 40 convolution layers successfully delegated to the NPU.
+question: If all 40 convolutions are delegated but latency is 85ms with 100% CPU, what is the likely root cause and fix?
 details:
-  realistic_solution: 'The root cause is ''graph shattering'' (subgraph fragmentation) triggered by an
-    algorithmic operator unsupported by the NPU compiler. Modern vision models often use novel activations
-    (e.g., SiLU or Mish) or dynamic strided slices. Because the NPU runtime delegate cannot compile these
-    specific ops, the framework partitions the execution graph into multiple NPU subgraphs separated by
-    CPU execution nodes. For a CNN with an unsupported activation after every convolution, this results
-    in dozens of CPU-NPU context switches. Each switch requires a synchronous DMA transfer of intermediate
-    feature maps from NPU SRAM/VRAM to system RAM, CPU execution of the activation, and DMA back to the
-    NPU. To fix this, you must co-design the algorithm with the compiler: replace the unsupported operator
-    (e.g., swap SiLU for ReLU6, which has native NPU support). This allows the runtime compiler to fuse
-    the entire model into a single NPU subgraph, entirely eliminating cross-device memory copies and CPU
-    intervention.'
-  common_mistake: Assuming the NPU is thermally throttling or that convolutions are memory-bound, leading
-    to aggressive INT4 quantization attempts.
-  napkin_math: 'Model has 40 Conv-SiLU blocks. NPU Conv compute: 0.1ms. CPU SiLU compute: 0.2ms. Context
-    switch + DMA copy (NPU->CPU->NPU) per block: 1.8ms. Total latency: 40 * (0.1 + 0.2 + 1.8) = 84ms.
-    By changing to ReLU6 (supported by NPU): 40 * 0.1ms (Conv+ReLU6 fused) + 0 context switches = 4.0ms.
-    Speedup: 21x.'
+  realistic_solution: 'The root cause is ''graph shattering'' (subgraph fragmentation) triggered by an algorithmic operator unsupported by the NPU compiler. Modern vision models often use novel activations (e.g., SiLU or Mish) or dynamic strided slices. Because the NPU runtime delegate cannot compile these specific ops, the framework partitions the execution graph into multiple NPU subgraphs separated by CPU execution nodes. For a CNN with an unsupported activation after every convolution, this results in dozens of CPU-NPU context switches. Each switch requires a synchronous DMA transfer of intermediate feature maps from NPU SRAM/VRAM to system RAM, CPU execution of the activation, and DMA back to the NPU. To fix this, you must co-design the algorithm with the compiler: replace the unsupported operator (e.g., swap SiLU for ReLU6, which has native NPU support). This allows the runtime compiler to fuse the entire model into a single NPU subgraph, entirely eliminating cross-device memory copies and CPU intervention.'
+  common_mistake: |
+    **The Pitfall:** Assuming the NPU is thermally throttling.
+    **The Rationale:** Candidates see slow inference times and blame the hardware compute capacity, rather than identifying the cross-device memory transfer overhead caused by subgraph fragmentation.
+    **The Consequence:** Attempting aggressive INT4 quantization or other compute optimizations, completely failing to resolve the actual memory bottleneck.
+  napkin_math: |
+    *   Model has 40 Conv-SiLU blocks.
+    *   NPU Conv compute: 0.1ms. CPU SiLU compute: 0.2ms.
+    *   Context switch + DMA copy (NPU->CPU->NPU) per block: 1.8ms.
+    *   Total latency: 40 * (0.1 + 0.2 + 1.8) = 84ms.
+    *   By changing SiLU to ReLU6 (supported by NPU): 40 * 0.1ms (Conv+ReLU6 fused) + 0 context switches = 4.0ms.
+    *   **Co-designing the model for NPU operator support eliminates DMA copies, providing a 21x speedup.**
 status: published
 provenance: imported
 requires_explanation: false

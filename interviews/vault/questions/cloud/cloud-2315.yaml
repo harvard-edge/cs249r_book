@@ -8,32 +8,21 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: FSDP AllGather PFC Storms at 4K Scale
-scenario: You are debugging a massive training stall on a 4,096-GPU cloud cluster (RoCEv2 network, 400Gbps
-  per GPU) training a 70B LLM with FSDP. At 1,024 GPUs, iteration time is a stable 350ms. Scaling to 4,096
-  GPUs, iteration time fluctuates wildly between 800ms and 3,000ms. GPU compute utilization drops below
-  35%. Profiling shows FSDP `AllGather` operations taking >600ms on average with massive tail latency.
-  Network telemetry shows 0 dead links, but high rates of PFC (Priority Flow Control) pause frames and
-  subsequent Tx/Rx bandwidth dropping to near zero intermittently on specific spine switches.
-question: "What is causing the FSDP AllGather tail latency at 4,096 GPUs, and how would you fix the RoCEv2 network?"
+scenario: You are debugging a massive training stall on a 4,096-GPU cloud cluster (RoCEv2 network, 400Gbps per GPU) training a 70B LLM with FSDP. At 1,024 GPUs, iteration time is a stable 350ms. Scaling to 4,096 GPUs, iteration time fluctuates wildly between 800ms and 3,000ms. GPU compute utilization drops below 35%. Profiling shows FSDP `AllGather` operations taking >600ms on average with massive tail latency. Network telemetry shows 0 dead links, but high rates of PFC (Priority Flow Control) pause frames and subsequent Tx/Rx bandwidth dropping to near zero intermittently on specific spine switches.
+question: What is causing the FSDP AllGather tail latency at 4,096 GPUs, and how would you fix the RoCEv2 network?
 details:
-  realistic_solution: 'The root cause is ECMP (Equal-Cost Multi-Path) hash collisions causing elephant
-    flow congestion. In RoCEv2, NCCL `AllGather` establishes long-lived, high-bandwidth RDMA queue pairs.
-    Because ECMP routes flows based on a static hash of the 5-tuple (IPs, Ports, Protocol), at 4,096 GPUs,
-    multiple large flows inevitably hash to the same physical spine link. This causes microbursts and
-    buffer overflows, triggering PFC pause frames. These pause frames propagate down to the leaf switches,
-    causing a ''PFC storm'' or head-of-line blocking that stalls the ring/tree collectives globally. To
-    fix this: 1) Switch NCCL from flat rings to a hierarchical topology (Ring intra-node, Tree/Butterfly
-    inter-node) to localize traffic and reduce cross-spine flow counts. 2) Enable Adaptive Routing (AR)
-    on the switches to dynamically balance packets across uplinks based on queue depth instead of static
-    ECMP hashing. 3) Tune DCQCN (Datacenter Quantized Congestion Notification) to throttle senders gracefully
-    before switch buffers fill up and trigger catastrophic PFC pauses.'
-  common_mistake: Assuming the network is oversubscribed or nodes are failing, and attempting to reduce
-    batch size or simply replace 'straggler' nodes without addressing the routing layer.
-  napkin_math: Switch buffer size = 32MB. If 2 elephant flows of 400Gbps (50GB/s) collide on a single
-    400Gbps uplink due to ECMP hash collision, the excess arrival rate is 50GB/s. Time to fill a 32MB
-    shared buffer = 32MB / 50GB/s = 0.64ms. Once filled, PFC pause is sent. If NCCL step size is 8MB,
-    transmission takes 8MB / 50GB/s = 160μs. The switch buffer fills and halts traffic before even 4 collective
-    steps complete, causing cascading stalls across the entire 4,096-GPU synchronization group.
+  realistic_solution: The root cause is ECMP (Equal-Cost Multi-Path) hash collisions causing elephant flow congestion. In RoCEv2, NCCL `AllGather` establishes long-lived, high-bandwidth RDMA queue pairs. Because ECMP routes flows based on a static hash of the 5-tuple (IPs, Ports, Protocol), at 4,096 GPUs, multiple large flows inevitably hash to the same physical spine link. This causes microbursts and buffer overflows, triggering PFC pause frames. These pause frames propagate down to the leaf switches, causing a 'PFC storm' or head-of-line blocking that stalls the ring/tree collectives globally. To fix this: 1) Switch NCCL from flat rings to a hierarchical topology (Ring intra-node, Tree/Butterfly inter-node) to localize traffic and reduce cross-spine flow counts. 2) Enable Adaptive Routing (AR) on the switches to dynamically balance packets across uplinks based on queue depth instead of static ECMP hashing. 3) Tune DCQCN (Datacenter Quantized Congestion Notification) to throttle senders gracefully before switch buffers fill up and trigger catastrophic PFC pauses.
+  common_mistake: |
+    **The Pitfall:** Assuming the network is oversubscribed or nodes are failing.
+    **The Rationale:** Intermittent massive tail latencies look like hardware faults or standard congestion, leading to attempts to replace nodes or reduce batch size.
+    **The Consequence:** Wasting time replacing healthy hardware or hobbling the training configuration without fixing the underlying static routing ECMP collisions.
+  napkin_math: |
+    - **Switch buffer size**: 32MB.
+    - **Collision**: If 2 elephant flows of 400Gbps (50GB/s) collide on a single 400Gbps uplink due to ECMP hashing, the excess arrival rate is 50GB/s.
+    - **Fill Time**: Time to fill a 32MB shared buffer = 32MB / 50GB/s = **0.64ms**.
+    - **PFC trigger**: Once filled, a PFC pause is sent.
+    - **NCCL step**: If NCCL step size is 8MB, transmission takes 8MB / 50GB/s = 160μs.
+    - **Result**: The switch buffer fills and halts traffic before even 4 collective steps complete, causing cascading stalls across the entire 4,096-GPU group.
 status: published
 provenance: imported
 requires_explanation: false

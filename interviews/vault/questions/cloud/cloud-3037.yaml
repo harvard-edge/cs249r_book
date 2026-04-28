@@ -7,27 +7,22 @@ topic: model-size-estimation
 competency_area: memory
 bloom_level: apply
 phase: both
-title: 'Model Size Estimation: Realize Full Memory Layout for 13B Model Serving on
-  H100'
-scenario: 'Concretely size every memory component for serving a 13B LLaMA-2 model
-  on a single H100 (80GB HBM3) in FP16 inference mode. Include: model weights, KV-cache
-  pool (allocated at startup for max concurrency), activation buffers (forward pass),
-  framework overhead (PyTorch/vLLM). Compute maximum sustainable concurrent requests.'
-question: How would you size the H100 memory budget for 13B LLaMA-2 FP16 serving and
-  compute max concurrency at 1024 tokens?
+title: 'Model Size Estimation: Realize Full Memory Layout for 13B Model Serving on H100'
+scenario: Concretely size every memory component for serving a 13B LLaMA-2 model on a single H100 (80GB HBM3) in FP16 inference mode. Include: model weights, KV-cache pool (allocated at startup for max concurrency), activation buffers (forward pass), and framework overhead.
+question: How would you size the H100 memory budget for 13B LLaMA-2 FP16 serving and compute max concurrency at 1024 tokens?
 details:
-  realistic_solution: 'Weights: 13B × 2B = 26GB. Framework overhead (PyTorch CUDA
-    context, vLLM allocator): ~2GB. Activation buffer (1 forward pass, 1 layer at
-    a time): 1×2048×5120×2B = 20MB (negligible). KV-cache pool: 80GB - 26GB - 2GB
-    = 52GB available. KV per token (MHA, 40 heads, 128 dim, 40 layers): 40×2×40×128×2B
-    = 819,200B ≈ 800KB/token. Pool capacity: 52GB / 800KB = 65,000 tokens. At avg
-    seq length 1024 tokens: 65,000/1024 = 63 concurrent requests.'
-  common_mistake: Not pre-allocating the KV-cache pool at startup (vLLM's approach),
-    leading to fragmentation and inability to serve long requests under high concurrency.
-  napkin_math: 'Weights: 26GB. Framework: 2GB. KV pool: 52GB. KV/token: 2×40×128×2B×40
-    layers = 819KB ≈ 800KB. Pool tokens: 52×10^9/800×10^3 = 65,000 tokens. At seq=1024:
-    63 concurrent. At seq=512: 126 concurrent. At seq=2048: 31 concurrent. Throughput:
-    63 requests × (1000ms / 7.8ms per step) ≈ 8076 tokens/s.'
+  realistic_solution: 'Weights: 13B × 2B = 26GB. Framework overhead (PyTorch CUDA context, vLLM allocator): ~2GB. Activation buffer (1 forward pass, 1 layer at a time): 1×2048×5120×2B = 20MB (negligible). KV-cache pool: 80GB - 26GB - 2GB = 52GB available. KV per token (MHA, 40 heads, 128 dim, 40 layers): 40×2×40×128×2B = 819,200B ≈ 800KB/token. Pool capacity: 52GB / 800KB = 65,000 tokens. At avg seq length 1024 tokens: 65,000/1024 = 63 concurrent requests.'
+  common_mistake: |
+    **The Pitfall:** Not pre-allocating the KV-cache pool at startup via a system like vLLM's PagedAttention.
+    **The Rationale:** Candidates assume memory can be dynamically allocated per request just like standard PyTorch training, leading to massive memory fragmentation.
+    **The Consequence:** The system runs out of contiguous memory blocks rapidly, causing unexpected OOM crashes and failing to reach peak theoretical concurrency.
+  napkin_math: |
+    - **Weights Budget:** 13B parameters × 2 bytes = 26 GB.
+    - **Framework & Activations:** ~2 GB total.
+    - **Available KV Pool:** 80 GB - 26 GB - 2 GB = 52 GB.
+    - **KV per Token:** 2 (K+V) × 40 heads × 128 dim × 2 bytes × 40 layers ≈ 800 KB/token.
+    - **Total Pool Tokens:** 52 GB / 800 KB = **65,000 tokens**.
+    - **Max Concurrency:** At average seq length 1024 tokens: 65,000 / 1024 = **63 concurrent requests**.
 status: published
 provenance: imported
 requires_explanation: false

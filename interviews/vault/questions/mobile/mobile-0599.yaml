@@ -8,39 +8,21 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: The Delegate Dilemma
-scenario: Your team has implemented a novel 'token-shuffling' operator in TensorFlow to improve a model's
-  robustness. When deployed to a Google Pixel phone using the TFLite NPU delegate, the model is 5x slower
-  than expected. The TFLite profiler shows the execution graph is partitioned into 20 small segments,
-  alternating between 'NPU Execution' and 'CPU Execution'. The custom token-shuffling op is one of the
-  CPU segments. Analyze the system-level costs incurred by this graph partitioning and explain why it
-  leads to such a dramatic slowdown.
-question: "How would you analyze the system-level costs incurred by this graph partitioning and explain why it leads to such a dramatic slowdown?"
+scenario: Your team implemented a custom 'token-shuffling' operator in TensorFlow. When deployed to a Google Pixel via TFLite NPU delegate, it is 5x slower. The graph is partitioned into 20 segments alternating between NPU and CPU.
+question: How do 20 NPU-CPU graph partitions cause a 5x slowdown for a single custom token-shuffling operator?
 details:
-  realistic_solution: 'The TFLite NPU delegate can only accelerate a specific set of known operators.
-    When it encounters an unsupported custom op (''token-shuffling''), it partitions the graph. The execution
-    flow becomes:
-
-    1. NPU executes a supported subgraph.
-
-    2. The output tensor is transferred from the NPU''s internal memory (SRAM) back to the phone''s main
-    DRAM.
-
-    3. The CPU reads the tensor from DRAM.
-
-    4. The CPU executes the single unsupported ''token-shuffling'' op.
-
-    5. The CPU writes the result back to DRAM.
-
-    6. The NPU delegate initiates a transfer of that tensor from DRAM back into its SRAM to execute the
-    next supported subgraph.'
-  common_mistake: Assuming the slowdown is just because the custom op runs on the slower CPU. While the
-    CPU is slower, the dominant cost is not the op's execution itself, but the repeated overhead of transferring
-    data between the CPU's and NPU's memory spaces.
-  napkin_math: Let's quantify the transfer overhead. Assume the intermediate tensor between partitions
-    is 4MB. The mobile LPDDR5x bandwidth is 77 GB/s. A single 4MB transfer to/from RAM takes theoretically
-    4MB / 77 GB/s ≈ 0.05ms. With 20 partitions, each requiring an NPU->CPU and CPU->NPU round trip, that's
-    40 transfers. 40 × 0.05ms = 2ms of pure theoretical memory transfer time, not including OS context
-    switching, driver overhead, and lack of pipelining, which easily inflates this to 10-20ms of overhead.
+  realistic_solution: 'The TFLite NPU delegate can only accelerate supported operators. When it encounters an unsupported custom op, it partitions the graph. The output tensor is transferred from the NPU to DRAM, the CPU reads it, executes the op, and writes back to DRAM. Then the NPU reads it back. This CPU-NPU round trip overhead dominates execution time.'
+  common_mistake: |
+    **The Pitfall:** Assuming the slowdown is purely because the custom op runs on the slower CPU.
+    **The Rationale:** Ignoring the colossal cost of moving data between memory spaces.
+    **The Consequence:** Attempting to optimize the CPU operator's C++ code instead of rewriting the op to be NPU-compatible or keeping the whole graph on one processor.
+  napkin_math: |
+    - 4MB intermediate tensor. Mobile LPDDR5x bandwidth: 77 GB/s.
+    - Transfer time (4MB / 77 GB/s) = ~0.05 ms.
+    - 20 partitions = 40 transfers (NPU->CPU, CPU->NPU).
+    - Theoretical memory time: 40 * 0.05 ms = 2.0 ms.
+    - Actual latency (with driver overhead and sync): 10-20 ms penalty.
+    - **Data transfer overhead dominates, not the CPU computation itself.**
 status: published
 provenance: imported
 requires_explanation: false

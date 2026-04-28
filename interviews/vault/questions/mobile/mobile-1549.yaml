@@ -7,52 +7,20 @@ topic: memory-mapped-inference
 competency_area: memory
 bloom_level: analyze
 phase: inference
-title: Optimizing LLM Inference with Memory-Mapped Weights on Samsung Exynos 2400
-  NPU
-scenario: You are tasked with optimizing a large language model (LLM) for real-time
-  inference on the Samsung Exynos 2400 NPU, which boasts 34.7 TOPS and 12 GB LPDDR5X.
-  The model weights alone exceed the NPU's available on-chip memory but can fit within
-  the LPDDR5X. To minimize load times and enable efficient sharing across multiple
-  inference processes (e.g., for different user queries or model variants), you decide
-  to leverage memory-mapped files for loading model weights. Describe a robust strategy
-  for implementing memory-mapped weight loading on this platform. How would you design
-  the system to minimize cold start latency, considering the NPU's architecture and
-  the LPDDR5X characteristics, especially when the model is first accessed or after
-  a period of inactivity? Furthermore, explain how shared memory across distinct inference
-  processes could be efficiently managed to prevent redundant memory usage and data
-  duplication, ensuring optimal utilization of the 12 GB LPDDR5X.
-question: How would you optimize memory-mapped LLM weights on Exynos 2400 to reduce
-  cold-start latency?
+title: Optimizing LLM Inference with Memory-Mapped Weights on Samsung Exynos 2400 NPU
+scenario: You are tasked with optimizing a large language model (LLM) for real-time inference on the Samsung Exynos 2400 NPU, which boasts 34.7 TOPS and 12 GB LPDDR5X. The model weights alone exceed the NPU's available on-chip memory but can fit within the LPDDR5X. To minimize load times and enable efficient sharing across multiple inference processes (e.g., for different user queries or model variants), you decide to leverage memory-mapped files for loading model weights.
+question: How would you optimize memory-mapped LLM weights on Exynos 2400 to reduce cold-start latency and efficiently share memory across processes?
 details:
-  realistic_solution: The solution involves using `mmap` with `MAP_SHARED` to map
-    the model weight file into the virtual address space. To minimize cold start latency,
-    employ explicit pre-faulting strategies such as `madvise(MADV_WILLNEED)` or `mlock`
-    on the entire mapped region immediately after `mmap`. This proactively loads the
-    weight data into the 12 GB LPDDR5X, preventing on-demand page faults during the
-    critical first inference. For shared memory across processes, the `MAP_SHARED`
-    flag inherently allows multiple processes to share the same physical pages backing
-    the mapped file, ensuring a single physical copy of the model weights. A centralized
-    'model server' process could load and `mmap` the model, then child processes can
-    `mmap` the same file, inheriting the shared physical memory. Utilizing the Samsung
-    Exynos 2400 NPU's dedicated APIs for zero-copy data transfer from LPDDR5X to NPU
-    internal memory where available would further enhance efficiency.
-  common_mistake: A common mistake is to simply 'mmap' the file without proactive
-    page fault management. This leads to 'cold start' latency where each memory access
-    during initial inference triggers a page fault, bringing data from storage into
-    RAM on demand. Another pitfall is not using `MAP_SHARED` correctly, resulting
-    in each process loading its own copy of the weights, negating the memory-saving
-    benefits for multi-process scenarios. Ignoring platform-specific memory alignments
-    or NPU data transfer mechanisms can also lead to suboptimal performance.
-  napkin_math: Consider an 8GB LLM. With LPDDR5X peak bandwidth (e.g., 68 GB/s on
-    Exynos 2400), a theoretical sequential read of 8GB would take ~0.117 seconds.
-    However, cold start without pre-faulting involves individual 4KB page faults.
-    For 8GB (2 million pages), if each page fault takes 50µs (conservative, actual
-    varies), the cumulative latency could be 100 seconds (2M * 50µs), drastically
-    increasing cold start. Pre-faulting using `mlock` or `madvise` aims to complete
-    this I/O in a more efficient, batched manner closer to the theoretical sequential
-    read time. For shared memory, if 5 inference processes each need the 8GB model,
-    `MAP_SHARED` reduces physical RAM usage from 5 * 8GB = 40GB down to a single 8GB
-    footprint, maximizing the utility of the 12GB LPDDR5X.
+  realistic_solution: The solution involves using `mmap` with `MAP_SHARED` to map the model weight file into the virtual address space. To minimize cold start latency, employ explicit pre-faulting strategies such as `madvise(MADV_WILLNEED)` or `mlock` on the entire mapped region immediately after `mmap`. This proactively loads the weight data into the 12 GB LPDDR5X, preventing on-demand page faults during the critical first inference. For shared memory across processes, the `MAP_SHARED` flag inherently allows multiple processes to share the same physical pages backing the mapped file, ensuring a single physical copy of the model weights. A centralized 'model server' process could load and `mmap` the model, then child processes can `mmap` the same file, inheriting the shared physical memory. Utilizing the Samsung Exynos 2400 NPU's dedicated APIs for zero-copy data transfer from LPDDR5X to NPU internal memory where available would further enhance efficiency.
+  common_mistake: |
+    **The Pitfall:** Simply using `mmap` without proactive page fault management or `MAP_SHARED`.
+    **The Rationale:** Unaware that OS demand-paging incurs massive latency overhead per page during the first inference pass, or ignoring cross-process duplication.
+    **The Consequence:** Results in terrible cold-start latency (seconds to minutes) and out-of-memory errors when multiple processes load separate physical copies of the weights.
+  napkin_math: |
+    - 8GB LLM sequential read at 68 GB/s (Exynos 2400 bandwidth): ~0.117 seconds.
+    - Cold start without pre-faulting involves individual 4KB page faults: 8GB = 2 million page faults.
+    - If 1 fault takes 50µs, total latency = 2,000,000 * 50µs = 100 seconds.
+    - **Shared Memory benefit:** 5 inference processes * 8GB = 40GB (OOM on 12GB device). Using `MAP_SHARED` collapses this to a single 8GB footprint, safely fitting in LPDDR5X.
 status: published
 provenance: imported
 requires_explanation: false

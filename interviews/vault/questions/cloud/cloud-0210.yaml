@@ -8,31 +8,25 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: The Rate Limiting Design
-scenario: Our LLM API rate-limits users to 100 requests per minute. A power user sends 100 requests, each
-  with a 50,000-token prompt and requesting 4,000 output tokens. A casual user sends 100 requests with
-  100-token prompts and 50 output tokens. Both hit the same rate limit, but one costs 1,000× more GPU
-  time. How do you design a fair rate limiter?
+scenario: Our LLM API rate-limits users to 100 requests per minute. A power user sends 100 requests, each with a 50,000-token prompt and requesting 4,000 output tokens. A casual user sends 100 requests with 100-token prompts and 50 output tokens. Both hit the same rate limit, but one costs 1,000x more GPU time.
 question: "How do you design a fair rate limiter?"
 details:
-  realistic_solution: Implement token-based rate limiting with separate budgets for input tokens (prefill
-    cost) and output tokens (decode cost). Each user gets a token budget per time window (e.g., 1M input
-    tokens + 100K output tokens per minute). This aligns rate limiting with actual resource consumption.
-    Weight input and output tokens differently because prefill is compute-bound (cheaper per token at
-    high batch sizes) while decode is memory-bandwidth-bound (expensive per token regardless of batch
-    size).
-  common_mistake: '"Request-based rate limiting is fine — all requests are equal." This is the fundamental
-    error. A request with 50K input tokens consumes ~500× more prefill compute and ~80× more decode compute
-    than a 100-token request. Request-count rate limiting lets heavy users subsidize their costs with
-    the same limits as light users.'
-  napkin_math: '70B model on H100: | **Prefill cost per token:** 2 × 70B = 140 GFLOPs per token. At 989
-    TFLOPS: 0.14ms/token. | **Decode cost per token:** Load 140 GB weights from HBM. At 3.35 TB/s: 42ms/token
-    (at BS=1). | **Power user (50K input + 4K output per request, 100 requests):** | Prefill: 100 × 50,000
-    × 0.14ms = **700 seconds** of compute. | Decode: 100 × 4,000 × 42ms = **16,800 seconds** of compute
-    (at BS=1; batching helps). | **Casual user (100 input + 50 output per request, 100 requests):** |
-    Prefill: 100 × 100 × 0.14ms = **1.4 seconds**. | Decode: 100 × 50 × 42ms = **210 seconds**. | **Cost
-    ratio:** Power user consumes (700 + 16,800) / (1.4 + 210) = **83× more GPU time** for the same number
-    of requests. | **Token-based limit:** Give both users 500K input tokens/min + 50K output tokens/min.
-    Power user can send ~10 requests. Casual user can send all 100. Fair.'
+  realistic_solution: Implement token-based rate limiting with separate budgets for input tokens (prefill cost) and output tokens (decode cost). Each user gets a token budget per time window (e.g., 1M input tokens + 100K output tokens per minute). This aligns rate limiting with actual resource consumption. Weight input and output tokens differently because prefill is compute-bound (cheaper per token at high batch sizes) while decode is memory-bandwidth-bound (expensive per token regardless of batch size).
+  common_mistake: |
+    **The Pitfall:** Using standard request-based rate limiting.
+    **The Rationale:** Candidates assume "all requests are equal," ignoring the massive variance in resource consumption. A request with 50K input tokens consumes ~500x more prefill compute and ~80x more decode compute than a 100-token request.
+    **The Consequence:** Request-count rate limiting lets heavy users subsidize their costs with the same limits as light users, monopolizing the GPU and degrading latency.
+  napkin_math: |
+    1. **Prefill cost per token:** 2 * 70B = 140 GFLOPs per token. At 989 TFLOPS: 0.14ms/token.
+    2. **Decode cost per token:** Load 140 GB weights from HBM. At 3.35 TB/s: 42ms/token (at BS=1).
+    3. **Power user compute (50K input + 4K output per request, 100 requests):**
+       - Prefill: 100 * 50,000 * 0.14ms = 700 seconds.
+       - Decode: 100 * 4,000 * 42ms = 16,800 seconds.
+    4. **Casual user compute (100 input + 50 output per request, 100 requests):**
+       - Prefill: 100 * 100 * 0.14ms = 1.4 seconds.
+       - Decode: 100 * 50 * 42ms = 210 seconds.
+    5. **Cost ratio:** (700 + 16,800) / (1.4 + 210) = **83x more GPU time** for the same number of requests.
+    6. **Token-based limit:** Give both users 500K input tokens/min + 50K output tokens/min. Power user can send ~10 requests. Casual user can send all 100. **Fair.**
 status: published
 provenance: imported
 requires_explanation: false
@@ -45,8 +39,6 @@ math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-math_issues:
-- H100 compute specified as 990 TFLOPS instead of 989 TFLOPS.
 human_reviewed:
   status: not-reviewed
   by: null

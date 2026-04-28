@@ -8,31 +8,20 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: 'Queueing Theory Realization: Queue Memory Sizing for KV Cache Pooling'
-scenario: 'Size the KV cache memory pool for an H100 (80GB HBM3) running LLaMA-3-70B
-  with continuous batching. Mean queue depth is L=20 requests (from Little''s Law:
-  λ=40 req/s, W=0.5s). Each request has context length uniformly distributed 100-4000
-  tokens. Calculate required KV cache size and determine the maximum safe concurrency
-  before OOM.'
-question: With L=20, how much KV cache memory is needed per request and what maximum
-  active concurrency fits before OOM?
+scenario: Size the KV cache memory pool for an H100 (80GB HBM3) running LLaMA-3-70B with continuous batching. Mean queue depth is L=20 requests (from Little's Law: λ=40 req/s, W=0.5s). Each request has context length uniformly distributed 100-4000 tokens.
+question: With L=20, how much KV cache memory is needed per request and what maximum active concurrency fits before OOM?
 details:
-  realistic_solution: 'KV cache per token per layer: 2 (K and V) * num_heads * head_dim
-    * 2 bytes = 2 * 64 * 128 * 2 = 32KB per token. 70B model: 80 layers. Per token
-    total: 32KB * 80 = 2.56MB per token. Mean context: (100+4000)/2 = 2050 tokens.
-    KV per request: 2050 * 2.56MB = 5.25GB. Weights: 140GB (BF16). Remaining for KV:
-    80-140 = negative! Must use INT4/INT8 weights. INT4 70B: 35GB. KV budget: 80-35
-    = 45GB. Max concurrent requests: 45GB / 5.25GB = 8.6 → 8 concurrent. L=20 from
-    Little''s Law means 12 requests are waiting (not in KV). Continuous batching handles
-    this correctly.'
-  common_mistake: Assuming all queued requests need full KV cache allocated at queue
-    time rather than understanding that continuous batching only allocates KV for
-    actively generating (not waiting) requests.
-  napkin_math: 'KV per token: 2*64*128*2 = 32KB per layer. 80 layers: 2.56MB/token.
-    Mean context = 2050 tok. KV per req = 2050 * 2.56MB = 5.25GB. INT4 weights: 70B
-    * 0.5 bytes = 35GB. Activations/overhead: ~3GB. Available for KV: 80-35-3 = 42GB.
-    Max active batch: floor(42/5.25) = 8 requests. These 8 generate; 12 wait in DRAM
-    queue. Throughput: 8 * 2 tok/s (decode) = 16 tok/s. With speculative: ~4x → 64
-    tok/s for 8 concurrent.'
+  realistic_solution: 'KV cache per token per layer: 2 (K and V) * num_heads * head_dim * 2 bytes = 2 * 64 * 128 * 2 = 32KB per token. 70B model: 80 layers. Per token total: 32KB * 80 = 2.56MB per token. Mean context: (100+4000)/2 = 2050 tokens. KV per request: 2050 * 2.56MB = 5.25GB. Weights: 140GB (BF16). Remaining for KV: 80-140 = negative! Must use INT4/INT8 weights. INT4 70B: 35GB. KV budget: 80-35 = 45GB. Max concurrent requests: 45GB / 5.25GB = 8.6 → 8 concurrent. L=20 from Little''s Law means 12 requests are waiting (not in KV). Continuous batching handles this correctly.'
+  common_mistake: |
+    **The Pitfall:** Assuming all queued requests need full KV cache allocated at queue time.
+    **The Rationale:** Engineers mistake queue depth for active concurrency, forgetting how continuous batching functions.
+    **The Consequence:** They erroneously calculate that the system will constantly OOM and over-provision expensive GPU hardware, wasting resources.
+  napkin_math: |
+    - KV per token: 2*64*128*2 = 32KB per layer. 80 layers: 2.56MB/token.
+    - Mean context = 2050 tok. KV per req = 2050 * 2.56MB = 5.25GB.
+    - INT4 weights: 70B * 0.5 bytes = 35GB. Activations/overhead: ~3GB.
+    - Available for KV: 80GB - 35GB - 3GB = 42GB.
+    - **Max active batch: floor(42GB / 5.25GB) = 8 requests. The remaining 12 requests safely wait in DRAM.**
 status: published
 provenance: imported
 requires_explanation: false

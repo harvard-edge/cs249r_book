@@ -8,28 +8,19 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Diagnosing Write-Bound Systolic Arrays
-scenario: 'Your team is deploying a large recommendation model on a custom cloud accelerator featuring
-  a 256x256 systolic array. During profiling of the deep fully-connected layers (which use INT8 inputs/weights
-  and INT32 accumulators), you observe that off-chip memory bandwidth is saturated. However, the performance
-  trace reveals a severe asymmetry: DRAM write bandwidth is maxed out at 400 GB/s, while DRAM read bandwidth
-  hovers at only 100 GB/s. Compute utilization is stalled at a dismal 15%. What is the architectural root
-  cause of this inverted memory profile, and how should you reconfigure the dataflow to fix it?'
-question: "What is the architectural root cause of this inverted memory profile, and how should you reconfigure the dataflow to fix it?"
+scenario: Your team is deploying a large recommendation model on a custom cloud accelerator featuring a 256x256 systolic array. During profiling of the deep fully-connected layers (which use INT8 inputs/weights and INT32 accumulators), you observe that off-chip memory bandwidth is saturated. However, the performance trace reveals a severe asymmetry: DRAM write bandwidth is maxed out at 400 GB/s, while DRAM read bandwidth hovers at only 100 GB/s. Compute utilization is stalled at a dismal 15%.
+question: What is the architectural root cause of this inverted memory profile, and how should you reconfigure the dataflow to fix it?
 details:
-  realistic_solution: Analyze the trace to recognize that the compiler selected a Weight Stationary (WS)
-    dataflow with a tile size that forces high-precision INT32 partial sums to constantly spill to DRAM
-    before accumulation is complete. Reconfigure the compiler to force an Output Stationary (OS) dataflow,
-    pinning the 32-bit partial sums in the local PE accumulators and streaming the much smaller 8-bit
-    inputs and weights.
-  common_mistake: Assuming the workload is fundamentally memory-bandwidth bound and attempting to increase
-    batch size or prune weights, completely missing that the higher-precision INT32 partial sums are causing
-    a write-thrashing bottleneck.
-  napkin_math: Under partial sum spilling (WS dataflow), each intermediate MAC might trigger an INT32
-    read (4B) and INT32 write (4B), compared to INT8 reads (2B) for inputs/weights. The memory traffic
-    ratio becomes heavily skewed toward 4B writes. By switching to Output Stationary, partial sums stay
-    locked in local SRAM/PE registers until fully accumulated. The write traffic drops from 4B per intermediate
-    MAC to just 1 byte (post-activation INT8) per finished output, instantly eliminating the 400 GB/s
-    write bottleneck.
+  realistic_solution: Analyze the trace to recognize that the compiler selected a Weight Stationary (WS) dataflow with a tile size that forces high-precision INT32 partial sums to constantly spill to DRAM before accumulation is complete. Reconfigure the compiler to force an Output Stationary (OS) dataflow, pinning the 32-bit partial sums in the local PE accumulators and streaming the much smaller 8-bit inputs and weights.
+  common_mistake: |
+    **The Pitfall:** Assuming the workload is fundamentally memory-bandwidth bound and attempting to increase batch size or prune weights.
+    **The Rationale:** Completely missing that the higher-precision INT32 partial sums are causing a write-thrashing bottleneck.
+    **The Consequence:** Failed optimization attempts that do not resolve the memory inversion.
+  napkin_math: |
+    - Partial sum spilling (Weight Stationary): intermediate MAC triggers an INT32 read (4B) and write (4B), vs INT8 reads (2B) for inputs.
+    - Output Stationary: partial sums stay locked in local SRAM.
+    - Write traffic drops from 4B per intermediate MAC to just 1 byte (post-activation INT8) per finished output.
+    - Result: **Instantly eliminates the 400 GB/s write bottleneck.**
 status: published
 provenance: imported
 requires_explanation: false

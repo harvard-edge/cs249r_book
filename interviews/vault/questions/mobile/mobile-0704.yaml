@@ -8,31 +8,19 @@ competency_area: precision
 bloom_level: analyze
 phase: inference
 title: The Cross-Platform Confidence Divergence
-scenario: You train a single PyTorch image classification model and deploy it as CoreML on iOS (iPhone
-  16 Pro, A18 Pro) and TFLite on Android (Galaxy S24, Snapdragon 8 Gen 3). Both use INT8 quantization.
-  For the same test image, the iOS model outputs 87% confidence for 'golden retriever' while the Android
-  model outputs 71% confidence. The predicted class is the same, but the confidence gap causes your app's
-  UX to behave differently (iOS shows 'Definitely a golden retriever!' while Android shows 'Might be a
-  golden retriever'). Explain the three conversion steps where confidence diverges.
-question: "Where do CoreML and TFLite INT8 conversion differences make iOS show 87% confidence while Android shows 71%?"
+scenario: You train a single PyTorch image classification model and deploy it as CoreML on iOS and TFLite on Android. Both use INT8 quantization. For the same test image, the iOS model outputs 87% confidence for 'golden retriever' while the Android model outputs 71% confidence. The predicted class is the same, but the confidence gap causes your app's UX to behave differently.
+question: Where do CoreML and TFLite INT8 conversion differences make iOS show 87% confidence while Android shows 71%?
 details:
-  realistic_solution: 'Three conversion steps introduce divergence: (1) Logit quantization differences:
-    TFLite and CoreML use different quantization schemas and calibration logic, shifting the raw logits.
-    (2) Softmax implementation: INT8 TFLite often approximates exp() using lookup tables (LUTs) with limited
-    precision, while CoreML usually runs softmax in FP16 on the Apple Neural Engine. (3) The exponential
-    nature of softmax: small logit shifts (e.g., from 4.2 down to 3.6) are exponentiated, turning a minor
-    pre-softmax difference into a massive 16% post-softmax confidence drop. The confidence gap is real,
-    but the predicted class remains robust.'
-  common_mistake: '"The models are quantized differently — requantize with the same calibration data."
-    Even with identical calibration data, the conversion pipelines produce different quantized models
-    because they make different algorithmic choices.'
-  napkin_math: 'Logits (FP32 reference): [4.2, 2.1, 0.5, -1.3]. FP32 softmax: [0.869, 0.106, 0.021, 0.004].
-    CoreML FP16 softmax: exp(4.2) = 66.69 (FP16: 66.75, 0.09% error). Result: [0.869, 0.106, 0.021, 0.004]
-    accurate. TFLite INT8 softmax (lookup table, 256 entries): exp(4.2) = 67 (table quantization). Result:
-    [0.871, 0.105, 0.020, 0.004] small shift. Critical edge case: logits [12.5, 12.4, 0.1]. FP32: [0.525,
-    0.475, 0.000]. INT8 lookup: exp(12.5) saturates at 127, both classes get 127, softmax = [0.50, 0.50,
-    0.00]. The 5% confidence flip changes classification on 3-8% of edge-case inputs. ANE inference: 2
-    ms. GPU fallback for FP32 softmax: 5 ms (+150% latency).'
+  realistic_solution: 'Three conversion steps introduce divergence: (1) Logit quantization differences: TFLite and CoreML use different quantization schemas and calibration logic, shifting the raw logits. (2) Softmax implementation: INT8 TFLite often approximates exp() using lookup tables (LUTs) with limited precision, while CoreML usually runs softmax in FP16 on the Apple Neural Engine. (3) The exponential nature of softmax: small logit shifts (e.g., from 4.2 down to 3.6) are exponentiated, turning a minor pre-softmax difference into a massive 16% post-softmax confidence drop. The confidence gap is real, but the predicted class remains robust.'
+  common_mistake: |
+    **The Pitfall:** Assuming requantizing with the same calibration data guarantees identical outputs across platforms.
+    **The Rationale:** Developers often treat quantization as a deterministic mathematical function, ignoring vendor-specific LUTs and compiler optimizations.
+    **The Consequence:** Unexplained UX divergences and silent accuracy regressions across iOS and Android.
+  napkin_math: |
+    1. FP32 reference logits [12.5, 12.4, 0.1] yield Softmax = [0.525, 0.475, 0.000].
+    2. CoreML FP16 softmax uses high precision, retaining the true distribution.
+    3. TFLite INT8 softmax uses a 256-entry lookup table where exp(12.5) saturates at 127.
+    4. **Result:** Both top classes hit the 127 ceiling, forcing a [0.50, 0.50, 0.00] distribution and swinging confidence by 5%.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,32 +8,22 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: Gradient Accumulation for Sparse Embedding Training
-scenario: You are training a DLRM on 128 MI300X GPUs (192 GB each, 5.3 TB/s HBM).
-  Gradient accumulation is set to 16 steps. You observe that memory usage for sparse
-  gradient tensors grows unboundedly during accumulation, eventually OOMing at step
-  12. Diagnose the cause and fix it without reducing accumulation steps or batch size.
-question: Why do sparse gradients OOM during 16-step accumulation on 128 MI300X GPUs,
-  and how would you fix it without reducing batch or accumulation?
+scenario: 'You are training a DLRM on 128 MI300X GPUs (192 GB each, 5.3 TB/s HBM). Gradient accumulation is set to 16 steps. You observe that memory usage for sparse gradient tensors grows unboundedly during accumulation, eventually OOMing at step 12.'
+question: Why do sparse gradients OOM during 16-step accumulation on 128 MI300X GPUs, and how would you fix it without reducing batch or accumulation?
 details:
-  realistic_solution: 'Sparse embedding gradients are indexed: each training sample
-    touches a specific subset of embedding rows. With 16-step accumulation, the accumulated
-    sparse gradient contains indices from 16 batches, each with batch_size × num_sparse_features
-    unique rows. If batch_size=32768 and each sample touches 500 sparse features, one
-    step produces 32768 × 500 ≈ 16.4M gradient entries. 16.4M entries × (index:
-    8 bytes + gradient: 64 dim × 4 bytes) = 16.4M × 264 bytes = 4.3 GB per GPU per
-    step for sparse gradient accumulation. MI300X 192 GB: with 140 GB memory for model shards/activations
-    and 4.3 GB sparse grads × 16 accumulation ≈ 69 GB → total 209 GB > 192 GB. (OOMs at step 12: 140 + 12×4.3 = 191.6 GB).
-    Fix: (1) Use immediate sparse gradient application (not accumulation): after each micro-step,
-    immediately apply the sparse gradient update to the embedding table (embedding_table[indices]
-    += lr × grad). This keeps memory O(1 step) instead of O(N steps). Dense gradients
-    (MLP) still accumulate normally. (2) Alternatively: deduplicate indices within
-    each step and average gradients for repeated indices before accumulation.'
-  common_mistake: 'Thinking gradient accumulation for sparse tensors works like dense:
-    accumulate for N steps, then update. For sparse tensors, naive accumulation materializes
-    all gradient indices from all N steps into a single sparse tensor — the number
-    of unique indices grows with N steps, consuming O(N × batch_size × indices_per_sample)
-    memory.'
-  napkin_math: 'Sparse grad memory per step: 32768 samples × 500 sparse features × (8 byte index + 256 byte grad) = 16.4M × 264 = 4.3 GB per step. 16 steps: 69 GB. With model and states (140 GB shard) — already over 192 GB budget by step 12 (140 + 12×4.3 = 191.6 GB). Apply-immediately: memory for sparse grads = 4.3 GB (1 step) — 16× reduction, frees ~65 GB.'
+  realistic_solution: 'Sparse embedding gradients are indexed: each training sample touches a specific subset of embedding rows. With 16-step accumulation, the accumulated sparse gradient contains indices from 16 batches, each with batch_size × num_sparse_features unique rows. If batch_size=32768 and each sample touches 500 sparse features, one step produces 32768 × 500 ≈ 16.4M gradient entries. 16.4M entries × (index: 8 bytes + gradient: 64 dim × 4 bytes) = 16.4M × 264 bytes = 4.3 GB per GPU per step for sparse gradient accumulation. MI300X 192 GB: with 140 GB memory for model shards/activations and 4.3 GB sparse grads × 16 accumulation ≈ 69 GB → total 209 GB > 192 GB. (OOMs at step 12: 140 + 12×4.3 = 191.6 GB). Fix: (1) Use immediate sparse gradient application (not accumulation): after each micro-step, immediately apply the sparse gradient update to the embedding table (embedding_table[indices] += lr × grad). This keeps memory O(1 step) instead of O(N steps). Dense gradients (MLP) still accumulate normally. (2) Alternatively: deduplicate indices within each step and average gradients for repeated indices before accumulation.'
+  common_mistake: |
+    **The Pitfall:** Thinking gradient accumulation for sparse tensors works identically to dense tensors.
+    
+    **The Rationale:** Candidates assume sparse accumulation is just adding values in place, failing to realize that native PyTorch accumulates sparse tensors by concatenating their indices indefinitely.
+    
+    **The Consequence:** The number of unique indices grows linearly with the accumulation steps, causing a catastrophic memory leak and inevitable OOM.
+  napkin_math: |
+    * **Unique Indices:** 32,768 samples × 500 sparse features = 16.38M indices
+    * **Memory per Step:** 16.38M × (8 bytes index + 256 bytes grad) = 4.32 GB
+    * **Accumulated Memory (16 steps):** 16 × 4.32 GB = 69.1 GB
+    * **Total Memory at Step 12:** 140 GB (model) + (12 × 4.32 GB) = 191.8 GB
+    * **Result:** **The GPU exceeds its 192 GB limit by step 12. Applying immediately reduces sparse gradient memory to a constant 4.3 GB.**
 status: published
 provenance: imported
 requires_explanation: false

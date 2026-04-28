@@ -8,30 +8,20 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Implementing a Custom Kubernetes Scheduler Extender for GPU Topology
-scenario: Your data center has 16-GPU H100 nodes interconnected via NVLink Switch
-  (NVSwitch 3.0, 900 GB/s all-to-all). A multi-node training job spans 4 nodes and
-  must maximize NVLink bandwidth within each node while minimizing cross-node RDMA
-  traffic. The default Kubernetes scheduler is topology-unaware. Implement a scheduler
-  extension that scores nodes based on GPU-to-GPU bandwidth topology.
-question: How would you implement a Kubernetes scheduler extension that scores H100
-  nodes by GPU-to-GPU bandwidth topology for the 4-node training job?
+scenario: Your data center has 16-GPU H100 nodes interconnected via NVLink Switch (900 GB/s all-to-all). A multi-node training job spans 4 nodes and must maximize NVLink bandwidth within each node while minimizing cross-node RDMA traffic. The default Kubernetes scheduler is topology-unaware.
+question: How would you implement a Kubernetes scheduler extension that scores H100 nodes by GPU-to-GPU bandwidth topology for the 4-node training job?
 details:
-  realistic_solution: 'Deploy a scheduler extender sidecar that reads GPU topology
-    from `nvidia-smi topo -m` output cached as a ConfigMap per node. Register it in
-    `KubeSchedulerConfiguration.extenders` with `prioritize: true`. The extender scores
-    each node 0–100 based on the number of NVLink P2P paths available between requested
-    GPUs. For 8-GPU H100 nodes with full NVSwitch mesh, all intra-node pairs score
-    100; cross-socket PCIe paths score 40. The scheduler selects the top-scored node
-    set. Refresh the ConfigMap via a DaemonSet that runs `nvidia-smi topo` every 5
-    minutes.'
-  common_mistake: Implementing a full custom scheduler from scratch; most teams don't
-    realize Kubernetes exposes a `scheduler extender` HTTP webhook interface that
-    receives filter/prioritize calls with node lists, allowing topology scoring without
-    forking the main scheduler binary.
-  napkin_math: 'NVSwitch 3.0 all-to-all: 900 GB/s aggregate. InfiniBand HDR inter-node:
-    200 Gb/s = 25 GB/s per link. Ratio: 36×. An AllReduce on 1 GB gradient tensor
-    over NVLink takes ~1.1 ms intra-node vs. ~40 ms over IB — 36× latency difference.
-    Topology-aware scheduling eliminates this for single-node fits.'
+  realistic_solution: 'Deploy a scheduler extender sidecar that reads GPU topology from `nvidia-smi topo -m` output cached as a ConfigMap per node. Register it in `KubeSchedulerConfiguration.extenders` with `prioritize: true`. The extender scores each node 0–100 based on the number of NVLink P2P paths available between requested GPUs. For 8-GPU H100 nodes with full NVSwitch mesh, all intra-node pairs score 100; cross-socket PCIe paths score 40. The scheduler selects the top-scored node set. Refresh the ConfigMap via a DaemonSet that runs `nvidia-smi topo` every 5 minutes.'
+  common_mistake: |
+    **The Pitfall:** Implementing a full custom scheduler from scratch.
+    **The Rationale:** Candidates assume Kubernetes requires rewriting core components to handle advanced hardware placement.
+    **The Consequence:** Creating an unmaintainable, brittle orchestration fork when standard HTTP webhook extenders already exist for this exact purpose.
+  napkin_math: |
+    - NVLink all-to-all: 900 GB/s.
+    - InfiniBand HDR inter-node: 200 Gb/s = 25 GB/s.
+    - Bandwidth ratio: 900 / 25 = 36x difference.
+    - Latency impact: An AllReduce on a 1 GB tensor takes ~1.1 ms intra-node vs ~40 ms over IB.
+    - **Conclusion: Topology-aware scheduling avoids a 36x latency penalty by keeping dense communication entirely within the 16-GPU NVLink domain.**
 status: published
 provenance: imported
 requires_explanation: false

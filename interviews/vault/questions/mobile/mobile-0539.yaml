@@ -8,37 +8,26 @@ competency_area: architecture
 bloom_level: apply
 phase: training
 title: The On-Device Search Dilemma
-scenario: You're a mobile ML engineer building an on-device 'Visual Search' feature. Your V1 prototype
-  uses a small Vision Transformer (ViT) and meets the accuracy goal, but it consistently misses the 16ms
-  'jank' budget on your target device (Apple A17 Pro), causing UI stutter. A Neural Architecture Search
-  (NAS) has proposed a MobileNet-style CNN using depthwise separable convolutions; it's much faster but
-  has 1.5% lower accuracy. Your manager is hesitant to sacrifice accuracy and asks you to diagnose exactly
-  *why* the ViT is so much slower.
+scenario: "You're a mobile ML engineer building an on-device 'Visual Search' feature. Your V1 prototype uses a small Vision Transformer (ViT) and meets the accuracy goal, but it consistently misses the 16ms 'jank' budget on your target device (Apple A17 Pro), causing UI stutter. A Neural Architecture Search (NAS) has proposed a MobileNet-style CNN using depthwise separable convolutions; it's much faster but has 1.5% lower accuracy. Your manager is hesitant to sacrifice accuracy and asks you to diagnose exactly why the ViT is so much slower."
 question: "Why does the ViT miss the 16ms mobile jank budget compared with the NAS-proposed depthwise CNN?"
 details:
   realistic_solution: 'The correct diagnosis lies in the fundamental difference in memory access patterns and arithmetic intensity, not just raw compute. While the ViT block does require more compute (~67 MFLOPs vs ~9 MFLOPs), 67 MFLOPs takes a fraction of a millisecond on a 35 TOPS NPU. The true bottleneck is memory bandwidth. The ViT''s self-attention has a very low Arithmetic Intensity (Ops/Byte) and non-local memory access patterns for the attention map, leading to a high number of cache misses and causing the compute units to stall while waiting for DRAM. The CNN''s convolutional structure has much better spatial locality, leading to better cache utilization.'
-  common_mistake: Engineers often have a hand-wavy sense that 'Transformers are slow' and incorrectly assume the root cause is the higher FLOP count. A common mistake is to only compare the computational complexity (FLOPs) without realizing that on powerful mobile NPUs, raw compute is rarely the bottleneck, while memory bandwidth and cache access patterns dominate real-world latency.
+  common_mistake: |
+    **The Pitfall:** Assuming Transformers are slow solely due to higher FLOP counts.
+    **The Rationale:** Engineers often compare the computational complexity (FLOPs) without realizing that on powerful mobile NPUs, raw compute is rarely the bottleneck, while memory bandwidth and cache access patterns dominate real-world latency.
+    **The Consequence:** Incorrectly optimizing for FLOP reduction instead of memory access patterns.
   napkin_math: |
-    **ViT Self-Attention (QK^T and AV):**
-    For 16x16 patches on a 256x256 image, N = 256 tokens. Feature dim D = 128.
-    Compute: 4 * N^2 * D = 4 * 256^2 * 128 = 33.5 MFLOPs.
-    Memory (Ideal): Reading Q,K,V = 3 * 256 * 128 * 2B = 196 KB.
-    AI = 33.5 MFLOPs / 196 KB ≈ 171 Ops/Byte. 
-    A17 Pro Ridge Point = ~683 Ops/Byte. ViT AI (171) << Ridge (683) -> severely memory-bound. 
-    Crucially, global self-attention requires random access to the N*N attention map, causing cache thrashing.
-
-    **MobileNet CNN (Depthwise Separable):**
-    Spatial locality in 3x3 convolutions allows the NPU to stream features perfectly into SRAM cache using sliding windows, avoiding DRAM roundtrips. Even though depthwise convolutions also have low AI, their sequential memory access guarantees high cache hit rates, allowing the NPU to maintain much higher effective memory bandwidth and throughput.
+    - **ViT Self-Attention (QK^T and AV):** For 16x16 patches on a 256x256 image, `N = 256` tokens. Feature dim `D = 128`.
+    - Compute: `4 * N^2 * D = 4 * 256^2 * 128 = 33.5 MFLOPs`.
+    - Memory (Ideal): Reading Q, K, V = `3 * 256 * 128 * 2B = 196 KB`.
+    - Arithmetic Intensity (AI) = `33.5 MFLOPs / 196 KB ≈ 171 Ops/Byte`.
+    - A17 Pro Ridge Point = `~683 Ops/Byte`. Since **171 << 683**, the ViT is severely memory-bound.
+    - **MobileNet CNN:** Spatial locality in 3x3 convolutions allows streaming features into SRAM using sliding windows, avoiding DRAM roundtrips and maintaining high effective memory bandwidth.
   options:
-  - The ViT's non-local memory access pattern for the attention map results in a high number of cache
-    misses on the SoC, which is the primary bottleneck. The FLOP count is secondary.
-  - The Apple A17's Neural Engine lacks hardware acceleration for the specific Softmax or LayerNorm ops
-    in the ViT, forcing them onto the less efficient CPU and causing the slowdown.
-  - The ViT's self-attention has a computational cost that scales quadratically with input tokens (O(N^2*D)),
-    making it ~7.4x more expensive (~67 MFLOPs vs ~9 MFLOPs) than the depthwise separable convolution,
-    which scales linearly. This large FLOP gap is the root cause of the missed deadline.
-  - The model is bottlenecked by memory bandwidth, not compute. The fix is to quantize the ViT from FP16
-    to INT8, which will halve the data movement and solve the latency issue without changing the architecture.
+  - The ViT's non-local memory access pattern for the attention map results in a high number of cache misses on the SoC, which is the primary bottleneck. The FLOP count is secondary.
+  - The Apple A17's Neural Engine lacks hardware acceleration for the specific Softmax or LayerNorm ops in the ViT, forcing them onto the less efficient CPU and causing the slowdown.
+  - The ViT's self-attention has a computational cost that scales quadratically with input tokens (O(N^2*D)), making it ~7.4x more expensive (~67 MFLOPs vs ~9 MFLOPs) than the depthwise separable convolution, which scales linearly. This large FLOP gap is the root cause of the missed deadline.
+  - The model is bottlenecked by memory bandwidth, not compute. The fix is to quantize the ViT from FP16 to INT8, which will halve the data movement and solve the latency issue without changing the architecture.
   correct_index: 0
 status: published
 provenance: imported
@@ -48,10 +37,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- The 'Napkin Math' calculates AI for the ViT but doesn't do so for the MobileNet-style CNN for comparison,
-  leaving an incomplete numerical diagnosis as to why the CNN is faster.
-- Reasoning_competency and reasoning_mode are not specified, which is unusual for an L3 question.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

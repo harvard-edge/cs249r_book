@@ -8,21 +8,19 @@ competency_area: latency
 bloom_level: apply
 phase: both
 title: Mitigating Latency Jitter with Memory Locking
-scenario: You are deploying a 10GB embedding model on a cloud CPU instance with 32GB RAM alongside monitoring
-  sidecars. The SLA requires P99 latency <50ms (median is 30ms). Intermittently, P99 spikes to >250ms.
-  Monitoring shows memory pressure causing the OS to swap inactive model pages to an NVMe SSD (100µs random
-  read latency). Calculate the latency impact if just 10MB of scattered model weights are swapped out
-  during an inference request, and propose an application-level fix.
+scenario: You are deploying a 10GB embedding model on a cloud CPU instance with 32GB RAM alongside monitoring sidecars. The SLA requires P99 latency <50ms (median is 30ms). Intermittently, P99 spikes to >250ms. Monitoring shows memory pressure causing the OS to swap inactive model pages to an NVMe SSD (100us random read latency).
 question: "What latency penalty does 10MB of swapped-out scattered weights add to inference, and what application-level fix prevents it?"
 details:
-  realistic_solution: Invoke `mlock()` or `mlockall(MCL_CURRENT | MCL_FUTURE)` within the serving application
-    to pin the 10GB of weights directly in physical RAM, requiring CAP_IPC_LOCK privileges.
-  common_mistake: Assuming that merely over-provisioning instance RAM prevents swapping, or relying on
-    system-wide 'swapoff' which DevOps teams often restrict for stability reasons.
-  napkin_math: OS swapping to local NVMe causes page faults. An inference needs 10MB of scattered weights.
-    Page size = 4KB. 10MB / 4KB = 2,500 page faults. At 100µs latency per NVMe random read, sequential
-    synchronous loading blocks for 2,500 * 100µs = 250ms. Total latency = 30ms base + 250ms IO penalty
-    = 280ms. This severely violates the 50ms P99 SLA, requiring disabling swap or memory pinning.
+  realistic_solution: Invoke `mlock()` or `mlockall(MCL_CURRENT | MCL_FUTURE)` within the serving application to pin the 10GB of weights directly in physical RAM, requiring CAP_IPC_LOCK privileges. This entirely prevents the OS from paging out the model.
+  common_mistake: |
+    **The Pitfall:** Recommending a system-wide `swapoff` or blindly over-provisioning RAM.
+    **The Rationale:** Candidates opt for infrastructure-level hammers rather than targeted application-level system calls.
+    **The Consequence:** DevOps teams often reject `swapoff` for stability reasons, and over-provisioning wastes money while failing to guarantee the OS won't still page out "inactive" memory under certain memory-pressure heuristics.
+  napkin_math: |
+    1. **Page count:** An inference needs 10MB of scattered weights. Page size = 4KB. 10MB / 4KB = 2,500 page faults.
+    2. **IO delay:** At 100us latency per NVMe random read, sequential synchronous loading blocks for 2,500 * 100us = 250,000us = 250ms.
+    3. **Total latency:** 30ms base + 250ms IO penalty = **280ms**.
+    4. **Result:** This severely violates the 50ms P99 SLA.
 status: published
 provenance: imported
 requires_explanation: false

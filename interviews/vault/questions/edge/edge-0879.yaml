@@ -8,32 +8,25 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: Drone Calibration Domain Shift
-scenario: Delivery drones use a 300M parameter CNN for depth estimation, running at 18ms latency on a
-  strict 20ms NPU budget. The INT8 PTQ model was calibrated using 5,000 high-res urban images. When deployed
-  in rural, low-contrast, and foggy areas, collision rates spike by 5x. Telemetry shows severe activation
-  clipping.
+scenario: Delivery drones use a 300M parameter CNN for depth estimation, running at 18ms latency on a strict 20ms NPU budget. The INT8 PTQ model was calibrated using 5,000 high-res urban images. When deployed in rural, low-contrast, and foggy areas, collision rates spike by 5x. Telemetry shows severe activation clipping.
 question: "Why does the urban-calibrated INT8 depth model fail in foggy rural areas, and how would you fix it within the 20ms NPU budget?"
 details:
-  realistic_solution: 'The root cause is a severe PTQ calibration dataset mismatch. Urban environments
-    have sharp edges and high contrast, resulting in wide min/max activation ranges during calibration.
-    In foggy/rural environments, the actual activation ranges are much narrower. Using the urban static
-    scale/zero-point parameters causes the narrow rural activations to collapse into just 2-3 INT8 bins,
-    destroying gradient/depth perception.
+  realistic_solution: 'The root cause is a severe PTQ calibration dataset mismatch. Urban environments have sharp edges and high contrast, resulting in wide min/max activation ranges during calibration. In foggy/rural environments, the actual activation ranges are much narrower. Using the urban static scale/zero-point parameters causes the narrow rural activations to collapse into just 2-3 INT8 bins, destroying gradient/depth perception.
 
 
-    The architectural fix is a Multi-Profile Static Quantization system. Offline, calibrate three distinct
-    INT8 profiles (Urban, Fog, Night) using KL-divergence minimization on domain-specific datasets. At
-    runtime, introduce a lightweight pre-processing router that computes image variance/contrast statistics.
-    Based on a threshold, the router dynamically swaps the NPU''s scale and zero-point registers to the
-    matching calibration profile. This maintains the speed of static INT8 while providing environment-aware
-    precision.'
-  common_mistake: Switching to dynamic quantization to handle the varied environments, which adds runtime
-    overhead and pushes latency well past the 20ms safety budget.
-  napkin_math: "Latency budget = 20ms. Current INT8 static latency = 18ms. FP16 latency = 45ms. Dynamic\
-    \ INT8 adds ~6ms for runtime scale calculations (24ms total, violating budget). \nRouter overhead:\
-    \ computing global variance on a 640x480 frame (~300k pixels) takes ~0.5ms on the edge CPU. Swapping\
-    \ 1,000 scale/ZP registers to the NPU takes <0.1ms. Total latency: 0.5ms + 18ms = 18.5ms, successfully\
-    \ staying under the 20ms hard deadline while restoring accuracy."
+    The architectural fix is a Multi-Profile Static Quantization system. Offline, calibrate three distinct INT8 profiles (Urban, Fog, Night) using KL-divergence minimization on domain-specific datasets. At runtime, introduce a lightweight pre-processing router that computes image variance/contrast statistics. Based on a threshold, the router dynamically swaps the NPU''s scale and zero-point registers to the matching calibration profile. This maintains the speed of static INT8 while providing environment-aware precision.'
+  common_mistake: |
+    **The Pitfall:** Switching entirely to dynamic quantization to handle the varied environments.
+    **The Rationale:** Dynamic quantization computes scale and zero-points on the fly, which seems ideal for unpredictable domain shifts.
+    **The Consequence:** This adds severe runtime overhead and pushes the overall execution time well past the 20ms safety budget, causing frame drops.
+  napkin_math: |
+    1. **Latency Budget:** 20ms hard deadline.
+    2. **Current Latency:** INT8 static latency = 18ms.
+    3. **Dynamic INT8 Overhead:** Adds ~6ms for runtime scale calculations. Total = `18ms + 6ms = 24ms` (Violates 20ms budget).
+    4. **Multi-Profile Router Overhead:** Computing global variance on a 640x480 frame (~300k pixels) takes ~0.5ms on the edge CPU.
+    5. **Register Swap:** Swapping 1,000 scale/ZP registers to the NPU takes <0.1ms.
+    6. **Total Proposed Latency:** `0.5ms (variance) + 18ms (INT8 static) = 18.5ms`.
+    **The multi-profile routing approach successfully stays under the 20ms hard deadline while restoring accuracy.**
 status: published
 provenance: imported
 requires_explanation: true

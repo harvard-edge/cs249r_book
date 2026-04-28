@@ -8,26 +8,20 @@ competency_area: reliability
 bloom_level: analyze
 phase: training
 title: Debugging a Hedged Request Retry Storm
-scenario: 'A real-time embedding store for an ad-ranking model has a P99 latency SLA of 50ms. The baseline
-  P50 latency is 10ms. To combat occasional tail latency from storage node garbage collection, the team
-  implements hedged requests: if a primary read takes longer than 15ms, a secondary read is sent to a
-  replica. This works perfectly under normal load (5,000 QPS). However, during a traffic spike to 15,000
-  QPS, the entire storage cluster completely locks up and crashes within minutes, despite load testing
-  showing the cluster could comfortably handle 20,000 QPS. Analyze the root cause of this cascading failure
-  and propose a structural fix.'
-question: "Why did static 15ms hedging crash the embedding store at 15,000 QPS, and what structural fix prevents the cascade?"
+scenario: A real-time embedding store has a P99 latency SLA of 50ms and a P50 of 10ms. To combat tail latency, hedged requests are sent if a primary read takes longer than 15ms. During a traffic spike to 15,000 QPS, the storage cluster locks up and crashes, despite load testing showing a 20,000 QPS capacity.
+question: Why did static 15ms hedging crash the embedding store at 15,000 QPS, and what structural fix prevents the cascade?
 details:
-  realistic_solution: Diagnose that baseline queuing delays during the spike pushed the median latency
-    above the static 15ms threshold. This caused a massive surge in redundant requests, artificially exceeding
-    cluster capacity. The fix is to use a dynamic hedge delay (e.g., tied to the rolling 95th percentile
-    latency) and implement a token bucket to hard-cap hedge traffic at a maximum of 5% of total queries.
-  common_mistake: Assuming the failure is due to pure network saturation or recommending turning off hedged
-    requests entirely, rather than identifying the non-linear read amplification caused by using a static
-    timeout during transient load increases.
-  napkin_math: 'Normal load: 5,000 QPS. If 15ms is the P95, hedges = 5% * 5k = 250 extra QPS (Total: 5,250
-    < 20k capacity). Spike load: 15,000 QPS. Queuing pushes median latency to 20ms. Now 50% of requests
-    take >15ms. Hedges = 50% * 15k = 7,500 extra QPS. Total load = 15k + 7.5k = 22,500 QPS. This exceeds
-    the 20,000 QPS absolute limit, triggering a queueing death spiral.'
+  realistic_solution: Diagnose that baseline queuing delays during the spike pushed the median latency above the static 15ms threshold. This caused a massive surge in redundant requests, artificially exceeding cluster capacity. The fix is to use a dynamic hedge delay (e.g., tied to the rolling 95th percentile latency) and implement a token bucket to hard-cap hedge traffic at a maximum of 5% of total queries.
+  common_mistake: |
+    **The Pitfall:** Assuming the failure is due to pure network saturation or turning off hedged requests entirely.
+    **The Rationale:** This misses the non-linear read amplification caused by a static timeout during transient queuing delays.
+    **The Consequence:** Implementing wrong fixes leaves the system vulnerable to future traffic spikes.
+  napkin_math: |
+    - **Normal Load:** 5,000 QPS. 5% > 15ms = 250 extra QPS (Total 5,250 < 20K).
+    - **Spike Load:** 15,000 QPS. Queuing pushes median to 20ms, meaning 50% > 15ms.
+    - **Amplified Load:** 50% * 15,000 = 7,500 extra QPS.
+    - **Total Load:** 15,000 + 7,500 = 22,500 QPS.
+    - **Final Result:** **22,500 QPS exceeds the 20,000 capacity, triggering a fatal queueing death spiral.**
 status: published
 provenance: imported
 requires_explanation: false

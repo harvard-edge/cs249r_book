@@ -8,42 +8,28 @@ competency_area: compute
 bloom_level: apply
 phase: inference
 title: The Fallback Tax
-scenario: You are a Mobile ML Engineer optimizing a new camera filter model for an iPhone 15 Pro. The
-  app feels laggy, and profiling shows your model's latency is 25ms, missing the critical 16ms 'jank'
-  budget for a smooth UI. Using CoreML's performance profiler, you diagnose that 10 separate layers using
-  a custom `FancyReLU` activation are not supported by the Apple Neural Engine (ANE) and are falling back
-  to the CPU for execution. The rest of the model delegates perfectly. As a quick test, you replace all
-  `FancyReLU` activations with a standard `ReLU`. This makes the model fully delegatable to the ANE, and
-  latency plummets to 12ms, but it causes an unacceptable 0.5% drop in model accuracy. How would you best
-  solve this latency crisis while minimizing the accuracy loss?
+scenario: You are a Mobile ML Engineer optimizing a new camera filter model for an iPhone 15 Pro. The app feels laggy, and profiling shows your model's latency is 25ms, missing the critical 16ms 'jank' budget for a smooth UI. Using CoreML's performance profiler, you diagnose that 10 separate layers using a custom `FancyReLU` activation are not supported by the Apple Neural Engine (ANE) and are falling back to the CPU for execution. The rest of the model delegates perfectly. As a quick test, you replace all `FancyReLU` activations with a standard `ReLU`. This makes the model fully delegatable to the ANE, and latency plummets to 12ms, but it causes an unacceptable 0.5% drop in model accuracy.
 question: "How should an iPhone 15 Pro replace unsupported FancyReLU layers to recover 12ms ANE latency without 0.5% accuracy loss?"
 details:
-  realistic_solution: The correct approach is 'delegation-aware' model design. The high latency isn't
-    from the `FancyReLU`'s complexity, but from the 10 separate CPU fallbacks it forces. The optimal solution
-    is to find a hardware-supported activation function that closely approximates `FancyReLU` (e.g., `SiLU`/Swish,
-    which is supported on modern NPUs) and retrain the model. This allows the compiler to fuse the activation
-    with its surrounding layers into a single, highly-efficient block that never leaves the ANE, eliminating
-    the fallback tax while retraining helps recover most of the lost accuracy.
-  common_mistake: Engineers often focus on micro-optimizing the single slow operator (e.g., by quantizing
-    it or writing a custom Metal kernel) without realizing that the true cost is the 'fallback tax' —
-    the repeated, fixed overhead of stopping the NPU, moving data to the CPU/GPU, and moving it back.
-    A faster fallback op is still orders of magnitude more expensive than avoiding the fallback altogether.
-  napkin_math: Let's diagnose the cost of a single fallback. The total latency difference between the
-    falling-back model (25ms) and the fully-fused model (12ms) is 13ms. Since there are 10 fallbacks,
-    the 'fallback tax' per operator is `13ms / 10 = 1.3ms`. Even if you quantize `FancyReLU` and make
-    its CPU execution 4x faster, the majority of that 1.3ms tax is fixed data transfer and scheduling
-    overhead. If the CPU op itself only took 0.5ms, a 4x speedup saves only `0.5 * (1 - 1/4) = 0.375ms`.
-    The total time per block would only drop from `1.3ms` to `0.925ms`. The new total latency would be
-    `12ms (base) + 10 * 0.925ms = 21.25ms`, which still misses the 16ms budget. This proves that eliminating
-    the fallback itself is the only effective strategy.
+  realistic_solution: The correct approach is 'delegation-aware' model design. The high latency isn't from the `FancyReLU`'s complexity, but from the 10 separate CPU fallbacks it forces. The optimal solution is to find a hardware-supported activation function that closely approximates `FancyReLU` (e.g., `SiLU`/Swish, which is supported on modern NPUs) and retrain the model. This allows the compiler to fuse the activation with its surrounding layers into a single, highly-efficient block that never leaves the ANE, eliminating the fallback tax while retraining helps recover most of the lost accuracy.
+  common_mistake: |
+    **The Pitfall:** Micro-optimizing the fallback operator (e.g., writing a custom GPU kernel or quantizing it).
+    **The Rationale:** Engineers assume the operator's execution time is the bottleneck, failing to realize that the repeated context switching and data transfer to/from the NPU (the "fallback tax") dominates the latency.
+    **The Consequence:** Engineering effort is wasted on a custom kernel that still fails to meet the 16ms budget because the fixed fallback tax remains.
+  napkin_math: |
+    * Latency with 10 CPU fallbacks = 25 ms
+    * Latency fully delegated to ANE = 12 ms
+    * Total penalty for 10 fallbacks = 25 ms - 12 ms = 13 ms
+    * Penalty per fallback = 13 ms / 10 = 1.3 ms (mostly context switch/transfer overhead).
+    * If CPU execution takes 0.5 ms and is optimized by 4x: new execution time = 0.125 ms.
+    * New penalty per fallback = 1.3 ms - (0.5 ms - 0.125 ms) = 0.925 ms.
+    * New total latency = 12 ms (base) + 10 * 0.925 ms = 21.25 ms.
+    * **21.25 ms still misses the 16 ms budget. Eliminating the fallback is the only path.**
   options:
   - Implement a custom Metal GPU kernel for `FancyReLU` to accelerate its execution compared to the CPU.
-  - Apply INT8 quantization to the whole model to reduce the data size and speed up the CPU execution
-    of `FancyReLU`.
-  - Replace `FancyReLU` with a similar, ANE-supported activation like `SiLU` (Swish) and retrain the model
-    to recover the accuracy.
-  - Increase the number of CPU threads available to the app to parallelize the execution of the ten `FancyReLU`
-    fallbacks.
+  - Apply INT8 quantization to the whole model to reduce the data size and speed up the CPU execution of `FancyReLU`.
+  - Replace `FancyReLU` with a similar, ANE-supported activation like `SiLU` (Swish) and retrain the model to recover the accuracy.
+  - Increase the number of CPU threads available to the app to parallelize the execution of the ten `FancyReLU` fallbacks.
   correct_index: 2
 status: published
 provenance: imported
@@ -57,8 +43,3 @@ math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

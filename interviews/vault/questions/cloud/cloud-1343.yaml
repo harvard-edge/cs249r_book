@@ -8,25 +8,18 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing GQA Memory Exhaustion
-scenario: You are deploying a 70B parameter LLM configured with Grouped Query Attention (GQA) where 8
-  query heads share 1 KV head to serve large context windows on an 8x H100 (80GB) node. During load testing
-  with an 8K sequence length and a batch size of 128, the system crashes with CUDA Out-Of-Memory (OOM)
-  errors. You notice the OOM happens during the forward pass of the attention layer, despite the KV cache
-  theoretically fitting comfortably within the 640 GB of available HBM due to the 8x GQA reduction. Diagnose
-  the root cause of this memory failure.
-question: "Why does the 70B GQA LLM OOM at batch size 128 and 8K context despite the KV cache fitting in HBM?"
+scenario: You are deploying a 70B LLM with Grouped Query Attention (GQA) on an 8-GPU node. During load testing with an 8K sequence length and batch size 128, the system crashes with CUDA OOM during the forward pass, even though the KV cache comfortably fits in HBM.
+question: Why does the model OOM during the forward pass despite the KV cache fitting in memory?
 details:
-  realistic_solution: The OOM is caused by materializing the intermediate attention logits matrix in HBM.
-    While GQA reduces the persistent KV cache footprint by 8x, the forward pass still computes QK^T for
-    all 64 query heads. To fix this, you must enable FlashAttention, which fuses the attention computation
-    and avoids materializing the massive O(B * H_q * N^2) matrix in HBM.
-  common_mistake: Assuming GQA reduces all memory requirements in the attention layer, failing to realize
-    that the intermediate QK^T attention matrix size still scales with the total number of query heads,
-    not the KV heads.
-  napkin_math: 'KV Cache across 80 layers (GQA-8): 2 (K,V) * 2 bytes * 8192 (seq) * 128 (BS) * 8 (KV heads)
-    * 128 (head dim) * 80 (layers) ≈ 343.6 GB. However, intermediate QK^T matrix per layer: 128 (BS) * 64
-    (Q heads) * 8192 * 8192 * 2 bytes ≈ 1.1 TB. This intermediate state immediately OOMs the 640GB cluster
-    without memory-efficient attention (e.g., FlashAttention).'
+  realistic_solution: The OOM is caused by materializing the intermediate attention logits matrix in HBM. While GQA reduces the persistent KV cache footprint by 8x, the forward pass still computes QK^T for all 64 query heads. To fix this, you must enable FlashAttention, which fuses the attention computation and avoids materializing the massive O(B * H_q * N^2) matrix in HBM.
+  common_mistake: |
+    **The Pitfall:** Assuming GQA reduces all memory requirements in the attention layer.
+    **The Rationale:** Candidates confuse the persistent memory footprint of the KV cache with the transient memory footprint of the intermediate attention matrices.
+    **The Consequence:** Failing to implement FlashAttention, resulting in catastrophic OOMs from materialized intermediate states.
+  napkin_math: |
+    1. **KV Cache Size:** 2 (K,V) × 2 bytes × 8192 (seq) × 128 (BS) × 8 (KV heads) × 128 (head dim) × 80 (layers) ≈ 343.6 GB. Fits in 640 GB HBM.
+    2. **Intermediate QK^T Matrix (per layer):** 128 (BS) × 64 (Q heads) × 8192 × 8192 × 2 bytes ≈ 1.1 TB.
+    **Conclusion:** The massive 1.1 TB intermediate state immediately OOMs the cluster. FlashAttention is required to fuse the computation and avoid materializing this matrix.
 status: published
 provenance: imported
 requires_explanation: false

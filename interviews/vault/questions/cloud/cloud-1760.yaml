@@ -8,25 +8,18 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: Diagnosing RoCEv2 Head-of-Line Blocking During Checkpoints
-scenario: In a 1024-H100 GPU cluster connected via 400Gbps RoCEv2, large language model training jobs
-  are experiencing intermittent NCCL timeouts (latency spikes >20ms) during synchronous All-Reduce operations.
-  Investigation shows these spikes perfectly correlate with periodic 80TB distributed checkpointing events
-  writing to a parallel filesystem. The switch telemetry shows no physical link oversubscription, but
-  deep buffer utilization is observed on egress ports. Diagnose the root cause of these timeouts and propose
-  a network configuration fix.
+scenario: In a 1024-H100 GPU cluster connected via 400Gbps RoCEv2, large language model training jobs are experiencing intermittent NCCL timeouts (latency spikes >20ms) during synchronous All-Reduce operations. Investigation shows these spikes perfectly correlate with periodic 80TB distributed checkpointing events writing to a parallel filesystem. The switch telemetry shows no physical link oversubscription, but deep buffer utilization is observed on egress ports.
 question: "Why do NCCL AllReduce timeouts correlate with 80 TB checkpointing despite no link oversubscription, and what network QoS fix would you apply?"
 details:
-  realistic_solution: The root cause is Head-of-Line (HoL) blocking, where large, bandwidth-heavy storage
-    flows (checkpointing) saturate switch buffers and delay small, latency-sensitive NCCL control messages
-    in the same queue. The solution is to configure Quality of Service (QoS) using Differentiated Services
-    Code Point (DSCP) to map RDMA training traffic and storage traffic into separate Traffic Classes (TCs)
-    and Virtual Lanes (VLs), mapping NCCL to a strict-priority lossless queue.
-  common_mistake: Assuming the issue is insufficient total bandwidth and attempting to solve it by adding
-    more spine switches, or enabling Priority Flow Control (PFC) globally without segregating traffic.
-  napkin_math: 'If a 1MB NCCL message gets queued behind a 100MB checkpoint burst on a single 400Gbps
-    (50GB/s) link: Time to drain the checkpoint burst = 100MB / 50GB/s = 2ms. If this happens across 5
-    switch hops, NCCL latency exceeds 10ms, triggering timeouts. In an isolated priority queue, the 1MB
-    message takes just 20µs per hop.'
+  realistic_solution: The root cause is Head-of-Line (HoL) blocking, where large, bandwidth-heavy storage flows (checkpointing) saturate switch buffers and delay small, latency-sensitive NCCL control messages in the same queue. The solution is to configure Quality of Service (QoS) using Differentiated Services Code Point (DSCP) to map RDMA training traffic and storage traffic into separate Traffic Classes (TCs) and Virtual Lanes (VLs), mapping NCCL to a strict-priority lossless queue.
+  common_mistake: |
+    **The Pitfall:** Assuming the issue is insufficient total bandwidth and attempting to add more spine switches or enable global PFC.
+    **The Rationale:** Candidates may misdiagnose the problem as a general capacity shortage rather than a queueing and priority issue.
+    **The Consequence:** Wasting money on unnecessary hardware or failing to resolve the Head-of-Line blocking caused by large storage flows.
+  napkin_math: |
+    1. Time to drain a 100MB checkpoint burst on a single 400Gbps (50GB/s) link: 100MB / 50GB/s = 2ms.
+    2. If a 1MB NCCL message gets queued behind this burst across 5 switch hops, latency exceeds 10ms.
+    3. **This delay triggers NCCL timeouts. In an isolated priority queue, the 1MB message takes just 20μs per hop.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,28 +8,20 @@ competency_area: parallelism
 bloom_level: apply
 phase: inference
 title: Tensor Parallelism GEMM Partitioning on H100 for LLM Layer
-scenario: A 70B LLM is tensor-parallel across 8 H100s. Each attention layer has weight
-  matrices of shape [8192, 8192] for Q, K, V projections. With 8-way tensor parallelism
-  (column-parallel for QKV, row-parallel for output), calculate the communication
-  cost per layer and the efficiency vs perfect linear scaling.
-question: What is the per-layer communication cost of 8-way tensor-parallel QKV/output
-  projections, and how efficient is it versus ideal scaling?
+scenario: A 70B LLM is tensor-parallel across 8 H100s. Each attention layer has weight matrices of shape [8192, 8192] for Q, K, V projections.
+question: What is the per-layer communication cost of 8-way tensor-parallel QKV/output projections, and how efficient is it versus ideal scaling?
 details:
-  realistic_solution: 'Column-parallel QKV: each GPU holds [8192, 1024] slice of Q,K,V.
-    Input X is broadcast (via AllGather if previously sharded): 8192×2B = 16.4KB.
-    AllGather across 8: 16.4KB at 450 GB/s = 0.036μs. Row-parallel output projection:
-    each GPU holds [1024, 8192] slice. After matmul, AllReduce output [8192×2B] across
-    8 GPUs: 16.4KB at 450 GB/s NVLink: 0.036μs. Two communications per attention layer.
-    80 layers × 2 × 0.036μs = 5.76μs per forward pass. Forward compute per layer:
-    ~2ms. Communication overhead: 5.76μs / 160ms ≈ 0.004%. Efficiency: ~99.9% of perfect
-    linear scaling.'
-  common_mistake: Counting only the AllReduce after the row-parallel projection and
-    forgetting the AllGather needed before column-parallel if activations were previously
-    scattered.
-  napkin_math: 'Per-layer comms: AllGather 16.4KB + AllReduce 16.4KB = 32.8KB. At
-    NVLink 450 GB/s: 0.073μs per layer. 80 layers: 5.8μs total communication overhead.
-    Forward compute: ~160ms total. Communication overhead: 5.8μs/160ms = 0.004% —
-    negligible. TP efficiency: ~99.9%.'
+  realistic_solution: 'Column-parallel QKV: each GPU holds [8192, 1024] slice of Q,K,V. Input X is broadcast (via AllGather if previously sharded): 8192×2B = 16.4KB. AllGather across 8: 16.4KB at 450 GB/s = 0.036μs. Row-parallel output projection: each GPU holds [1024, 8192] slice. After matmul, AllReduce output [8192×2B] across 8 GPUs: 16.4KB at 450 GB/s NVLink: 0.036μs. Two communications per attention layer. 80 layers × 2 × 0.036μs = 5.76μs per forward pass. Forward compute per layer: ~2ms. Communication overhead: 5.76μs / 160ms ≈ 0.004%. Efficiency: ~99.9% of perfect linear scaling.'
+  common_mistake: |
+    **The Pitfall:** Counting only the AllReduce after the row-parallel projection.
+    **The Rationale:** Candidates forget the AllGather needed before the column-parallel projection if activations were previously scattered.
+    **The Consequence:** Underestimating the communication overhead by 2x.
+  napkin_math: |
+    - **AllGather (QKV input):** 8192 * 2B = 16.4 KB. At 450 GB/s NVLink: 16.4 KB / 450 GB/s = 0.036 \mu s.
+    - **AllReduce (Output):** 8192 * 2B = 16.4 KB. At 450 GB/s NVLink: 0.036 \mu s.
+    - **Per-layer comms:** 0.036 \mu s + 0.036 \mu s = 0.073 \mu s.
+    - **Total overhead:** 80 layers * 0.073 \mu s = 5.8 \mu s total communication overhead.
+    - **Efficiency:** Forward compute is ~160 ms. 5.8 \mu s / 160 ms = **0.004% overhead (~99.9% efficiency).**
 status: published
 provenance: imported
 requires_explanation: false

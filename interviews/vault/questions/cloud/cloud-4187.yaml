@@ -8,23 +8,20 @@ competency_area: compute
 bloom_level: apply
 phase: both
 title: Tensor Core Utilization vs CUDA Core Fallback
-scenario: An H100 has 989 TFLOPS FP16 Tensor Core throughput but only 67 TFLOPS FP16
-  on CUDA cores. Your kernel performs a 4096×4096 matrix multiplication followed by
-  a GELU activation. Calculate the time for each operation and explain why the activation
-  function is the bottleneck despite being computationally simpler.
-question: What is the unfused runtime breakdown for the 4096×4096 matmul plus GELU,
-  including the GELU compute and HBM round-trip costs?
+scenario: An H100 has 989 TFLOPS FP16 Tensor Core throughput but only 67 TFLOPS FP16 on CUDA cores. Your kernel performs a $4096 \times 4096$ matrix multiplication followed by a GELU activation.
+question: What is the unfused runtime breakdown for the $4096 \times 4096$ matmul plus GELU, and why is the activation function a massive bottleneck?
 details:
-  realistic_solution: 'Unfused total: matmul 0.139ms + GELU 0.0025ms (compute-light)
-    + HBM round-trip 0.019ms = 0.161ms (not 0.167ms which uses 0.0095ms for GELU).'
-  common_mistake: Assuming GELU is negligible because it's element-wise. While GELU
-    has far fewer FLOPs than matmul, it runs on CUDA cores at 67 TFLOPS instead of
-    Tensor Cores at 989 TFLOPS — a 14.8× throughput disadvantage. Worse, GELU is memory-bound,
-    not compute-bound.
-  napkin_math: 'Unfused kernel time: matmul 0.139ms + GELU compute 0.0025ms (not 0.0095ms
-    — GELU is compute-cheap) + HBM round-trip for intermediate result 0.019ms = 0.139
-    + 0.0025 + 0.019 = 0.1605ms ≈ 0.161ms (not 0.167ms which uses 0.0095ms for GELU,
-    implying expensive memory-bound GELU implementation).'
+  realistic_solution: 'Unfused total: matmul 0.139ms + GELU 0.0025ms (compute-light) + HBM round-trip 0.019ms = 0.161ms (not 0.167ms which uses 0.0095ms for GELU).'
+  common_mistake: |
+    **The Pitfall:** Assuming the GELU activation time is negligible because it has far fewer FLOPs than the matrix multiplication.
+    **The Rationale:** Candidates forget that element-wise activations run on slower CUDA cores (not Tensor Cores) and, critically, require full HBM round-trips when unfused.
+    **The Consequence:** Failing to implement kernel fusion, leaving massive performance gains on the table because the system is starved by memory latency.
+  napkin_math: |
+    *   **Matmul Time (Tensor Cores):** Highly optimized, takes $\approx$ **0.139 ms**.
+    *   **GELU Compute (CUDA Cores):** Element-wise math takes $\approx$ **0.0025 ms** (very cheap).
+    *   **Unfused Memory Penalty:** Reading/writing the intermediate matrix to HBM takes $\approx$ **0.019 ms**.
+    *   **Total Unfused Time:** 0.139 + 0.0025 + 0.019 = **~0.161 ms**.
+    *   **Conclusion:** The memory round-trip for GELU takes nearly 10x longer than the GELU compute itself.
 status: published
 provenance: imported
 requires_explanation: false

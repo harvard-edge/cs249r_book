@@ -8,26 +8,21 @@ competency_area: memory
 bloom_level: analyze
 phase: training
 title: High-Resolution ViT OOM Analysis
-scenario: You are training a Vision Transformer on an 80GB A100 GPU. When scaling input resolution to
-  1024x1024, the job OOMs during the backward pass. The memory profile shows 15GB for model states and
-  75GB for activations. The team tries CPU offloading for activations, but PCIe Gen4 bandwidth causes
-  a 4x throughput drop. Analyze the bottleneck and propose a purely compute-based trade-off to fit the
-  model in VRAM.
+scenario: You are training a Vision Transformer on an 80GB A100 GPU. When scaling input resolution to 1024x1024, the job OOMs during the backward pass. The memory profile shows 15GB for model states and 75GB for activations. The team tries CPU offloading for activations, but PCIe Gen4 bandwidth causes a 4x throughput drop.
 question: "What is the bottleneck, and what compute-based trade-off would fit the 1024x1024 ViT in 80GB without CPU offloading?"
 details:
-  realistic_solution: Implement activation (gradient) checkpointing to save only boundary activations
-    and recompute intermediate ones during the backward pass. This trades ~33% extra compute for a roughly
-    7x reduction in activation memory, keeping all operations on-device and completely avoiding the PCIe
-    bottleneck that caused the 4x throughput drop with CPU offloading.
-  common_mistake: Checkpointing every single layer (which maximizes compute overhead without further memory
-    savings) or persistently trying to offload high-bandwidth activations over a slow PCIe Gen4 bus (32
-    GB/s), which cannot match HBM bandwidth (2 TB/s) and causes severe throughput degradation.
-  napkin_math: Standard training time = 1F (forward) + 2F (backward) = 3F. Checkpointing adds 1F recomputation
-    = 4F total time (a 33% iteration time increase). Activation memory drops from O(L) to O(sqrt(L)) where
-    L = number of layers. With ~50 layers, only sqrt(50) ≈ 7 boundary activations are stored. The 75GB
-    activation footprint drops to roughly 75GB / sqrt(50) ≈ 10.6GB. Total VRAM = 15GB (model states) +
-    10.6GB (checkpointed activations) ≈ 26GB, fitting comfortably within 80GB while avoiding the PCIe
-    Gen4 (32 GB/s) offloading bottleneck.
+  realistic_solution: |
+    Implement activation (gradient) checkpointing to save only boundary activations and recompute intermediate ones during the backward pass. This trades ~33% extra compute for a roughly 7x reduction in activation memory, keeping all operations on-device and completely avoiding the PCIe bottleneck that caused the 4x throughput drop with CPU offloading.
+  common_mistake: |
+    **The Pitfall:** Persistently trying to offload high-bandwidth activations over a slow PCIe bus, or checkpointing every single layer.
+    **The Rationale:** PCIe Gen4 (32 GB/s) cannot match HBM bandwidth (2 TB/s), and over-checkpointing maximizes compute overhead unnecessarily.
+    **The Consequence:** Severe throughput degradation that defeats the purpose of high-end GPU training.
+  napkin_math: |
+    - **Checkpointing Overhead:** Adds 1 forward recomputation. Iteration time increases by **~33%**.
+    - **Activation Memory:** Drops from O(L) to O(sqrt(L)). For 50 layers, only ~7 boundary activations are stored.
+    - **New Memory Footprint:** 75GB / sqrt(50) ≈ **10.6GB**.
+    - **Total VRAM:** 15GB (states) + 10.6GB (activations) ≈ **26GB**.
+    - **Result:** Fits comfortably within 80GB, entirely avoiding the PCIe offloading bottleneck.
 status: published
 provenance: imported
 requires_explanation: false

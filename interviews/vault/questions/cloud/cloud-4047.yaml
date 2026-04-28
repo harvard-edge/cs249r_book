@@ -8,34 +8,19 @@ competency_area: parallelism
 bloom_level: create
 phase: training
 title: Gradient Synchronization for ZeRO Stage 3
-scenario: ZeRO Stage 3 partitions model parameters, gradients, and optimizer states
-  across GPUs. Unlike standard data parallelism where each GPU holds a full copy,
-  each GPU only holds 1/N of everything. This means forward/backward passes require
-  all-gather of parameters before each layer and reduce-scatter of gradients after.
-  Design the communication schedule for a 64-MI300X cluster training a 30B parameter
-  model with 60 Transformer layers.
-question: What is the ZeRO-3 per-layer communication schedule and cost for a 64-MI300X,
-  30B-parameter, 60-layer training run?
+scenario: 'ZeRO Stage 3 partitions model parameters, gradients, and optimizer states across GPUs. Unlike standard data parallelism where each GPU holds a full copy, each GPU only holds 1/N of everything. This means forward/backward passes require all-gather of parameters before each layer and reduce-scatter of gradients after.'
+question: 'What is the ZeRO-3 per-layer communication schedule and cost for a 64-MI300X, 30B-parameter, 60-layer training run?'
 details:
-  realistic_solution: 'Model: 30B params = 60GB FP16. Per GPU (64 GPUs): 60GB/64 = 937.5MB of parameters
-    (vs the 60 GB full copy). Per-layer communication: Forward AllGather
-    = (N-1)/N * 1 GB per layer (60 all-gathers total). Backward AllGather = (N-1)/N * 1 GB per layer
-    (parameters needed again, 60 more). Gradient ReduceScatter at end of backward = (N-1)/N * 1 GB per
-    layer (60 reduce-scatters). Note: AllGather and ReduceScatter each move (N-1)/N * size of bus traffic
-    — *not* 2*(N-1)/N — that 2x factor is for AllReduce only. Total bus traffic per iteration: 3 × 60
-    × 63/64 × 1 GB ≈ 177.2 GB. At 50 GB/s un-pipelined: ~3.5 s without overlap. With prefetching: each
-    AllGather of 1 GB takes 63/64 / 50 = 19.7 ms; layer compute ~5 ms, so communication is ~4x slower
-    than per-layer compute and prefetching can overlap most of it. Using all 8 NICs on MI300X (8 × 400
-    Gbps ≈ 400 GB/s aggregate): AllGather drops to ~2.5 ms ≈ compute, enabling near-perfect overlap.'
-  common_mistake: Applying the 2*(N-1)/N AllReduce factor to AllGather and ReduceScatter. Each of those
-    two collectives moves (N-1)/N * size, and AllReduce = ReduceScatter + AllGather, which is where
-    its 2*(N-1)/N comes from. Treating them as if each cost 2*(N-1)/N independently double-counts the
-    traffic and gives ZeRO-3 a 3x rather than 1.5x bus-traffic ratio over flat AllReduce.
-  napkin_math: 'Memory savings: 60 GB (full copy) → 937.5 MB (ZeRO-3) per GPU = 64x reduction. Per-layer
-    bus traffic: AllGather (fwd) + AllGather (bwd) + ReduceScatter = 3 * (N-1)/N * 1 GB ≈ 2.95 GB. Across
-    60 layers: ~177.2 GB per iteration vs ~118.1 GB for a flat AllReduce in standard DP (2*(63/64)*60
-    GB) — roughly 1.5x more bus traffic, hidden by per-layer prefetching when NIC bandwidth ≥ compute
-    intensity per layer.'
+  realistic_solution: 'Model: 30B params = 60GB FP16. Per GPU (64 GPUs): 60GB/64 = 937.5MB of parameters (vs the 60 GB full copy). Per-layer communication: Forward AllGather = (N-1)/N * 1 GB per layer (60 all-gathers total). Backward AllGather = (N-1)/N * 1 GB per layer (parameters needed again, 60 more). Gradient ReduceScatter at end of backward = (N-1)/N * 1 GB per layer (60 reduce-scatters). Note: AllGather and ReduceScatter each move (N-1)/N * size of bus traffic — *not* 2*(N-1)/N — that 2x factor is for AllReduce only. Total bus traffic per iteration: 3 × 60 × 63/64 × 1 GB ≈ 177.2 GB. At 50 GB/s un-pipelined: ~3.5 s without overlap. With prefetching: each AllGather of 1 GB takes 63/64 / 50 = 19.7 ms; layer compute ~5 ms, so communication is ~4x slower than per-layer compute and prefetching can overlap most of it. Using all 8 NICs on MI300X (8 × 400 Gbps ≈ 400 GB/s aggregate): AllGather drops to ~2.5 ms ≈ compute, enabling near-perfect overlap.'
+  common_mistake: |
+    **The Pitfall:** Applying the `2*(N-1)/N` AllReduce factor to AllGather and ReduceScatter independently.
+    **The Rationale:** Candidates double-count the traffic because they forget that AllReduce is composed of ReduceScatter + AllGather, and each alone only moves `(N-1)/N` data.
+    **The Consequence:** Overestimating ZeRO-3 bus traffic by a factor of 2, leading to incorrect networking design decisions.
+  napkin_math: |
+    * Model: 30B params = 60GB FP16. Memory per GPU: 60GB/64 = 937.5MB.
+    * Traffic per layer: AllGather (fwd) + AllGather (bwd) + ReduceScatter = 3 × (63/64) × 1 GB ≈ 2.95 GB.
+    * Across 60 layers: ~177.2 GB per iteration.
+    * **ZeRO-3 requires ~1.5x more bus traffic than a flat AllReduce (~118.1 GB), easily hidden by prefetching on 400 GB/s networking.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,28 +8,18 @@ competency_area: reliability
 bloom_level: apply
 phase: training
 title: The Watchdog Blind Spot
-scenario: Your edge AI cameras have a hardware watchdog timer (WDT) set to 60 seconds. The CPU application
-  process kicks the watchdog every 10 seconds. You receive reports that cameras are freezing — the video
-  stream stops and no detections are sent — but the devices aren't rebooting. You SSH in and find the
-  CPU is running fine, but the GPU is deadlocked running a custom CUDA kernel for a new ML model. Why
-  didn't the hardware watchdog trigger a reboot, and how do you design a watchdog system that actually
-  monitors the ML hardware?
-question: "Why didn't the hardware watchdog trigger a reboot, and how do you design a watchdog system that actually monitors the ML hardware?"
+scenario: Your edge AI cameras have a hardware watchdog timer (WDT) set to 60 seconds. The CPU application process kicks the watchdog every 10 seconds. You receive reports that cameras are freezing (video stream stops, no detections) but the devices aren't rebooting. You SSH in and find the CPU is running fine, but the GPU is deadlocked running a custom CUDA kernel for a new ML model.
+question: Why didn't the hardware watchdog trigger a reboot, and how do you design a watchdog system that actually monitors the ML hardware?
 details:
-  realistic_solution: The hardware WDT is tied to the CPU. The CPU application thread responsible for
-    kicking the watchdog is still running perfectly fine, so the WDT never fires. However, the ML inference
-    is executing asynchronously on the GPU. If a custom CUDA kernel enters an infinite loop (e.g., due
-    to a bad index calculation in a custom NMS layer), the GPU hangs. The CPU thread might be waiting
-    on a `cudaStreamSynchronize()` or a queue, but a separate health-check thread on the CPU is still
-    happily kicking the WDT.
-  common_mistake: '"The watchdog timeout is too long, shorten it to 5 seconds." The timeout duration isn''t
-    the problem; the problem is *what* is being monitored.'
-  napkin_math: At 30 FPS, the GPU should produce a tensor every 33ms. If the timestamp hasn't updated
-    in 5 seconds, you've missed 150 frames — the GPU is definitively hung. If you rely on the CPU's main
-    loop to block on the GPU before kicking the WDT, you risk the CPU hanging in an uninterruptible sleep
-    state (`D` state) waiting for the GPU driver, which can sometimes prevent the OS from cleanly rebooting
-    even if the WDT fires. The supervisor pattern ensures the WDT is tied to the *semantic* health of
-    the ML model, not just the *execution* health of the CPU.
+  realistic_solution: The hardware WDT is tied to the CPU. The CPU application thread responsible for kicking the watchdog is still running perfectly fine, so the WDT never fires. However, the ML inference is executing asynchronously on the GPU. If a custom CUDA kernel enters an infinite loop (e.g., due to a bad index calculation in a custom NMS layer), the GPU hangs. The CPU thread might be waiting on a `cudaStreamSynchronize()` or a queue, but a separate health-check thread on the CPU is still happily kicking the WDT.
+  common_mistake: |
+    **The Pitfall:** Assuming the watchdog timeout duration is too long and shortening it (e.g., to 5 seconds).
+    **The Rationale:** Treating the symptoms rather than the root cause of what the watchdog is actually monitoring.
+    **The Consequence:** The CPU continues to kick the shortened watchdog while the GPU remains deadlocked, completely failing to recover the edge device.
+  napkin_math: |
+    * **Expected GPU Output**: At 30 FPS, the GPU should produce a tensor every 33.3 ms.
+    * **Hang Threshold**: If the ML pipeline hasn't produced an output in 5 seconds, it has missed 150 frames.
+    * **Conclusion**: The GPU is undeniably hung, and the watchdog logic must monitor this **semantic tensor output rate**, not just the CPU thread execution.
 status: published
 provenance: imported
 requires_explanation: false
@@ -38,8 +28,6 @@ validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- Reasoning competency and mode are 'None'; should be more specific.
 math_verified: true
 math_status: UNCHECKED
 human_reviewed:

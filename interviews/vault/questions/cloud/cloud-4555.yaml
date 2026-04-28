@@ -8,23 +8,21 @@ competency_area: reliability
 bloom_level: create
 phase: both
 title: Asynchronous H100 Checkpointing
-scenario: Synchronous checkpointing of a 1T parameter model across 1024 H100 GPUs
-  takes 5 minutes to write to object storage, idling the cluster.
-question: Design an asynchronous memory-tiering approach to reduce GPU blocking time
-  to under 10 seconds.
+scenario: Synchronous checkpointing of a 1T parameter model across 1024 H100 GPUs takes 5 minutes to write to object storage, idling the cluster.
+question: Design an asynchronous memory-tiering approach to reduce GPU blocking time to under 10 seconds.
 details:
-  realistic_solution: 'Footprint with 8-bit optimizer states (Adam-8bit): weights
-    FP16 = 2 TB; gradients FP16 = 2 TB; Adam-8bit = 2 TB; total = 6 TB. Standard
-    FP32 Adam states would yield: weights 2 TB + grads 2 TB + Adam (m+v) FP32 =
-    8 TB; total = 12 TB. We assume 8-bit optimizer (the default for 1T-class training).
-    Per GPU: 6 TB / 1024 = 6 GB. Dump 6 GB GPU->host DRAM over PCIe Gen5 (~64 GB/s)
-    takes ~0.1 s. Training resumes while a background CPU thread streams the DRAM
-    buffer to object storage at 5-10 GB/s.'
-  common_mistake: Reporting the 6 TB footprint without specifying the optimizer
-    precision; FP32 Adam doubles the optimizer state to 8 TB and shifts the per-GPU
-    dump cost.
-  napkin_math: '8-bit optimizer: 6 TB total (2W + 2G + 2 OptState). FP32 Adam: 12
-    TB total (2W + 2G + 8 OptState in m+v FP32). Per GPU at 1024: 6 GB or 12 GB.'
+  realistic_solution: |
+    Dump the per-GPU memory buffer to host DRAM over PCIe Gen5. Training resumes while a background CPU thread streams the DRAM buffer to object storage at 5-10 GB/s.
+  common_mistake: |
+    **The Pitfall:** Reporting the total footprint without specifying optimizer precision.
+    **The Rationale:** Candidates assume a static footprint without considering the dramatic difference between 8-bit and FP32 optimizers.
+    **The Consequence:** Grossly miscalculating the per-GPU dump cost and necessary memory tiering bandwidth.
+  napkin_math: |
+    - FP32 Adam: 2TB Weights + 2TB Grads + 8TB Optimizer = 12TB total.
+    - 8-bit Adam: 2TB Weights + 2TB Grads + 2TB Optimizer = 6TB total.
+    - Per GPU (1024 GPUs): 6TB / 1024 = 6GB.
+    - PCIe Gen5 dump: 6GB / 64GB/s = ~0.1s.
+    - **Asynchronous tiering reduces GPU blocking time from 5 minutes to ~0.1 seconds.**
 status: draft
 provenance: llm-draft
 expected_time_minutes: 10

@@ -8,33 +8,20 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: inference
 title: On-Device PII Guardrail Starvation on Hexagon NPU
-scenario: 'Your team deploys a local generative AI assistant alongside a lightweight
-  PII-redaction guardrail model on a device powered by the Qualcomm Hexagon NPU (Snapdragon
-  8 Gen 3). During red-teaming assessments, you observe a critical symptom: when the
-  main 3B parameter model generates text, the guardrail model periodically drops evaluation
-  requests, allowing PII to leak to the UI. Both models are quantized to INT8 and
-  the NPU is reporting only 30% compute utilization out of its 45 TOPS capacity. Diagnose
-  the hardware-level root cause of this guardrail failure.'
-question: Why can a 3B INT8 assistant on Snapdragon 8 Gen 3 starve a lightweight PII
-  guardrail despite 30% NPU utilization?
+scenario: Your team deploys a local generative AI assistant alongside a lightweight PII-redaction guardrail model on a device powered by the Qualcomm Hexagon NPU (Snapdragon 8 Gen 3). During red-teaming assessments, you observe a critical symptom: when the main 3B parameter model generates text, the guardrail model periodically drops evaluation requests, allowing PII to leak to the UI. Both models are quantized to INT8 and the NPU is reporting only 30% compute utilization out of its 45 TOPS capacity.
+question: Why can a 3B INT8 assistant on Snapdragon 8 Gen 3 starve a lightweight PII guardrail despite 30% NPU utilization?
 details:
-  realistic_solution: The root cause is memory bandwidth starvation on the shared
-    12-16 GB LPDDR5X bus. Autoregressive text generation is heavily memory-bound;
-    the main model is saturating the bus reading weights for every token. Despite
-    the Hexagon NPU having ample compute headroom (45 TOPS), the concurrent guardrail
-    model cannot fetch its own weights fast enough from the shared memory pool, causing
-    it to miss its real-time SLA and fail open.
-  common_mistake: Candidates often assume the issue is a lack of compute power or
-    thermal throttling, suggesting that the NPU's 45 TOPS limit is being hit. They
-    might also blindly blame the software implementation of the guardrail (like an
-    inefficient tokenizer) without considering the underlying hardware resource contention.
-  napkin_math: The Snapdragon 8 Gen 3 LPDDR5X provides roughly 77 GB/s of memory bandwidth.
-    A 3B parameter INT8 main model requires ~3 GB of memory reads per generated token.
-    At 20 tokens/sec, this consumes 60 GB/s (78% of total bandwidth). The guardrail
-    model (e.g., 0.5B parameters) needs to run context checks, requiring at least
-    0.5 GB per pass. With OS, display, and background tasks consuming the remaining
-    ~16 GB/s, the memory bus is completely saturated, starving the NPU's memory fetch
-    for the guardrail operations.
+  realistic_solution: The root cause is memory bandwidth starvation on the shared 12-16 GB LPDDR5X bus. Autoregressive text generation is heavily memory-bound; the main model is saturating the bus reading weights for every token. Despite the Hexagon NPU having ample compute headroom (45 TOPS), the concurrent guardrail model cannot fetch its own weights fast enough from the shared memory pool, causing it to miss its real-time SLA and fail open.
+  common_mistake: |
+    **The Pitfall:** Assuming the NPU is hitting compute limits (45 TOPS) or thermal throttling.
+    **The Rationale:** Because NPU utilization is low (30%), candidates incorrectly suspect software inefficiencies or single-core bottlenecks.
+    **The Consequence:** They fail to identify LPDDR5X memory bandwidth saturation as the true hardware bottleneck.
+  napkin_math: |
+    1. Memory bandwidth: Snapdragon 8 Gen 3 LPDDR5X provides ~77 GB/s.
+    2. Main model (3B INT8) at 20 tok/sec: 3 GB * 20 = 60 GB/s (78% of total bandwidth).
+    3. System overhead: OS, display, and background tasks consume ~16 GB/s.
+    4. Guardrail model (0.5B): Requires >0.5 GB/s memory reads.
+    5. **Conclusion: 60 + 16 + 0.5 = 76.5 GB/s, completely saturating the bus and starving the guardrail.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,27 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: 'The On-Device Vector Search Gone Wrong: Memory Hierarchy Design'
-scenario: Your note-taking app has an on-device semantic search feature on a Pixel 9 (Tensor G4, 12 GB
-  RAM). Users index ~10K notes with 384-dim embeddings using an HNSW index. A user reports that searching
-  for 'vacation photos from Italy' returns their tax documents instead. The embedding model is correct
-  — you verified the embeddings are semantically meaningful. What's wrong with the vector search?
-question: "Why does an HNSW search over unnormalized 384-dim note embeddings return tax documents for an Italy vacation query?"
+scenario: 'Your note-taking app has an on-device semantic search feature on a Pixel 9 (Tensor G4, 12 GB RAM). Users index ~10K notes with 384-dim embeddings using an HNSW index. A user reports that searching for ''vacation photos from Italy'' returns their tax documents instead. The embedding model is correct — you verified the embeddings are semantically meaningful.'
+question: 'Why does an HNSW search over unnormalized 384-dim note embeddings return tax documents for an Italy vacation query?'
 details:
-  realistic_solution: 'The HNSW index uses L2 (Euclidean) distance on unnormalized embeddings. Embedding
-    vectors have varying magnitudes: the tax document vector (magnitude 4.0) is numerically closer in
-    L2 to the query (magnitude 12.5) than the vacation note (magnitude 25.0), despite being semantically
-    wrong. With cosine similarity (which normalizes magnitudes): vacation scores 0.89, tax scores 0.23
-    — correct ranking. Fix: normalize all embeddings to unit length before indexing (cost: <1ms for 10K
-    vectors), or configure HNSW to use cosine/inner-product distance. The normalization step is O(n) and
-    trivially cheap but completely changes search quality.'
-  common_mistake: '"The embedding model is bad — fine-tune it on the user''s data." You already verified
-    the embeddings are correct. The bug is in the index, not the embeddings.'
-  napkin_math: '10K notes, 384-dim, FP32: 10K × 384 × 4 = **15 MB** (fits easily in 12 GB). With L2 distance
-    on unnormalized embeddings: query embedding magnitude = 12.5, vacation note magnitude = 25.0, tax
-    doc magnitude = 4.0. L2 to query: vacation = √(12.5² + 25.0² - 2×12.5×25.0×0.89) ≈ 15.0, tax = √(12.5²
-    + 4.0² - 2×12.5×4.0×0.23) ≈ 12.2. Tax doc is "closer" in L2 despite being semantically wrong. With
-    cosine distance: vacation cosine = 0.89, tax cosine = 0.23. Correct ranking. The normalization step
-    costs: 10K × 384 multiplies + 10K square roots = **<1ms**. Skipping it breaks the entire search.'
+  realistic_solution: 'The HNSW index uses L2 distance on unnormalized embeddings. Because the vectors have radically different magnitudes, a semantically wrong vector with a small magnitude is mathematically "closer" than a correct vector with a massive magnitude. Normalizing the vectors to unit length forces equivalence to cosine similarity.'
+  common_mistake: |
+    **The Pitfall:** Blaming the embedding model and deciding to fine-tune it.
+    **The Rationale:** Candidates don't realize L2 geometry heavily penalizes long semantic vectors if not scaled uniformly.
+    **The Consequence:** Wasting weeks trying to improve model weights while the actual index ranking mechanism remains fundamentally broken.
+  napkin_math: |
+    1. **Size check:** 10K × 384 × 4B = 15 MB (Fits easily).
+    2. **L2 Distance Example:** Query mag = 12.5. Vacation mag = 25.0, Cosine = 0.89. Tax mag = 4.0, Cosine = 0.23.
+    3. **Vacation L2:** √(12.5² + 25.0² - 2×12.5×25.0×0.89) = **15.0**.
+    4. **Tax L2:** √(12.5² + 4.0² - 2×12.5×4.0×0.23) = **12.2**.
+    5. **Result:** Tax document (12.2) beats Vacation (15.0) under L2 distance despite terrible cosine similarity. Normalization fixes this in <1ms.
 status: published
 provenance: imported
 requires_explanation: false

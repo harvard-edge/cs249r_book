@@ -8,33 +8,21 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: MoE Expert Pruning for Inference Optimization
-scenario: 'After training your 16-expert MoE model, you analyze routing statistics
-  over your eval dataset and find that 4 experts receive less than 2% of tokens each
-  (total: 7% of all routing assignments). These 4 experts use 25% of total parameters.
-  Can you prune them for inference, and what is the expected quality impact?'
-question: Can you prune the 4 low-traffic experts for inference, and what memory savings
-  and quality impact should you expect?
+scenario: After training your 16-expert MoE model, you analyze routing statistics and find that 4 specific experts receive less than 2% of tokens each (totaling 7% of all routing assignments). These 4 experts account for 25% of the expert parameters.
+question: Can you prune the 4 low-traffic experts for inference, and what memory savings and quality impact should you expect?
 details:
-  realistic_solution: 'Step 1: Analyze which experts can be pruned. If 4 experts handle
-    only 7% of tokens, pruning them affects at most 7% of tokens'' computation. For
-    top-2 routing, affected tokens still have their primary expert — only their secondary
-    expert is lost. Quality impact is typically 0.5-2% on benchmarks. Step 2: Reroute
-    affected tokens. Option A: increase top-k for remaining experts (top-2 among 12
-    instead of 16). Option B: fine-tune the router to redistribute (a few hundred
-    steps of fine-tuning with frozen expert weights). Option C: hard remap — assign
-    each pruned expert''s tokens to the most similar remaining expert (by weight cosine
-    similarity). Step 3: Memory savings. Before: 16 experts × 5B params each = 80B
-    MLP params = 160 GB FP16. After pruning 4: 12 × 5B = 60B = 120 GB. Savings: 40
-    GB — enough to fit on a single MI300X instead of two GPUs. Step 4: Validate quality
-    on held-out benchmarks. Accept pruning if quality drop < 1% on key metrics. This
-    is analogous to structured pruning in dense models but at expert granularity.'
-  common_mistake: Simply removing the experts and redistributing their routing probability
-    uniformly. The tokens that were routed to pruned experts now need to go somewhere
-    meaningful — random reassignment degrades quality more than careful rerouting.
-  napkin_math: '16 experts → 12 experts. Memory: 160 GB → 120 GB (25% savings). Affected
-    tokens: 7% lose secondary expert. Quality drop: ~0.5-1% (tokens still have primary
-    expert). Inference speedup: fewer expert weights to read from HBM at large batch
-    sizes. At BS=64: all 12 experts loaded vs 16 → reading 25% fewer weights yields a 33% throughput speedup.'
+  realistic_solution: 'Yes, expert pruning is highly effective. Since they handle only 7% of assignments (mostly as secondary experts), pruning them affects a tiny fraction of the computation. Affected tokens simply fall back to remaining experts. Reroute tokens by assigning each pruned expert''s tokens to the most similar remaining expert or by fine-tuning the router. This structured pruning drops VRAM requirements significantly with <1% quality degradation on benchmarks.'
+  common_mistake: |
+    **The Pitfall:** Simply deleting the experts and redistributing their routing probability uniformly.
+    **The Rationale:** Engineers assume that since the traffic is low, random reassignment of the remaining 7% won't matter.
+    **The Consequence:** Randomly reassigning tokens destroys the semantic routing space, degrading generation quality far more than careful cosine-similarity remapping or router fine-tuning.
+  napkin_math: |
+    1. 16 experts $\rightarrow$ 12 experts.
+    2. Total MLP memory: $160\text{ GB} \rightarrow 120\text{ GB}$ (25% savings).
+    3. Affected tokens: 7% lose their secondary expert, but retain their primary.
+    4. Quality drop: ~0.5-1% on held-out benchmarks.
+    5. At large batch sizes (BS=64), reading 25% fewer expert weights from HBM yields a $\sim 33\%$ throughput speedup.
+    6. **Saves 40 GB of VRAM (allowing deployment on fewer GPUs) with minimal quality loss.**
 status: published
 provenance: imported
 requires_explanation: true

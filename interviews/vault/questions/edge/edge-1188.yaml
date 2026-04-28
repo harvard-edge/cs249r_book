@@ -8,12 +8,20 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: 'Edge Transformer Cost Specification: Design Edge Transformer SLO'
-scenario: 'Specify the maximum transformer model size (in parameters) that can be deployed on Jetson Orin (32GB LPDDR5, 102.4GB/s, 275 TOPS INT8) to meet: decode latency < 2.5ms/token at a context length of 128 tokens, concurrent users = 5, INT4 quantization for both weights and KV cache. Assume the model architecture has 24 layers, 16 KV heads, and head_dim=64.'
+scenario: A transformer model is being sized for deployment on Jetson Orin (32GB LPDDR5, 102.4GB/s, 275 TOPS INT8) to meet a decode latency < 2.5ms/token at a context length of 128 tokens, with 5 concurrent users, using INT4 quantization for both weights and KV cache. The model architecture has 24 layers, 16 KV heads, and head_dim=64.
 question: What is the correct KV cache size and max INT4 model size after reserving KV for 5 users at context 128?
 details:
-  realistic_solution: 'KV per user at context=128, 24 layers, 16 KV heads, head_dim=64, INT4: 24\u00d72\u00d716\u00d764\u00d7128\u00d70.5B = 3MB. 5 users require 15MB. Max bandwidth per step (2.5ms at 102.4GB/s) is 256MB. Weight budget: 256MB - 15MB = 241MB. Max INT4 params: 241MB / 0.5 bytes = 482M params.'
-  common_mistake: Solving only for weight bandwidth and ignoring KV cache memory, which for 5 concurrent users at 128 context can be substantial and may reduce the available weight bandwidth headroom.
-  napkin_math: 'KV for 5 users at context=128, 24 layers, 16 KV heads, head_dim=64, INT4 (0.5B): KV per user = 24 layers \u00d7 2 \u00d7 16 heads \u00d7 64 head_dim \u00d7 128 context \u00d7 0.5B = 3,145,728 bytes \u2248 3MB per user. 5 users: 15MB KV. Decode latency 2.5ms at 102.4GB/s = 256MB total bandwidth per step. Weight budget: 256MB - 15MB = 241MB \u2192 241MB/0.5B/param = 482M params max.'
+  realistic_solution: 'First, calculate the KV cache size for 5 users. Then, determine the maximum memory bandwidth allowed by the 2.5ms latency constraint. Subtract the KV cache bandwidth requirement to find the remaining weight bandwidth headroom. Finally, use the remaining headroom to calculate the maximum number of INT4 parameters that can be streamed per token generation step.'
+  common_mistake: |
+    **The Pitfall:** Ignoring the KV cache memory bandwidth requirement entirely.
+    **The Rationale:** Candidates often size models based purely on static weight footprint and static weight streaming limits.
+    **The Consequence:** When deployed with 5 concurrent users, the dynamically expanding KV cache consumes significant bandwidth, causing the system to miss the strict 2.5ms latency target.
+  napkin_math: |
+    1. KV per token: 2 (K&V) * 24 layers * 16 heads * 64 dim * 0.5 bytes (INT4) = 24,576 bytes.
+    2. KV per user at context=128: 24,576 * 128 = ~3.14 MB. For 5 users: ~15 MB total KV cache.
+    3. Decode bandwidth budget per step (2.5ms at 102.4 GB/s): 102.4 * 10⁹ * 0.0025 = 256 MB.
+    4. Weight budget: 256 MB - 15 MB = 241 MB.
+    5. **Max INT4 parameters: 241 MB / 0.5 bytes/param = 482 million parameters.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,38 +8,20 @@ competency_area: data
 bloom_level: create
 phase: both
 title: The 10,000-Experiment Infrastructure Challenge
-scenario: 'You are the Staff engineer responsible for ML infrastructure at a company that runs 10,000
-  experiments per month across 20 teams. The current system uses a shared MLflow instance backed by a
-  PostgreSQL database. The system is failing: experiment logging adds 200ms of latency per training step
-  (with 10,000 steps per experiment, this is 33 minutes of overhead per experiment), queries for cross-team
-  experiment comparison time out, and the metadata store has grown to 500GB. Design the next-generation
-  experiment tracking infrastructure that can scale to 100,000 experiments per month.'
+scenario: You manage ML infrastructure for 20 teams running 10,000 experiments per month. The current system uses a shared MLflow instance backed by PostgreSQL. Experiment logging adds 200ms latency per step. The metadata store has grown to 500GB.
 question: "How would you design experiment tracking to scale from 10,000 to 100,000 experiments per month without training or query bottlenecks?"
 details:
-  realistic_solution: 'Separate the write path from the read path (CQRS pattern for experiment tracking):
-    Write path (hot, latency-sensitive): Replace synchronous RPCs with asynchronous, buffered logging.
-    Each training job writes metrics to a local ring buffer and flushes to a distributed log (Kafka) every
-    N seconds. Training step overhead drops from 200ms to < 1ms (local memory write). The log is append-only
-    and partitioned by team. Read path (warm, query-heavy): A stream processor (Flink/Spark Streaming)
-    consumes the Kafka log, transforms metrics into a columnar format (Parquet), and materializes views
-    into a query engine (ClickHouse/DuckDB). Cross-team queries hit the materialized views, not the raw
-    log. Storage tier: Hot metrics (last 7 days) in ClickHouse for interactive queries. Cold metrics (7-90
-    days) in Parquet on S3 with a catalog (Iceberg/Hive). Archive (90+ days) in compressed Parquet with
-    metadata-only index. Model artifacts stored separately in object storage with content-addressable
-    hashing for deduplication. Scale calculation: 100K experiments × 10K steps × 1,000 metrics × 8 bytes
-    = 8 TB/month of raw metrics. With columnar compression (10×): 800 GB/month. With 90-day hot retention:
-    2.4 TB in ClickHouse.'
-  common_mistake: 'Proposing to ''just shard the database'' or ''switch to MongoDB.'' The problem is architectural:
-    synchronous logging on the training critical path and a single queryable store for both write-heavy
-    (logging) and read-heavy (analysis) workloads.'
-  napkin_math: 'Current system: 10K experiments * 10K steps * 200ms = 33 min overhead/experiment. Total:
-    33 min * 10K = 5,500 GPU-hours/month wasted. At $3/GPU-hr = $16,500/month. New system: 10K experiments *
-    10K steps * 1ms = 10 seconds/experiment. Total: 10K * 10s / 3600 = 27.8 GPU-hours/month. Savings:
-    5,472 GPU-hours/month = $16,417/month. Storage (at current 10K experiments/month): 10K * 10K steps *
-    1,000 metrics * 8 bytes = 800 GB/month raw. With columnar compression (10x): 80 GB/month. With 90-day
-    hot retention: 240 GB in ClickHouse. Scaling to 100K experiments/month: 8 TB/month raw, 800 GB/month
-    compressed, 2.4 TB hot. ClickHouse cluster: ~$1K/month. Kafka cluster: ~$1K/month. Total infra: ~$2K/month
-    vs $16.5K/month wasted on logging overhead alone. The system pays for itself.'
+  realistic_solution: 'Separate the write path from the read path (CQRS pattern for experiment tracking): Write path (hot, latency-sensitive): Replace synchronous RPCs with asynchronous, buffered logging. Each training job writes metrics to a local ring buffer and flushes to a distributed log (Kafka) every N seconds. Training step overhead drops from 200ms to < 1ms (local memory write). The log is append-only and partitioned by team. Read path (warm, query-heavy): A stream processor (Flink/Spark Streaming) consumes the Kafka log, transforms metrics into a columnar format (Parquet), and materializes views into a query engine (ClickHouse/DuckDB). Cross-team queries hit the materialized views, not the raw log. Storage tier: Hot metrics (last 7 days) in ClickHouse for interactive queries. Cold metrics (7-90 days) in Parquet on S3 with a catalog (Iceberg/Hive). Archive (90+ days) in compressed Parquet with metadata-only index. Model artifacts stored separately in object storage with content-addressable hashing for deduplication. Scale calculation: 100K experiments × 10K steps × 1,000 metrics × 8 bytes = 8 TB/month of raw metrics. With columnar compression (10×): 800 GB/month. With 90-day hot retention: 2.4 TB in ClickHouse.'
+  common_mistake: |
+    **The Pitfall:** Proposing to "just shard the database" or "switch to MongoDB" to handle scale.
+    **The Rationale:** It treats the issue purely as a database size problem rather than a systemic architectural flaw.
+    **The Consequence:** The synchronous logging still blocks the expensive GPU training loop, continuing to waste millions of dollars in compute time.
+  napkin_math: |
+    - **Current Overhead**: 10K experiments * 10K steps * 200ms = 5,500 wasted GPU-hours/month. At $3/hr = $16,500/month.
+    - **New System Overhead**: Async logging drops to 1ms. 10K * 10K * 1ms = ~28 GPU-hours/month.
+    - **Raw Metrics Volume (100K)**: 100K * 10K steps * 1,000 metrics * 8 bytes = 8 TB/month.
+    - **Compressed Storage**: Columnar compression (10x) = 800 GB/month. 90-day hot retention = 2.4 TB.
+    - **Conclusion**: The infra cost (~$2K/mo) pays for itself by saving **~$16,400/month** in wasted GPU time.
 status: published
 provenance: imported
 requires_explanation: true

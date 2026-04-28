@@ -9,11 +9,22 @@ bloom_level: analyze
 phase: training
 title: LLM Serving Arithmetic Intensity
 scenario: You are serving a 30B parameter LLM (FP16) on a single 80GB A100 GPU (2 TB/s HBM bandwidth). At a batch size of 1, token generation latency is 30ms, yielding ~33 tokens/sec. You want to scale to 500 tokens/sec. However, when you increase the batch size, the system throws a CUDA Out of Memory error at a batch size of 4. The average request sequence length is 2048 tokens.
-question: "How would you scale the 30B FP16 LLM on one 80GB A100 from 33 tokens/sec to 500 tokens/sec without hitting KV-cache OOMs?"
+question: How would you scale the 30B FP16 LLM on one 80GB A100 from 33 tokens/sec to 500 tokens/sec without hitting KV-cache OOMs?
 details:
   realistic_solution: 'The system is simultaneously hitting a memory capacity wall (OOM) and a memory bandwidth wall (decoding arithmetic intensity). The 30B FP16 weights consume 60GB of HBM, leaving 20GB. The KV cache per token is ~2.1 MB (2 * 64 layers * 64 heads * 128 dim * 2 bytes). At 2048 tokens, the KV cache per request is ~4.3 GB, limiting the maximum batch size to floor(20 / 4.3) = 4 — but activations and CUDA context consume the remaining headroom, so OOM occurs at batch size 4. Max safe batch size = 3. To hit 500 tokens/sec, you must optimize both capacity and bandwidth. By applying INT4 Weight-Only Quantization (W4A16), the weight footprint drops to 15GB. By applying INT8 KV Cache Quantization, the KV cache halves to ~2.15 GB per request. This allows a batch size of 20 (consuming 43GB KV + 15GB weights = 58GB VRAM). During generation, reading 58GB at 2 TB/s takes 29ms. At a batch size of 20, the throughput becomes 20 tokens / 29ms = 689 tokens/sec, comfortably exceeding the 500 tokens/sec target.'
-  common_mistake: Attempting to use faster matrix multiplication kernels (like FlashAttention) or CUDA graphs, which do not solve the fundamental capacity bottleneck of the KV cache.
-  napkin_math: 'KV cache per token: 2.1 MB. At 2048 tokens: 4.3 GB per request. FP16 Weights: 60GB. Max BS = (80 - 60) / 4.3 = 4 (OOMs at 4). Max safe BS = 3. At BS 3, Read per step = 60GB + 12.9GB = 72.9GB. Latency = 72.9GB / 2000GB/s = 36.5ms. Throughput = 3 / 0.0365s = 82 tokens/sec. INT4 Weights: 15GB. INT8 KV Cache: 2.15 GB/req. Remaining VRAM = 65GB. Max safe BS = 20. At BS 20, KV memory = 43GB. Read per step = 15GB (weights) + 43GB (KV) = 58GB. Read latency = 58GB / 2000GB/s = 29ms. Throughput at BS 20 = 20 / 0.029s = 689 tokens/sec.'
+  common_mistake: |
+    **The Pitfall:** Attempting to use faster matrix multiplication kernels (like FlashAttention) or CUDA graphs to increase throughput.
+    **The Rationale:** Developers often reach for compute optimizations when the system is fundamentally blocked by memory capacity (KV cache size) and memory bandwidth.
+    **The Consequence:** No meaningful improvement in throughput, as faster math cannot resolve a physical VRAM capacity wall.
+  napkin_math: |
+    - FP16 Weights = 60 GB.
+    - KV cache/token = 2.1 MB. At 2048 tokens = 4.3 GB/request.
+    - Max safe BS in FP16 = 3. Read = 60 + 12.9 = 72.9 GB. Speed = 2000 / 72.9 = ~27 tok/s/req * 3 = 82 tok/s.
+    - INT4 Weights = 15 GB. INT8 KV cache = 2.15 GB/request.
+    - Remaining VRAM = 65 GB. Max safe BS = 20 (uses 43 GB KV).
+    - Read per step at BS 20 = 15 GB + 43 GB = 58 GB.
+    - Latency = 58 GB / 2000 GB/s = 29 ms.
+    - **Throughput at BS 20 = 20 requests / 0.029s = ~689 tokens/sec, achieving the target.**
 status: published
 provenance: imported
 requires_explanation: false

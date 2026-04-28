@@ -8,27 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The KV Cache Thrashing Cascade
-scenario: Your multi-tenant LLM serving cluster (H100s, 80GB HBM) uses continuous batching. GPU compute
-  utilization is consistently high, but P99 latency is spiking and overall requests-per-second is 30%
-  below your benchmark. The KV cache is allocated 60 GB of HBM, and monitoring shows this buffer is always
-  near 100% full. Differentiate between a system that is compute-bound versus one that is memory-capacity-bound
-  in this specific context, and analyze the cascading failure mode that is likely occurring.
+scenario: Your multi-tenant LLM serving cluster (H100s, 80GB HBM) uses continuous batching. GPU compute utilization is consistently high, but P99 latency is spiking and overall requests-per-second is 30% below your benchmark. The KV cache is allocated 60 GB of HBM, and monitoring shows this buffer is always near 100% full.
 question: "Is this continuous-batched cluster compute-bound or KV-cache-capacity-bound, and what cascading failure explains the 30% RPS loss and P99 spikes?"
 details:
-  realistic_solution: The system is memory-capacity-bound, not compute-bound, and is suffering from KV
-    cache thrashing. A perpetually full KV cache means the scheduler has no room for new requests. To
-    accept a new request, it must evict the KV cache of a sequence that is currently paused (e.g., waiting
-    for a user's next turn in a chat). When that user's request returns, its entire prompt history must
-    be re-processed from scratch to regenerate the evicted KV cache state. This re-computation, or 'recompute
-    tax,' consumes valuable GPU cycles that could have been used for generating new tokens for other users.
-    This directly explains both the reduced system throughput (as cycles are wasted) and the P99 latency
-    spikes experienced by unlucky users whose caches were evicted. The solution involves either reducing
-    the maximum sequence length, using a more memory-efficient model, or implementing more sophisticated
-    eviction policies (like Least Recently Used) instead of what is likely a random or FIFO eviction.
-  common_mistake: Assuming that a full KV cache is a sign of an efficient system ('we are using all our
-    memory!'). This fails to distinguish between useful, warm cache occupancy and destructive cache thrashing
-    where the cost of recomputing evicted state outweighs the benefit of accepting a new request.
-  napkin_math: 'For a 70B model with GQA (8 KV heads, 128 head dim, 80 layers), KV cache is ~320 KB per token. 60 GB allows ~190K total tokens in flight. If average context is 2K tokens, we can only hold ~95 concurrent requests. The GPU has massive compute available, but we are hard-limited by the memory capacity to hold more KV states, forcing evictions.'
+  realistic_solution: The system is memory-capacity-bound, not compute-bound, and is suffering from KV cache thrashing. A perpetually full KV cache means the scheduler has no room for new requests. To accept a new request, it must evict the KV cache of a sequence that is currently paused (e.g., waiting for a user's next turn in a chat). When that user's request returns, its entire prompt history must be re-processed from scratch to regenerate the evicted KV cache state. This re-computation, or 'recompute tax,' consumes valuable GPU cycles that could have been used for generating new tokens for other users. This directly explains both the reduced system throughput (as cycles are wasted) and the P99 latency spikes experienced by unlucky users whose caches were evicted. The solution involves either reducing the maximum sequence length, using a more memory-efficient model, or implementing more sophisticated eviction policies (like Least Recently Used) instead of what is likely a random or FIFO eviction.
+  common_mistake: |
+    **The Pitfall:** Assuming a full KV cache indicates an efficient system.
+    **The Rationale:** Engineers equate high memory utilization with optimal performance, failing to distinguish between useful cache occupancy and destructive thrashing.
+    **The Consequence:** Misdiagnosis of the bottleneck, leading to ineffective scaling rather than fixing the eviction policy.
+  napkin_math: |
+    1. KV cache per token (70B, GQA, 8 KV heads, 128 dim, 80 layers): ~320 KB.
+    2. Total tokens in flight (60 GB): 60 GB / 320 KB ≈ 190K tokens.
+    3. Concurrent requests (2K avg context): 190K / 2K = 95 requests.
+    4. Identify limitation: Compute is abundant, but memory capacity limits concurrent requests.
+    **Final Result: The system is memory-capacity-bound, causing thrashing.**
 status: published
 provenance: imported
 requires_explanation: false

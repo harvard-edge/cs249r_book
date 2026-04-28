@@ -8,31 +8,18 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: The Hierarchical AllReduce Asymmetry
-scenario: Your 256-GPU cluster has 32 nodes, each with 8 GPUs connected by NVLink at 900 GB/s. Nodes are
-  connected by 8x InfiniBand NICs at 400 Gb/s each (400 GB/s aggregate per node). You run a flat Ring
-  AllReduce across all 256 GPUs and observe that gradient synchronization takes 180 ms for 2 GB of gradients
-  — far worse than the bandwidth-optimal prediction. Diagnose the problem and propose a better algorithm
-  that exploits the network hierarchy.
-question: "Why is flat Ring AllReduce slow for 2 GB gradients across 256 GPUs, and what topology-aware algorithm would you use instead?"
+scenario: Your 256-GPU cluster has 32 nodes, each with 8 GPUs connected by NVLink at 900 GB/s. Nodes are connected by 8x InfiniBand NICs at 400 Gb/s each (400 GB/s aggregate per node). You run a flat Ring AllReduce across all 256 GPUs and observe that gradient synchronization takes 180 ms for 2 GB of gradients — far worse than the bandwidth-optimal prediction.
+question: Why is flat Ring AllReduce slow for 2 GB gradients across 256 GPUs, and what topology-aware algorithm would you use instead?
 details:
-  realistic_solution: 'The problem is treating the topology as a flat 256-GPU ring, which maps poorly
-    to the DGX architecture. A flat ring forces each step to be limited by a single 50 GB/s InfiniBand
-    link, yielding ~80 ms theoretical time (plus massive network contention causing the 180 ms observed).
-    **Hierarchical AllReduce** solves this in three phases: (1) **Intra-node ReduceScatter**: 8 GPUs reduce
-    locally over NVLink. Time: $\frac{7}{8} \times 2\text{ GB} / 900\text{ GB/s} \approx 1.9\text{ ms}$.
-    (2) **Inter-node AllReduce**: Each GPU performs a Ring AllReduce of its 250 MB shard independently
-    across the 32 nodes using its dedicated 50 GB/s NIC. Time: $2 \times \frac{31}{32} \times 250\text{
-    MB} / 50\text{ GB/s} \approx 9.7\text{ ms}$. (3) **Intra-node AllGather**: Broadcast the result over
-    NVLink. Time: $\approx 1.9\text{ ms}$. Total: ~13.5 ms — a 6× improvement over the flat ring.'
-  common_mistake: Blaming the InfiniBand switches or assuming the algorithm is buggy. The algorithm is
-    correct; it's just topology-unaware. A flat ring forces intra-node traffic (which could use 900 GB/s
-    NVLink) to compete with inter-node traffic (limited to 50 GB/s IB), and many ring steps cross the
-    slow inter-node link unnecessarily.
-  napkin_math: '- Flat ring: 510 steps, bottlenecked by a single 50 GB/s InfiniBand link per step. BW
-    term: 2 × 255/256 × 2 GB / 50 GB/s ≈ 80 ms. Latency: 510 × 5 μs = 2.5 ms. Total ≈ 82 ms theoretical
-    (180 ms observed includes congestion). - Hierarchical: Intra ReduceScatter 1.9 ms + Inter AllReduce
-    (all 8 NICs in parallel) 9.7 ms + Intra AllGather 1.9 ms = 13.5 ms. - Speedup: ~6× by exploiting all
-    NICs and local NVLink.'
+  realistic_solution: The problem is treating the topology as a flat 256-GPU ring, forcing each step to be limited by a single 50 GB/s InfiniBand link. Hierarchical AllReduce solves this in three phases: Intra-node ReduceScatter (NVLink), Inter-node AllReduce (InfiniBand), and Intra-node AllGather (NVLink).
+  common_mistake: |
+    **The Pitfall:** Blaming the InfiniBand switches or assuming the networking hardware is faulty.
+    **The Rationale:** Engineers assume standard algorithms automatically optimize for hardware, ignoring that a flat ring forces intra-node traffic to cross slow inter-node links unnecessarily.
+    **The Consequence:** Tearing down working network fabrics instead of simply enabling topology-aware collectives in the software.
+  napkin_math: |
+    1. **Calculate Flat Ring Latency:** Bottlenecked by a single 50 GB/s link per step. BW term: 2 × 255/256 × 2 GB / 50 GB/s ≈ 80 ms. Total ≈ 82 ms theoretical (180 ms observed due to congestion).
+    2. **Calculate Hierarchical Latency:** Intra ReduceScatter ≈ 1.9 ms + Inter AllReduce ≈ 9.7 ms + Intra AllGather ≈ 1.9 ms = 13.5 ms.
+    **Final Result: Hierarchical AllReduce provides a ~6x improvement over the flat ring by exploiting local NVLink.**
 status: published
 provenance: imported
 requires_explanation: false

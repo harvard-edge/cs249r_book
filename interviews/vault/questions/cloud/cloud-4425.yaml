@@ -8,29 +8,22 @@ competency_area: architecture
 bloom_level: understand
 phase: inference
 title: QLoRA Double Quantization Memory Accounting
-scenario: A team wants to fine-tune a 70B model on a single 80GB H100 using QLoRA.
-  They plan to use NF4 base weights with double quantization. Calculate the total
-  memory usage and verify feasibility.
-question: How much memory does QLoRA need to fine-tune a 70B model with NF4 and double
-  quantization on one 80GB H100, and is it feasible?
+scenario: A team wants to fine-tune a 70B model on a single 80GB GPU using QLoRA. They plan to use NF4 base weights with double quantization.
+question: How much memory does QLoRA need to fine-tune a 70B model with NF4 and double quantization on one 80GB GPU, and is it feasible?
 details:
-  realistic_solution: 'QLoRA memory breakdown: (1) Base model NF4: 70B params * 0.5
-    bytes = 35GB. (2) Double quantization saves ~0.37 bits/param additionally: 70B
-    * 0.373/8 = 3.26GB savings = 31.74GB. (3) LoRA adapters (r=16): ~83MB in BF16 (negligible).
-    (4) LoRA optimizer states (Adam): 2 * 83MB = 166MB. (5) Activation memory per
-    layer during backward: depends on batch size and sequence length. For batch=1,
-    seq=2048, Llama-3 70B: ~256MB activations with gradient checkpointing. (6) CUDA
-    kernels + overhead: ~2GB. Total: 31.74 + 0.17 + 0.26 + 2 = 34.17GB. Fits in 80GB
-    with room for batch size 2-4.'
-  common_mistake: Only accounting for the quantized base model weights and forgetting
-    optimizer states, gradients, and activation memory during backward pass. QLoRA
-    only quantizes the frozen base model; LoRA adapters and their optimizer states
-    are in full precision.
-  napkin_math: 'NF4 quantization: 4 bits/param = 0.5 bytes. 70B * 0.5 = 35GB. Double
-    quant: quantizes 32-bit constants (block size 64) to 8-bit (block size 256).
-    Savings: 32/64 - (8/64 + 32/(64*256)) = 0.5 - 0.127 = 0.373 bits/param. 70B * 0.373/8 = ~3.26GB savings.
-    Total base model: 35 - 3.26 = 31.74GB. Plus LoRA: +0.25GB. Plus activations (gradient
-    checkpoint): +0.5GB. Total: ~34.5GB. Fits in 80GB with 45GB headroom for batching.'
+  realistic_solution: 'QLoRA memory breakdown: (1) Base model NF4: 70B params * 0.5 bytes = 35GB. (2) Double quantization saves ~0.37 bits/param additionally: 70B * 0.373/8 = 3.26GB savings = 31.74GB. (3) LoRA adapters (r=16): ~83MB in BF16. (4) LoRA optimizer states (Adam): 2 * 83MB = 166MB. (5) Activation memory per layer during backward: depends on batch size and sequence length. For batch=1, seq=2048: ~256MB activations with gradient checkpointing. (6) CUDA kernels: ~2GB. Total: ~34.17GB. Fits in 80GB with room for batching.'
+  common_mistake: |
+    **The Pitfall:** Only accounting for the quantized base model weights.
+    **The Rationale:** Engineers often forget that QLoRA only quantizes the frozen base model, while LoRA adapters, optimizer states, and activations remain in higher precision.
+    **The Consequence:** Memory requirements are underestimated, leading to unexpected Out-of-Memory (OOM) errors during the backward pass.
+  napkin_math: |
+    1. Calculate NF4 base model: 4 bits/param = 0.5 bytes. 70B * 0.5 = 35GB.
+    2. Calculate double quantization savings: Quantizes 32-bit constants (block size 64) to 8-bit (block size 256). Savings: 32/64 - (8/64 + 32/(64*256)) = 0.5 - 0.127 = 0.373 bits/param.
+    3. Apply savings: 70B * 0.373/8 = ~3.26GB savings. Total base model = 35 - 3.26 = 31.74GB.
+    4. Add LoRA adapter memory: ~0.25GB (adapters + optimizer states).
+    5. Add activation memory: ~0.5GB (with gradient checkpointing).
+    6. Calculate total memory: 31.74 + 0.25 + 0.5 = ~32.5GB.
+    7. Evaluate feasibility: **Fits in 80GB with ~47GB headroom** for batching and CUDA context.
 status: published
 provenance: imported
 requires_explanation: false

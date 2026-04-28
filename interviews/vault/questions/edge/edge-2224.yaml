@@ -8,29 +8,21 @@ competency_area: optimization
 bloom_level: create
 phase: training
 title: Federated learning gradient compression with autograd hooks on Jetson Orin
-scenario: You are implementing PowerSGD gradient compression for federated learning
-  across 100 Jetson Orin devices with 1Mbps uplink bandwidth. Each device has a 30M
-  parameter model producing 120MB FP32 gradients per step. Uploading 120MB on a 1Mbps
-  link takes 960 seconds — orders of magnitude too slow.
-question: How would you apply PowerSGD so 120 MB gradients can be uploaded over a
-  1 Mbps link within a federated round?
+scenario: You are implementing PowerSGD gradient compression for federated learning across 100 Jetson Orin devices with 1Mbps uplink bandwidth. Each device has a 30M parameter model producing 120MB FP32 gradients per step. Uploading 120MB on a 1Mbps link takes 960 seconds — orders of magnitude too slow.
+question: How would you apply PowerSGD so 120 MB gradients can be uploaded over a 1 Mbps link within a federated round?
 details:
-  realistic_solution: 'Use gradient hooks registered with module.register_backward_hook()
-    to intercept gradients layer-by-layer as they are produced during backward. Apply
-    rank-1 PowerSGD compression (UV decomposition) immediately before accumulation
-    into .grad. Maintain an error feedback buffer per layer. With rank-1 compression:
-    30M params → (n_layers × (in_dim + out_dim) × rank) ≈ 1000 layers × 256 values
-    = 1MB transmitted. 120× compression.'
-  common_mistake: Applying gradient compression after the full backward pass has run
-    and gradients are materialized. This saves communication bandwidth but doesn't
-    reduce the memory cost of holding 120MB gradients on the device during compression.
-    Also not considering error feedback — compressed gradients accumulate approximation
-    errors that must be corrected.
-  napkin_math: '30M params FP32 = 120MB. PowerSGD rank-1 for a 256×1024 weight matrix:
-    transmit (256+1024)×4 bytes = 5.1KB vs 1MB original = 196× compression. Average
-    across all layers: ~100× compression. Compressed gradient size: 120MB/100 = 1.2MB.
-    Upload time at 1Mbps: 1.2MB × 8 bits = 9.6Mb / 1Mbps = 9.6 seconds. Achievable
-    for federated round of 5 minutes.'
+  realistic_solution: Use gradient hooks registered with module.register_backward_hook() to intercept gradients layer-by-layer as they are produced during backward. Apply rank-1 PowerSGD compression (UV decomposition) immediately before accumulation into .grad. Maintain an error feedback buffer per layer. With rank-1 compression: 30M params -> (n_layers * (in_dim + out_dim) * rank) ~ 1000 layers * 256 values = 1MB transmitted. 120x compression.
+  common_mistake: |
+    **The Pitfall:** Applying gradient compression after the full backward pass completes.
+    **The Rationale:** Candidates focus solely on communication bandwidth, ignoring the fact that materializing the full 120MB uncompressed gradient on the device before compression causes massive memory pressure. They also frequently forget to implement error feedback for the compression algorithm.
+    **The Consequence:** The device OOMs during the backward pass, or the federated model fails to converge due to uncorrected approximation errors.
+  napkin_math: |
+    - Uncompressed gradients: 30M params in FP32 = 120MB.
+    - PowerSGD rank-1 (e.g., for a 256x1024 matrix): Transmit (256+1024)*4 bytes = 5.12 KB vs 1 MB original (200x compression).
+    - Average compression across all layers: ~100x.
+    - Compressed gradient size: 120MB / 100 = 1.2MB.
+    - Upload time at 1Mbps: 1.2MB * 8 bits/byte = 9.6 Mb / 1 Mbps = 9.6 seconds.
+    **Conclusion: Using backward hooks to compress gradients layer-by-layer allows the 9.6-second upload to comfortably fit within a federated round.**
 status: published
 provenance: imported
 requires_explanation: true

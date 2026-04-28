@@ -7,25 +7,20 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: evaluate
 phase: both
-title: 'Network Bandwidth Bottlenecks: Master Full Communication Analysis for 3D-Parallel
-  LLM Training'
-scenario: 'Analyze all communication bottlenecks in a 3D-parallel training setup (TP-4,
-  PP-4, DP-8) for a 70B model on 128 H100 GPUs (8-GPU DGX nodes, NVLink 900GB/s intra-node,
-  200Gb/s InfiniBand inter-node). Quantify: TP all-reduce time, PP bubble overhead,
-  DP gradient AllReduce time, and identify the dominant bottleneck.'
-question: In a TP-4, PP-4, DP-8 setup for a 70B model on 128 H100s, how large are
-  the TP, PP, and DP communication costs and which dominates?
+title: 'Network Bandwidth Bottlenecks: Master Full Communication Analysis for 3D-Parallel LLM Training'
+scenario: You are analyzing a 3D-parallel training setup (TP-4, PP-4, DP-8) for a 70B model on 128 H100 GPUs (8-GPU nodes, NVLink 900GB/s, 200Gb/s IB).
+question: What are the specific TP, PP, and DP communication costs per step, and which dominates the 3D-parallel setup?
 details:
-  realistic_solution: 'TP-4 (within node, NVLink): per layer, 4 all-reduces of shape
-    [batch, seq, hidden] = 4×[1, 2048, 8192]×2B = 134MB per step × 80 layers = 10.7GB
-    total. NVLink 900GB/s/4: each layer''s TP all-reduce: 134MB/225GB/s = 0.6ms/layer
-    × 80 = 48ms. PP bubble: 4 pipeline stages, 1 micro-batch (Gpipe). Bubble fraction:
-    (PP-1)/PP=75%. Fix: interleaved 1F1B (v=4) with 8 micro-batches: bubble overhead = (PP-1)/(v×M)
-    = 3/32 = 9.4%. DP AllReduce: 70B/16 params × 2B = 8.75GB per GPU. Ring AllReduce over 8 DP: 8.75GB × 2 × 7/8 = 15.31GB. At 25GB/s per GPU IB: 15.31GB / 25GB/s = 612ms. PP bubble: 200ms×9.4%=18.8ms. Dominant: DP AllReduce (612ms) >> TP comm (48ms) >> PP bubble (18ms).'
-  common_mistake: Analyzing each parallelism dimension independently without noting
-    that TP and PP run synchronously within a micro-batch while DP is overlapped with
-    backward computation.
-  napkin_math: 'TP all-reduce: 4×80layers×(1×2048×8192×2B)/225GB/s = 4×80×33.6MB/225GB/s=47.8ms. PP bubble (interleaved 1F1B, v=4, M=8): (4-1)/(4×8)=3/32=9.4%×200ms step=18.8ms. DP AllReduce: 70B×2B/(4TP×4PP) = 8.75GB gradient per shard. Ring-AllReduce over 8 DP: 2×7/8×8.75GB = 15.31GB over IB 25GB/s = 612.5ms. DP is dominant.'
+  realistic_solution: 'TP-4 (within node, NVLink): per layer, 4 all-reduces of shape [batch, seq, hidden] = 4×[1, 2048, 8192]×2B = 134MB per step × 80 layers = 10.7GB total. NVLink 900GB/s/4: each layer''s TP all-reduce: 134MB/225GB/s = 0.6ms/layer × 80 = 48ms. PP bubble: 4 pipeline stages, 1 micro-batch (Gpipe). Bubble fraction: (PP-1)/PP=75%. Fix: interleaved 1F1B (v=4) with 8 micro-batches: bubble overhead = (PP-1)/(v×M) = 3/32 = 9.4%. DP AllReduce: 70B/16 params × 2B = 8.75GB per GPU. Ring AllReduce over 8 DP: 8.75GB × 2 × 7/8 = 15.31GB. At 25GB/s per GPU IB: 15.31GB / 25GB/s = 612ms. PP bubble: 200ms×9.4%=18.8ms. Dominant: DP AllReduce (612ms) >> TP comm (48ms) >> PP bubble (18ms).'
+  common_mistake: |
+    **The Pitfall:** Analyzing each parallelism dimension independently.
+    **The Rationale:** Failing to recognize that TP and PP run synchronously within a micro-batch, while DP communication spans the slower inter-node fabric.
+    **The Consequence:** Misidentifying the bottleneck and optimizing the wrong parallel dimension, such as trying to reduce the PP bubble when DP AllReduce is taking 30x longer.
+  napkin_math: |
+    - **TP-4 (NVLink)**: 4 all-reduces of shape [1, 2048, 8192] × 2B = 134MB/step × 80 layers = 10.7GB. NVLink (900GB/s/4 = 225GB/s). 10.7GB / 225GB/s = **~48ms**.
+    - **PP Bubble (Interleaved 1F1B, v=4, M=8)**: Overhead = (PP-1)/(v×M) = 3/32 = 9.4%. For a 200ms step, bubble = **~18.8ms**.
+    - **DP AllReduce (IB 25GB/s)**: 70B params × 2B / (4TP × 4PP) = 8.75GB per shard. Ring-AllReduce over 8 DP: 2 × (7/8) × 8.75GB = 15.31GB. 15.31GB / 25GB/s = **612.5ms**.
+    - **Result**: DP AllReduce (612ms) completely dominates TP communication (48ms) and PP bubble (18ms).
 status: published
 provenance: imported
 requires_explanation: true

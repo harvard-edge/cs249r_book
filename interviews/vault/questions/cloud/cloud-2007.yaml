@@ -8,23 +8,18 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Evaluating Tensor Memory Layouts for Tensor Cores
-scenario: You are optimizing a ResNet-based vision pipeline on an NVIDIA A100 GPU (80GB, 2TB/s bandwidth)
-  using FP16. Tensors currently use the legacy NCHW memory layout. A proposal suggests migrating the tensor
-  abstraction to the NHWC ('channels_last') layout to maximize Tensor Core utilization for Conv2D operations.
-  However, three custom CUDA kernels in the pipeline strictly require contiguous NCHW tensors. Evaluate
-  the trade-offs of switching the global tensor layout, given a critical bottleneck tensor of shape [N=256,
-  C=1024, H=14, W=14].
-question: "Should you switch the ResNet pipeline to NHWC despite three NCHW-only custom kernels, and when is the conversion cost justified?"
+scenario: You are optimizing a ResNet-based vision pipeline on an NVIDIA A100 GPU using FP16. Tensors currently use the legacy NCHW memory layout. A proposal suggests migrating the tensor abstraction to the NHWC ('channels_last') layout to maximize Tensor Core utilization for Conv2D operations. However, three custom CUDA kernels in the pipeline strictly require contiguous NCHW tensors. A critical bottleneck tensor is shape [N=256, C=1024, H=14, W=14].
+question: Should you switch the ResNet pipeline to NHWC despite three NCHW-only custom kernels, and when is the conversion cost justified?
 details:
-  realistic_solution: Adopt the NHWC layout to unlock 2-3x Tensor Core speedups for convolutions. The
-    overhead of dynamically converting to NCHW for the custom kernels is bandwidth-bound but justified
-    if the convolution time savings exceed the memory copy penalty.
-  common_mistake: Ignoring the memory bandwidth cost of implicit `.contiguous()` calls when passing tensors
-    to the legacy NCHW custom kernels, or assuming NCHW is globally optimal.
-  napkin_math: 'Tensor size: 256 * 1024 * 14 * 14 * 2 bytes (FP16) = 102,760,448 bytes (approx 102.7 MB).
-    A transposition requires a full read and write (205.4 MB total). At 2 TB/s bandwidth, the copy takes
-    205.4 MB / 2,000,000 MB/s = 102.7 microseconds. If the NHWC Conv2D saves more than 102.7 microseconds
-    per layer compared to NCHW, the global layout change is a net positive.'
+  realistic_solution: Adopt the NHWC layout to unlock 2-3x Tensor Core speedups for convolutions. The overhead of dynamically converting to NCHW for the custom kernels is bandwidth-bound but justified if the convolution time savings exceed the memory copy penalty.
+  common_mistake: |
+    **The Pitfall:** Ignoring the memory bandwidth cost of implicit `.contiguous()` calls.
+    **The Rationale:** Assuming the global optimal layout (NHWC) is universally faster.
+    **The Consequence:** Dynamic memory transpositions before legacy custom kernels destroy the performance gains of the Tensor Cores.
+  napkin_math: |
+    - 1. **Tensor Size:** 256 × 1024 × 14 × 14 × 2 bytes (FP16) = 102.7 MB.
+    - 2. **Transposition Cost:** Read + Write = 205.4 MB. At 2 TB/s bandwidth, the copy takes **102.7 microseconds**.
+    - 3. **Result:** The layout change is only a net positive if NHWC Conv2D saves more than **102.7 µs per layer** compared to NCHW.
 status: published
 provenance: imported
 requires_explanation: false
@@ -43,4 +38,3 @@ human_reviewed:
   by: null
   date: null
   notes: null
-created_at: '2026-03-24T01:42:17.141063'

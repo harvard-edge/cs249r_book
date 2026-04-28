@@ -8,26 +8,21 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: Diagnosing RoCEv2 PFC Storms in MoE
-scenario: You are training a Mixture of Experts (MoE) model across 32 nodes (256 GPUs) connected via a
-  400Gbps RoCEv2 fabric. During the All-to-All expert routing phase, the entire cluster's network throughput
-  periodically drops to near zero for 3-5 seconds, causing massive timeouts and NCCL watchdog crashes.
-  Network utilization otherwise peaks at 80%.
+scenario: 'You are training a Mixture of Experts (MoE) model across 32 nodes (256 GPUs) connected via a 400Gbps RoCEv2 fabric. During the All-to-All expert routing phase, the entire cluster''s network throughput periodically drops to near zero for 3-5 seconds, causing massive timeouts and NCCL watchdog crashes. Network utilization otherwise peaks at 80%.'
 question: "What causes the 3-5s network collapses and NCCL watchdog crashes during MoE All-to-All on RoCEv2, and how would you mitigate them?"
 details:
-  realistic_solution: The root cause is an RDMA Incast leading to a Priority Flow Control (PFC) storm.
-    During the MoE All-to-All phase, 255 GPUs simultaneously send data to a single GPU's Top-of-Rack (ToR)
-    switch port. This massive microburst instantly overflows the switch's ingress buffers. Because RoCEv2
-    relies on lossless Ethernet, the switch emits PFC pause frames back to the sender ports. If the congestion
-    control (DCQCN) reacts too slowly, the pause frames propagate up the spine switches, creating a 'PFC
-    storm' that completely halts fabric traffic (head-of-line blocking). The solution is to aggressively
-    tune DCQCN parameters to react to Explicit Congestion Notification (ECN) earlier, lowering the ECN
-    marking threshold, and implementing hierarchical All-to-All to reduce the incast degree.
-  common_mistake: Increasing the NCCL timeout duration to mask the crashes without addressing the network
-    halt.
-  napkin_math: Incast from 255 GPUs sending 100KB chunks simultaneously = 25.5MB of data hitting one switch
-    port in microseconds. A typical 400G ToR switch has ~32MB of shared buffer pool. A single incast event
-    consumes almost the entire buffer, triggering PFC thresholds (usually set around 5-10MB per queue)
-    instantly.
+  realistic_solution: The root cause is an RDMA Incast leading to a Priority Flow Control (PFC) storm. During the MoE All-to-All phase, 255 GPUs simultaneously send data to a single GPU's Top-of-Rack (ToR) switch port. This massive microburst instantly overflows the switch's ingress buffers. Because RoCEv2 relies on lossless Ethernet, the switch emits PFC pause frames back to the sender ports. If the congestion control (DCQCN) reacts too slowly, the pause frames propagate up the spine switches, creating a 'PFC storm' that completely halts fabric traffic (head-of-line blocking). The solution is to aggressively tune DCQCN parameters to react to Explicit Congestion Notification (ECN) earlier, lowering the ECN marking threshold, and implementing hierarchical All-to-All to reduce the incast degree.
+  common_mistake: |
+    **The Pitfall:** Increasing the NCCL timeout duration to mask the crashes.
+    
+    **The Rationale:** When faced with timeout errors, a quick fix is to increase the timeout threshold, ignoring the underlying network halt.
+    
+    **The Consequence:** Training jobs stay 'alive' but spend most of their time idle during silent network collapses, devastating overall throughput.
+  napkin_math: |
+    * **Incast Volume:** 255 GPUs × 100 KB chunks = 25.5 MB arriving simultaneously
+    * **Switch Buffer:** A typical 400G ToR switch has ~32 MB of shared buffer pool
+    * **PFC Threshold:** Typically set around 5-10 MB per queue
+    * **Result:** **A single incast event (25.5 MB) instantly overflows the queue threshold, triggering a PFC storm.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,25 +8,20 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Diagnosing High TTFT in Confidential GPU Enclaves
-scenario: You deployed a Llama-3 70B model (140GB in FP16) on an 8x H100 node with NVIDIA Confidential
-  Computing (CC) enabled to protect proprietary weights and patient data. During profiling, you observe
-  that the model's Time-To-First-Token (TTFT) has spiked from 0.5s to over 3.0s, and total host-to-device
-  memory bandwidth utilization during weight loading is only ~15 GB/s per GPU instead of the expected
-  PCIe Gen5 limits. However, the auto-regressive decoding phase maintains its normal 15 tokens/s rate.
-  Analyze the root cause of this TTFT regression in the secure deployment.
-question: "What is causing the TTFT regression with Confidential Computing enabled while decoding throughput remains normal?"
+scenario: You deployed a Llama-3 70B model (140GB in FP16) on an 8x H100 node with NVIDIA Confidential Computing (CC) enabled to protect proprietary weights and patient data. During profiling, you observe that the model's Time-To-First-Token (TTFT) has spiked from 0.5s to over 3.0s, and total host-to-device memory bandwidth utilization during weight loading is only ~15 GB/s per GPU instead of the expected PCIe Gen5 limits. However, the auto-regressive decoding phase maintains its normal 15 tokens/s rate.
+question: What is causing the TTFT regression with Confidential Computing enabled while decoding throughput remains normal?
 details:
-  realistic_solution: The bottleneck is the PCIe bounce buffer mechanism used in Confidential Computing.
-    Encrypted data must be transferred from host memory to the GPU's secure memory region via limited-size
-    bounce buffers, causing PCIe synchronization stalls that severely restrict the effective host-to-device
-    transfer rate during model loading and initial prompt processing.
-  common_mistake: Assuming the H100's hardware encryption engines slow down matrix multiplications during
-    the decoding phase, or that AES-GCM encryption natively limits the internal HBM3 bandwidth.
-  napkin_math: PCIe Gen5 x16 theoretical limit is 64 GB/s (effective ~50 GB/s). With CC bounce buffers,
-    sync and encryption overhead drop effective host-to-device transfer to ~15 GB/s. Transferring 17.5
-    GB of weights per GPU (140GB / 8) takes 17.5 / 15 = ~1.16s for PCIe transfer alone. Added to the secure
-    enclave initialization and prompt decryption overhead, this accounts for the multi-second TTFT increase,
-    while internal HBM3 decoding (3 TB/s) remains unaffected.
+  realistic_solution: The bottleneck is the PCIe bounce buffer mechanism used in Confidential Computing. Encrypted data must be transferred from host memory to the GPU's secure memory region via limited-size bounce buffers, causing PCIe synchronization stalls that severely restrict the effective host-to-device transfer rate during model loading and initial prompt processing.
+  common_mistake: |
+    **The Pitfall:** Assuming the H100's hardware encryption engines slow down matrix multiplications during decoding.
+    **The Rationale:** Candidates misunderstand where the encryption overhead applies, thinking AES-GCM natively limits internal HBM3 bandwidth.
+    **The Consequence:** Investigating complex CUDA kernel optimizations instead of focusing on the host-to-device PCIe transfer bottlenecks.
+  napkin_math: |
+    - Normal PCIe Gen5 x16: ~50 GB/s effective bandwidth.
+    - CC Bounce Buffer Penalty: Synchronization and encryption drop effective transfer to ~15 GB/s.
+    - Transfer payload per GPU: 140GB / 8 GPUs = 17.5 GB.
+    - PCIe transfer time: 17.5 GB / 15 GB/s = ~1.16s.
+    - **Conclusion: The 1.16s PCIe transfer plus secure enclave initialization overhead perfectly accounts for the multi-second TTFT spike, while internal HBM3 decoding (3 TB/s) is unaffected.**
 status: published
 provenance: imported
 requires_explanation: false

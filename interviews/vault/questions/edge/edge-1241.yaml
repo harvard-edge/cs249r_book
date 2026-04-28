@@ -8,35 +8,19 @@ competency_area: architecture
 bloom_level: analyze
 phase: training
 title: Hailo-8 Dataflow Topology Memory Bottleneck
-scenario: A hardware-aware NAS process yielded two INT8 object detection models targeted
-  for a Hailo-8 edge device (26 TOPS INT8, 2.5W, dataflow architecture with no local
-  DRAM). Model X requires 15 GOPs per inference and features heavy branching with
-  long skip connections. Model Y requires 20 GOPs per inference but uses a strictly
-  sequential topology. Despite Model X having 25% fewer compute requirements, it runs
-  at 150 FPS while Model Y achieves 600 FPS on the Hailo-8. Explain why the lower-compute
-  model performs significantly worse on this specific accelerator.
-question: Why does Model X run at 150 FPS while the higher-compute sequential Model
-  Y reaches 600 FPS on the Hailo-8?
+scenario: A hardware-aware NAS yielded two INT8 object detection models for a Hailo-8 edge device (26 TOPS, 2.5W, dataflow architecture, no local DRAM). Model X requires 15 GOPs with heavy branching. Model Y requires 20 GOPs with a strictly sequential topology.
+question: Why does the lower-compute Model X run at 150 FPS while the higher-compute Model Y reaches 600 FPS on the Hailo-8?
 details:
-  realistic_solution: Because the Hailo-8 is a dataflow accelerator lacking local
-    DRAM, it relies on mapping the entire neural network graph directly onto its distributed
-    internal compute units and SRAM. A sequential model like Model Y can be pipelined
-    efficiently, processing data on-chip without intermediate off-chip memory access.
-    Model X's heavy branching and long skip connections likely exhaust the internal
-    SRAM capacity for holding intermediate tensors. This forces the device to spill
-    and stream intermediate activations to and from the host memory over the system
-    bus, causing severe bandwidth bottlenecks that stall the 26 TOPS compute engines.
-  common_mistake: Candidates often assume that fewer FLOPs/GOPs always translates
-    directly to lower latency. They may try to explain the discrepancy by citing standard
-    CPU/GPU cache misses, failing to account for the Hailo-8's unique dataflow architecture
-    and lack of local DRAM, which makes it highly sensitive to network topology.
-  napkin_math: 'Compute bounds: Model Y limit = 26,000 GOPs / 20 GOPs = 1,300 max
-    FPS. Model X limit = 26,000 GOPs / 15 GOPs = 1,733 max FPS. Memory bound for Model
-    X: If spilling a 4MB intermediate feature map to host memory over a 4 GB/s PCIe
-    bus, the round-trip transfer (8MB total) takes 8MB / 4000 MB/s = 2.0 ms per inference.
-    This memory bottleneck imposes a strict ceiling of 1 / 0.002s = 500 FPS, completely
-    negating the FLOP advantage before accounting for any overhead or synchronization
-    latency, dropping actual throughput to 150 FPS.'
+  realistic_solution: Because the Hailo-8 is a dataflow accelerator lacking local DRAM, it relies on mapping the entire network graph directly onto its distributed SRAM. A sequential model can be pipelined efficiently. Model X's heavy branching exhausts internal SRAM, forcing it to spill intermediate activations over the PCIe bus, causing severe bandwidth bottlenecks.
+  common_mistake: |
+    **The Pitfall:** Assuming that fewer FLOPs/GOPs mathematically guarantees lower latency on dataflow accelerators.
+    **The Rationale:** Candidates rely on standard CPU/GPU intuition, failing to account for the unique memory topology of specialized NPUs that lack local DRAM.
+    **The Consequence:** Selecting a theoretically "efficient" model that heavily thrashes the host PCIe bus because intermediate activations spill out of the chip's internal SRAM.
+  napkin_math: |
+    * **Compute Bound Model Y:** 26,000 GOPs / 20 GOPs = 1,300 max FPS.
+    * **Compute Bound Model X:** 26,000 GOPs / 15 GOPs = 1,733 max FPS.
+    * **Memory Bottleneck (Model X):** Heavy branching exhausts SRAM. Spilling a 4MB feature map over a 4 GB/s PCIe bus takes 8MB / 4000 MB/s = 2.0ms per inference.
+    * **Throughput Ceiling:** 1 / 0.002s = 500 FPS limit. When accounting for synchronization, this crashes down to the observed **150 FPS**.
 status: published
 provenance: imported
 requires_explanation: false
@@ -45,8 +29,6 @@ validated: true
 validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
-validation_issues:
-- reasoning_competency and reasoning_mode are not specified.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

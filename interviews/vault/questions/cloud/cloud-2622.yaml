@@ -8,12 +8,20 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Memory Reduction Strategy Selection
-scenario: 'A 7B model needs fine-tuning on a single A100-80GB. Full fine-tuning needs ~154GB. Option A: Gradient checkpointing (saves 60% activation memory, 30% slower). Option B: LoRA (r=16, trains only 0.1% of params, may lose 1-2% accuracy). Option C: Use 2 GPUs with ZeRO Stage 3. Which approach and why?'
-question: "Which approach and why?"
+scenario: A 7B model needs fine-tuning on a single A100-80GB. Full fine-tuning needs ~154GB. Option A: Gradient checkpointing (saves 60% activation memory, 30% slower). Option B: LoRA (r=16, trains only 0.1% of params, may lose 1-2% accuracy). Option C: Use 2 GPUs with ZeRO Stage 3.
+question: Which memory reduction approach should be used for 7B fine-tuning on a single 80GB GPU, and why?
 details:
   realistic_solution: 'The 154GB breaks down as: ~14GB weights + ~14GB gradients + ~84GB optimizer + ~42GB activations. Option A: Gradient checkpointing reduces activations from ~42GB to ~17GB. New total: 14+14+84+17 = 129GB. Still exceeds 80GB. Option C: 2 GPUs with ZeRO-3 splits optimizer+gradients+weights, giving ~(14+14+84)/2 + 42 = 98GB/GPU — still OOM on 80GB without CPU offloading! Option B: LoRA with r=16 trains ~7M params. Optimizer states: 7M \times 12 = 84MB. Gradients: 7M \times 2 = 14MB. Total: 14GB weights + 0.1GB LoRA overhead + ~42GB activations = ~56GB. Fits on one GPU. Best choice if 1-2% accuracy trade-off is acceptable.'
-  common_mistake: Assuming gradient checkpointing alone solves OOM. It only reduces activation memory, not optimizer states, which are often the dominant consumer.
-  napkin_math: 'A: 14W + 14G + 84Opt + 17Act = 129GB > 80GB (fails). C: ZeRO-3 splits W+G+Opt to 56GB/GPU, but with 42GB activations total is 98GB > 80GB (fails without activation partitioning). B: 14W + 0.1LoRA + 42Act = 56GB < 80GB (fits). LoRA is the only viable single-GPU option.'
+  common_mistake: |
+    **The Pitfall:** Assuming gradient checkpointing is a magic bullet that fixes all OOM errors.
+    **The Rationale:** Candidates know that gradient checkpointing drastically reduces activation memory, but fail to realize that for 7B models, optimizer states (not activations) often dominate the footprint.
+    **The Consequence:** Checkpointing only drops memory to 129GB, meaning the job still crashes instantly despite the optimization effort.
+  napkin_math: |
+    1. **Baseline Full FT:** 14 GB (Weights) + 14 GB (Gradients) + 84 GB (Optimizer) + 42 GB (Activations) = 154 GB.
+    2. **Option A (Checkpointing):** Reduces activations to 17 GB. Total = 129 GB $\gg$ 80 GB. **Fails.**
+    3. **Option C (ZeRO-3 on 2 GPUs):** Splits states. Total per GPU = $112/2 + 42$ = 98 GB $\gg$ 80 GB. **Fails.**
+    4. **Option B (LoRA r=16):** Freezes weights. Optimizer for 7M parameters = 84 MB. Total = 14 GB + 0.1 GB + 42 GB = **56 GB**.
+    5. **Conclusion:** LoRA is the **only viable** single-GPU option.
 status: published
 provenance: imported
 requires_explanation: false

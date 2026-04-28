@@ -8,27 +8,22 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Diagnose low GPU utilization when serving MobileNetV3 on H100
-scenario: A production MobileNetV3-Large serving endpoint on H100 shows only 12% GPU-SM
-  utilization in nvidia-smi despite receiving 5,000 QPS. The model processes 224×224
-  images in BF16. Each request is a single image. Diagnose the root causes and propose
-  fixes.
-question: Why is MobileNetV3-Large only reaching 12% SM utilization at 5,000 QPS batch=1
-  on H100, and how would you fix it?
+scenario: A production MobileNetV3-Large serving endpoint on H100 shows only 12% GPU-SM utilization in nvidia-smi despite receiving 5,000 QPS. The model processes 224x224 images in BF16. Each request is a single image.
+question: Why is MobileNetV3-Large only reaching 12% SM utilization at 5,000 QPS batch=1 on H100, and how would you fix it?
 details:
-  realistic_solution: 'At 5K QPS with batch=1, each forward pass takes ~0.8ms at 12%
-    SM util. Root causes: (1) batch size=1 means each 0.22-GFLOP inference is dominated
-    by kernel launch overhead (~50 μs per kernel × many kernels); (2) CPU preprocessing
-    (decode + resize) taking 3–5ms per image; (3) H2D PCIe transfers serializing GPU
-    work. Fix: implement server-side dynamic batching (10ms window → batch=50), move
-    preprocessing to GPU with DALI, use CUDA graphs to fuse kernel launches.'
-  common_mistake: Assuming the fix is simply increasing batch size without diagnosing
-    whether the bottleneck is CPU preprocessing, Python overhead, or memory copy latency
-    — scaling batch size on a CPU-bound pipeline doesn't help.
-  napkin_math: 'MobileNetV3-Large: 0.22 GFLOPs at batch=1. H100 peak 989 TFLOPS BF16
-    at 12% util = 119 TFLOPS. Actual compute time: 0.22G/119T = 1.8 μs — nearly zero!
-    H100 is idle 99.9% of the time. With dynamic batching at batch=50: 50×0.22G =
-    11 GFLOPs, 10ms batching window. Compute: 11G/594T (60% util) = 0.019ms << 10ms
-    window. GPU util jumps to ~50% with 5K QPS and batch=50.'
+  realistic_solution: |
+    At 5K QPS with batch=1, each forward pass takes ~0.8ms at 12% SM util. Root causes: (1) batch size=1 means each 0.22-GFLOP inference is dominated by kernel launch overhead; (2) CPU preprocessing (decode + resize) taking 3–5ms per image; (3) H2D PCIe transfers serializing GPU work. Fix: implement server-side dynamic batching (10ms window → batch=50), move preprocessing to GPU with DALI, use CUDA graphs to fuse kernel launches.
+  common_mistake: |
+    **The Pitfall:** Arbitrarily increasing batch size without root-cause diagnosis.
+    **The Rationale:** Candidates assume batch size always solves utilization, without checking if the bottleneck is CPU preprocessing, Python overhead, or PCIe transfer.
+    **The Consequence:** Scaling batch size on a CPU-bound pipeline provides zero throughput improvement and increases latency.
+  napkin_math: |
+    - MobileNetV3-Large: 0.22 GFLOPs at batch=1.
+    - H100 peak 989 TFLOPS BF16 at 12% util = 119 TFLOPS.
+    - Actual compute time: 0.22 GFLOPs / 119 TFLOPS = 1.8 μs. The H100 is idle 99.9% of the time.
+    - With dynamic batching (batch=50): 50 * 0.22 GFLOPs = 11 GFLOPs.
+    - Compute time: 11 GFLOPs / 594 TFLOPS (60% util) = 0.019ms.
+    - **GPU utilization jumps to ~50% with 5K QPS and batch=50, safely fitting within a 10ms dynamic batching window.**
 status: published
 provenance: imported
 requires_explanation: true

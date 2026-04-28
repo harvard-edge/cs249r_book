@@ -8,40 +8,23 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: 'Multi-Tenant Serving: LoRA vs KD'
-scenario: 'You are designing a multi-tenant cloud API for 100 enterprise customers, each requiring a customized
-  version of an 8B parameter LLM for text classification. Traffic per customer is unpredictable (averaging
-  5 QPS, spiking to 50 QPS). Target latency is <200ms TTFT. You have an autoscaling cluster of A100 80GB
-  GPUs. You must evaluate the tradeoffs between two strategies: (A) Knowledge Distillation (KD) to train
-  and serve 100 individual 1B parameter models, and (B) Serving a single 8B base model with 100 dynamically
-  loaded LoRA adapters (Rank=32) using multi-LoRA batching kernels (e.g., S-LoRA). Analyze the tradeoffs
-  regarding VRAM capacity, batching efficiency, and cold-start latency.'
+scenario: You are designing a multi-tenant cloud API for 100 enterprise customers, each requiring a customized version of an 8B parameter LLM for text classification. Traffic per customer averages 5 QPS, spiking to 50 QPS. Target latency is <200ms TTFT. You have an autoscaling cluster of A100 80GB GPUs.
 question: "Which strategy should you choose for 100 customized 8B LLM tenants—100 distilled 1B models or one 8B base with LoRA adapters—and why?"
 details:
-  realistic_solution: 'Option B (LoRA) is the superior architectural choice for this high-variance, multi-tenant
-    cloud workload due to VRAM constraints and cross-tenant batching capabilities.
+  realistic_solution: 'Option B (LoRA) is the superior architectural choice for this high-variance, multi-tenant cloud workload due to VRAM constraints and cross-tenant batching capabilities.
 
+    Option A (KD to 1B) generates 100 distinct models. Even though individual inference is fast, storing 100 models at 2GB each requires 200GB of VRAM. This forces the system to either over-provision at least three A100 80GB GPUs just to hold inactive weights, or aggressively swap models in and out of GPU memory over PCIe, which introduces massive cold-start latency (seconds per swap) and entirely violates the 200ms TTFT SLA during traffic spikes.
 
-    Option A (KD to 1B) generates 100 distinct models. Even though individual inference is fast, storing
-    100 models at 2GB each requires 200GB of VRAM. This forces the system to either over-provision at
-    least three A100 80GB GPUs just to hold inactive weights, or aggressively swap models in and out of
-    GPU memory over PCIe, which introduces massive cold-start latency (seconds per swap) and entirely
-    violates the 200ms TTFT SLA during traffic spikes.
-
-
-    Option B (Base 8B + LoRA) requires only 16GB for the base model weights. Each Rank=32 LoRA adapter
-    takes roughly 30MB, meaning all 100 adapters consume just 3GB. The total weight memory is 19GB, easily
-    fitting on a single A100 80GB GPU. Furthermore, by using multi-LoRA kernels (like Punica or S-LoRA),
-    requests from different tenants can be batched together through the shared base model, applying the
-    specific LoRA A and B matrices to individual sequence hidden states on the fly. This maximizes GPU
-    compute utilization and entirely eliminates cold-start swapping latency, leaving over 50GB of VRAM
-    available for a massive shared KV cache to handle the 500+ concurrent requests.'
-  common_mistake: Choosing Option A because a 1B model computes faster than an 8B model, ignoring that
-    storing 100 separate models in VRAM prevents effective cross-tenant batching and causes severe memory
-    fragmentation.
-  napkin_math: 'Option A VRAM: 100 models * 2GB (1B FP16) = 200GB (requires 3x A100s minimum). Option
-    B VRAM: 16GB (8B base) + 100 * 0.03GB (LoRA r=32) = 19GB. Available VRAM on 1 A100: 80GB - 19GB =
-    61GB. KV Cache per token (8B, 32 layers, 4096 dim): ~0.5MB. With 61GB, we can store ~120,000 tokens
-    in the KV cache, comfortably supporting 500 QPS with average sequence lengths of 200 tokens.'
+    Option B (Base 8B + LoRA) requires only 16GB for the base model weights. Each Rank=32 LoRA adapter takes roughly 30MB, meaning all 100 adapters consume just 3GB. The total weight memory is 19GB, easily fitting on a single A100 80GB GPU. Furthermore, by using multi-LoRA kernels (like Punica or S-LoRA), requests from different tenants can be batched together through the shared base model, applying the specific LoRA A and B matrices to individual sequence hidden states on the fly. This maximizes GPU compute utilization and entirely eliminates cold-start swapping latency, leaving over 50GB of VRAM available for a massive shared KV cache to handle the 500+ concurrent requests.'
+  common_mistake: |
+    **The Pitfall:** Choosing to distill 100 separate 1B models because they compute faster individually.
+    **The Rationale:** Engineers focus purely on isolated model inference speed, ignoring the systemic VRAM cost of multi-tenancy.
+    **The Consequence:** Storing 100 models causes severe memory fragmentation, prevents cross-tenant batching, and introduces massive cold-start swapping latency during traffic spikes.
+  napkin_math: |
+    *   **Option A (1B KD):** 100 models $\times$ 2GB = 200GB (requires at least 3x A100s).
+    *   **Option B (8B + LoRA):** 16GB base + (100 $\times$ 0.03GB adapters) = 19GB.
+    *   **Remaining VRAM:** 80GB - 19GB = 61GB available for KV cache.
+    *   **Result:** **A single A100 easily fits the LoRA approach, leaving 61GB to store ~120,000 tokens of KV cache to comfortably handle 500 QPS.**
 status: published
 provenance: imported
 requires_explanation: false

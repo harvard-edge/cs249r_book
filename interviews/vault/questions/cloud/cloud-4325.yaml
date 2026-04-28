@@ -8,42 +8,22 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: Negative Sampling Bias in Recommendation Training
-scenario: 'Your recommendation model is trained with in-batch negatives (other items
-  in the same batch serve as negatives for each positive pair). At 1M QPS serving,
-  you observe a popularity bias: the top-0.1% most popular items account for 40% of
-  recommendations even though they represent 3% of catalog impressions. Diagnose why
-  in-batch negatives cause this bias and propose a debiasing technique.'
-question: Why do in-batch negatives create the observed popularity bias, and what
-  debiasing technique would you use?
+scenario: Your recommendation model is trained with in-batch negatives. At 1M QPS serving, you observe a popularity bias where the top-0.1% most popular items account for 40% of recommendations, even though they represent only 3% of catalog impressions.
+question: Why do in-batch negatives create the observed popularity bias, and what debiasing technique would you use?
 details:
-  realistic_solution: 'In-batch negatives: for a batch of B items, each positive pair
-    (user, item_i) uses the other B-1 items as negatives. Popular items appear in
-    the batch more often (proportional to their frequency in training data). An item
-    appearing K× more frequently serves as a negative K× more often — its embedding
-    is pushed away from all other items K× more. This makes popular items'' embeddings
-    ''universally repellent'' in a counterintuitive way — BUT simultaneously, popular
-    items appear as positives K× more often too, pulling their embeddings toward the
-    users who do interact with them. Net effect: popular items dominate the learned
-    embedding space because they receive disproportionately more gradient updates,
-    leading to sharper, better-calibrated embeddings that the ranking MLP learns to
-    prefer. Debiasing: (1) Logit adjustment: subtract log(item_frequency) from the
-    ranking score at inference time (frequency-based logit correction). (2) Popularity-stratified
-    sampling: oversample rare items as negatives to equalize training signal. (3)
-    Hard negative mining: use items with high predicted score but no interaction as
-    negatives, forcing the model to distinguish similar items rather than just popular
-    ones.'
-  common_mistake: Blaming the ranking model's MLP weights. The bias is in the embedding
-    space — popular items have better-trained embeddings because they appear as negatives
-    more often, making them universally high-similarity.
-  napkin_math: 'Item popularity: Zipf(α=1.0). Top 0.1% = 1k items out of 1M. Fraction
-    of in-batch negatives they represent: proportional to popularity → top 0.1% appear
-    in ~10% of batches as negatives at α=1.0. 10% of gradient steps update their embeddings
-    as negatives. For 100B training examples: 10B gradient updates to top 1k items
-    vs 100M for median item (100× more updates). Well-trained vs poorly-trained embeddings:
-    100× training signal → 10× lower embedding variance → sharper recommendations.
-    Logit correction: score_corrected = score - β × log(freq_i / avg_freq). At β=1:
-    popular item score reduced by log(100) = 4.6 nats ≈ enough to reduce top-0.1%
-    from 40% to ~15% of recommendations.'
+  realistic_solution: 'In-batch negatives cause popular items to appear as negatives proportionally to their frequency. An item appearing 100x more frequently serves as a negative 100x more often, pushing its embedding away from all others. Simultaneously, it appears as a positive 100x more often. Net effect: popular items receive disproportionately more gradient updates, leading to sharper, universally high-similarity embeddings. Debiasing requires logit adjustment: subtract $\log(\text{item\_frequency})$ from the ranking score at inference time, or oversample rare items as negatives during training.'
+  common_mistake: |
+    **The Pitfall:** Blaming the ranking model's final MLP weights for the bias.
+    **The Rationale:** Engineers assume the final linear layers simply learned a high bias term for popular items.
+    **The Consequence:** Attempting to regularize or threshold the MLP, which completely fails to fix the root cause of distorted, overly-sharp embeddings.
+  napkin_math: |
+    1. Top 0.1% = 1k items out of 1M.
+    2. They account for 3% of impressions, so they represent ~3% of all in-batch negatives.
+    3. In a batch of 1024, these 1k items are used as negatives ~30 times per batch.
+    4. The median item rarely appears in batches, receiving vastly fewer gradient updates.
+    5. This immense training signal density gives popular items >100x lower embedding variance.
+    6. Apply logit correction: $\text{score}_{corrected} = \text{score} - \beta \log(\text{freq}_i / \text{avg\_freq})$.
+    7. **At $\beta=1$, the popular item score is sufficiently penalized to neutralize the embedding sharpness bias.**
 status: published
 provenance: imported
 requires_explanation: false

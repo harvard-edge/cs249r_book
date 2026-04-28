@@ -8,27 +8,19 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The GPU Utilization Paradox
-scenario: 'Your team rents 64 A100 GPUs to train a large vision model. After a month, the cloud bill arrives:
-  ~$92,000. You pull the utilization logs and discover average GPU compute utilization was 23%. The team
-  swears the training loop is optimized. Where did 77% of your GPU-hours go?'
-question: "Where did 77% of your GPU-hours go?"
+scenario: Your team rents 64 A100 GPUs to train a large vision model for a month. The cloud bill is ~$92,000, but average GPU compute utilization was only 23%. The team swears the training loop code is perfectly optimized.
+question: Where did 77% of your GPU-hours go, and what is the root cause?
 details:
-  realistic_solution: 'The GPU is idle because the *surrounding infrastructure* can''t feed it fast enough.
-    In production ML systems, the model code is roughly 5% of the system (per Google''s "Hidden Technical
-    Debt" paper). The other 95% — data ingestion, preprocessing, feature extraction, checkpointing, logging,
-    and gradient synchronization — creates the actual bottleneck. Common culprits: CPU-bound image decoding
-    (8 CPU cores can''t decode fast enough for 8 GPUs), slow NFS reads during shuffling, synchronous checkpointing
-    that stalls all GPUs every N steps, and Python GIL contention in the data loader.'
-  common_mistake: '"The model isn''t big enough to saturate the GPUs" or "We need to increase the batch
-    size." Both assume the bottleneck is inside the training loop — it''s not.'
-  napkin_math: '64 A100 GPUs at $2/GPU-hour × 720 hours/month = $92,160/month. At 23% utilization, only
-    $21,197 of compute is productive — $70,963/month wasted on idle silicon. Root cause analysis: a vision
-    model training step on A100 with batch=64 runs in ~200ms. Data pipeline must deliver 64 decoded images
-    per 200ms per GPU = 320 images/sec/GPU. For 64 GPUs: 20,480 images/sec total. At ~600 KB/image (224×224×3×FP32):
-    12.3 GB/s of decoded data. If NFS delivers 2 GB/s and JPEG decode is CPU-limited to 5,000 images/sec
-    across available CPU cores, GPUs are starved (5,000/20,480 = 24.4% — matching the observed 23% utilization).
-    Fix: NVIDIA DALI for GPU-accelerated decoding + local NVMe staging. Cost of fix: ~$5,000/month in
-    NVMe storage. Savings: ~$71K/month.'
+  realistic_solution: 'The GPU is idle because the *surrounding infrastructure* can''t feed it fast enough. In production ML systems, the model code is roughly 5% of the system (per Google''s "Hidden Technical Debt" paper). The other 95% — data ingestion, preprocessing, feature extraction, checkpointing, logging, and gradient synchronization — creates the actual bottleneck. Common culprits: CPU-bound image decoding (8 CPU cores can''t decode fast enough for 8 GPUs), slow NFS reads during shuffling, synchronous checkpointing that stalls all GPUs every N steps, and Python GIL contention in the data loader.'
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck must be inside the model architecture or that the batch size needs increasing.
+    **The Rationale:** ML engineers focus entirely on the neural network code, ignoring that data ingestion, decoding, and preprocessing (the "other 95%" of the system) often fail to keep up with raw GPU FLOPs.
+    **The Consequence:** Tens of thousands of dollars are burned on idle GPU time while waiting for CPU-bound data pipelines to deliver batches.
+  napkin_math: |
+    * **Financial Waste:** 64 GPUs × 720h × $2/hr = $92,160. At 23% use, $70,963 is wasted on idle silicon.
+    * **Data Requirements:** Batch=64 takes ~200ms per step. GPUs need 320 images/s/GPU. 64 GPUs need 20,480 images/s.
+    * **CPU Bottleneck:** If standard CPU JPEG decode tops out at 5,000 images/s, GPUs only receive 5,000 / 20,480 = 24.4% of needed data.
+    * **Conclusion:** The GPUs are starved by a **CPU-bound data ingestion pipeline**, causing the exact ~23% utilization observed.
 status: published
 provenance: imported
 requires_explanation: false

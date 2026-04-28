@@ -8,27 +8,21 @@ competency_area: reliability
 bloom_level: create
 phase: training
 title: 'Fault Tolerance: Design Checkpointing Architecture for 1024-GPU Training'
-scenario: You are designing checkpointing for a 175B model training on 1,024 H100s
-  (80GB HBM3, 3.35 TB/s). The full checkpoint is 700GB. Your shared Lustre filesystem
-  peaks at 200 GB/s write throughput. Design a checkpoint strategy that minimizes
-  training interruption while maintaining full recovery capability.
-question: What checkpointing strategy minimizes interruption for a 175B model on 1,024
-  H100s while preserving full recovery capability?
+scenario: You are designing checkpointing for a 175B model training on 1,024 H100s. The full checkpoint is 700GB. Your shared Lustre filesystem peaks at 200 GB/s write throughput.
+question: What checkpointing strategy minimizes interruption for a 175B model on 1,024 H100s while preserving full recovery capability?
 details:
-  realistic_solution: 'Use asynchronous sharded checkpointing: each node writes its
-    own shard in parallel. 1024 nodes write 700GB / 1024 = 683MB each. Pipeline: snapshot
-    model state to CPU memory (fast), continue training, async write to Lustre in
-    background.'
-  common_mistake: Blocking all GPUs during checkpoint write — 700GB / 200 GB/s = 3.5
-    seconds minimum write, but in practice 30-60 seconds with Lustre contention from
-    1024 nodes writing simultaneously.
-  napkin_math: '700GB checkpoint. Naive: 700GB / 200 GB/s = 3.5 seconds write, but
-    1024 nodes × metadata ops creates contention → actual 45-90 seconds. Sharded async:
-    each node snapshots 683MB to CPU RAM in 683MB / (NVLink 900 GB/s) ≈ 0.76ms (GPU→CPU
-    PCIe 32 GB/s) = 21ms. Training continues. Each node writes 683MB to Lustre: 683MB
-    / (200GB/1024 nodes = 195MB/s) = 3.5 seconds per node. Total pause: 21ms for snapshot.
-    Background write: 3.5 seconds (overlapped with training). Effective overhead:
-    21ms checkpoint pause every 95 minutes = 0.037% time overhead.'
+  realistic_solution: 'Use asynchronous sharded checkpointing: each node writes its own shard in parallel. Snapshot the model state locally from GPU to CPU memory (extremely fast over PCIe), allow the GPUs to immediately resume training, and then asynchronously write the CPU shards to Lustre in the background.'
+  common_mistake: |
+    **The Pitfall:** Blocking all GPUs during the full checkpoint write to network storage.
+    **The Rationale:** It guarantees consistency and avoids complex async buffer management.
+    **The Consequence:** Creating a massive I/O traffic jam that locks up 1,024 expensive GPUs for 30-60 seconds due to filesystem contention, burning huge amounts of money as overhead.
+  napkin_math: |
+    1. Total checkpoint = 700GB. 1,024 nodes write $700\text{GB} / 1024 = 683\text{MB}$ each.
+    2. **GPU to CPU snapshot:** $683\text{MB} / 32\text{ GB/s (PCIe 4.0)} \approx 21\text{ms}$.
+    3. GPUs resume training after just a 21ms pause.
+    4. **Async Lustre write:** Each node gets $\sim 195\text{MB/s}$ of the 200GB/s pool.
+    5. $683\text{MB} / 195\text{MB/s} \approx 3.5\text{ seconds}$ background write (overlapped with training).
+    6. **Effective overhead drops to a 21ms pause, approaching 0% wasted compute time.**
 status: published
 provenance: imported
 requires_explanation: true

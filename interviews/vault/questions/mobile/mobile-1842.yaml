@@ -7,15 +7,9 @@ topic: autograd-computational-graphs
 competency_area: optimization
 bloom_level: create
 phase: training
-title: Designing a two-phase autograd pipeline for on-device neural style transfer
-  on A17 Pro
-scenario: 'You are implementing neural style transfer on A17 Pro (35 TOPS, 8GB). Classic
-  Gatys-style NST iterates 300 gradient steps optimizing the input image (not model
-  weights) to minimize content+style loss. The VGG-19 feature extractor (143M params,
-  548MB) is frozen. Each iteration runs a forward pass through VGG-19 and backward
-  to the input image. Target: 60 seconds total on A17 Pro.'
-question: How would you structure A17 Pro neural style transfer so only the input
-  image needs gradients and VGG stays efficient?
+title: Designing a two-phase autograd pipeline for on-device neural style transfer on A17 Pro
+scenario: You are implementing neural style transfer on a device. Classic Gatys-style NST iterates 300 gradient steps optimizing the input image (not model weights) to minimize content+style loss. The VGG-19 feature extractor (143M params, 548MB) is frozen. Each iteration runs a forward pass through VGG-19 and backward to the input image. You have a target of 60 seconds total execution time.
+question: "How would you structure neural style transfer so only the input image needs gradients, keeping VGG efficient enough to beat a 60-second target?"
 details:
   realistic_solution: 'Freeze VGG-19: model.requires_grad_(False). Set requires_grad=True
     only on the input image tensor. The backward graph is only built for operations
@@ -23,16 +17,17 @@ details:
     relu4_2 for content): reduces model size from 548MB to ~20MB active layers. Convert
     truncated VGG to Core ML for ANE acceleration. Run gradient step for input image
     in PyTorch. Total memory: 20MB activations + 512×512×3×4 bytes = 3MB input = ~25MB.'
-  common_mistake: 'Keeping the full VGG-19 with requires_grad=True, building a graph
-    through all 143M parameters that never need gradients. Memory for VGG-19 backward
-    graph at 512×512 input: >2GB. Also not recognizing that on A17 Pro, the VGG-19
-    should run on ANE (no gradient), and only the input image gradient computation
-    needs autograd.'
-  napkin_math: '300 iterations × (VGG forward + backward to input). Truncated VGG-19
-    to relu4_2: ~50 GOPS. Core ML ANE on A17 Pro at 35 TOPS: ~1.5ms per pass. Backward
-    to input (PyTorch CPU, only 512×512×3 gradient): ~4.5ms. Total per iteration: ~6ms.
-    300 iterations: 1.8 seconds. Even without ANE optimization (Core ML CPU): ~30ms/iter
-    × 300 = 9 seconds. Both beat 60 second target.'
+  common_mistake: |
+    **The Pitfall:** Keeping the full VGG-19 graph with `requires_grad=True`.
+    **The Rationale:** Candidates build a backward graph through all 143M parameters that never need gradients, failing to recognize that only the input image needs autograd.
+    **The Consequence:** Massive memory bloat (>2GB for the backward graph) and execution inefficiency, fundamentally failing to meet the strict 60-second target.
+  napkin_math: |
+    - Iterations: 300.
+    - Truncated VGG-19 compute: ~50 GOPS.
+    - Core ML ANE forward pass (35 TOPS): ~1.5ms.
+    - Backward pass to input image (PyTorch CPU): ~4.5ms.
+    - Total latency per iteration: 1.5ms + 4.5ms = 6ms.
+    - Total execution time: 300 × 6ms = **1.8 seconds**.
 status: published
 provenance: imported
 requires_explanation: false

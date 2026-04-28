@@ -8,27 +8,20 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: The MQA Prefill Disappointment
-scenario: To optimize the prefill phase for 16K-token documents on an L4 GPU (300 GB/s, 120 TFLOPS), your
-  team replaces standard Multi-Head Attention (MHA) with Multi-Query Attention (MQA). They know MQA drastically
-  reduces KV cache memory reads. They expect the prefill latency for a single 16K prompt to drop by at
-  least 30%. Instead, the prefill latency is nearly identical to the original MHA model.
+scenario: To optimize the prefill phase for 16K-token documents on an L4 GPU (300 GB/s, 120 TFLOPS), your team replaces standard Multi-Head Attention (MHA) with Multi-Query Attention (MQA). They know MQA drastically reduces KV cache memory reads. They expect the prefill latency for a single 16K prompt to drop by at least 30%. Instead, the prefill latency is nearly identical to the original MHA model.
 question: "Why does replacing MHA with MQA fail to reduce prefill latency for a single 16K-token prompt on the L4 GPU?"
 details:
-  realistic_solution: The root cause is a misclassification of the workload bound during the prefill phase.
-    While autoregressive decoding is memory-bandwidth bound (reading the KV cache token by token), the
-    prefill phase of a long prompt is heavily compute-bound. During prefill, the dominant operation in
-    attention is the Q \times K^T matrix multiplication. For a 16K sequence length, the arithmetic intensity
-    of this operation is proportional to the sequence length, pushing it far to the right of the L4's
-    roofline ridge point. MQA reduces the memory footprint of the KV cache, which solves a memory-bandwidth
-    bottleneck. But since prefill is bottlenecked by the Tensor Cores (FLOPs), reducing memory traffic
-    provides zero latency benefit. The FLOPs for MQA's Q \times K^T are only marginally lower than MHA,
-    resulting in near-identical prefill latency.
-  common_mistake: Conflating the memory-bound nature of the decode phase with the compute-bound nature
-    of the prefill phase.
-  napkin_math: L4 Ridge Point = 120 TFLOPS / 300 GB/s = 400 FLOPs/byte. For MHA prefill of 16K tokens,
-    Attention AI ~ O(SeqLen) = 16000 FLOPs/byte. 16000 >> 400, so it is deeply compute-bound. Time is
-    dictated by FLOPs / 120 TFLOPS. MQA reduces KV memory loaded by factor of 'h' (heads), but memory
-    load time was already hidden behind the massive compute time.
+  realistic_solution: The root cause is a misclassification of the workload bound during the prefill phase. While autoregressive decoding is memory-bandwidth bound (reading the KV cache token by token), the prefill phase of a long prompt is heavily compute-bound. During prefill, the dominant operation in attention is the Q \times K^T matrix multiplication. For a 16K sequence length, the arithmetic intensity of this operation is proportional to the sequence length, pushing it far to the right of the L4's roofline ridge point. MQA reduces the memory footprint of the KV cache, which solves a memory-bandwidth bottleneck. But since prefill is bottlenecked by the Tensor Cores (FLOPs), reducing memory traffic provides zero latency benefit. The FLOPs for MQA's Q \times K^T are only marginally lower than MHA, resulting in near-identical prefill latency.
+  common_mistake: |
+    **The Pitfall:** Conflating the memory-bound nature of the autoregressive decode phase with the compute-bound nature of the prefill phase.
+    **The Rationale:** MQA is famous for speeding up inference, so engineers blindly apply it to all phases of generation without analyzing the arithmetic intensity.
+    **The Consequence:** Wasting effort redesigning model architectures to reduce memory traffic in a phase that is entirely bottlenecked by the Tensor Cores.
+  napkin_math: |
+    - L4 Ridge Point = 120 TFLOPS / 300 GB/s = 400 FLOPs/byte.
+    - For MHA prefill of 16K tokens, Arithmetic Intensity is ~O(SeqLen) ≈ 16,000 FLOPs/byte.
+    - Since 16,000 >> 400, the operation is deeply compute-bound.
+    - MQA reduces KV memory loaded by a factor of 'h', but this memory load time was already entirely hidden behind the massive compute time.
+    - **Reducing memory traffic provides zero latency benefit when the GPU is 100% busy performing matrix multiplications.**
 status: published
 provenance: imported
 requires_explanation: false

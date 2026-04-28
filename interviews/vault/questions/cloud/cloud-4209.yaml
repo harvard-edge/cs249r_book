@@ -8,34 +8,19 @@ competency_area: data
 bloom_level: create
 phase: both
 title: Feature Store for Real-Time ML on A100 Inference
-scenario: Your search ranking model on A100 GPUs processes 10K QPS. Each query retrieves
-  500 candidate documents with 100 features each from the feature store, then runs
-  inference. GPU utilization is only 35% — the model waits for feature fetches. The
-  feature fetch takes 8ms but inference takes only 3ms. Design a prefetch architecture
-  to overlap feature retrieval with GPU computation and increase GPU utilization above
-  80%.
-question: How would you design prefetching to overlap the 8 ms feature fetch with
-  3 ms GPU inference and raise utilization above 80%?
+scenario: Your search ranking model on A100 GPUs processes 10K QPS. Each query retrieves 500 candidate documents with 100 features each from the feature store, then runs inference. GPU utilization is only 35% because the model waits for feature fetches. The feature fetch takes 8ms but inference takes only 3ms.
+question: "How would you design a prefetch architecture to overlap the 8ms feature fetch with 3ms GPU inference and raise utilization above 80%?"
 details:
-  realistic_solution: 'Implement a double-buffering pipeline: while the GPU processes
-    batch N, the CPU prefetches features for batch N+1. Architecture: (1) request
-    queue accumulates queries; (2) CPU thread pool fetches features for the next batch
-    while GPU processes current batch; (3) feature tensors are written to pinned (page-locked)
-    memory for zero-copy DMA to GPU. With micro-batching (batch size 32, ~3.2ms per
-    micro-batch on A100), you overlap 3.2ms of compute with 3.2ms of next batch''s
-    feature fetch. The remaining 4.8ms of feature fetch overlaps with subsequent batches.
-    Pipeline fill time: 1 batch latency (8ms). Steady-state throughput: one batch
-    every max(3.2ms, 8ms/3 overlapped) ≈ 3.2ms. GPU utilization: 3.2/3.2 = ~100% in
-    steady state, ~85% including pipeline bubbles.'
-  common_mistake: Simply adding more CPU threads for feature fetching — this reduces
-    average latency but doesn't overlap with GPU computation. The GPU still idles
-    during each request's feature fetch phase.
-  napkin_math: 'Current: 8ms fetch + 3ms compute = 11ms/batch, GPU util = 3/11 = 27%.
-    Double-buffer: pipeline latency = 8ms (first batch), throughput = 1 batch / max(fetch_time/pipeline_depth,
-    compute_time). With 3-stage pipeline: fetch 8ms / 3 = 2.7ms per stage, compute
-    3ms. Throughput limited by 3ms compute. GPU util: 3/3.6 ≈ 83%. Memory: 32 × 500
-    × 100 × 4 bytes × 3 buffers = 19.2 MB pinned memory — negligible vs A100''s 80
-    GB.'
+  realistic_solution: 'Implement a double-buffering pipeline: while the GPU processes batch N, the CPU prefetches features for batch N+1. Architecture: (1) request queue accumulates queries; (2) CPU thread pool fetches features for the next batch while GPU processes current batch; (3) feature tensors are written to pinned (page-locked) memory for zero-copy DMA to GPU. With micro-batching (batch size 32, ~3.2ms per micro-batch on A100), you overlap 3.2ms of compute with 3.2ms of next batch''s feature fetch. The remaining 4.8ms of feature fetch overlaps with subsequent batches. Pipeline fill time: 1 batch latency (8ms). Steady-state throughput: one batch every max(3.2ms, 8ms/3 overlapped) \approx 3.2ms. GPU utilization: 3.2/3.2 = ~100% in steady state, ~85% including pipeline bubbles.'
+  common_mistake: |
+    **The Pitfall:** Simply adding more CPU threads for feature fetching.
+    **The Rationale:** Engineers assume parallelizing the fetch will fix the stall.
+    **The Consequence:** This reduces average latency but fails to overlap fetch with compute, leaving the GPU idle during each request's fetch phase.
+  napkin_math: |
+    *   **Current State:** 8ms fetch + 3ms compute = 11ms/batch. GPU util = $3/11 \approx 27\%$.
+    *   **Pipelining:** With a 3-stage pipeline, fetch is divided: $8\text{ms} / 3 = 2.7\text{ms}$ per stage.
+    *   **Overlap:** Throughput is limited by the longest stage (3ms compute). 
+    *   **Result:** **GPU utilization increases to $3/3.6 \approx 83\%$. Memory overhead for pinned buffers is $\approx 19.2\text{MB}$, negligible on an 80GB A100.**
 status: published
 provenance: imported
 requires_explanation: false

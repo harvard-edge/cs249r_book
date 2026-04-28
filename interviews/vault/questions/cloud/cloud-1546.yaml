@@ -8,29 +8,20 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: LLM Serving Bottleneck Evaluation
-scenario: You are evaluating optimization strategies for serving a 70B parameter autoregressive
-  model (140GB in BF16 weights) on an 8x A100 GPU cluster (80GB HBM, 2 TB/s bandwidth
-  per GPU). The product requires maximizing throughput for concurrent users while
-  maintaining a strict 50ms time-between-tokens (TBT). You must evaluate whether to
-  prioritize compute optimizations (like INT8 matrix multiplication) or memory management
-  (like continuous batching with PagedAttention) to improve performance.
-question: For 70B decoding on 8x A100s with a 50ms TBT target, should you prioritize
-  INT8 matmul or continuous batching with PagedAttention?
+scenario: You are evaluating optimization strategies for serving a 70B parameter autoregressive model (140GB in BF16 weights) on an 8x A100 GPU cluster (80GB HBM, 2 TB/s bandwidth per GPU). The product requires maximizing throughput for concurrent users while maintaining a strict 50ms time-between-tokens (TBT).
+question: For 70B decoding on 8x A100s with a 50ms TBT target, should you prioritize INT8 matmul or continuous batching with PagedAttention?
 details:
-  realistic_solution: Prioritize continuous batching and memory management. The decode
-    phase is strictly memory-bandwidth bound because it must load the entire model
-    weight matrix to generate a single token per user request. Increasing the batch
-    size amortizes this memory read cost, but is constrained by KV cache fragmentation.
-    Efficient memory management allows larger batch sizes, directly increasing system
-    throughput.
-  common_mistake: Candidates often assume the decode phase is compute-bound due to
-    the model's massive 9.7x FLOPs-to-Bytes ratio potential, leading them to prioritize
-    compute optimizations over memory bandwidth utilization and KV cache management.
-  napkin_math: A100 bandwidth = 2 TB/s. Weights per GPU = 140GB / 8 = 17.5GB. Memory
-    transfer time per token (batch 1) = 17.5GB / 2000GB/s = 8.75ms. With a 50ms TBT
-    budget, the theoretical max batch size is roughly 50ms / 8.75ms = 5.7. Without
-    efficient KV cache paging, fragmentation prevents reaching this batch size limit,
-    making memory bandwidth the hard ceiling.
+  realistic_solution: Prioritize continuous batching and memory management. The decode phase is strictly memory-bandwidth bound because it must load the entire model weight matrix to generate a single token per user request. Increasing the batch size amortizes this memory read cost, but is constrained by KV cache fragmentation. Efficient memory management allows larger batch sizes, directly increasing system throughput.
+  common_mistake: |
+    **The Pitfall:** Prioritizing compute optimizations like INT8 matrix multiplication over memory management.
+    **The Rationale:** Candidates observe the model's massive FLOPs-to-Bytes ratio and incorrectly assume generation is compute-bound, missing that token-by-token decoding is memory-bandwidth bound.
+    **The Consequence:** Engineering time is wasted writing custom INT8 kernels while throughput remains crippled by KV cache fragmentation and low batch sizes.
+  napkin_math: |
+    1. Total model weights = 140GB. Sharded across 8 GPUs = 17.5GB per GPU.
+    2. A100 memory bandwidth = 2,000 GB/s.
+    3. Time to load weights for one decode step (batch size 1) = 17.5GB / 2,000 GB/s = 8.75ms.
+    4. With a 50ms TBT budget, the theoretical maximum batch size is 50ms / 8.75ms ≈ 5.7 requests.
+    **Without continuous batching and PagedAttention to eliminate KV fragmentation, you cannot even reach this low ceiling of 5 concurrent requests.**
 status: published
 provenance: imported
 requires_explanation: false

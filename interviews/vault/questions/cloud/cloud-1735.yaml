@@ -8,25 +8,19 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Evaluating Split-Pool vs Chunked Prefill
-scenario: 'Your team is serving a 70B parameter LLM on 8x A100 (80GB) instances. When long-context prompts
-  (8k tokens) arrive concurrently with decode requests, the compute-heavy prefill phase starves the memory-bound
-  decode phase, causing decode latencies to spike and violate the 50ms/token P99 SLO. One engineer proposes
-  ''Split-Pool'' serving: routing all prefills to a dedicated compute-optimized GPU pool and transferring
-  the KV cache over the datacenter network to a separate memory-optimized decode pool. Evaluate this design
-  decision against using ''Chunked Prefill'' on a unified hardware pool.'
-question: "Should the 70B service use split-pool serving or chunked prefill to protect 50ms/token decode latency, and why?"
+scenario: Your team is serving a 70B parameter LLM on 8x 80GB instances. When long-context prompts (8k tokens) arrive concurrently with decode requests, the compute-heavy prefill phase starves the memory-bound decode phase, causing decode latencies to violate the 50ms/token P99 SLO. One engineer proposes "Split-Pool" serving: routing all prefills to a dedicated pool and transferring the KV cache over the ethernet network to a separate decode pool.
+question: Should the service use split-pool serving or chunked prefill to protect the 50ms/token decode latency, and why?
 details:
-  realistic_solution: Chunked Prefill on a unified pool is usually preferable for moderate contexts. It
-    splits the long prefill into smaller chunks (e.g., 512 tokens) and batches them with decode requests.
-    This maintains high arithmetic intensity during the hybrid batch without the severe penalty of sending
-    gigabytes of KV cache over ethernet.
-  common_mistake: Candidates correctly identify that prefill is compute-bound (high arithmetic intensity)
-    and decode is memory-bound (low arithmetic intensity), but fail to quantify the massive KV cache transfer
-    overhead between pools, which can saturate network bandwidth and regress Time-To-First-Token (TTFT).
-  napkin_math: For a 70B model (80 layers, 8 KV heads, 128 dim, FP16), the KV cache per token is 2(K,V)
-    * 2B * 80 * 8 × 128 = 327.68 KB. An 8K token prompt generates ~2.6GB of KV cache. Transferring this
-    over a standard 100 Gbps (12.5 GB/s) datacenter network takes ~215ms per request. At just 10 req/sec,
-    this demands 26GB/s, instantly bottlenecking the NIC and degrading throughput.
+  realistic_solution: Chunked Prefill on a unified pool is usually preferable for moderate contexts. It splits the long prefill into smaller chunks (e.g., 512 tokens) and batches them with decode requests. This maintains high arithmetic intensity during the hybrid batch without the severe penalty of sending gigabytes of KV cache over ethernet.
+  common_mistake: |
+    **The Pitfall:** Proposing Split-Pool serving without calculating the massive KV cache network transfer overhead.
+    **The Rationale:** Disaggregating compute-bound and memory-bound workloads is a standard cloud design pattern.
+    **The Consequence:** The network interface completely saturates, causing Time-To-First-Token (TTFT) to heavily regress and eliminating any benefits of workload isolation.
+  napkin_math: |
+    1. Calculate KV cache size per token: For a 70B model (80 layers, 8 KV heads, 128 dim, FP16), 2(K,V) * 2 bytes * 80 * 8 * 128 = 327.68 KB/token.
+    2. Calculate total KV payload: An 8K token prompt generates 8000 * 327.68 KB ≈ 2.6 GB of KV cache.
+    3. Evaluate network transfer: Over a 100 Gbps (12.5 GB/s) ethernet network, transferring 2.6 GB takes 2.6 / 12.5 = 208 ms.
+    4. Conclude: At just 10 req/sec, this demands 26 GB/s, **instantly bottlenecking the NIC** and degrading end-to-end latency worse than unified serving.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,25 +8,18 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: The DLRM Vertical Fusion Trap
-scenario: Optimizing a DLRM (Deep Learning Recommendation Model) on Cloud TPU v4. The model has massive
-  sparse embedding lookups followed by a dense MLP. Profiling shows TPU compute utilization is < 15%.
-  An engineer writes a custom XLA pass to vertically fuse the embedding lookup with the first dense MLP
-  layer to 'eliminate intermediate HBM roundtrips'. After deployment, overall step latency doubles.
-question: "Why did fusing embedding lookup with the first dense MLP layer double DLRM step latency on TPU v4?"
+scenario: Optimizing a DLRM (Deep Learning Recommendation Model) on Cloud TPU v4. The model has massive sparse embedding lookups followed by a dense MLP. Profiling shows TPU compute utilization is < 15%. An engineer writes a custom XLA pass to vertically fuse the embedding lookup with the first dense MLP layer to 'eliminate intermediate HBM roundtrips'. After deployment, overall step latency doubles.
+question: Why did fusing embedding lookup with the first dense MLP layer double DLRM step latency on TPU v4?
 details:
-  realistic_solution: 'This creates a ''poisoned'' execution profile. Embedding lookups are strictly memory-bandwidth
-    bound with an Arithmetic Intensity near 0 (scatter/gather operations). Dense MLPs are heavily compute-bound
-    matrix multiplications. Fusing them forces the TPU''s Matrix Multiply Units (MXUs) to sit idle, waiting
-    for the sparse, irregular memory gathers to return from HBM before computing each row. This artificially
-    lowers the Arithmetic Intensity of the MLP to match the embedding. Unfused, the TPU compiler can pipeline
-    execution: fetching embeddings for batch N+1 asynchronously while the MXU churns through the dense
-    MLP of batch N.'
-  common_mistake: Believing that eliminating HBM roundtrips always improves performance regardless of
-    the fused operators' individual arithmetic intensities.
-  napkin_math: 'Unfused: Gather takes 5ms (bandwidth bound), MLP takes 1ms (compute bound). Pipelined
-    throughput = max(5, 1) = 5ms per step. Fused: MXU compute is stalled by memory fetches. The operations
-    serialize at the vector level, destroying pipeline latency hiding. Total time becomes memory fetch
-    time (5ms) + compute time (1ms) + fusion overhead = ~6ms. Throughput drops from 1/5ms to 1/6ms.'
+  realistic_solution: 'This creates a ''poisoned'' execution profile. Embedding lookups are strictly memory-bandwidth bound with an Arithmetic Intensity near 0 (scatter/gather operations). Dense MLPs are heavily compute-bound matrix multiplications. Fusing them forces the TPU''s Matrix Multiply Units (MXUs) to sit idle, waiting for the sparse, irregular memory gathers to return from HBM before computing each row. This artificially lowers the Arithmetic Intensity of the MLP to match the embedding. Unfused, the TPU compiler can pipeline execution: fetching embeddings for batch N+1 asynchronously while the MXU churns through the dense MLP of batch N.'
+  common_mistake: |
+    **The Pitfall:** Believing that eliminating HBM roundtrips always improves performance.
+    **The Rationale:** Candidates blindly apply kernel fusion, ignoring the arithmetic intensity mismatch between the fused operators.
+    **The Consequence:** The operations serialize at the vector level, destroying pipeline latency hiding and artificially lowering the arithmetic intensity of the compute-bound MLP, drastically reducing overall throughput.
+  napkin_math: |
+    - **Unfused Pipelined Execution:** Gather takes 5ms (bandwidth bound), MLP takes 1ms (compute bound). Pipelined throughput = max(5, 1) = **5ms per step**.
+    - **Fused Execution:** MXU compute is stalled by memory fetches. Operations serialize. Total time = memory fetch (5ms) + compute (1ms) + overhead = **~6ms per step**.
+    - **Result:** Throughput drops from 1/5ms to 1/6ms, effectively increasing latency and decreasing QPS.
 status: published
 provenance: imported
 requires_explanation: false

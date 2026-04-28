@@ -8,29 +8,20 @@ competency_area: parallelism
 bloom_level: apply
 phase: both
 title: FSDP Prefetch Policy Tuning for Communication-Compute Overlap
-scenario: 'You use PyTorch FSDP to train a 30B model across 32 H100 GPUs. FSDP has
-  three prefetch policies: BACKWARD_PRE, BACKWARD_POST, and NO_PREFETCH. With BACKWARD_PRE,
-  memory spikes cause OOM. With NO_PREFETCH, training is 40% slower. Find the right
-  configuration.'
-question: Which FSDP prefetch policy should you use when BACKWARD_PRE OOMs but NO_PREFETCH
-  is 40% slower, and why?
+scenario: You use PyTorch FSDP to train a 30B model across 32 H100 GPUs. FSDP has three prefetch policies: BACKWARD_PRE, BACKWARD_POST, and NO_PREFETCH. With BACKWARD_PRE, memory spikes cause OOM. With NO_PREFETCH, training is 40% slower.
+question: "Which FSDP prefetch policy should you use when BACKWARD_PRE OOMs but NO_PREFETCH is 40% slower, and why?"
 details:
-  realistic_solution: 'BACKWARD_PRE: fetches next FSDP unit''s params during current
-    backward. Doubles per-layer memory. BACKWARD_POST: fetches after current backward
-    finishes but before waiting for result. Less aggressive, lower memory. NO_PREFETCH:
-    waits until params are actually needed. For 30B model with 32 GPUs: per-GPU params
-    in FSDP = 30B/32 = 937.5M. Each FSDP unit (1 layer, ~750M params) = 1.5GB BF16.
-    BACKWARD_PRE: 2 x 1.5GB = 3GB extra. At 80GB H100 with 70GB occupied, 3GB causes
-    OOM. Solution: use BACKWARD_POST (prefetch with lower memory), or use BACKWARD_PRE
-    with limit_all_gathers=True (limits concurrent AllGathers to 2).'
-  common_mistake: Using BACKWARD_PRE (most aggressive prefetch) with large models
-    without considering memory overhead. BACKWARD_PRE fetches the next layer's full
-    parameters before the current layer's backward finishes, requiring memory for
-    two full layers simultaneously.
-  napkin_math: 'BACKWARD_POST overlap: AllGather ~3ms, backward compute ~8ms per layer.
-    Overlap hides 3ms/8ms = 37.5% of communication. Total training time reduction
-    vs NO_PREFETCH: ~25%. Memory overhead: 1.5GB (1 extra layer) vs 3GB (BACKWARD_PRE).
-    The 25% speedup at 1.5GB cost is the best tradeoff.'
+  realistic_solution: 'BACKWARD_PRE: fetches next FSDP unit''s params during current backward. Doubles per-layer memory. BACKWARD_POST: fetches after current backward finishes but before waiting for result. Less aggressive, lower memory. NO_PREFETCH: waits until params are actually needed. For 30B model with 32 GPUs: per-GPU params in FSDP = 30B/32 = 937.5M. Each FSDP unit (1 layer, ~750M params) = 1.5GB BF16. BACKWARD_PRE: 2 x 1.5GB = 3GB extra. At 80GB H100 with 70GB occupied, 3GB causes OOM. Solution: use BACKWARD_POST (prefetch with lower memory), or use BACKWARD_PRE with limit_all_gathers=True (limits concurrent AllGathers to 2).'
+  common_mistake: |
+    **The Pitfall:** Blindly using the most aggressive prefetch policy (BACKWARD_PRE) for large models.
+    **The Rationale:** Candidates often assume maximum communication overlap is always best without calculating the transient memory overhead required to hold multiple layers simultaneously.
+    **The Consequence:** Unnecessary Out-Of-Memory (OOM) errors that prevent the model from training at all.
+  napkin_math: |
+    - FSDP overlap: AllGather takes ~3ms, backward compute takes ~8ms per layer.
+    - Overlap hides 3ms / 8ms = 37.5% of communication time, leading to a ~25% total training time reduction vs NO_PREFETCH.
+    - Memory overhead for BACKWARD_POST is 1.5GB (1 extra layer).
+    - Memory overhead for BACKWARD_PRE is 3.0GB (2 extra layers).
+    - **BACKWARD_POST provides the best tradeoff, giving a 25% speedup at only 1.5GB memory cost.**
 status: published
 provenance: imported
 requires_explanation: false

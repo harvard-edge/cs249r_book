@@ -8,32 +8,19 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: Network Topology Impact on Checkpoint I/O
-scenario: Your 256-GPU H100 cluster checkpoints a 175B model every 1000 steps. Each
-  GPU writes 5.5 GB (model shard + optimizer states) to a shared NFS server connected
-  via 2× 100 GbE links. Calculate the checkpoint write time and network contention,
-  then propose a topology-aware checkpointing strategy.
-question: What is the checkpoint write time to the 2×100 GbE NFS server, and what
-  topology-aware checkpointing strategy reduces stalls?
+scenario: Your 256-GPU H100 cluster checkpoints a 175B model every 1000 steps. Each GPU writes 5.5 GB (model shard + optimizer states) to a shared NFS server connected via 2× 100 GbE links.
+question: What is the checkpoint write time to the 2×100 GbE NFS server, and what topology-aware checkpointing strategy reduces stalls?
 details:
-  realistic_solution: 'Naive: 256 GPUs × 5.5 GB = 1,408 GB total. NFS bandwidth: 25
-    GB/s. Write time: 1,408 / 25 = 56.3s. But NFS metadata overhead adds ~40%: effective
-    = 79s per checkpoint. At 1000 steps × 200ms/step = 200s between checkpoints, 79s
-    stall = 28% training time wasted. Topology-aware strategy: (1) Intra-node aggregation
-    — each 8-GPU node reduces 8 × 5.5 = 44 GB to a single checkpoint file using NVLink
-    (0.05s). Only 32 nodes write to NFS. (2) Tiered storage — write to node-local
-    NVMe first (3.5 GB/s per node): 44 GB / 3.5 = 12.6s, zero network contention.
-    Background flush to NFS while training resumes. (3) ZeRO-style checkpoint — with
-    ZeRO-3, each GPU only checkpoints its unique shard (no redundancy). Data = 1408
-    / redundancy_factor GB. (4) Async checkpoint with CUDA events — copy GPU→host
-    while next training step runs.'
-  common_mistake: Assuming NFS can handle 256 concurrent writes at wire speed. The
-    NFS server's 2× 100 GbE = 25 GB/s is shared across 256 writers, giving each GPU
-    only 97 MB/s — a checkpoint takes nearly a minute, during which training stalls.
-  napkin_math: 'NFS direct: 1408 GB / 25 GB/s = 56s + 40% overhead = 79s stall. Local
-    NVMe: 44 GB / 3.5 GB/s = 12.6s per node, all parallel. Background NFS: 1408 GB
-    / 25 GB/s = 56s but overlapped with training (0s stall). Async GPU→host: 5.5 GB
-    / 32 GB/s PCIe = 0.17s per GPU, overlapped. Total stall: 0.17s (async) + 12.6s
-    (NVMe) = 12.8s vs 79s. Improvement: 6.2×.'
+  realistic_solution: 'Naive: 256 GPUs × 5.5 GB = 1,408 GB total. NFS bandwidth: 25 GB/s. Write time: 1,408 / 25 = 56.3s. But NFS metadata overhead adds ~40%: effective = 79s per checkpoint. At 1000 steps × 200ms/step = 200s between checkpoints, 79s stall = 28% training time wasted. Topology-aware strategy: (1) Intra-node aggregation — each 8-GPU node reduces 8 × 5.5 = 44 GB to a single checkpoint file using NVLink (0.05s). Only 32 nodes write to NFS. (2) Tiered storage — write to node-local NVMe first (3.5 GB/s per node): 44 GB / 3.5 = 12.6s, zero network contention. Background flush to NFS while training resumes. (3) ZeRO-style checkpoint — with ZeRO-3, each GPU only checkpoints its unique shard (no redundancy). Data = 1408 / redundancy_factor GB. (4) Async checkpoint with CUDA events — copy GPU→host while next training step runs.'
+  common_mistake: |
+    **The Pitfall:** Assuming the NFS server can handle 256 concurrent writes at wire speed.
+    **The Rationale:** Engineers often ignore networking fan-in ratios and assume a shared storage appliance behaves like dedicated local disk.
+    **The Consequence:** The NFS server's 25 GB/s bandwidth is instantly overwhelmed, causing a nearly minute-long stall that cripples training utilization.
+  napkin_math: |
+    - NFS direct: 1408 GB / 25 GB/s = 56s + 40% overhead = 79s stall.
+    - Local NVMe: 44 GB / 3.5 GB/s = 12.6s per node, all parallel.
+    - Async GPU→host: 5.5 GB / 32 GB/s PCIe = 0.17s per GPU, overlapped.
+    - **Total stall with topology-aware strategy: 0.17s (async) + 12.6s (NVMe) = 12.8s vs 79s. Improvement: 6.2×.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,29 +8,21 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: The Speculative Memory Trade-off
-scenario: You implement speculative decoding for a 70B parameter LLM using a 1.5B
-  draft model. On a single A100 (80GB), generation speed increases by 2.5x. You deploy
-  this to production, but under heavy concurrent load (batch size 64), the speculative
-  decoding actually makes generation *slower* than standard autoregressive decoding.
-  Why?
-question: Why?
+scenario: You implement speculative decoding for a 70B LLM using a 1.5B draft model. At batch size 1, generation speed increases by 2.5×. However, in production under heavy concurrent load (batch size 64), speculative decoding is actually slower than standard autoregressive decoding.
+question: Why does speculative decoding degrade throughput at high batch sizes?
 details:
-  realistic_solution: Speculative decoding trades spare compute (ALU cycles) for memory
-    bandwidth. At batch size 1, LLM inference is severely memory-bandwidth bound,
-    so the A100's ALUs are mostly idle. Using those idle ALUs to run a small draft
-    model and verify multiple tokens in one memory sweep of the 70B model is a massive
-    win. However, at batch size 64, the arithmetic intensity of the workload increases
-    significantly. The system becomes compute-bound. Now, running the draft model
-    steals precious ALU cycles away from the main model's generation, and the overhead
-    of verifying rejected tokens actually reduces overall throughput.
-  common_mistake: '"Assuming speculative decoding always provides a speedup because
-    it reduces the number of forward passes of the large model."'
-  napkin_math: A 70B model at BS=1 has an arithmetic intensity of `~1 FLOP/byte`.
-    The A100 is memory bound up to `156 FLOPs/byte`. But at BS=64, intensity jumps
-    to `64 FLOPs/byte`, significantly increasing compute utilization. The draft model
-    requires `1.5B * 2 = 3 GFLOPs` per token. At BS=64, that's 192 GFLOPs of pure
-    overhead per speculative step that is now eating into a heavily utilized compute
-    pipeline.
+  realistic_solution: Speculative decoding trades spare compute (ALU cycles) for memory bandwidth. At batch size 1, LLM inference is severely memory-bandwidth bound, so the A100's ALUs are mostly idle. Using those idle ALUs to run a small draft model and verify multiple tokens in one memory sweep of the 70B model is a massive win. However, at batch size 64, the arithmetic intensity of the workload increases significantly. The system becomes compute-bound. Now, running the draft model steals precious ALU cycles away from the main model's generation, and the overhead of verifying rejected tokens actually reduces overall throughput.
+  common_mistake: |
+    **The Pitfall:** Assuming speculative decoding always provides a speedup because it reduces the number of forward passes of the large model.
+    **The Rationale:** Failing to understand the roofline model and the shift from memory-bound to compute-bound execution at higher batch sizes.
+    **The Consequence:** Deploying speculative decoding to high-throughput endpoints and unintentionally bottlenecking the system.
+  napkin_math: |
+    - A 70B model at Batch Size (BS) 1 has an arithmetic intensity of ~1 FLOP/byte.
+    - An A100 is memory bound up to 156 FLOPs/byte. (Idle ALUs are free to run the draft model).
+    - At BS=64, intensity jumps to 64 FLOPs/byte, heavily utilizing the compute pipeline.
+    - The draft model requires $1.5\text{B} \times 2 = 3\text{ GFLOPs}$ per token.
+    - At BS=64, this is $192\text{ GFLOPs}$ of pure overhead per step.
+    - **Running the draft model steals precious ALU cycles from the now compute-bound main model, slowing overall generation.**
 status: published
 provenance: imported
 requires_explanation: false

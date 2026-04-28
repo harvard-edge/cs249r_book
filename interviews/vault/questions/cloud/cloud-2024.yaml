@@ -8,27 +8,22 @@ competency_area: compute
 bloom_level: evaluate
 phase: both
 title: Evaluating Test-Time Compute vs Model Scaling
-scenario: 'You are architecting a reasoning API using a 70B LLM deployed on an 8x H100 GPU node (80GB
-  HBM3, 3.35 TB/s per GPU). The service handles a mix of simple queries and complex logic tasks. To improve
-  accuracy on complex tasks while keeping P95 latency under 10 seconds for 500-token outputs, you are
-  evaluating two strategies: upgrading to a 400B parameter model with standard greedy decoding, versus
-  keeping the 70B model but implementing a test-time compute scaling strategy (Best-of-N sampling with
-  N=16 and a lightweight verifier). Justify which approach yields better latency and hardware utilization.'
-question: "For 500-token reasoning outputs under 10s P95, should you upgrade to a 400B model or run Best-of-16 on the 70B model, and why?"
+scenario: You are architecting a reasoning API using a 70B LLM deployed on an 8x H100 GPU node (80GB HBM3, 3.35 TB/s per GPU). The service handles a mix of simple queries and complex logic tasks. To improve accuracy on complex tasks while keeping P95 latency under 10 seconds for 500-token outputs, you are evaluating two strategies: upgrading to a 400B parameter model with standard greedy decoding, versus keeping the 70B model but implementing a test-time compute scaling strategy (Best-of-N sampling with N=16 and a lightweight verifier).
+question: For 500-token reasoning outputs under 10s P95, should you upgrade to a 400B model or run Best-of-16 on the 70B model, and why?
 details:
-  realistic_solution: Keeping the 70B model and scaling test-time compute (N=16) is superior. The 400B
-    model weights consume ~800GB (FP16), leaving minimal HBM for KV cache across 8x H100s, severely limiting
-    batch size and causing high Time Per Output Token (TPOT). The 70B model leaves >400GB for KV cache,
-    allowing the N=16 generations to be parallelized in a single large batch. Weight loading time is amortized
-    across the 16 paths, dramatically increasing Model FLOPs Utilization (MFU) and keeping latency within
-    the 10s SLA.
-  common_mistake: Candidates often assume upgrading to a larger model is always necessary for complex
-    tasks, failing to recognize that generating N parallel samples from a smaller model turns a memory-bandwidth-bound
-    autoregressive decoding process into a highly efficient compute-bound operation.
-  napkin_math: '400B TPOT (memory bound): 800GB / (8 * 3.35 TB/s) = ~30ms/token. 500 tokens = 15s (violates
-    10s SLA). 70B model weights = 140GB. For N=16, we batch the paths. Weight memory read time is 140GB
-    / 26.8 TB/s = ~5.2ms. Even with compute time added for 16 tokens, TPOT is ~6ms. 500 tokens * 6ms =
-    3.0s, easily beating the SLA while producing 16 candidate answers for the verifier.'
+  realistic_solution: Keeping the 70B model and scaling test-time compute (N=16) is superior. The 400B model weights consume ~800GB (FP16), leaving minimal HBM for KV cache across 8x H100s, severely limiting batch size and causing high Time Per Output Token (TPOT). The 70B model leaves >400GB for KV cache, allowing the N=16 generations to be parallelized in a single large batch. Weight loading time is amortized across the 16 paths, dramatically increasing Model FLOPs Utilization (MFU) and keeping latency within the 10s SLA.
+  common_mistake: |
+    **The Pitfall:** Assuming larger models are always required for better reasoning.
+    **The Rationale:** Candidates ignore the memory-bandwidth bottleneck of autoregressive decoding and fail to realize that Best-of-N turns a memory-bound operation into an efficient compute-bound one.
+    **The Consequence:** The candidate proposes an architecture that violates the latency SLA and starves for KV cache memory.
+  napkin_math: |
+    *   **400B TPOT (memory bound):** 800GB / (8 × 3.35 TB/s) = ~30ms/token.
+    *   **400B latency:** 500 tokens × 30ms = 15s (Violates 10s SLA).
+    *   **70B weights:** 140GB.
+    *   **70B memory read time:** 140GB / 26.8 TB/s = ~5.2ms.
+    *   **70B N=16 TPOT:** Batched paths share the weight read. Even with compute overhead, TPOT is ~6ms.
+    *   **70B N=16 latency:** 500 tokens × 6ms = **3.0s**.
+    *   **Result:** 70B Best-of-16 easily meets the SLA (3.0s < 10s) by increasing MFU.
 status: published
 provenance: imported
 requires_explanation: true

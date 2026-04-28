@@ -8,22 +8,20 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Diagnosing SRAM Spills in Tiled Attention
-scenario: A team is optimizing a custom Transformer for 16K sequence lengths on A100 GPUs (164 KB usable
-  shared SRAM per SM). They implement a tiled, IO-aware attention kernel inspired by FlashAttention using
-  FP16 with a head dimension d=128 and tiling blocks Br=256 and Bc=256. Profiling reveals intermediate
-  matrix blocks are silently spilling to HBM, bottlenecking memory bandwidth and yielding only a 1.2x
-  speedup over standard attention instead of the expected >3x. Diagnose the root cause of the HBM spilling.
-question: "Why do Br=256 and Bc=256 attention tiles spill to HBM on A100, and what tile sizing fixes it?"
+scenario: A team optimizes a custom Transformer for 16K sequences on A100 GPUs (164 KB usable shared SRAM per SM). They implement a tiled, IO-aware attention kernel in FP16 with head dimension d=128 and tiling blocks Br=256 and Bc=256. Profiling reveals intermediate matrix blocks are silently spilling to HBM, yielding only a 1.2x speedup.
+question: Why do the Br=256 and Bc=256 attention tiles spill to HBM on A100, and what tile sizing fixes the bottleneck?
 details:
-  realistic_solution: The chosen block sizes require more shared memory than the A100 SM provides. Reduce
-    the tile sizes (e.g., Br=64, Bc=128) so the loaded Q, K, V, O blocks and intermediate accumulators
-    strictly fit within the 164 KB SRAM limit, entirely preventing HBM roundtrips.
-  common_mistake: Assuming the bottleneck is poor Tensor Core arithmetic intensity or suggesting to increase
-    the tile size for better compute utilization, ignoring hard hardware SRAM limits per SM.
-  napkin_math: 'With Br=256, Bc=256, d=128, FP16 (2 Bytes): Q block = 256 * 128 * 2B = 64 KB. K block
-    = 64 KB. V block = 64 KB. Output block = 64 KB. Total = 256 KB. 256 KB > 164 KB A100 SRAM limit. Reducing
-    to Br=64, Bc=128 uses: 16KB (Q) + 32KB (K) + 32KB (V) + 16KB (O) = 96 KB, safely below the 164 KB
-    limit.'
+  realistic_solution: The chosen block sizes require more shared memory than the A100 SM provides. Reduce the tile sizes (e.g., Br=64, Bc=128) so the loaded Q, K, V, O blocks strictly fit within the 164 KB SRAM limit, entirely preventing HBM roundtrips.
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is poor Tensor Core arithmetic intensity or suggesting larger tile sizes.
+    **The Rationale:** Candidates ignore the hard architectural limits of shared memory (SRAM) per SM on the GPU.
+    **The Consequence:** Exacerbating the memory spilling and failing to achieve the expected performance.
+  napkin_math: |
+    - **Current Tile Size (Br=256, Bc=256, d=128, FP16):** Q, K, V, and Output blocks each take 256 × 128 × 2B = 64 KB.
+    - **Total Required SRAM:** 4 × 64 KB = 256 KB.
+    - **Constraint Check:** 256 KB > 164 KB A100 SM limit (spills to HBM).
+    - **Reduced Tile Size (Br=64, Bc=128):** Q (16 KB) + K (32 KB) + V (32 KB) + O (16 KB) = 96 KB.
+    - **Result:** **96 KB < 164 KB limit**, safely fitting in SRAM and preventing HBM spills.
 status: published
 provenance: imported
 requires_explanation: false

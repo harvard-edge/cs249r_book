@@ -8,35 +8,22 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: The Bad Batch Spike
-scenario: You're fine-tuning a 7B model on 8 A100 GPUs. At step 12,400 the training loss suddenly spikes
-  from 1.8 to 4.5, then gradually recovers over the next 200 steps. The spike happens at the exact same
-  step every time you restart from the same checkpoint. What's in that batch, and how do you prove it?
-question: "What's in that batch, and how do you prove it?"
+scenario: 'You''re fine-tuning a 7B model on 8 A100 GPUs. At step 12,400 the training loss suddenly spikes from 1.8 to 4.5, then gradually recovers over the next 200 steps. The spike happens at the exact same step every time you restart from the same checkpoint.'
+question: 'What is in that specific batch causing the loss spike, and how do you prove it?'
 details:
-  realistic_solution: 'The deterministic reproduction at step 12,400 means the data loader, with its fixed
-    seed, serves a specific mini-batch at that step that contains pathological examples. Common culprits:
-    (1) a corrupted sample with extremely long repetitive sequences that cause attention to produce near-uniform
-    distributions, generating saturated gradients in the softmax backward pass; (2) a mislabeled example where
-    the target is nonsensical (e.g., a truncated UTF-8 sequence decoded as garbage tokens), producing
-    a cross-entropy loss orders of magnitude above normal; (3) a duplicate of the prompt as the target,
-    causing the model to receive contradictory supervision. Proof: log the batch indices at step 12,400,
-    extract those samples, compute per-sample loss — the pathological sample will have loss >45x the
-    batch mean. Fix: implement per-sample gradient clipping or loss clipping that caps individual sample
-    contributions, and add a data quality filter that removes samples with anomalous token distributions.'
-  common_mistake: '"The learning rate is too high — reduce it" or "This is normal training noise." The
-    reproducibility at the exact same step rules out stochastic noise, and the spike magnitude is
-    far beyond normal gradient variance.'
-  napkin_math: 'Normal per-token cross-entropy loss ≈ 1.8 nats. Batch: 32 samples × 512 tokens = 16,384 tokens total. Good tokens: 31 × 512 = 15,872 tokens at 1.8 nats each. Total good loss = 15,872 × 1.8 = 28,570 nats.
-    To reach a batch mean loss of 4.5, the batch sum must be 16,384 × 4.5 = 73,728 nats.
-    The bad tokens must contribute 73,728 - 28,570 = 45,158 nats.
-    Per bad token loss = 45,158 / 512 = 88.2 nats.
-    This value (88.2 nats) corresponds roughly to -ln(1e-38), which is near the underflow limit of BF16. The model assigned near-zero probability to these tokens. While the token-level cross-entropy gradient is bounded by 1.0 (grad = p - y), these tokens consistently saturate the gradient at maximum magnitude, pulling the model slightly off-distribution while the extreme loss values heavily skew the reported batch telemetry.'
+  realistic_solution: 'The deterministic reproduction at step 12,400 means the data loader, with its fixed seed, serves a specific mini-batch at that step that contains pathological examples. Common culprits: (1) a corrupted sample with extremely long repetitive sequences; (2) a mislabeled example where the target is nonsensical; (3) a duplicate of the prompt as the target. Proof: log the batch indices at step 12,400, extract those samples, compute per-sample loss — the pathological sample will have loss >45x the batch mean. Fix: implement per-sample gradient clipping or loss clipping that caps individual sample contributions.'
+  common_mistake: |
+    **The Pitfall:** Dismissing it as stochastic noise or blaming the learning rate.
+    **The Rationale:** Candidates jump to typical hyperparameter tuning instincts without considering the deterministic nature of the reproduction.
+    **The Consequence:** Wasting time tweaking learning rates when the underlying issue is a heavily corrupted training sample dominating the batch gradient.
+  napkin_math: |
+    - **Normal State:** 32 samples × 512 tokens = 16,384 tokens. Normal loss = 1.8 nats/token. Total batch loss = 29,491 nats.
+    - **Spike State:** Average loss = 4.5. Total batch loss = 16,384 × 4.5 = 73,728 nats.
+    - **Pathological Contribution:** 31 normal samples contribute 15,872 × 1.8 = 28,570 nats. The 1 bad sample must contribute 73,728 - 28,570 = 45,158 nats.
+    - **Per-Token Bad Loss:** 45,158 / 512 tokens = **88.2 nats per token**.
+    - **Result:** A loss of 88.2 corresponds to -ln(1e-38), near the underflow limit of BF16. The model assigns near-zero probability to these tokens, pointing to a severely corrupted or duplicated sample.
 status: archived
-deletion_reason: 'Cell-fit error: topic is 3d-parallelism but the scenario is fundamentally about loss-curve
-  debugging and per-sample gradient pathology on a single replica — there is no parallelism dimension
-  to reason about, and grafting one in would invalidate the mid-step deterministic-batch insight that
-  is the whole point of the question. The data-quality / per-sample-clipping content is well placed
-  in a data-engineering or training-stability cell, not under 3d-parallelism.'
+deletion_reason: 'Cell-fit error: topic is 3d-parallelism but the scenario is fundamentally about loss-curve debugging and per-sample gradient pathology on a single replica — there is no parallelism dimension to reason about, and grafting one in would invalidate the mid-step deterministic-batch insight that is the whole point of the question. The data-quality / per-sample-clipping content is well placed in a data-engineering or training-stability cell, not under 3d-parallelism.'
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 4
