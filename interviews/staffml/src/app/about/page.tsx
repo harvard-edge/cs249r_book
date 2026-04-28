@@ -38,8 +38,16 @@ export default function AboutPage() {
         <p className="text-[16px] text-textSecondary leading-relaxed mb-2">
           <strong className="text-textPrimary">{QUESTION_COUNT_FORMATTED} physics-grounded ML systems questions</strong>{' '}
           across {TOPIC_COUNT} topics and {TRACK_COUNT} deployment tracks, at {LEVEL_COUNT} difficulty levels
-          from recall to system design. Backed by a 600-page open textbook. Free,
-          open source, and runs entirely in your browser.
+          from recall to system design. Backed by the{' '}
+          <a
+            href="https://mlsysbook.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accentBlue hover:underline"
+          >
+            Machine Learning Systems
+          </a>
+          {' '}textbook. Free, open source, and runs entirely in your browser.
         </p>
         <div className="flex flex-wrap items-center gap-2 mt-4 mb-8">
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">No accounts</span>
