@@ -227,24 +227,34 @@ def emit_manifest(
     *,
     release_id: str,
     release_hash: str,
+    schema_version: str,
+    policy_version: str,
     published_count: int,
     chain_count: int,
     concept_count: int = 87,
     area_count: int = 13,
     taxonomy_version: str = "87-topics",
-    schema_version: str = "0.1.2-dev",
 ) -> dict[str, Any]:
-    """Emit `vault-manifest.json` next to the corpus bundle.
+    """Emit `vault-manifest.json` — the staffml site's view of the release.
 
-    Added 2026-04-25 (Phase E.2): the staffml `validate-vault.py` and
-    `vault doctor` both read this file; it must agree with the corpus
-    or the pre-commit hook fails. Prior to this change the manifest was
-    hand-edited and drifted on every regeneration. Now it's emitted
-    deterministically from the same loaded set that produced the
-    bundle, so it can never drift.
+    Single source of truth contract: the upstream authority is
+    ``releases/<release_id>/release.json`` (and the corresponding
+    release_metadata row); this manifest is a build-time projection of
+    that artifact PLUS the loaded set's distributions. Anything that
+    needs to know "what release is the site running" reads this file.
+
+    The site never reads ``release_id`` from environment variables for
+    display: ``NEXT_PUBLIC_VAULT_RELEASE`` is reserved as an override
+    used to point local builds at a different worker, not to label the
+    bundle. That kept the field drift-prone for months — now closed.
     """
     from collections import Counter
     from datetime import datetime
+
+    if not release_id:
+        raise ValueError("emit_manifest: release_id is required")
+    if not release_hash or len(release_hash) < 16:
+        raise ValueError("emit_manifest: release_hash must be the full hex digest")
 
     track_dist = Counter(lq.question.track for lq in loaded
                          if lq.question.status == "published")
@@ -252,10 +262,12 @@ def emit_manifest(
                          if lq.question.status == "published")
 
     manifest = {
-        "version": schema_version,
+        "releaseId": release_id,
+        "releaseHash": release_hash,
+        "schemaVersion": schema_version,
+        "policyVersion": policy_version,
         "buildDate": datetime.now(UTC).strftime(
             "%Y-%m-%dT%H:%M:%SZ"),
-        "contentHash": release_hash[:12],
         "questionCount": published_count,
         "chainCount": chain_count,
         "conceptCount": concept_count,
@@ -271,6 +283,7 @@ def emit_manifest(
     )
     return {
         "output": str(output),
+        "releaseId": release_id,
         "questionCount": published_count,
         "chainCount": chain_count,
     }

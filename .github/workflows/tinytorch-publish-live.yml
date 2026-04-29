@@ -509,6 +509,42 @@ jobs:
           ls -la ${{ vars.TINYTORCH_SITE }}/_build/assets/slides/ || echo "No slides folder"
           echo "✅ Downloaded $(ls ${{ vars.TINYTORCH_SITE }}/_build/assets/slides/*.pdf 2>/dev/null | wc -l) slide decks"
 
+      - name: 📦 Emit release manifest
+        # Single source of truth for "what release does this bundle ship?".
+        # The footer pill (shared/release/release-pill.html) fetches this
+        # at runtime; the BibTeX/citation card consumes it at build time.
+        # Always emitted — for site-only redeploys we keep the existing
+        # release_id but stamp a fresh buildDate so users on stale tabs
+        # still get the drift-detection signal.
+        env:
+          NEW_VERSION: ${{ needs.validate-inputs.outputs.new_version }}
+        run: |
+          set -euo pipefail
+          RELEASE_ID="${NEW_VERSION#tinytorch-v}"
+
+          # Inputs that DEFINE a TinyTorch release. We hash framework source
+          # (modules/), the user-facing site (quarto/, but never its build
+          # output), and the release-defining metadata (pyproject.toml,
+          # MANIFEST.in). Scripts are intentionally excluded — they're build
+          # tooling, not part of the citable artifact.
+          RELEASE_HASH=$(python3 scripts/version/release.py compute-hash \
+            --paths tinytorch/modules tinytorch/quarto \
+                    tinytorch/pyproject.toml tinytorch/MANIFEST.in \
+            --exclude '_build' '__pycache__' '*.pyc' '.DS_Store' \
+                      '.ipynb_checkpoints' '*.egg-info')
+
+          echo "📦 Release: tinytorch v${RELEASE_ID} (hash ${RELEASE_HASH:0:12})"
+
+          python3 scripts/version/release.py emit-manifest \
+            --output ${{ vars.TINYTORCH_SITE }}/_build/release-manifest.json \
+            --project tinytorch \
+            --tier A \
+            --release-id "$RELEASE_ID" \
+            --release-hash "$RELEASE_HASH"
+
+          echo "✅ Manifest written to ${{ vars.TINYTORCH_SITE }}/_build/release-manifest.json"
+          cat ${{ vars.TINYTORCH_SITE }}/_build/release-manifest.json
+
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:

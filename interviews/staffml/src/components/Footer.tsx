@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { ECOSYSTEM_BASE } from "../lib/env";
+import { RELEASE_ID, RELEASE_HASH, BUILD_DATE } from "../lib/stats";
 
 /**
  * Page-end footer with a stable cross-link back to the ML Systems textbook.
@@ -12,6 +14,12 @@ import { ECOSYSTEM_BASE } from "../lib/env";
  * Intentionally minimal: one attribution row, low contrast, no dropdowns.
  */
 export default function Footer() {
+  const buildLabel = new Date(BUILD_DATE).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const shortHash = RELEASE_HASH.slice(0, 7);
   return (
     <footer className="border-t border-border mt-12 py-6 px-4 lg:px-6 text-xs text-textTertiary">
       <div className="max-w-7xl mx-auto flex flex-col sm:flex-row gap-2 sm:gap-4 sm:items-center sm:justify-between">
@@ -61,6 +69,15 @@ export default function Footer() {
           >
             GitHub
           </a>
+          <Link
+            href="/about#release"
+            className="font-mono hover:text-textSecondary transition-colors"
+            title={`Vault v${RELEASE_ID} · built ${buildLabel} · hash ${shortHash}`}
+            aria-label={`Vault release v${RELEASE_ID}, built ${buildLabel}`}
+          >
+            Vault v{RELEASE_ID}
+            <span className="text-textMuted/70"> · {buildLabel}</span>
+          </Link>
         </div>
       </div>
     </footer>

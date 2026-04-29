@@ -52,6 +52,18 @@ jobs:
   build-and-deploy:
     name: '🎯 Build & Deploy StaffML (Dev)'
     runs-on: ubuntu-latest
+    env:
+      # Single source for paths and versions — see docs/CI-VARIABLES.md.
+      # The `paths:` trigger filter at the top of this file is intentionally
+      # NOT vars-ified (GitHub Actions evaluates triggers at workflow-load
+      # time, before vars are resolved). If STAFFML_ROOT moves, update the
+      # paths filter manually.
+      STAFFML_ROOT:    ${{ vars.STAFFML_ROOT    || 'interviews/staffml' }}
+      VAULT_DIR:       ${{ vars.VAULT_DIR       || 'interviews/vault' }}
+      VAULT_CLI_DIR:   ${{ vars.VAULT_CLI_DIR   || 'interviews/vault-cli' }}
+      DEV_STAFFML_PATH: ${{ vars.DEV_STAFFML_PATH || 'staffml' }}
+      NODE_VERSION:    ${{ vars.NODE_VERSION    || '20' }}
+      PYTHON_VERSION:  ${{ vars.PYTHON_VERSION  || '3.12' }}
 
     steps:
       - name: 📥 Checkout
@@ -60,61 +72,61 @@ jobs:
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: interviews/staffml/package-lock.json
+          cache-dependency-path: ${{ env.STAFFML_ROOT }}/package-lock.json
 
       - name: 📦 Install dependencies
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npm ci
 
       - name: 🐍 Setup Python (for vault-cli)
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 🛠️ Install vault-cli
-        run: pip install -e interviews/vault-cli/
+        run: pip install -e "$VAULT_CLI_DIR/"
 
       - name: 🔄 Regenerate corpus from YAMLs (vault build --legacy-json)
-        # Emits interviews/staffml/src/data/corpus.json (full) +
+        # Emits $STAFFML_ROOT/src/data/corpus.json (full) +
         # corpus-summary.json (site bundle) from the committed YAMLs.
         # Guarantees the built site reflects current vault state even if
         # the committed JSON artifacts drift from YAMLs.
-        run: vault build --vault-dir interviews/vault --release-id preview-dev --legacy-json
+        run: vault build --vault-dir "$VAULT_DIR" --release-id preview-dev --legacy-json
 
       - name: 🔍 Type check
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npx tsc --noEmit
 
       - name: 🧪 Run tests
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npm test
 
       - name: 🔨 Build StaffML
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         env:
-          NEXT_PUBLIC_BASE_PATH: /cs249r_book_dev/staffml
+          NEXT_PUBLIC_BASE_PATH: /cs249r_book_dev/${{ env.DEV_STAFFML_PATH }}
           NEXT_PUBLIC_ECOSYSTEM_BASE: https://harvard-edge.github.io/cs249r_book_dev
-          NEXT_PUBLIC_ANALYTICS_URL: https://mlsysbook.ai/api/staffml-analytics
+          NEXT_PUBLIC_ANALYTICS_URL: ${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}/api/staffml-analytics
           # Preview builds share the production interviewer worker. This
           # means preview PRs can exercise the real hosted AskInterviewer
           # panel, and any rate-limit hits on preview count against the
           # same global budget as production. The CORS allowlist on the
           # worker already includes localhost plus the production origins.
-          NEXT_PUBLIC_INTERVIEWER_ENDPOINT: https://mlsysbook.ai/api/staffml-interviewer
+          NEXT_PUBLIC_INTERVIEWER_ENDPOINT: ${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}/api/staffml-interviewer
           # Preview shares the production worker (same D1 data).
-          NEXT_PUBLIC_VAULT_API: https://staffml-vault.mlsysbook-ai-account.workers.dev
+          NEXT_PUBLIC_VAULT_API: ${{ vars.STAFFML_VAULT_WORKER_URL || 'https://staffml-vault.mlsysbook-ai-account.workers.dev' }}
           NEXT_PUBLIC_VAULT_RELEASE: "1.0.2"
         run: npm run build
 
       - name: 📁 Inject paper and figures into build
         run: |
           echo "📁 Injecting paper assets into built site..."
-          mkdir -p interviews/staffml/out/downloads
+          mkdir -p "$STAFFML_ROOT/out/downloads"
 
           if [ -f interviews/paper/paper.pdf ]; then
-            cp interviews/paper/paper.pdf interviews/staffml/out/downloads/StaffML-Paper.pdf
+            cp interviews/paper/paper.pdf "$STAFFML_ROOT/out/downloads/StaffML-Paper.pdf"
             echo "✅ Injected StaffML-Paper.pdf"
           else
             echo "⚠️ Paper PDF not found"
@@ -122,26 +134,26 @@ jobs:
 
           echo ""
           echo "📦 Downloads folder contents:"
-          ls -la interviews/staffml/out/downloads/ || echo "No downloads folder"
+          ls -la "$STAFFML_ROOT/out/downloads/" || echo "No downloads folder"
 
       - name: 🔗 Rewrite URLs for dev site
-        run: bash .github/scripts/rewrite-dev-urls.sh staffml interviews/staffml/out
+        run: bash .github/scripts/rewrite-dev-urls.sh "$DEV_STAFFML_PATH" "$STAFFML_ROOT/out"
 
       - name: 🔍 Validate build
         run: |
-          if [ ! -f "interviews/staffml/out/index.html" ]; then
+          if [ ! -f "$STAFFML_ROOT/out/index.html" ]; then
             echo "❌ CRITICAL: index.html missing. Aborting deployment."
             exit 1
           fi
 
-          PAGE_COUNT=$(find interviews/staffml/out -name '*.html' | wc -l)
+          PAGE_COUNT=$(find "$STAFFML_ROOT/out" -name '*.html' | wc -l)
           echo "✅ StaffML built: $PAGE_COUNT pages"
-          echo "📊 Build size: $(du -sh interviews/staffml/out | cut -f1)"
+          echo "📊 Build size: $(du -sh "$STAFFML_ROOT/out" | cut -f1)"
 
           # Verify critical pages exist
           MISSING=0
           for page in practice gauntlet progress about 404; do
-            if [ ! -f "interviews/staffml/out/${page}.html" ]; then
+            if [ ! -f "$STAFFML_ROOT/out/${page}.html" ]; then
               echo "❌ MISSING: ${page}.html"
               MISSING=$((MISSING + 1))
             fi
@@ -151,70 +163,75 @@ jobs:
             exit 1
           fi
 
-          # Show vault version
-          if [ -f "interviews/staffml/src/data/vault-manifest.json" ]; then
-            echo "📋 Vault version: $(python3 -c "import json; print(json.load(open('interviews/staffml/src/data/vault-manifest.json'))['version'])")"
+          # Show vault release identity
+          MANIFEST="$STAFFML_ROOT/src/data/vault-manifest.json"
+          if [ -f "$MANIFEST" ]; then
+            echo "📋 Vault release: v$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['releaseId'])" "$MANIFEST")"
           fi
 
       - name: 🔐 Validate vault integrity
-        run: python3 interviews/staffml/scripts/validate-vault.py
+        run: python3 "$STAFFML_ROOT/scripts/validate-vault.py"
 
       - name: 🧪 Smoke tests
         run: |
-          python3 -c "
-          import json, sys
+          STAFFML_ROOT="$STAFFML_ROOT" python3 - <<'PY'
+          import json, os, sys
+
+          root = os.environ["STAFFML_ROOT"]
 
           # Test 1: Corpus integrity
-          with open('interviews/staffml/src/data/corpus.json') as f:
+          with open(f"{root}/src/data/corpus.json") as f:
               corpus = json.load(f)
-          assert len(corpus) >= 4000, f'Corpus too small: {len(corpus)} questions'
-          print(f'✅ Corpus: {len(corpus)} questions')
+          assert len(corpus) >= 4000, f"Corpus too small: {len(corpus)} questions"
+          print(f"✅ Corpus: {len(corpus)} questions")
 
           # Test 2: Every question has required fields
-          required = ['id', 'title', 'level', 'track', 'scenario', 'competency_area', 'topic', 'zone', 'details']
+          required = ["id", "title", "level", "track", "scenario", "competency_area", "topic", "zone", "details"]
           missing = []
           for q in corpus:
               for field in required:
                   if not q.get(field):
-                      missing.append(f'{q.get(\"id\", \"???\")} missing {field}')
+                      missing.append(f"{q.get('id', '???')} missing {field}")
           if missing:
-              print(f'⚠️ {len(missing)} questions with missing fields')
+              print(f"⚠️ {len(missing)} questions with missing fields")
               for m in missing[:5]:
-                  print(f'   {m}')
+                  print(f"   {m}")
               if len(missing) > 5:
-                  print(f'   ... and {len(missing) - 5} more')
+                  print(f"   ... and {len(missing) - 5} more")
           else:
-              print('✅ All questions have required fields')
+              print("✅ All questions have required fields")
 
           # Test 3: Every question has a valid level
-          valid_levels = {'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L6+'}
-          bad_levels = [q['id'] for q in corpus if q.get('level') not in valid_levels]
-          assert len(bad_levels) == 0, f'{len(bad_levels)} questions with invalid levels: {bad_levels[:3]}'
-          print('✅ All levels valid (L1-L6+)')
+          valid_levels = {"L1", "L2", "L3", "L4", "L5", "L6", "L6+"}
+          bad_levels = [q["id"] for q in corpus if q.get("level") not in valid_levels]
+          assert len(bad_levels) == 0, f"{len(bad_levels)} questions with invalid levels: {bad_levels[:3]}"
+          print("✅ All levels valid (L1-L6+)")
 
           # Test 4: Taxonomy loads and has concepts
-          with open('interviews/staffml/src/data/taxonomy.json') as f:
+          with open(f"{root}/src/data/taxonomy.json") as f:
               taxonomy = json.load(f)
-          concepts = taxonomy.get('concepts', [])
-          assert len(concepts) >= 70, f'Taxonomy too small: {len(concepts)} topics'
-          print(f'✅ Taxonomy: {len(concepts)} topics')
+          concepts = taxonomy.get("concepts", [])
+          assert len(concepts) >= 70, f"Taxonomy too small: {len(concepts)} topics"
+          print(f"✅ Taxonomy: {len(concepts)} topics")
 
-          # Test 5: Manifest exists and is valid
-          with open('interviews/staffml/src/data/vault-manifest.json') as f:
+          # Test 5: Manifest exists and is valid (single source of truth)
+          with open(f"{root}/src/data/vault-manifest.json") as f:
               manifest = json.load(f)
-          assert 'version' in manifest, 'Manifest missing version'
-          assert manifest['questionCount'] == len(corpus), f'Manifest count mismatch: {manifest[\"questionCount\"]} vs {len(corpus)}'
-          print(f'✅ Manifest: v{manifest[\"version\"]} ({manifest[\"questionCount\"]} Qs)')
+          assert "releaseId" in manifest, "Manifest missing releaseId"
+          assert "releaseHash" in manifest and len(manifest["releaseHash"]) >= 16, \
+              "Manifest missing or truncated releaseHash"
+          assert manifest["questionCount"] == len(corpus), \
+              f"Manifest count mismatch: {manifest['questionCount']} vs {len(corpus)}"
+          print(f"✅ Manifest: v{manifest['releaseId']} ({manifest['questionCount']} Qs, hash {manifest['releaseHash'][:7]})")
 
           # Test 6: Build output has static assets
-          import os
-          js_files = [f for f in os.listdir('interviews/staffml/out/_next/static') if not f.startswith('.')]
-          assert len(js_files) > 0, 'No static JS chunks found'
-          print(f'✅ Static assets: {len(js_files)} chunks')
+          js_files = [f for f in os.listdir(f"{root}/out/_next/static") if not f.startswith(".")]
+          assert len(js_files) > 0, "No static JS chunks found"
+          print(f"✅ Static assets: {len(js_files)} chunks")
 
           print()
-          print('🎯 All smoke tests passed')
-          "
+          print("🎯 All smoke tests passed")
+          PY
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:

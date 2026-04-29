@@ -28,6 +28,33 @@ name: '📦 Kits · 🚀 Publish (Live)'
 
 on:
   workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? [Content updates and improvements]'
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        description: 'Website-only deploy? (no version bump, no tag — reuses current release_id)'
+        required: false
+        type: boolean
+        default: false
+      release_type:
+        description: 'Release type (ignored if site_only OR explicit_version is set) [patch]'
+        required: true
+        type: choice
+        options:
+          - 'patch'
+          - 'minor'
+          - 'major'
+        default: 'patch'
+      explicit_version:
+        description: 'Override: explicit X.Y.Z (skips bump math). Leave blank to auto-bump.'
+        required: false
+        default: ''
+      confirm:
+        description: 'Type "PUBLISH" to confirm (safety check) [required]'
+        required: true
+        default: ''
 
 permissions:
   contents: write
@@ -42,14 +69,29 @@ jobs:
   # See .github/workflows/infra-publish-guard.yml for guard semantics.
   guard:
     name: '🛡️ Validate-Dev Green Gate'
+    if: inputs.confirm == 'PUBLISH'
     uses: ./.github/workflows/infra-publish-guard.yml
     with:
       validate_workflow: kits-validate-dev.yml
+
+  prepare:
+    name: '🏷️ Prepare release'
+    uses: ./.github/workflows/_release-prepare.yml
+    with:
+      project: kits
+      tier: B
+      previous_tag_pattern: 'kits-v*'
+      release_type: ${{ inputs.release_type }}
+      explicit_version: ${{ inputs.explicit_version }}
+      description: ${{ inputs.description }}
+      confirm: ${{ inputs.confirm }}
+      site_only: ${{ inputs.site_only }}
 
   # Build PDF first
   build-pdf:
     name: '📚 Build PDF'
     needs: [guard]
+    if: inputs.confirm == 'PUBLISH'
     uses: ./.github/workflows/kits-build-pdfs.yml
     with:
       ref: ${{ github.ref }}
@@ -60,7 +102,8 @@ jobs:
     concurrency:
       group: gh-pages-deploy
       cancel-in-progress: false
-    needs: [guard, build-pdf]
+    needs: [guard, prepare, build-pdf]
+    if: inputs.confirm == 'PUBLISH'
 
     steps:
       - name: 📥 Checkout
@@ -92,6 +135,30 @@ jobs:
       - name: 🕐 Inject Build Stamp
         run: bash shared/scripts/inject-build-stamp.sh ${{ vars.KITS_ROOT }}/_build "Kits"
 
+      - name: 🐍 Setup Python (for release manifest)
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 📦 Emit release manifest
+        env:
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+        run: |
+          set -euo pipefail
+          RELEASE_HASH=$(python3 scripts/version/release.py compute-hash \
+            --paths ${{ vars.KITS_ROOT }} \
+            --exclude '_build' '__pycache__' '*.pyc' '.DS_Store' \
+                      '.ipynb_checkpoints' '.quarto')
+
+          echo "📦 Release: kits v${NEW_RELEASE_ID} (hash ${RELEASE_HASH:0:12})"
+
+          python3 scripts/version/release.py emit-manifest \
+            --output ${{ vars.KITS_ROOT }}/_build/release-manifest.json \
+            --project kits \
+            --tier B \
+            --release-id "$NEW_RELEASE_ID" \
+            --release-hash "$RELEASE_HASH"
+
       - name: 🚀 Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
@@ -100,4 +167,51 @@ jobs:
           destination_dir: ${{ vars.DEV_KITS_PATH }}
           publish_branch: gh-pages
           keep_files: true
-          commit_message: '🔧 Deploy Kits live (with PDF) - ${{ github.sha }}'
+          commit_message: '🔧 Deploy Kits ${{ needs.prepare.outputs.new_tag }} - ${{ github.sha }}'
+
+  # Tag the release. Tier B does NOT generate AI release notes — the
+  # description plus auto-generated commit list is sufficient given the
+  # rapid iteration cadence and lower citation stakes.
+  create-tag:
+    name: '🏷️ Create Tag & Release'
+    needs: [build-and-deploy, prepare]
+    if: needs.build-and-deploy.result == 'success' && inputs.site_only != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Create and push tag
+        env:
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$NEW_TAG" -m "Kits $NEW_TAG: $DESCRIPTION"
+          git push origin "$NEW_TAG"
+
+      - name: 📦 Create GitHub Release (draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          PREV_TAG: ${{ needs.prepare.outputs.previous_tag }}
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          gh release create "$NEW_TAG" \
+            --title "Kits v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes "${DESCRIPTION}\n\n**Site**: https://mlsysbook.ai/${{ vars.DEV_KITS_PATH }}/" \
+            --draft \
+            ${PREV_TAG:+--generate-notes --notes-start-tag="$PREV_TAG"} || \
+          gh release create "$NEW_TAG" \
+            --title "Kits v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes "${DESCRIPTION}" \
+            --draft

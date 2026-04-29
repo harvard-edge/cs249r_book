@@ -1,5 +1,5 @@
 import taxonomyData from "../data/taxonomy.json";
-import corpusData from "../data/corpus.json";
+import corpusData from "../data/corpus-summary.json";
 import zonesData from "../data/zones.json";
 import {
   HardDrive, Cpu, Rocket, Layers, Timer, Shuffle,

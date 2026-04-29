@@ -429,17 +429,27 @@ const VAULT_API = process.env.NEXT_PUBLIC_VAULT_API
 const _detailsCache = new Map<string, Question>();
 let _staticDetailsCache: Map<string, Question> | null = null;
 
+// Opt-in offline / local-dev mode. Set NEXT_PUBLIC_VAULT_FALLBACK=static and
+// run `vault build --legacy-json` to materialize corpus.json on disk. Not a
+// prod safety net: production deploys neither emit nor bundle corpus.json.
 function shouldUseStaticDetails(): boolean {
-  if (process.env.NEXT_PUBLIC_VAULT_FALLBACK?.toLowerCase() === "static") return true;
-  if (typeof window === "undefined") return false;
-  return window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  return process.env.NEXT_PUBLIC_VAULT_FALLBACK?.toLowerCase() === "static";
 }
 
 async function getStaticFullDetail(id: string, summary: Question): Promise<Question | undefined> {
   if (!_staticDetailsCache) {
-    const mod = await import("../data/corpus.json");
-    const fullQuestions = mod.default as unknown as Question[];
-    _staticDetailsCache = new Map(fullQuestions.map((q) => [q.id, q]));
+    // Function-constructor dynamic import: hides the path from Turbopack's
+    // static analyzer so prod builds don't require corpus.json to exist.
+    // corpus.json is materialized on disk only when a contributor runs
+    // `vault build --legacy-json` locally with NEXT_PUBLIC_VAULT_FALLBACK=
+    // static. If the file is missing at runtime, the import rejects and
+    // the caller surfaces an error to the UI.
+    const dynImport = new Function(
+      "p",
+      "return import(p)",
+    ) as (p: string) => Promise<{ default: Question[] }>;
+    const mod = await dynImport("../data/corpus.json");
+    _staticDetailsCache = new Map(mod.default.map((q) => [q.id, q]));
   }
   const full = _staticDetailsCache.get(id);
   if (!full) return undefined;
@@ -457,8 +467,10 @@ async function getStaticFullDetail(id: string, summary: Question): Promise<Quest
 
 /**
  * Fetch the FULL question (with `scenario` and `details.*`) from the
- * Cloudflare Worker. Returns the summary-only record on network failure
- * so the UI can still render id/title/level/zone.
+ * Cloudflare Worker. Returns the cache-merged Question on success.
+ * Throws on Worker error — useFullQuestion catches and renders the
+ * "details unavailable" state. (Static fallback is opt-in via
+ * NEXT_PUBLIC_VAULT_FALLBACK=static and is handled earlier.)
  */
 export async function getQuestionFullDetail(id: string): Promise<Question | undefined> {
   const cached = _detailsCache.get(id);
@@ -471,51 +483,44 @@ export async function getQuestionFullDetail(id: string): Promise<Question | unde
     return getStaticFullDetail(id, summary);
   }
 
-  try {
-    const res = await fetch(`${VAULT_API}/questions/${encodeURIComponent(id)}`, {
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!res.ok) return (await getStaticFullDetail(id, summary)) ?? summary;
-    // Worker returns a DENORMALIZED row (flat fields straight from the D1
-    // questions table) — common_mistake / realistic_solution / napkin_math
-    // live at the top level, NOT under `details`. Re-nest to match the
-    // site's Question shape before returning, otherwise callers get
-    // `current.details.napkin_math` → TypeError on an undefined details.
-    const full = await res.json() as {
-      scenario?: string;
-      common_mistake?: string;
-      realistic_solution?: string;
-      napkin_math?: string;
-      details?: Question["details"];   // future-proof if worker changes
-    };
-    const workerDetails = full.details ?? {
-      common_mistake: full.common_mistake ?? "",
-      realistic_solution: full.realistic_solution ?? "",
-      napkin_math: full.napkin_math ?? "",
-    };
-    const merged: Question = {
-      ...summary,
-      scenario: full.scenario ?? summary.scenario,
-      details: {
-        // Preserve MCQ options/correct_index that came in the summary.
-        ...summary.details,
-        ...workerDetails,
-      },
-    };
-    _detailsCache.set(id, merged);
-    return merged;
-  } catch {
-    // Worker unreachable → serve the bundled full corpus when available.
-    // This keeps local previews usable even when the Worker blocks localhost
-    // via CORS, and gives production a graceful fallback on transient outages.
-    return (await getStaticFullDetail(id, summary)) ?? summary;
-  }
+  const res = await fetch(`${VAULT_API}/questions/${encodeURIComponent(id)}`, {
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!res.ok) throw new Error(`worker ${res.status}`);
+  // Worker returns a DENORMALIZED row (flat fields straight from the D1
+  // questions table) — common_mistake / realistic_solution / napkin_math
+  // live at the top level, NOT under `details`. Re-nest to match the
+  // site's Question shape before returning, otherwise callers get
+  // `current.details.napkin_math` → TypeError on an undefined details.
+  const full = await res.json() as {
+    scenario?: string;
+    common_mistake?: string;
+    realistic_solution?: string;
+    napkin_math?: string;
+    details?: Question["details"];   // future-proof if worker changes
+  };
+  const workerDetails = full.details ?? {
+    common_mistake: full.common_mistake ?? "",
+    realistic_solution: full.realistic_solution ?? "",
+    napkin_math: full.napkin_math ?? "",
+  };
+  const merged: Question = {
+    ...summary,
+    scenario: full.scenario ?? summary.scenario,
+    details: {
+      // Preserve MCQ options/correct_index that came in the summary.
+      ...summary.details,
+      ...workerDetails,
+    },
+  };
+  _detailsCache.set(id, merged);
+  return merged;
 }
 
 /**
  * Pre-warm the details cache for a batch of IDs (e.g., gauntlet session).
- * Fires fetches in parallel, resolves when all complete (or time out).
+ * Fires fetches in parallel; individual failures don't reject the batch.
  */
 export async function prefetchQuestionDetails(ids: string[]): Promise<void> {
-  await Promise.all(ids.map(id => getQuestionFullDetail(id)));
+  await Promise.allSettled(ids.map(id => getQuestionFullDetail(id)));
 }

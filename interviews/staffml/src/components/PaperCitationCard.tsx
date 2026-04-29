@@ -15,7 +15,8 @@ import { FileText, Copy, Check } from "lucide-react";
 export interface PaperCitationCardProps {
   paperUrl: string;
   releaseId: string;
-  releaseHash?: string;   // short or full — displayed truncated to 16 chars.
+  releaseHash: string;    // full hex digest; first 7 chars are shown above the fold.
+  buildDate?: string;     // ISO 8601; rendered as a human-readable date next to the version.
   doi?: string;           // optional — register via Zenodo per ARCHITECTURE.md §15 #2
   className?: string;
 }
@@ -26,12 +27,12 @@ function bibtex({
   doi,
 }: {
   releaseId: string;
-  releaseHash?: string;
+  releaseHash: string;
   doi?: string;
 }): string {
   const year = new Date().getFullYear();
   const version = `v${releaseId}`;
-  const hashLine = releaseHash ? `  note = {Release hash: ${releaseHash.slice(0, 16)}},\n` : "";
+  const hashLine = `  note = {Release hash: ${releaseHash.slice(0, 16)}},\n`;
   const doiLine = doi ? `  doi = {${doi}},\n` : "";
   return (
 `@misc{staffml${year},
@@ -47,11 +48,16 @@ export default function PaperCitationCard({
   paperUrl,
   releaseId,
   releaseHash,
+  buildDate,
   doi,
   className,
 }: PaperCitationCardProps) {
   const [copied, setCopied] = useState(false);
   const cite = bibtex({ releaseId, releaseHash, doi });
+  const shortHash = releaseHash.slice(0, 7);
+  const buildDateLabel = buildDate
+    ? new Date(buildDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+    : null;
 
   const handleCopy = async () => {
     try {
@@ -81,7 +87,7 @@ export default function PaperCitationCard({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      <div className="flex flex-wrap gap-2 mb-3">
         <a
           href={paperUrl}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-accentBlue text-white text-[12px] font-medium hover:bg-accentBlue/90 transition-colors"
@@ -98,6 +104,20 @@ export default function PaperCitationCard({
           </a>
         )}
       </div>
+
+      {/* Release identity — always visible. The hash short-form lets a
+          reader confirm at a glance which corpus snapshot the bundle
+          serves; the BibTeX details below carry the full digest. */}
+      <p
+        id="release"
+        className="text-[11px] font-mono text-textTertiary mb-3 leading-relaxed"
+        aria-label="Release identity"
+      >
+        <span className="text-textSecondary">v{releaseId}</span>
+        {buildDateLabel && <> · {buildDateLabel}</>}
+        {" · "}
+        <span title={releaseHash}>hash {shortHash}</span>
+      </p>
 
       <details className="group">
         <summary className="cursor-pointer list-none flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wide text-textTertiary hover:text-textSecondary">

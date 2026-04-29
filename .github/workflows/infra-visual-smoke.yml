@@ -1,0 +1,103 @@
+name: '🔧 Infra · 👁️ Visual Smoke'
+
+# =============================================================================
+# 👁️ Visual Smoke — Reusable Quarto-site rendering check
+# =============================================================================
+#
+# Reusable workflow called from each <site>-preview-dev.yml after the site
+# is built. Runs .github/scripts/visual_smoke.py against an uploaded
+# _build/ artifact, asserting:
+#
+#   • Every <link rel=stylesheet> returns 200 (catches deploy regressions
+#     that drop site_libs/ — see commit 6fdf81dd4).
+#   • No JS console errors during page load.
+#   • Homepage body height > 1.5× viewport (catches blank-page failures
+#     where CSS fails and content stacks below 3000 px of whitespace).
+#   • Navbar collapse-state matches the shared collapse-below: xl
+#     breakpoint at 992 / 1199 / 1200 / 1400 px in light + dark.
+#
+# Inputs:
+#   site         — site name (used in the report; e.g. "tinytorch").
+#   artifact     — name of the workflow-artifact containing the _build/ tree
+#                  the caller uploaded earlier.
+#   pages        — space-separated page paths to check, default "/index.html".
+#                  Each site can extend this with site-specific pages.
+#
+# Outputs:
+#   none. The job exits non-zero on any assertion failure, gating the caller.
+#
+# Failure debugging:
+#   On failure the smoke report (results.json + any failure screenshots) is
+#   uploaded as the "<site>-visual-smoke-report" artifact for inspection.
+#
+# Related:
+#   - .github/scripts/visual_smoke.py — actual test logic (runnable locally).
+#   - tinytorch-preview-dev.yml — first caller (proof-of-concept).
+#
+# =============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      site:
+        description: 'Site name (e.g. tinytorch). Used for the report only.'
+        required: true
+        type: string
+      artifact:
+        description: 'Name of the build artifact containing _build/ tree.'
+        required: true
+        type: string
+      pages:
+        description: 'Space-separated page paths to check (default: /index.html).'
+        required: false
+        type: string
+        default: '/index.html'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  smoke:
+    name: '👁️ Visual smoke (${{ inputs.site }})'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout (script + shared config)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            .github/scripts/visual_smoke.py
+
+      - name: 📦 Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.artifact }}
+          path: _build
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 🎭 Install Playwright + Chromium
+        run: |
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: 👁️ Run visual smoke
+        run: |
+          python .github/scripts/visual_smoke.py \
+            --build-dir _build \
+            --site "${{ inputs.site }}" \
+            --pages ${{ inputs.pages }} \
+            --report-dir _smoke-report
+
+      - name: 📤 Upload smoke report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.site }}-visual-smoke-report
+          path: _smoke-report/
+          retention-days: 7
