@@ -120,9 +120,6 @@ vault ship 1.0.0 --env staging                   # D1 → Next.js → paper-last
 vault ship 1.0.0 --env production --canary-percent 10
 ```
 
-See [`../vault-cli/docs/CUTOVER_QA.md`](../vault-cli/docs/CUTOVER_QA.md) for
-the cutover-day operator runbook.
-
 ## Invariants (26 total, tiered)
 
 - **Fast** (pre-commit, <1s): schema validation, unique IDs, lowercase paths,

@@ -1,7 +1,6 @@
 # StaffML Vault — Testing Plan
 
 > **Scope**: Full test strategy for `vault-cli`, the Worker API, and the cutover flow. Expands ARCHITECTURE.md §19 with concrete test inventory, fixtures, CI workflow spec, and phase gates.
-> **Companion**: [`vault-cli/docs/CUTOVER_QA.md`](../vault-cli/docs/CUTOVER_QA.md) for manual cutover-day checklist.
 > **Status**: v1, drafted 2026-04-15 alongside ARCHITECTURE.md v2.1.
 
 ---
