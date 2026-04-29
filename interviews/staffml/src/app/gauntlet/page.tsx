@@ -199,8 +199,10 @@ export default function GauntletPage() {
     // worker responses come back, swap the questions state to the hydrated
     // copies. Until then the UI shows summaries (empty scenario/details).
     Promise.all(selected.map(q => getQuestionFullDetail(q.id))).then(results => {
-      const hydrated = results.filter((q): q is Question => q !== undefined);
-      if (hydrated.length === selected.length) setQuestions(hydrated);
+      // Fall back to the original summary for any question the Worker couldn't hydrate
+      // rather than silently discarding the entire batch when even one fetch fails.
+      const merged = selected.map((s, i) => results[i] ?? s);
+      setQuestions(merged);
     });
   }, [selectedTrack, selectedLevel, selectedDuration]);
 
