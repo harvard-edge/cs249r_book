@@ -329,16 +329,34 @@ export default function EcosystemBar() {
           <img
             src={`${ASSET_PREFIX}/logo-seas-shield.png`}
             alt=""
-            style={{ height: 28, width: 'auto', flexShrink: 0 }}
+            // Dim the shield slightly in dark mode so the white "VE RI TAS"
+            // books at the top do not pop as a bright square against the
+            // dark navbar. Mirrors `body.quarto-dark .navbar-brand img` in
+            // shared/styles/partials/_navbar.scss so StaffML reads the same
+            // as every Quarto site here.
+            style={{
+              height: 28,
+              width: 'auto',
+              flexShrink: 0,
+              filter: isDark ? 'brightness(0.85) contrast(1.05)' : undefined,
+            }}
           />
-          {/* Title always shown — Quarto mobile bars still show "ML Systems"
-              (truncated), so hiding the span below `nav-sm` was worse than
-              the ecosystem. Parent `S.brand` has `overflow: 'hidden'` +
-              `whiteSpace: 'nowrap'`, so narrow viewports get an ellipsis
-              rather than a wrap. */}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+          {/* Mirror Quarto's brand-title abbreviation: show the full
+              "Machine Learning Systems" only when the desktop nav is up
+              (>= nav-xl, 1400 px); below that, switch to the abbreviated
+              "ML Systems" — same swap Quarto sites do via _mobile.scss
+              `@media (max-width: 1199px)`. Without this, narrow widths
+              ellipsis-truncated the full title mid-word, which read as
+              visually different from the Quarto navbars on the rest of
+              the ecosystem. Both spans are wrapped in a single anchor
+              so screen readers still read one accessible name. */}
+          <span aria-hidden="true" className="hidden nav-xl:inline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             Machine Learning Systems
           </span>
+          <span aria-hidden="true" className="nav-xl:hidden" style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+            ML Systems
+          </span>
+          <span className="sr-only">Machine Learning Systems</span>
         </a>
 
         {/* Desktop nav — appears at Bootstrap's lg breakpoint (992px) to match
