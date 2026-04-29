@@ -8,27 +8,53 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: The Leaking Inference Server
-scenario: Your team runs a 13B model on GPUs for long-running inference sessions. After ~6 hours of continuous serving, `nvidia-smi` shows VRAM usage has crept from 32 GB to ~80 GB, and the next request triggers an OOM kill. Restarting the process fixes it for another 6 hours. The model weights haven't changed.
+scenario: Your team runs a 13B model on GPUs for long-running inference sessions.
+  After ~6 hours of continuous serving, `nvidia-smi` shows VRAM usage has crept from
+  32 GB to ~80 GB, and the next request triggers an OOM kill. Restarting the process
+  fixes it for another 6 hours. The model weights haven't changed.
 question: What is leaking and how do you find it?
 details:
-  realistic_solution: 'The leak is almost certainly in the KV-cache allocator. Most serving frameworks pre-allocate a KV-cache pool, but when requests are cancelled mid-generation (client disconnects, timeouts), the allocated KV-cache blocks may not be returned to the free pool. Each orphaned block holds memory proportional to the sequence length and number of layers. Over thousands of cancelled requests, these orphaned blocks accumulate. A secondary source is CUDA graph capture: if the framework re-captures CUDA graphs for new input shapes (dynamic batching with varying sequence lengths), each captured graph allocates a private workspace that is never freed. Diagnosis: use `torch.cuda.memory_stats()` to track `allocated_bytes.all.current` vs `reserved_bytes.all.current` — a growing gap between reserved and allocated indicates fragmentation or leaks in the caching allocator. For the KV-cache specifically, instrument the block manager to log allocations and frees, then diff them.'
-  common_mistake: |
-    **The Pitfall:** Assuming the model is loading duplicate weights over time or just increasing the GPU memory.
-    **The Rationale:** It's a common misconception that memory leaks only happen via standard heap allocations, ignoring KV-cache orphan blocks.
-    **The Consequence:** Increasing memory only masks the root cause, leading to OOMs on larger models later.
-  napkin_math: |
-    - **KV-cache per request**: (13B model, 32 layers, 40 heads, d=128, seq=2048, FP16) = 2 * 32 * 40 * 128 * 2048 * 2 = 1.34 GB.
+  realistic_solution: 'The leak is almost certainly in the KV-cache allocator. Most
+    serving frameworks pre-allocate a KV-cache pool, but when requests are cancelled
+    mid-generation (client disconnects, timeouts), the allocated KV-cache blocks may
+    not be returned to the free pool. Each orphaned block holds memory proportional
+    to the sequence length and number of layers. Over thousands of cancelled requests,
+    these orphaned blocks accumulate. A secondary source is CUDA graph capture: if
+    the framework re-captures CUDA graphs for new input shapes (dynamic batching with
+    varying sequence lengths), each captured graph allocates a private workspace that
+    is never freed. Diagnosis: use `torch.cuda.memory_stats()` to track `allocated_bytes.all.current`
+    vs `reserved_bytes.all.current` — a growing gap between reserved and allocated
+    indicates fragmentation or leaks in the caching allocator. For the KV-cache specifically,
+    instrument the block manager to log allocations and frees, then diff them.'
+  common_mistake: '**The Pitfall:** Assuming the model is loading duplicate weights
+    over time or just increasing the GPU memory.
+
+    **The Rationale:** It''s a common misconception that memory leaks only happen
+    via standard heap allocations, ignoring KV-cache orphan blocks.
+
+    **The Consequence:** Increasing memory only masks the root cause, leading to OOMs
+    on larger models later.
+
+    '
+  napkin_math: '- **KV-cache per request**: (13B model, 32 layers, 40 heads, d=128,
+    seq=2048, FP16) = 2 * 32 * 40 * 128 * 2048 * 2 = 1.34 GB.
+
     - **Leaked blocks**: 1% of 600 req/hr = 6 blocks/hr.
+
     - **Leak rate**: 6 * 1.34 GB = 8 GB/hr.
+
     - **Total leak after 6 hours**: 6 * 8 GB = 48 GB.
+
     - **Result**: **Matches the observed creep from 32 GB to ~80 GB.**
+
+    '
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
 chains:
 - id: cloud-chain-250
-  position: 3
+  position: 2
 validated: true
 validation_status: OK
 validation_date: '2026-04-01'

@@ -8,35 +8,69 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: The Speculative Decoding Memory Bomb
-scenario: To improve Time Per Output Token (TPOT), your team implements speculative decoding for a 70B model. You use a small draft model to generate 4 candidate tokens, and the 70B orchestrator model verifies them in a single, parallel forward pass. In staging, TPOT improves by 2.5x. You deploy to production. Shortly after, the service suffers a cascading failure from OOM errors, even though the number of concurrent users did not increase. Your observability tools show that peak GPU memory usage per request has inexplicably quadrupled.
-question: Why did an optimization designed to reduce latency cause a catastrophic memory failure?
+scenario: To improve Time Per Output Token (TPOT), your team implements speculative
+  decoding for a 70B model. You use a small draft model to generate 4 candidate tokens,
+  and the 70B orchestrator model verifies them in a single, parallel forward pass.
+  In staging, TPOT improves by 2.5x. You deploy to production. Shortly after, the
+  service suffers a cascading failure from OOM errors, even though the number of concurrent
+  users did not increase. Your observability tools show that peak GPU memory usage
+  per request has inexplicably quadrupled.
+question: Why did an optimization designed to reduce latency cause a catastrophic
+  memory failure?
 details:
-  realistic_solution: 'The catastrophic failure stems from a misunderstanding of the memory access pattern during the verification step. The 4x increase in memory per request is a direct result of the speculation length (k=4). To verify 4 candidate tokens in parallel, the attention mechanism''s internal data structures grow proportionally. The query tensor becomes [batch, k, dim] instead of [batch, 1, dim], and the intermediate attention score matrices become k times larger. These temporary activation tensors are the source of the memory explosion. The system was provisioned for the memory profile of standard decoding, not the multiplicative peak memory required by parallel verification.'
-  common_mistake: |
-    **The Pitfall:** Blaming the draft model's weight size or weight loading overhead.
-    **The Rationale:** Overlooking the multiplicative effect of the verification step on the attention mechanism's intermediate activation tensors.
-    **The Consequence:** Misdiagnosing the OOM and failing to provision sufficient HBM for the burst in KV cache and activation memory.
-  napkin_math: |
-    **Assumptions & Constraints:**
+  realistic_solution: The catastrophic failure stems from a misunderstanding of the
+    memory access pattern during the verification step. The 4x increase in memory
+    per request is a direct result of the speculation length (k=4). To verify 4 candidate
+    tokens in parallel, the attention mechanism's internal data structures grow proportionally.
+    The query tensor becomes [batch, k, dim] instead of [batch, 1, dim], and the intermediate
+    attention score matrices become k times larger. These temporary activation tensors
+    are the source of the memory explosion. The system was provisioned for the memory
+    profile of standard decoding, not the multiplicative peak memory required by parallel
+    verification.
+  common_mistake: '**The Pitfall:** Blaming the draft model''s weight size or weight
+    loading overhead.
+
+    **The Rationale:** Overlooking the multiplicative effect of the verification step
+    on the attention mechanism''s intermediate activation tensors.
+
+    **The Consequence:** Misdiagnosing the OOM and failing to provision sufficient
+    HBM for the burst in KV cache and activation memory.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
     - Orchestrator: 70B model.
+
     - Speculation length (k): 4 tokens.
+
     - Verification in a single parallel forward pass.
 
+
     **Calculations:**
+
     - Standard decoding query tensor: `[batch, 1, dim]`.
+
     - Speculative decoding query tensor: `[batch, k, dim]`.
-    - Peak activation memory scales linearly with `k` during the verification forward pass.
+
+    - Peak activation memory scales linearly with `k` during the verification forward
+    pass.
+
     - Since `k=4`, intermediate attention score matrices are 4x larger.
 
+
     **Conclusion & Interpretation:**
-    - **Result: 4x activation memory spike per request (Memory-Capacity-Bound)**. Parallel verification multiplicatively increases peak memory requirements.
+
+    - **Result: 4x activation memory spike per request (Memory-Capacity-Bound)**.
+    Parallel verification multiplicatively increases peak memory requirements.
+
+    '
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 14
 chains:
 - id: cloud-chain-386
-  position: 2
+  position: 1
 validated: true
 validation_status: OK
 validation_date: '2026-04-01'

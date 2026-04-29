@@ -8,28 +8,55 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: The Full-Stack Performance Mystery
-scenario: 'A 64-GPU distributed training job achieves only 35% MFU on H100s (expected: ~55%). You profile with nsys and find that individual GEMM kernels achieve 85% of peak FLOPS, NCCL AllReduce bandwidth is 92% of theoretical, and the data pipeline is not stalling. Each component looks healthy in isolation.'
-question: How would you debug a 64-GPU job with healthy GEMMs, NCCL, and data pipeline but only 35% MFU instead of the expected 55%?
+scenario: 'A 64-GPU distributed training job achieves only 35% MFU on H100s (expected:
+  ~55%). You profile with nsys and find that individual GEMM kernels achieve 85% of
+  peak FLOPS, NCCL AllReduce bandwidth is 92% of theoretical, and the data pipeline
+  is not stalling. Each component looks healthy in isolation.'
+question: How would you debug a 64-GPU job with healthy GEMMs, NCCL, and data pipeline
+  but only 35% MFU instead of the expected 55%?
 details:
-  realistic_solution: 'The hidden bottleneck is almost certainly in the gaps between components — the ''white space'' on the timeline. Your debugging methodology: (1) Generate a multi-GPU nsys timeline with NCCL tracing enabled. Don''t look at kernel throughput — look at the timeline gaps. (2) Check for serialization: Are forward GEMM kernels and NCCL AllReduce running sequentially instead of overlapping? If backward pass computation and gradient AllReduce aren''t overlapped, you lose the opportunity to hide communication behind compute. (3) Check for micro-bubbles: Are there 1-5ms gaps between consecutive kernels? These accumulate — 200 kernel launches with 2ms gaps = 400ms of dead time per step. Common causes: CPU-side Python overhead between operations, CUDA stream synchronization points, dynamic shape changes triggering recompilation. (4) Check for stragglers: With 64 GPUs, the AllReduce completes at the speed of the slowest GPU. If one GPU is 10% slower (thermal throttling, PCIe contention), all GPUs wait. nsys shows this as idle time on 63 GPUs before the AllReduce barrier. (5) Compute the theoretical: at 55% MFU target and 35% achieved, the step time is 1.57x longer than expected. This means about 36% of the actual step time is wasted cycles (1 - 1/1.57). Locate them on the timeline.'
-  common_mistake: |
-    **The Pitfall:** Profiling each component in isolation and concluding 'everything looks fine.'
-    **The Rationale:** The fallacy is that system-level emergent behavior — the interaction between components (or lack of overlap) — is invisible to component-level profiling.
-    **The Consequence:** Being unable to identify the source of wasted compute, leading to massively underutilized GPU clusters.
-  napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Target MFU: 55%. Actual MFU: 35%.
-       - 200 kernel launches per step with 2ms micro-gaps.
-    2. **Calculations:**
-       - Slowdown factor = 55% / 35% = 1.57x.
-       - If target step = 1000ms, actual step = 1570ms (570ms wasted).
-       - Waste from micro-bubbles = 200 launches × 2ms = 400ms.
-    3. **Conclusion & Interpretation:** **White space between operations (micro-bubbles/serialization) accounts for missing MFU. Concurrency-Bound.**
+  realistic_solution: 'The hidden bottleneck is almost certainly in the gaps between
+    components — the ''white space'' on the timeline. Your debugging methodology:
+    (1) Generate a multi-GPU nsys timeline with NCCL tracing enabled. Don''t look
+    at kernel throughput — look at the timeline gaps. (2) Check for serialization:
+    Are forward GEMM kernels and NCCL AllReduce running sequentially instead of overlapping?
+    If backward pass computation and gradient AllReduce aren''t overlapped, you lose
+    the opportunity to hide communication behind compute. (3) Check for micro-bubbles:
+    Are there 1-5ms gaps between consecutive kernels? These accumulate — 200 kernel
+    launches with 2ms gaps = 400ms of dead time per step. Common causes: CPU-side
+    Python overhead between operations, CUDA stream synchronization points, dynamic
+    shape changes triggering recompilation. (4) Check for stragglers: With 64 GPUs,
+    the AllReduce completes at the speed of the slowest GPU. If one GPU is 10% slower
+    (thermal throttling, PCIe contention), all GPUs wait. nsys shows this as idle
+    time on 63 GPUs before the AllReduce barrier. (5) Compute the theoretical: at
+    55% MFU target and 35% achieved, the step time is 1.57x longer than expected.
+    This means about 36% of the actual step time is wasted cycles (1 - 1/1.57). Locate
+    them on the timeline.'
+  common_mistake: '**The Pitfall:** Profiling each component in isolation and concluding
+    ''everything looks fine.''
+
+    **The Rationale:** The fallacy is that system-level emergent behavior — the interaction
+    between components (or lack of overlap) — is invisible to component-level profiling.
+
+    **The Consequence:** Being unable to identify the source of wasted compute, leading
+    to massively underutilized GPU clusters.
+
+    '
+  napkin_math: "1. **Assumptions & Constraints:**\n   - Target MFU: 55%. Actual MFU:\
+    \ 35%.\n   - 200 kernel launches per step with 2ms micro-gaps.\n2. **Calculations:**\n\
+    \   - Slowdown factor = 55% / 35% = 1.57x.\n   - If target step = 1000ms, actual\
+    \ step = 1570ms (570ms wasted).\n   - Waste from micro-bubbles = 200 launches\
+    \ × 2ms = 400ms.\n3. **Conclusion & Interpretation:** **White space between operations\
+    \ (micro-bubbles/serialization) accounts for missing MFU. Concurrency-Bound.**\n"
   options:
-  - Generate an nsys timeline and look for serialization, micro-bubbles between kernel launches, and straggler GPUs causing idle time before AllReduce barriers.
-  - Switch from a Ring AllReduce to a Tree AllReduce topology to immediately resolve the 20% MFU gap.
-  - Focus exclusively on the data loader; if it is not stalling, the only other possibility is that the CPU is overheating.
-  - Increase the batch size by 4x to force the GPU to become compute-bound, ignoring the network communication overhead.
+  - Generate an nsys timeline and look for serialization, micro-bubbles between kernel
+    launches, and straggler GPUs causing idle time before AllReduce barriers.
+  - Switch from a Ring AllReduce to a Tree AllReduce topology to immediately resolve
+    the 20% MFU gap.
+  - Focus exclusively on the data loader; if it is not stalling, the only other possibility
+    is that the CPU is overheating.
+  - Increase the batch size by 4x to force the GPU to become compute-bound, ignoring
+    the network communication overhead.
   correct_index: 0
 status: published
 provenance: imported
@@ -37,7 +64,7 @@ requires_explanation: false
 expected_time_minutes: 14
 chains:
 - id: cloud-chain-459
-  position: 3
+  position: 2
 validated: true
 validation_status: OK
 validation_date: '2026-04-01'

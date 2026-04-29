@@ -8,34 +8,60 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The FreeRTOS Heap Exhaustion
-scenario: You are using FreeRTOS on an MCU. Every time a new image arrives, you dynamically spawn a new ML worker task using `xTaskCreate()` to run the inference, and then delete the task when it finishes. After a few hundred images, the system crashes because `xTaskCreate` returns NULL. You have plenty of SRAM.
-question: Why did spawning and deleting an ML task per image cause heap exhaustion despite having plenty of SRAM?
+scenario: You are using FreeRTOS on an MCU. Every time a new image arrives, you dynamically
+  spawn a new ML worker task using `xTaskCreate()` to run the inference, and then
+  delete the task when it finishes. After a few hundred images, the system crashes
+  because `xTaskCreate` returns NULL. You have plenty of SRAM.
+question: Why did spawning and deleting an ML task per image cause heap exhaustion
+  despite having plenty of SRAM?
 details:
-  realistic_solution: 'FreeRTOS''s vTaskDelete() marks a task for deletion, but actual memory reclamation happens in the Idle Task. If you continuously spawn new ML tasks at 10 fps, each allocating a 4KB stack, and the Idle Task never gets CPU time (because a new ML task is always ready), memory accumulates at 40KB/s. A 256KB MCU exhausts heap in ~6.4 seconds. Fix: (1) use a persistent worker task with a queue instead of create/delete per frame, (2) ensure the Idle Task runs between inferences by adding a brief vTaskDelay(1), or (3) pre-allocate the task stack statically with xTaskCreateStatic(). The dynamic create/delete pattern is fundamentally wrong for MCUs.'
-  common_mistake: |
-    **The Pitfall:** Assuming `vTaskDelete` instantly frees the task's memory.
-    **The Rationale:** Candidates familiar with general-purpose OS garbage collection mistakenly believe RTOS memory deletion is synchronous and immediate.
-    **The Consequence:** The system experiences catastrophic heap exhaustion because the RTOS Idle Task is never allowed to reclaim memory.
-  napkin_math: |
-    **Assumptions & Constraints:**
+  realistic_solution: 'FreeRTOS''s vTaskDelete() marks a task for deletion, but actual
+    memory reclamation happens in the Idle Task. If you continuously spawn new ML
+    tasks at 10 fps, each allocating a 4KB stack, and the Idle Task never gets CPU
+    time (because a new ML task is always ready), memory accumulates at 40KB/s. A
+    256KB MCU exhausts heap in ~6.4 seconds. Fix: (1) use a persistent worker task
+    with a queue instead of create/delete per frame, (2) ensure the Idle Task runs
+    between inferences by adding a brief vTaskDelay(1), or (3) pre-allocate the task
+    stack statically with xTaskCreateStatic(). The dynamic create/delete pattern is
+    fundamentally wrong for MCUs.'
+  common_mistake: '**The Pitfall:** Assuming `vTaskDelete` instantly frees the task''s
+    memory.
+
+    **The Rationale:** Candidates familiar with general-purpose OS garbage collection
+    mistakenly believe RTOS memory deletion is synchronous and immediate.
+
+    **The Consequence:** The system experiences catastrophic heap exhaustion because
+    the RTOS Idle Task is never allowed to reclaim memory.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
     - Task stack size: 4 KB.
+
     - Frame rate: 10 fps.
+
     - MCU SRAM: 256 KB.
+
     - Idle Task never runs to reclaim memory.
 
+
     **Calculations:**
+
     - Memory leak rate: 10 frames/sec * 4 KB = 40 KB/s.
+
     - Time to exhaust heap: 256 KB / 40 KB/s = 6.4 seconds.
 
+
     **Conclusion & Interpretation:**
-    - **Result: 6.4 seconds (Memory-Bound)**. A continuous task creation loop without idle time will hard crash a 256 KB MCU in exactly 6.4 seconds due to heap exhaustion.
+
+    - **Result: 6.4 seconds (Memory-Bound)**. A continuous task creation loop without
+    idle time will hard crash a 256 KB MCU in exactly 6.4 seconds due to heap exhaustion.
+
+    '
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 6
-chains:
-- id: tinyml-chain-037
-  position: 0
 validated: true
 validation_status: OK
 validation_date: '2026-04-01'
