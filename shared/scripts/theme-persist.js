@@ -81,10 +81,41 @@
     html.setAttribute('data-quarto-color-scheme', scheme);
     // Hint for any CSS using the @media `prefers-color-scheme` shorthand.
     html.style.colorScheme = scheme;
+    // Legacy `.quarto-dark` body class: site/about/about.css,
+    // site/community/community.css, and site/newsletter/newsletter.css
+    // key their dark-mode CSS variables off `.quarto-dark { ... }` and
+    // descendant chains like `.quarto-dark .opening-lead`. That class
+    // is only added by Quarto's *click handler*, not by the OS-pref
+    // path, so a visitor whose browser is set to dark mode but who has
+    // never clicked the toggle gets dark backgrounds with light-mode
+    // variables (invisible "Open by design." headlines, dark-on-dark
+    // body text on /about/license.html, etc.). Mirroring the class
+    // here means both paths — toggle and OS pref — leave the same DOM
+    // state for those CSS files. document.body may not exist yet on
+    // the first call (script runs in <head>); the DOMContentLoaded
+    // re-application below picks up the bridge later.
+    var body = document.body;
+    if (body) body.classList.toggle('quarto-dark', scheme === 'dark');
   }
 
   // 1. Apply the initial scheme synchronously (before paint).
   apply(preferredScheme());
+
+  // 1b. Bridge `.quarto-dark` body class as soon as <body> is parsed,
+  // not waiting for DOMContentLoaded — that window is the FOUC zone for
+  // any CSS file keyed on `body.quarto-dark` (about.css, community.css,
+  // newsletter.css). Once `apply()` runs in step 1 the <html> attributes
+  // are set, but `document.body` may still be null. Watch for it and
+  // bridge immediately.
+  if (!document.body) {
+    var earlyObserver = new MutationObserver(function () {
+      if (document.body) {
+        apply(preferredScheme()); // re-apply now that body exists
+        earlyObserver.disconnect();
+      }
+    });
+    earlyObserver.observe(document.documentElement, { childList: true });
+  }
 
   // 2. Same-tab sync: Quarto's toggle writes to localStorage but does NOT
   //    update <html> attributes. After Quarto's toggle handler runs, mirror
