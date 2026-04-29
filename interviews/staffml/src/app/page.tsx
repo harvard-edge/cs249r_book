@@ -520,7 +520,7 @@ function HomePage() {
                             <span className="text-[10px] font-mono text-textMuted">{q.track}</span>
                           </div>
                           <p className="text-sm font-medium text-textPrimary group-hover:text-accentBlue transition-colors">{q.title}</p>
-                          <p className="text-[12px] text-textTertiary mt-1 line-clamp-2">{q.scenario.slice(0, 150)}{q.scenario.length > 150 ? '...' : ''}</p>
+                          <p className="text-[12px] text-textTertiary mt-1 line-clamp-2">{(() => { const t = q.question ?? q.scenario; return t.length > 150 ? `${t.slice(0, 150)}…` : t; })()}</p>
                         </Link>
                       ))}
                     </div>
