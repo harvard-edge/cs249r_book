@@ -8,6 +8,7 @@
  */
 
 import type { Manifest, Question, VaultApiClientOptions } from "@staffml/vault-types";
+import { RELEASE_ID } from "./stats";
 
 interface FetchOpts {
   signal?: AbortSignal;
@@ -207,7 +208,12 @@ let _singleton: VaultApiClient | null | undefined = undefined;
 export function makeClientFromEnv(): VaultApiClient | null {
   if (_singleton !== undefined) return _singleton;
   const api = process.env.NEXT_PUBLIC_VAULT_API;
-  const release = process.env.NEXT_PUBLIC_VAULT_RELEASE ?? "unknown";
+  // The X-Vault-Release header tells the worker which release the bundle
+  // was built against. Primary source is the baked manifest via stats.ts
+  // (single source of truth). NEXT_PUBLIC_VAULT_RELEASE is an override
+  // for staging a local site against an older worker; production leaves
+  // it unset and the manifest's RELEASE_ID flows through.
+  const release = process.env.NEXT_PUBLIC_VAULT_RELEASE ?? RELEASE_ID;
   _singleton = api ? new VaultApiClient(api, { release }) : null;
   return _singleton;
 }

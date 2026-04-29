@@ -1,0 +1,217 @@
+name: '🏷️ Reusable · Release Prepare'
+
+# =============================================================================
+# Shared release-id computation for MLSysBook publish workflows.
+# =============================================================================
+#
+# Each project's <project>-publish-live.yml calls this workflow first, gets
+# back a `new_release_id` and `new_tag`, then drives its own build with that
+# id. After the build succeeds the project's workflow tags and publishes the
+# release itself (project-specific because deploy artifacts differ).
+#
+# This workflow does NOT:
+#   - Run the project's build (caller does that — preserves existing build
+#     scripts and avoids generic-build-step fragility).
+#   - Tag the repo or create a GitHub Release (caller does that at the end).
+#   - Touch pyproject.toml or any project source (additive only).
+#
+# It DOES:
+#   - Validate that confirm == "PUBLISH" (gates the entire flow).
+#   - Compute the new release_id from previous tag + bump type, with explicit
+#     override and site-only-redeploy support.
+#   - Refuse to re-tag an existing release.
+#   - Emit machine-readable outputs for the caller's downstream steps.
+#
+# The version computation is delegated to scripts/version/release.py so the
+# logic is testable outside the workflow runner and identical to anything
+# else that imports it.
+#
+# Caller pattern (sketch — see <project>-publish-live.yml for full examples):
+#
+#     jobs:
+#       prepare:
+#         uses: ./.github/workflows/_release-prepare.yml
+#         with:
+#           project: tinytorch
+#           tier: A
+#           previous_tag_pattern: 'tinytorch-v*'
+#           release_type: ${{ github.event.inputs.release_type }}
+#           explicit_version: ${{ github.event.inputs.explicit_version }}
+#           description: ${{ github.event.inputs.description }}
+#           confirm: ${{ github.event.inputs.confirm }}
+#           site_only: ${{ github.event.inputs.site_only }}
+#       build:
+#         needs: prepare
+#         runs-on: ubuntu-latest
+#         steps:
+#           - run: ./build.sh
+#             env:
+#               RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+# =============================================================================
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: 'Project identifier, e.g. tinytorch, staffml, book-vol1.'
+        required: true
+        type: string
+      tier:
+        description: 'Adoption tier: A (citable) or B (lite).'
+        required: true
+        type: string
+      previous_tag_pattern:
+        description: 'Glob pattern for previous tags, e.g. "tinytorch-v*".'
+        required: true
+        type: string
+      release_type:
+        description: 'patch | minor | major | none. Ignored if site_only or explicit_version set.'
+        required: true
+        type: string
+      explicit_version:
+        description: 'Override: explicit X.Y.Z. Skips bump math.'
+        required: false
+        type: string
+        default: ''
+      description:
+        description: 'Operator-supplied summary line for release notes.'
+        required: true
+        type: string
+      confirm:
+        description: 'Must be "PUBLISH" to proceed.'
+        required: true
+        type: string
+      site_only:
+        description: 'If true, reuse current release_id (site-only redeploy).'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      new_release_id:
+        description: 'Computed release_id (bare X.Y.Z, no v prefix).'
+        value: ${{ jobs.prepare.outputs.new_release_id }}
+      new_tag:
+        description: 'Full tag, e.g. tinytorch-v0.1.0.'
+        value: ${{ jobs.prepare.outputs.new_tag }}
+      previous_release_id:
+        description: 'Previous release_id (bare X.Y.Z) or empty.'
+        value: ${{ jobs.prepare.outputs.previous_release_id }}
+      previous_tag:
+        description: 'Previous full tag or empty.'
+        value: ${{ jobs.prepare.outputs.previous_tag }}
+      site_only:
+        description: 'Echoed back as a string ("true"/"false") for downstream gating.'
+        value: ${{ jobs.prepare.outputs.site_only }}
+      description:
+        description: 'Echoed back so the build job has it in scope.'
+        value: ${{ jobs.prepare.outputs.description }}
+
+jobs:
+  prepare:
+    name: '🔍 Validate + compute release_id'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: inputs.confirm == 'PUBLISH'
+    outputs:
+      new_release_id: ${{ steps.compute.outputs.new_release_id }}
+      new_tag:        ${{ steps.compute.outputs.new_tag }}
+      previous_release_id: ${{ steps.compute.outputs.previous_release_id }}
+      previous_tag:   ${{ steps.compute.outputs.previous_tag }}
+      site_only:      ${{ inputs.site_only }}
+      description:    ${{ inputs.description }}
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Need full tag history for previous_tag lookup.
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+      - name: 🧮 Compute release_id from previous tag + bump
+        id: compute
+        env:
+          PROJECT: ${{ inputs.project }}
+          TIER: ${{ inputs.tier }}
+          TAG_PATTERN: ${{ inputs.previous_tag_pattern }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+          EXPLICIT: ${{ inputs.explicit_version }}
+          SITE_ONLY: ${{ inputs.site_only }}
+        run: |
+          set -euo pipefail
+
+          # Look up the most recent tag matching the project's pattern.
+          PREV_TAG=$(git tag -l "$TAG_PATTERN" | sort -V | tail -n1 || true)
+          PREV_BARE=""
+          if [ -n "$PREV_TAG" ]; then
+            PREV_BARE=$(echo "$PREV_TAG" | python3 -c "
+          import re, sys
+          for line in sys.stdin:
+              m = re.search(r'(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)', line)
+              print(m.group(1) if m else '')
+          ")
+          fi
+          echo "📊 Previous tag:  ${PREV_TAG:-<none>}"
+          echo "📊 Previous bare: ${PREV_BARE:-<none>}"
+
+          # Site-only mode: keep the current release_id, no bump, no new tag.
+          if [ "$SITE_ONLY" = "true" ]; then
+            if [ -z "$PREV_BARE" ]; then
+              echo "❌ site_only=true but no previous tag found ($TAG_PATTERN)."
+              exit 1
+            fi
+            echo "🌐 Mode: SITE-ONLY — reusing release_id $PREV_BARE."
+            NEW_BARE="$PREV_BARE"
+            NEW_TAG="$PREV_TAG"
+          else
+            # Compute new release_id via shared Python helper. The helper is
+            # the canonical implementation — duplicating bash math here would
+            # let the two drift.
+            NEW_BARE=$(python3 scripts/version/release.py compute-id \
+              --previous "${PREV_BARE:-}" \
+              --bump "$RELEASE_TYPE" \
+              --explicit "$EXPLICIT")
+
+            # Construct the project-prefixed tag from the pattern. We assume
+            # the pattern is "<prefix>v*" (the convention used across all
+            # MLSysBook projects); if a project ever uses a different shape
+            # this needs revisiting.
+            TAG_PREFIX="${TAG_PATTERN%v*}"
+            NEW_TAG="${TAG_PREFIX}v${NEW_BARE}"
+
+            # Refuse to re-tag an existing release. Citation integrity demands
+            # release_ids are append-only.
+            if git rev-parse -q --verify "refs/tags/$NEW_TAG" >/dev/null 2>&1; then
+              echo "❌ Tag $NEW_TAG already exists. Refusing to overwrite."
+              echo "   To re-publish the same content, use site_only=true."
+              echo "   To bump past it, set explicit_version to a higher value."
+              exit 1
+            fi
+          fi
+
+          echo "🎯 New release_id: $NEW_BARE"
+          echo "🎯 New tag:        $NEW_TAG"
+
+          {
+            echo "new_release_id=$NEW_BARE"
+            echo "new_tag=$NEW_TAG"
+            echo "previous_release_id=$PREV_BARE"
+            echo "previous_tag=$PREV_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+          # Step summary for human-readable record.
+          {
+            echo "## Release prepared"
+            echo ""
+            echo "| Key | Value |"
+            echo "| --- | --- |"
+            echo "| Project | \`$PROJECT\` |"
+            echo "| Tier | \`$TIER\` |"
+            echo "| Previous | \`${PREV_TAG:-<none>}\` |"
+            echo "| New release_id | \`$NEW_BARE\` |"
+            echo "| New tag | \`$NEW_TAG\` |"
+            echo "| Site-only | \`$SITE_ONLY\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

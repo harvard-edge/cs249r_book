@@ -50,6 +50,17 @@ concurrency:
   group: staffml-validate-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Workflow-wide single source for paths and versions. See docs/CI-VARIABLES.md.
+  # The `paths:` trigger filter is intentionally NOT vars-ified — GitHub Actions
+  # evaluates trigger filters at workflow-load time, before vars are resolved.
+  STAFFML_ROOT:    ${{ vars.STAFFML_ROOT    || 'interviews/staffml' }}
+  VAULT_DIR:       ${{ vars.VAULT_DIR       || 'interviews/vault' }}
+  VAULT_CLI_DIR:   ${{ vars.VAULT_CLI_DIR   || 'interviews/vault-cli' }}
+  DEV_STAFFML_PATH: ${{ vars.DEV_STAFFML_PATH || 'staffml' }}
+  NODE_VERSION:    ${{ vars.NODE_VERSION    || '20' }}
+  PYTHON_VERSION:  ${{ vars.PYTHON_VERSION  || '3.12' }}
+
 jobs:
   # ===========================================================================
   # Stage 1: Type-check + unit tests
@@ -67,34 +78,34 @@ jobs:
       - name: 🐍 Setup Python (for vault-cli)
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 🛠️ Install vault-cli
         run: |
           python -m pip install --upgrade pip
-          pip install -e interviews/vault-cli/
+          pip install -e "$VAULT_CLI_DIR/"
 
       - name: 🔄 Regenerate staffml data bundle (corpus.json; not in git)
         run: |
-          vault build --vault-dir interviews/vault --release-id validate-dev-tsc --legacy-json
+          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-tsc --legacy-json
 
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: interviews/staffml/package-lock.json
+          cache-dependency-path: ${{ env.STAFFML_ROOT }}/package-lock.json
 
       - name: 📦 Install dependencies
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npm ci
 
       - name: 🔍 Type check
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npx tsc --noEmit
 
       - name: 🧪 Run tests
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npm test
 
   # ===========================================================================
@@ -113,40 +124,40 @@ jobs:
       - name: 🐍 Setup Python (for vault-cli)
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 🛠️ Install vault-cli
         run: |
           python -m pip install --upgrade pip
-          pip install -e interviews/vault-cli/
+          pip install -e "$VAULT_CLI_DIR/"
 
       - name: 🔄 Regenerate staffml data bundle (corpus.json; not in git)
         run: |
-          vault build --vault-dir interviews/vault --release-id validate-dev-build --legacy-json
+          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-build --legacy-json
 
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: interviews/staffml/package-lock.json
+          cache-dependency-path: ${{ env.STAFFML_ROOT }}/package-lock.json
 
       - name: 📦 Install dependencies
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npm ci
 
       - name: 🔨 Build StaffML (static export)
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         env:
           # Validation-only build; matches dev preview env so we exercise the
           # same code paths but no deploy follows.
-          NEXT_PUBLIC_BASE_PATH: /cs249r_book_dev/staffml
+          NEXT_PUBLIC_BASE_PATH: /cs249r_book_dev/${{ env.DEV_STAFFML_PATH }}
           NEXT_PUBLIC_ECOSYSTEM_BASE: https://harvard-edge.github.io/cs249r_book_dev
         run: npm run build
 
       - name: 🔍 Validate build output
         run: |
-          if [ ! -f "interviews/staffml/out/index.html" ]; then
+          if [ ! -f "$STAFFML_ROOT/out/index.html" ]; then
             echo "❌ CRITICAL: index.html missing from build output."
             exit 1
           fi
@@ -156,12 +167,12 @@ jobs:
           # one exception — Next.js still ships it flat as out/404.html so
           # GitHub Pages can serve it as the not-found template.
           for page in practice gauntlet progress about; do
-            if [ ! -f "interviews/staffml/out/${page}/index.html" ]; then
+            if [ ! -f "$STAFFML_ROOT/out/${page}/index.html" ]; then
               echo "❌ MISSING: ${page}/index.html"
               MISSING=$((MISSING + 1))
             fi
           done
-          if [ ! -f "interviews/staffml/out/404.html" ]; then
+          if [ ! -f "$STAFFML_ROOT/out/404.html" ]; then
             echo "❌ MISSING: 404.html"
             MISSING=$((MISSING + 1))
           fi
@@ -169,7 +180,7 @@ jobs:
             echo "❌ $MISSING critical pages missing."
             exit 1
           fi
-          echo "✅ StaffML built: $(find interviews/staffml/out -name '*.html' | wc -l) pages"
+          echo "✅ StaffML built: $(find "$STAFFML_ROOT/out" -name '*.html' | wc -l) pages"
 
   # ===========================================================================
   # Stage 2.5: Headless-Chromium end-to-end smoke
@@ -191,29 +202,29 @@ jobs:
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: interviews/staffml/package-lock.json
+          cache-dependency-path: ${{ env.STAFFML_ROOT }}/package-lock.json
 
       - name: 📦 Install dependencies
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npm ci
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 🛠️ Install vault-cli
-        run: pip install -e interviews/vault-cli/
+        run: pip install -e "$VAULT_CLI_DIR/"
 
       - name: 🔄 Regenerate corpus from YAMLs
         # Ensures the E2E build sees current YAML state (same as preview/
         # publish workflows do).
-        run: vault build --vault-dir interviews/vault --release-id e2e-smoke --legacy-json
+        run: vault build --vault-dir "$VAULT_DIR" --release-id e2e-smoke --legacy-json
 
       - name: 🔨 Build StaffML for E2E (no base-path)
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         # Builds at the root path so we can serve out/ locally without
         # mirroring the /cs249r_book_dev/staffml/ prefix. Base-path
         # fidelity is already validated by the main `build` job above.
@@ -227,7 +238,7 @@ jobs:
           playwright install --with-deps chromium
 
       - name: 🧪 Run E2E smoke
-        run: python3 interviews/staffml/scripts/e2e-smoke.py
+        run: python3 "$STAFFML_ROOT/scripts/e2e"-smoke.py
 
   # ===========================================================================
   # Stage 3: Vault integrity + corpus smoke tests
@@ -245,28 +256,28 @@ jobs:
       - name: 🐍 Setup Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 🛠️ Install vault-cli
         run: |
           python -m pip install --upgrade pip
-          pip install -e interviews/vault-cli/
+          pip install -e "$VAULT_CLI_DIR/"
 
       - name: 🔄 Regenerate staffml bundle (corpus.json is a build artifact)
         # Same contract as staffml-preview-dev / publish-live: YAMLs are
         # source of truth; --legacy-json emits staffml/src/data/corpus.json
         # for validate-vault.py and inline corpus invariants (not in git).
         run: |
-          vault build --vault-dir interviews/vault --release-id validate-dev-smoke --legacy-json
+          vault build --vault-dir "$VAULT_DIR" --release-id validate-dev-smoke --legacy-json
 
       - name: 🐍 Install PyYAML (for schema drift check)
         run: pip install pyyaml
 
       - name: 🔐 Validate vault integrity
-        run: python3 interviews/staffml/scripts/validate-vault.py
+        run: python3 "$STAFFML_ROOT/scripts/validate"-vault.py
 
       - name: 🧬 Vault schema drift check (enums.py ↔ LinkML)
-        run: python3 interviews/vault-cli/scripts/check_schema_sync.py
+        run: python3 "$VAULT_CLI_DIR/scripts/check_schema_sync".py
 
       - name: 🧪 Corpus invariants
         run: |
@@ -297,9 +308,12 @@ jobs:
 
           with open('interviews/staffml/src/data/vault-manifest.json') as f:
               manifest = json.load(f)
+          assert 'releaseId' in manifest, 'Manifest missing releaseId'
+          assert 'releaseHash' in manifest and len(manifest['releaseHash']) >= 16, \
+              'Manifest missing or truncated releaseHash'
           assert manifest.get('questionCount') == len(corpus), \
               f"Manifest count mismatch: {manifest.get('questionCount')} vs {len(corpus)}"
-          print(f"✅ Manifest: v{manifest['version']} ({manifest['questionCount']} Qs)")
+          print(f"✅ Manifest: v{manifest['releaseId']} ({manifest['questionCount']} Qs, hash {manifest['releaseHash'][:7]})")
           PYEOF
 
   # ===========================================================================

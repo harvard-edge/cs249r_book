@@ -101,8 +101,10 @@ def register(app: typer.Typer) -> None:
             manifest_result = emit_manifest(
                 loaded=loaded,
                 output=manifest_out,
-                release_id=str(result.get("release_id", "dev")),
-                release_hash=str(result.get("release_hash", "")),
+                release_id=str(result["release_id"]),
+                release_hash=str(result["release_hash"]),
+                schema_version="1",
+                policy_version=str(result["policy_version"]),
                 published_count=int(legacy_result["count"]),
                 chain_count=len(chains_seen),
             )

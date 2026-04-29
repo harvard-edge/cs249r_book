@@ -1,0 +1,141 @@
+<!--
+  MLSysBook release-pill — shared footer snippet for Quarto + static sites.
+
+  Renders a small "v0.1.0 · Apr 26, 2026" pill from a deployed
+  release-manifest.json. The pill is best-effort chrome: silent on any
+  fetch failure (manifest missing, offline, CORS). Use at any site that
+  emits a manifest via scripts/version/release.py emit-manifest.
+
+  ── Per-project setup (one of two patterns) ──
+
+  Pattern A — Quarto, configured via _quarto.yml:
+
+      project:
+        resources:
+          - ../shared/release/release-pill.html
+      format:
+        html:
+          include-in-header:
+            - text: |
+                <meta name="release-manifest" content="/<project-base>/release-manifest.json">
+          include-after-body:
+            - file: ../shared/release/release-pill.html
+
+  The meta tag tells the snippet where to find the manifest. The
+  ``include-after-body`` injects the snippet into every rendered page.
+
+  Pattern B — Next.js / hand-rolled HTML:
+
+      <meta name="release-manifest" content="/release-manifest.json" />
+      // in footer:
+      <span data-release-pill></span>
+      <script src="/release-pill.js"></script>
+
+  (See shared/release/release-pill.js for the standalone JS form.)
+
+  NOTE: Do NOT use a nested `<!-- ... -->` HTML comment in this docstring
+  block. HTML disallows nested comments, so the inner `-->` would
+  terminate the outer comment early and cause the example markup below
+  it (the `<span data-release-pill>` and `<script src=…release-pill.js>`)
+  to leak into the rendered page — producing a 404 on every Quarto site
+  that includes this snippet via `include-after-body`. Use `//`-style
+  pseudo-comments inside the documentation block instead.
+
+  ── Manifest contract ──
+
+  The manifest is the JSON written by scripts/version/release.py
+  emit-manifest. Required keys: releaseId, releaseHash. Optional but
+  recommended: buildDate, project. Anything else is ignored.
+
+  ── Why runtime fetch instead of build-time templating ──
+
+  Build-time templating (Lua filter, Quarto partial with variable
+  interpolation) would be deterministic and faster but requires
+  per-project Lua/template machinery. Runtime fetch is project-agnostic
+  and works identically across Quarto, Next.js, and plain HTML. The
+  ~50ms fetch cost happens once per page-load and is invisible because
+  the pill is below the fold. If a future project needs the version
+  visible above the fold, it should bake at build time (StaffML does
+  this for its citation card).
+-->
+
+<span class="release-pill" data-release-pill aria-live="polite">
+  <noscript><a href="#">release</a></noscript>
+</span>
+
+<style>
+  .release-pill {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.25em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+    font-size: 0.75rem;
+    line-height: 1;
+    color: var(--bs-secondary, var(--release-pill-color, #6c757d));
+  }
+  .release-pill a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .release-pill a:hover {
+    color: var(--bs-link-color, #0d6efd);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .release-pill-date {
+    opacity: 0.7;
+  }
+</style>
+
+<script>
+  (function () {
+    var el = document.querySelector('[data-release-pill]');
+    if (!el) return;
+
+    // Manifest URL resolution order:
+    //   1. data-manifest attribute on the pill (per-page override)
+    //   2. <meta name="release-manifest" content="..."> in <head>
+    //   3. './release-manifest.json' relative to current page (fallback)
+    var meta = document.querySelector('meta[name="release-manifest"]');
+    var manifestPath =
+      el.getAttribute('data-manifest') ||
+      (meta && meta.getAttribute('content')) ||
+      './release-manifest.json';
+
+    var linkHref = el.getAttribute('data-link') || '#release';
+
+    fetch(manifestPath, { cache: 'no-store' })
+      .then(function (res) { return res.ok ? res.json() : null; })
+      .then(function (m) {
+        if (!m || !m.releaseId || !m.releaseHash) return;
+        var date = m.buildDate
+          ? new Date(m.buildDate).toLocaleDateString('en-US',
+              { year: 'numeric', month: 'short', day: 'numeric' })
+          : '';
+        var shortHash = String(m.releaseHash).slice(0, 7);
+        var title =
+          (m.project ? m.project + ' ' : '') +
+          'v' + m.releaseId +
+          (date ? ' · built ' + date : '') +
+          ' · hash ' + shortHash;
+        var a = document.createElement('a');
+        a.href = linkHref;
+        a.title = title;
+        a.setAttribute('aria-label',
+          'Release v' + m.releaseId + (date ? ', built ' + date : ''));
+        var v = document.createElement('span');
+        v.className = 'release-pill-version';
+        v.textContent = 'v' + m.releaseId;
+        a.appendChild(v);
+        if (date) {
+          var d = document.createElement('span');
+          d.className = 'release-pill-date';
+          d.textContent = ' · ' + date;
+          a.appendChild(d);
+        }
+        el.innerHTML = '';
+        el.appendChild(a);
+      })
+      .catch(function () { /* silent: best-effort chrome */ });
+  })();
+</script>

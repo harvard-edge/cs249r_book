@@ -29,6 +29,33 @@ name: '🎯 StaffML · 🚀 Publish (Live)'
 
 on:
   workflow_dispatch:
+    inputs:
+      description:
+        description: 'What are you publishing? [Content updates and improvements]'
+        required: false
+        default: 'Content updates and improvements'
+      site_only:
+        description: 'Website-only deploy? (no version bump, no tag — reuses current release_id)'
+        required: false
+        type: boolean
+        default: false
+      release_type:
+        description: 'Release type (ignored if site_only OR explicit_version is set) [patch]'
+        required: true
+        type: choice
+        options:
+          - 'patch'
+          - 'minor'
+          - 'major'
+        default: 'patch'
+      explicit_version:
+        description: 'Override: explicit X.Y.Z (skips bump math). Leave blank to auto-bump.'
+        required: false
+        default: ''
+      confirm:
+        description: 'Type "PUBLISH" to confirm (safety check) [required]'
+        required: true
+        default: ''
 
 permissions:
   contents: write
@@ -47,23 +74,56 @@ jobs:
   # See .github/workflows/infra-publish-guard.yml for guard semantics.
   guard-dev:
     name: '🛡️ Validate-Dev Green Gate'
+    if: inputs.confirm == 'PUBLISH'
     uses: ./.github/workflows/infra-publish-guard.yml
     with:
       validate_workflow: staffml-validate-dev.yml
 
   guard-vault:
     name: '🛡️ Validate-Vault Green Gate'
+    if: inputs.confirm == 'PUBLISH'
     uses: ./.github/workflows/infra-publish-guard.yml
     with:
       validate_workflow: staffml-validate-vault.yml
 
+  # Compute the new release_id from previous tag + release_type. The shared
+  # workflow validates confirm == "PUBLISH" and refuses to re-tag an
+  # existing release. This is what closes the "manifest drifted to
+  # 0.1.2-dev while releases/0.1.0 said 0.1.0" gap that motivated the
+  # whole single-source-of-truth refactor — every publish now passes a
+  # real, deliberate release_id to `vault build` instead of the
+  # constant-string `--release-id publish-live`.
+  prepare:
+    name: '🏷️ Prepare release'
+    uses: ./.github/workflows/_release-prepare.yml
+    with:
+      project: staffml
+      tier: A
+      previous_tag_pattern: 'staffml-v*'
+      release_type: ${{ inputs.release_type }}
+      explicit_version: ${{ inputs.explicit_version }}
+      description: ${{ inputs.description }}
+      confirm: ${{ inputs.confirm }}
+      site_only: ${{ inputs.site_only }}
+
   build-and-deploy:
     name: '🔧 Build & Deploy StaffML'
-    needs: [guard-dev, guard-vault]
+    needs: [guard-dev, guard-vault, prepare]
+    if: inputs.confirm == 'PUBLISH'
     runs-on: ubuntu-latest
     concurrency:
       group: gh-pages-deploy
       cancel-in-progress: false
+    env:
+      # Single source for paths and versions. Set via repo Settings →
+      # Variables; the `|| 'fallback'` keeps the workflow runnable on
+      # forks or if a var isn't set. See docs/CI-VARIABLES.md.
+      STAFFML_ROOT:    ${{ vars.STAFFML_ROOT    || 'interviews/staffml' }}
+      VAULT_DIR:       ${{ vars.VAULT_DIR       || 'interviews/vault' }}
+      VAULT_CLI_DIR:   ${{ vars.VAULT_CLI_DIR   || 'interviews/vault-cli' }}
+      DEV_STAFFML_PATH: ${{ vars.DEV_STAFFML_PATH || 'staffml' }}
+      NODE_VERSION:    ${{ vars.NODE_VERSION    || '20' }}
+      PYTHON_VERSION:  ${{ vars.PYTHON_VERSION  || '3.12' }}
 
     steps:
       - name: 📥 Checkout
@@ -72,56 +132,116 @@ jobs:
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-          cache-dependency-path: interviews/staffml/package-lock.json
+          cache-dependency-path: ${{ env.STAFFML_ROOT }}/package-lock.json
 
       - name: 📦 Install dependencies
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npm ci
 
       - name: 🐍 Setup Python (for vault-cli)
         uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: 🛠️ Install vault-cli
-        run: pip install -e interviews/vault-cli/
+        run: pip install -e "$VAULT_CLI_DIR/"
+
+      - name: 🔄 Regenerate manifest + summary from YAMLs (vault build)
+        # Ships $STAFFML_ROOT/src/data/vault-manifest.json +
+        # corpus-summary.json (bundled by the site) straight from the
+        # committed YAMLs. The site always deploys with current YAML state,
+        # even if the committed JSON artifacts drifted on the last commit.
+        # PR #1598 retired the legacy corpus.json static fallback in prod
+        # (no --legacy-json here); the Worker is the sole catalog source.
+        # --release-id is the deliberately-bumped version from the prepare
+        # job — the manifest emit_manifest() writes will carry it, and
+        # everything downstream (footer pill, citation card, X-Vault-Release
+        # header) inherits it from the manifest. Closes the long-running
+        # "publish-live constant string overwrites releases/<id>" bug.
+        run: vault build --vault-dir "$VAULT_DIR" --release-id "${{ needs.prepare.outputs.new_release_id }}"
 
       - name: 🔍 Type check
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npx tsc --noEmit
 
       - name: 🧪 Run tests
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         run: npm test
 
       - name: 🔨 Build StaffML
-        working-directory: interviews/staffml
+        working-directory: ${{ env.STAFFML_ROOT }}
         env:
-          NEXT_PUBLIC_BASE_PATH: /staffml
-          NEXT_PUBLIC_ANALYTICS_URL: https://mlsysbook.ai/api/staffml-analytics
+          NEXT_PUBLIC_BASE_PATH: /${{ env.DEV_STAFFML_PATH }}
+          NEXT_PUBLIC_ANALYTICS_URL: ${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}/api/staffml-analytics
           # Hosted Ask Interviewer endpoint. Custom route on the mlsysbook.ai
           # zone served by the staffml-interviewer Cloudflare Worker (see
-          # interviews/staffml/worker/wrangler.toml). Same-origin with the
-          # live site at mlsysbook.ai/staffml/ so no CORS preflight is
-          # required on /ask calls from the AskInterviewer panel.
-          NEXT_PUBLIC_INTERVIEWER_ENDPOINT: https://mlsysbook.ai/api/staffml-interviewer
+          # $STAFFML_ROOT/worker/wrangler.toml). Same-origin with the live
+          # site so no CORS preflight is required on /ask calls from the
+          # AskInterviewer panel.
+          NEXT_PUBLIC_INTERVIEWER_ENDPOINT: ${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}/api/staffml-interviewer
           # Vault cutover (PRs #1433, #1434): site reads live data from the
-          # Cloudflare Worker in production. There is no static rollback in
-          # prod — corpus.json is neither emitted nor bundled. If the Worker
-          # is unreachable, the UI surfaces a "details unavailable" banner.
-          NEXT_PUBLIC_VAULT_API: https://staffml-vault.mlsysbook-ai-account.workers.dev
-          NEXT_PUBLIC_VAULT_RELEASE: "1.0.2"
+          # Cloudflare Worker in production. PR #1598 retired the static
+          # rollback in prod — corpus.json is neither emitted nor bundled.
+          # If the Worker is unreachable, the UI surfaces a "details
+          # unavailable" banner.
+          NEXT_PUBLIC_VAULT_API: ${{ vars.STAFFML_VAULT_WORKER_URL || 'https://staffml-vault.mlsysbook-ai-account.workers.dev' }}
+          # NEXT_PUBLIC_VAULT_RELEASE is intentionally unset — the site reads
+          # RELEASE_ID from src/lib/stats.ts (which derives from the manifest
+          # emit_manifest() just wrote in the previous step). See vault-api.ts.
         run: npm run build
 
+      - name: 📦 Emit canonical release-manifest.json into deploy dir
+        # The site bundles vault-manifest.json into the JS at build time
+        # (stats.ts imports it). A separate canonical-shape manifest at
+        # out/release-manifest.json gives external consumers (other tools,
+        # scrapers, monitoring) a uniform URL across all MLSysBook sites:
+        # https://<domain>/<project>/release-manifest.json. Same
+        # releaseId + releaseHash as the bundled manifest — they come
+        # from the same emit_manifest() call that just wrote
+        # vault-manifest.json.
+        run: |
+          set -euo pipefail
+          python3 - <<PY
+          import json, pathlib, os
+          root = pathlib.Path(os.environ["STAFFML_ROOT"])
+          src = root / "src/data/vault-manifest.json"
+          dst = root / "out/release-manifest.json"
+          m = json.loads(src.read_text())
+          canonical = {
+              "releaseId":      m["releaseId"],
+              "releaseHash":    m["releaseHash"],
+              "schemaVersion":  m["schemaVersion"],
+              "tier":           "A",
+              "project":        "staffml",
+              "buildDate":      m["buildDate"],
+              "metadata": {
+                  "questionCount":     m.get("questionCount"),
+                  "chainCount":        m.get("chainCount"),
+                  "conceptCount":      m.get("conceptCount"),
+                  "areaCount":         m.get("areaCount"),
+                  "policyVersion":     m.get("policyVersion"),
+                  "taxonomyVersion":   m.get("taxonomyVersion"),
+                  "trackDistribution": m.get("trackDistribution"),
+                  "levelDistribution": m.get("levelDistribution"),
+              },
+          }
+          dst.parent.mkdir(parents=True, exist_ok=True)
+          dst.write_text(json.dumps(canonical, indent=2, sort_keys=True) + "\n")
+          print(f"📦 Wrote {dst}: v{canonical['releaseId']} (hash {canonical['releaseHash'][:7]})")
+          PY
+
       - name: 📁 Inject paper and figures into build
+        # The interviews/paper/ source dir is intentionally NOT vars-ified —
+        # it's under interviews/ alongside staffml-vault-worker etc. and
+        # changing its location is unrelated to STAFFML_ROOT moves.
         run: |
           echo "📁 Injecting paper assets into built site..."
-          mkdir -p interviews/staffml/out/downloads
+          mkdir -p "$STAFFML_ROOT/out/downloads"
 
           if [ -f interviews/paper/paper.pdf ]; then
-            cp interviews/paper/paper.pdf interviews/staffml/out/downloads/StaffML-Paper.pdf
+            cp interviews/paper/paper.pdf "$STAFFML_ROOT/out/downloads/StaffML-Paper.pdf"
             echo "✅ Injected StaffML-Paper.pdf"
           else
             echo "⚠️ Paper PDF not found"
@@ -129,32 +249,33 @@ jobs:
 
           echo ""
           echo "📦 Downloads folder contents:"
-          ls -la interviews/staffml/out/downloads/ || echo "No downloads folder"
+          ls -la "$STAFFML_ROOT/out/downloads/" || echo "No downloads folder"
 
       - name: 🔍 Validate build
         run: |
-          if [ ! -f "interviews/staffml/out/index.html" ]; then
+          if [ ! -f "$STAFFML_ROOT/out/index.html" ]; then
             echo "❌ CRITICAL: index.html missing. Aborting deployment."
             exit 1
           fi
 
-          PAGE_COUNT=$(find interviews/staffml/out -name '*.html' | wc -l)
+          PAGE_COUNT=$(find "$STAFFML_ROOT/out" -name '*.html' | wc -l)
           echo "✅ StaffML built: $PAGE_COUNT pages"
-          echo "📊 Build size: $(du -sh interviews/staffml/out | cut -f1)"
+          echo "📊 Build size: $(du -sh "$STAFFML_ROOT/out" | cut -f1)"
 
           if [ "$PAGE_COUNT" -lt 8 ]; then
             echo "⚠️ WARNING: Expected at least 8 pages, got $PAGE_COUNT"
           fi
 
-          # Show vault version
-          if [ -f "interviews/staffml/src/data/vault-manifest.json" ]; then
-            VERSION=$(python3 -c "import json; print(json.load(open('interviews/staffml/src/data/vault-manifest.json'))['version'])")
-            QUESTIONS=$(python3 -c "import json; print(json.load(open('interviews/staffml/src/data/vault-manifest.json'))['questionCount'])")
-            echo "📋 Vault v${VERSION} — ${QUESTIONS} questions"
+          # Show vault release identity
+          if [ -f "$STAFFML_ROOT/src/data/vault-manifest.json" ]; then
+            MANIFEST="$STAFFML_ROOT/src/data/vault-manifest.json"
+            RELEASE_ID=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['releaseId'])" "$MANIFEST")
+            QUESTIONS=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['questionCount'])" "$MANIFEST")
+            echo "📋 Vault v${RELEASE_ID} — ${QUESTIONS} questions"
           fi
 
       - name: 🔐 Validate vault integrity
-        run: python3 interviews/staffml/scripts/validate-vault.py
+        run: python3 "$STAFFML_ROOT/scripts/validate-vault.py"
 
       - name: 🧪 Smoke tests
         # Reads the bundled corpus-summary.json (committed) — the prod build
@@ -163,71 +284,78 @@ jobs:
         # `vault check --strict` covers per-question YAML validation in the
         # validate-vault workflow.
         run: |
-          python3 -c "
+          python3 - <<'PY'
           import json
 
-          with open('interviews/staffml/src/data/corpus-summary.json') as f:
+          ROOT = "interviews/staffml"
+
+          with open(f"{ROOT}/src/data/corpus-summary.json") as f:
               corpus = json.load(f)
-          assert len(corpus) >= 4000, f'Corpus too small: {len(corpus)}'
-          print(f'✅ Corpus: {len(corpus)} questions')
+          assert len(corpus) >= 4000, f"Corpus too small: {len(corpus)}"
+          print(f"OK corpus: {len(corpus)} questions")
 
           required = ['id', 'title', 'level', 'track', 'competency_area', 'topic', 'zone']
           for q in corpus:
-              for f in required:
-                  assert q.get(f), f'{q.get(\"id\", \"???\")} missing {f}'
-          print('✅ All questions have required structural fields')
+              for field in required:
+                  assert q.get(field), f"{q.get('id', '???')} missing {field}"
+          print("OK all questions have required structural fields")
 
-          valid_levels = {'L1', 'L2', 'L3', 'L4', 'L5', 'L6', 'L6+'}
+          valid_levels = {"L1", "L2", "L3", "L4", "L5", "L6", "L6+"}
           for q in corpus:
-              assert q['level'] in valid_levels, f'{q[\"id\"]} invalid level {q[\"level\"]}'
-          print('✅ All levels valid')
+              assert q["level"] in valid_levels, f"{q['id']} invalid level {q['level']}"
+          print("OK all levels valid")
 
-          areas = set(q['competency_area'] for q in corpus)
-          assert len(areas) == 13, f'Expected 13 competency areas, got {len(areas)}'
-          print(f'✅ Competency areas: {len(areas)}')
+          areas = set(q["competency_area"] for q in corpus)
+          assert len(areas) == 13, f"Expected 13 competency areas, got {len(areas)}"
+          print(f"OK competency areas: {len(areas)}")
 
-          zones = set(q['zone'] for q in corpus)
-          assert len(zones) == 11, f'Expected 11 zones, got {len(zones)}'
-          print(f'✅ Zones: {len(zones)}')
+          zones = set(q["zone"] for q in corpus)
+          assert len(zones) == 11, f"Expected 11 zones, got {len(zones)}"
+          print(f"OK zones: {len(zones)}")
 
-          with open('interviews/staffml/src/data/taxonomy.json') as f:
+          with open(f"{ROOT}/src/data/taxonomy.json") as f:
               taxonomy = json.load(f)
-          assert len(taxonomy.get('concepts', [])) >= 70
-          print(f'✅ Taxonomy: {len(taxonomy[\"concepts\"])} topics')
+          assert len(taxonomy.get("concepts", [])) >= 70
+          print(f"OK taxonomy: {len(taxonomy['concepts'])} topics")
 
-          with open('interviews/staffml/src/data/vault-manifest.json') as f:
+          with open(f"{ROOT}/src/data/vault-manifest.json") as f:
               manifest = json.load(f)
-          assert manifest['questionCount'] == len(corpus)
-          print(f'✅ Manifest: v{manifest[\"version\"]}')
+          assert manifest["questionCount"] == len(corpus)
+          assert "releaseId" in manifest, "Manifest missing releaseId"
+          assert "releaseHash" in manifest and len(manifest["releaseHash"]) >= 16, \
+              "Manifest missing or truncated releaseHash"
+          print(f"OK manifest: v{manifest['releaseId']} (hash {manifest['releaseHash'][:7]})")
 
-          print('🎯 All smoke tests passed')
-          "
+          print("All smoke tests passed")
+          PY
 
-      - name: 📁 Prepare redirect from /interviews/ → /staffml/
+      - name: 📁 Prepare redirect from /interviews/ → /${{ env.DEV_STAFFML_PATH }}/
+        env:
+          DOMAIN: ${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}
         run: |
           mkdir -p interviews-redirect
-          cat > interviews-redirect/index.html << 'REDIRECT_EOF'
+          cat > interviews-redirect/index.html <<REDIRECT_EOF
           <!DOCTYPE html>
           <html lang="en">
           <head>
             <meta charset="UTF-8">
             <title>StaffML — Redirecting</title>
-            <link rel="canonical" href="https://mlsysbook.ai/staffml/">
-            <meta http-equiv="refresh" content="0; url=/staffml/">
+            <link rel="canonical" href="${DOMAIN}/${DEV_STAFFML_PATH}/">
+            <meta http-equiv="refresh" content="0; url=/${DEV_STAFFML_PATH}/">
           </head>
           <body>
-            <p>Redirecting to <a href="/staffml/">StaffML</a>...</p>
-            <script>window.location.replace("/staffml/");</script>
+            <p>Redirecting to <a href="/${DEV_STAFFML_PATH}/">StaffML</a>...</p>
+            <script>window.location.replace("/${DEV_STAFFML_PATH}/");</script>
           </body>
           </html>
           REDIRECT_EOF
 
-      - name: 🚀 Deploy StaffML to /staffml/
+      - name: 🚀 Deploy StaffML to /${{ env.DEV_STAFFML_PATH }}/
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./interviews/staffml/out
-          destination_dir: staffml
+          publish_dir: ./${{ env.STAFFML_ROOT }}/out
+          destination_dir: ${{ env.DEV_STAFFML_PATH }}
           publish_branch: gh-pages
           keep_files: true
           commit_message: '🎯 Deploy StaffML live v${{ github.run_number }} - ${{ github.sha }}'
@@ -255,9 +383,12 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: python3 interviews/vault-cli/scripts/ship_d1.py --skip-build
+        run: python3 "$VAULT_CLI_DIR/scripts/ship_d1.py" --skip-build
 
       - name: 📦 Install worker deps + deploy
+        # The staffml-vault-worker dir lives next to staffml under
+        # interviews/; not vars-ified because it doesn't follow the
+        # STAFFML_ROOT pattern (separate top-level project).
         working-directory: interviews/staffml-vault-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -265,3 +396,74 @@ jobs:
         run: |
           npm ci
           npx wrangler deploy
+
+  # Tag the release and create a draft GitHub Release. Skipped on
+  # site-only redeploys (which intentionally reuse the previous release_id
+  # — re-tagging would violate citation integrity).
+  create-tag:
+    name: '🏷️ Create Tag & Release'
+    needs: [build-and-deploy, prepare]
+    if: needs.build-and-deploy.result == 'success' && inputs.site_only != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Create and push tag
+        env:
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          echo "🏷️ Creating tag: $NEW_TAG on $(git rev-parse --short HEAD)"
+          git tag -a "$NEW_TAG" -m "StaffML $NEW_TAG: $DESCRIPTION"
+          git push origin "$NEW_TAG"
+
+      - name: 📦 Create GitHub Release (draft)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ needs.prepare.outputs.new_tag }}
+          PREV_TAG: ${{ needs.prepare.outputs.previous_tag }}
+          NEW_RELEASE_ID: ${{ needs.prepare.outputs.new_release_id }}
+          DESCRIPTION: ${{ inputs.description }}
+        run: |
+          set -euo pipefail
+
+          # Auto-generated notes from GitHub (includes contributor list).
+          if [ -n "$PREV_TAG" ]; then
+            AUTO_NOTES=$(gh api "repos/${{ github.repository }}/releases/generate-notes" \
+              -f tag_name="$NEW_TAG" -f previous_tag_name="$PREV_TAG" \
+              --jq '.body' || echo "")
+          else
+            AUTO_NOTES=""
+          fi
+
+          DOMAIN="${{ vars.PRODUCTION_DOMAIN || 'https://mlsysbook.ai' }}"
+          DEPLOY_PATH="${{ vars.DEV_STAFFML_PATH || 'staffml' }}"
+          cat > /tmp/release-notes.md <<NOTES_EOF
+          ## StaffML v${NEW_RELEASE_ID}
+
+          ${DESCRIPTION}
+
+          ${AUTO_NOTES}
+
+          ---
+
+          **Site**: ${DOMAIN}/${DEPLOY_PATH}/
+          **Manifest**: ${DOMAIN}/${DEPLOY_PATH}/release-manifest.json
+          NOTES_EOF
+
+          gh release create "$NEW_TAG" \
+            --title "StaffML v${NEW_RELEASE_ID} — ${DESCRIPTION}" \
+            --notes-file /tmp/release-notes.md \
+            --draft
+
+          echo "✅ Draft release created — review at https://github.com/${{ github.repository }}/releases"

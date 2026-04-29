@@ -15,7 +15,7 @@ import { Cloud, Smartphone, Cpu, CircuitBoard } from "lucide-react";
 import { getAttempts, getStreakData } from "@/lib/progress";
 import { FilterPill, AreaOverview, ExpandedArea, SearchResults, TopicDetail } from "@/components/vault";
 import { isDailyCompleted } from "@/lib/daily";
-import manifest from "@/data/vault-manifest.json";
+import { RELEASE_ID } from "@/lib/stats";
 import { ECOSYSTEM_BASE } from "@/lib/env";
 
 function formatTrackLabel(t: string) {
@@ -290,22 +290,20 @@ function HomePage() {
                 StaffML
               </h1>
               <p className="text-[13px] text-textSecondary mb-3">
-                Free, open-source interview prep for ML systems engineers.{" "}
-                {selectedTrack ? (
+                Free, open-source interview prep for ML systems engineers.
+                {selectedTrack && (
                   <>
+                    {" "}
                     <span className="font-semibold">{formatTrackLabel(selectedTrack)}</span> track:{" "}
-                    {filteredAreas.reduce((s, a) => s + a.questionCount, 0).toLocaleString()} of{" "}
-                    {stats.totalQuestions.toLocaleString()} questions.
+                    {filteredAreas.reduce((s, a) => s + a.questionCount, 0).toLocaleString()} questions.
                   </>
-                ) : (
-                  <>{stats.totalQuestions.toLocaleString()} questions across compute, memory, latency, and more.</>
                 )}
               </p>
 
               {/* Welcome guide */}
               <div className="p-4 rounded-xl border border-accentBlue/20 bg-accentBlue/5 mb-3">
                 <span className="text-[10px] font-mono text-accentBlue uppercase block mb-2.5">New here? Start with one of these:</span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
                   <Link
                     href="/practice?daily=1"
                     className="flex items-start gap-2.5 p-3 rounded-lg bg-background border border-border hover:border-accentBlue/40 transition-colors group"
@@ -561,7 +559,7 @@ function HomePage() {
                 {" "}&middot;{" "}
                 <Link href="/about" className="hover:text-textTertiary transition-colors">About</Link>
                 {" "}&middot;{" "}
-                <span className="font-mono">v{manifest.version}</span>
+                <span className="font-mono">v{RELEASE_ID}</span>
               </p>
             </div>
           </div>

@@ -45,6 +45,8 @@ const LEFT_MENUS: MenuGroup[] = [
       { divider: true },
       { icon: "bi-map", label: "Study Plans", href: "/plans" },
       { icon: "bi-diagram-3", label: "Framework", href: "/framework" },
+      { divider: true },
+      { icon: "bi-file-pdf", label: "Whitepaper (PDF)", href: "https://mlsysbook.ai/staffml/downloads/StaffML-Paper.pdf", external: true },
     ]
   },
   {
@@ -295,7 +297,14 @@ export default function EcosystemBar() {
 
   return (
     <div ref={barRef} style={{
-      position: 'sticky' as const, top: 0, zIndex: 60,
+      position: 'sticky' as const, top: 0,
+      // z-index 1100: the StaffML internal Nav (`Nav.tsx`) sticks at
+      // `z-50` directly below this bar. With our previous z-60, dropdowns
+      // *should* have painted above Nav (60 > 50), but WebKit's stacking
+      // for sticky+overflow:clip parents was occasionally rendering them
+      // behind. Bumping well above any in-page sticky element (Nav z-50,
+      // Bootstrap dropdown-menu z-1000) makes it unambiguous.
+      zIndex: 1100,
       backgroundColor: bgColor,
       // Quarto navbars have no bottom border in light mode — the seam is
       // provided by the bg-color contrast against the white page body.
@@ -303,6 +312,29 @@ export default function EcosystemBar() {
       // dark page background.
       borderBottom: isDark ? `1px solid ${borderColor}` : 'none',
       transition: 'background-color 0.2s, border-color 0.2s',
+      // Why `overflow-x: clip` (not `hidden`):
+      // At iPad landscape (1024 px) and other narrow desktop widths, the 7
+      // left dropdowns + 6 right-side icons + brand exceed the viewport.
+      // Without containment, that overflow propagates to body.scrollWidth
+      // and the whole page scrolls horizontally. Quarto sites avoid the
+      // same scroll because their navbar lives inside `.fixed-top`
+      // (position:fixed), which is removed from normal flow — body width
+      // never sees the navbar's true content width. We achieve the same
+      // visual result without changing positioning by clipping the X axis
+      // on this wrapper.
+      // `clip` (not `hidden`) is critical: per CSS Overflow Module 3, when
+      // `overflow-x: clip` is paired with `overflow-y: visible`, the Y axis
+      // stays visible. `overflow-x: hidden` would force `overflow-y: auto`
+      // and clip the dropdown menus that extend below the bar. Browser
+      // support: Safari 16+, Chrome 90+, Firefox 81+; older browsers fall
+      // back to `visible` (no regression vs current behavior).
+      overflowX: 'clip' as const,
+      // Pin overflow-y explicitly visible so WebKit cannot reinterpret it
+      // as `auto` when overflow-x is `clip` (the spec exempts `clip` from
+      // the visible→auto coercion, but Safari has historically been
+      // inconsistent). Without this, the dropdowns that extend below the
+      // navbar can be clipped or render behind sibling sticky containers.
+      overflowY: 'visible' as const,
     }}>
       <div style={{ ...S.nav, position: 'relative' as const, borderBottom: 'none' }}>
         {/* Brand */}
@@ -310,16 +342,34 @@ export default function EcosystemBar() {
           <img
             src={`${ASSET_PREFIX}/logo-seas-shield.png`}
             alt=""
-            style={{ height: 28, width: 'auto', flexShrink: 0 }}
+            // Dim the shield slightly in dark mode so the white "VE RI TAS"
+            // books at the top do not pop as a bright square against the
+            // dark navbar. Mirrors `body.quarto-dark .navbar-brand img` in
+            // shared/styles/partials/_navbar.scss so StaffML reads the same
+            // as every Quarto site here.
+            style={{
+              height: 28,
+              width: 'auto',
+              flexShrink: 0,
+              filter: isDark ? 'brightness(0.85) contrast(1.05)' : undefined,
+            }}
           />
-          {/* Title always shown — Quarto mobile bars still show "ML Systems"
-              (truncated), so hiding the span below `nav-sm` was worse than
-              the ecosystem. Parent `S.brand` has `overflow: 'hidden'` +
-              `whiteSpace: 'nowrap'`, so narrow viewports get an ellipsis
-              rather than a wrap. */}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+          {/* Mirror Quarto's brand-title abbreviation: show the full
+              "Machine Learning Systems" only when the desktop nav is up
+              (>= nav-xl, 1400 px); below that, switch to the abbreviated
+              "ML Systems" — same swap Quarto sites do via _mobile.scss
+              `@media (max-width: 1199px)`. Without this, narrow widths
+              ellipsis-truncated the full title mid-word, which read as
+              visually different from the Quarto navbars on the rest of
+              the ecosystem. Both spans are wrapped in a single anchor
+              so screen readers still read one accessible name. */}
+          <span aria-hidden="true" className="hidden nav-xl:inline" style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
             Machine Learning Systems
           </span>
+          <span aria-hidden="true" className="nav-xl:hidden" style={{ overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>
+            ML Systems
+          </span>
+          <span className="sr-only">Machine Learning Systems</span>
         </a>
 
         {/* Desktop nav — appears at Bootstrap's lg breakpoint (992px) to match

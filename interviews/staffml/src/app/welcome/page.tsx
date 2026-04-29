@@ -88,7 +88,16 @@ export default function WelcomePage() {
         </h1>
         <p className="text-[15px] sm:text-base text-textSecondary text-center max-w-xl mx-auto leading-relaxed mb-2">
           {TOPIC_COUNT} topics across {TRACK_COUNT} deployment tracks, at {LEVEL_COUNT} difficulty levels.
-          Backed by a 600-page open textbook. Runs entirely in your browser.
+          Backed by the{" "}
+          <a
+            href="https://mlsysbook.ai"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accentBlue hover:underline"
+          >
+            Machine Learning Systems
+          </a>
+          {" "}textbook. Runs entirely in your browser.
         </p>
         <div className="flex flex-wrap items-center justify-center gap-2 mb-10">
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">No accounts</span>
@@ -98,7 +107,9 @@ export default function WelcomePage() {
         </div>
 
         {/* ─── Action cards ─── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-8">
+        {/* Stay 2x2 inside max-w-3xl. lg:grid-cols-4 squeezed body copy into
+            ~170px columns at iPad landscape / 1280px desktop, hurting readability. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
           <ActionCard
             icon={Shuffle}
             accent="blue"
