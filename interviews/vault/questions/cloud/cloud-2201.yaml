@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: training
 title: The Nsys Timeline Mystery
 scenario: 'You open an Nsight Systems timeline for a distributed training step on 8 H100s. You see tight, back-to-back GEMM kernels for the forward pass, then a 120ms gap where no GPU kernels are running, followed by the backward pass. GPU utilization during this gap is 0%. The training step takes 500ms total, so this gap is 24% of your iteration time.'
-question: What are the three most likely causes of this gap, and how do you distinguish between them using the nsys timeline?
+question: 'What are the three most likely causes of this gap, and how do you distinguish between them using the nsys timeline?'
 details:
   realistic_solution: 'The three most likely causes: (1) CPU-bound loss computation: If the loss function involves operations that fall back to CPU (e.g., custom Python loss with non-trivial control flow, or a metric computation that triggers a GPU-to-CPU synchronization), the GPU stalls waiting for the CPU to finish and launch the backward kernels. On the nsys timeline, you''d see a CPU thread active during the gap with cudaStreamSynchronize or cudaMemcpy D2H calls. (2) Dynamic graph recompilation: If using torch.compile() or a JIT, a shape change (e.g., the last mini-batch has a different size) can trigger recompilation. On the timeline, you''d see CPU activity in the TorchDynamo/Inductor threads but no GPU kernels. (3) Host-side data pipeline stall: If the next batch isn''t ready, the GPU idles waiting for data. On the timeline, you''d see the DataLoader worker threads blocked on I/O or the CPU preprocessing taking longer than the forward pass. The diagnostic: look at CPU thread activity during the gap. Active CPU + no GPU = cause 1 or 2. Idle CPU + idle GPU = cause 3 (data starvation).'
   common_mistake: |
@@ -17,14 +17,16 @@ details:
     **The Rationale:** While AllReduce can cause gaps, a gap with zero GPU activity between forward and backward suggests the GPU is waiting for the host, not for the network.
     **The Consequence:** Misdiagnosing the bottleneck leads to wasted effort optimizing network configuration instead of CPU-bound tasks or data pipelines.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - GPU setup: 8 H100s. Training step: 500ms.
-       - Unexplained GPU idle gap: 120ms.
-       - GPU cost: $2/hr.
-    2. **Calculations:**
-       - Wasted time ratio: 120ms / 500ms = 24%.
-       - Cost of idle GPUs per hour: 8 * $2 = $16/hr.
-       - Monthly waste (720 hrs): 0.24 * $16 * 720 = $2,764.80.
-    3. **Conclusion & Interpretation:**
-       - **Result: CPU/Host-Bound Pipeline.** Eliminating the 120ms CPU stall reclaims 24% of the step time, saving thousands of dollars and days of wall-clock time.
+    **Assumptions & Constraints:**
+    - GPU setup: 8 H100s. Training step: 500ms.
+    - Unexplained GPU idle gap: 120ms.
+    - GPU cost: $2/hr.
+
+    **Calculations:**
+    - Wasted time ratio: 120ms / 500ms = 24%.
+    - Cost of idle GPUs per hour: 8 * $2 = $16/hr.
+    - Monthly waste (720 hrs): 0.24 * $16 * 720 = $2,764.80.
+
+    **Conclusion & Interpretation:**
+    - **Result: CPU/Host-Bound Pipeline.** Eliminating the 120ms CPU stall reclaims 24% of the step time, saving thousands of dollars and days of wall-clock time.
 status: published

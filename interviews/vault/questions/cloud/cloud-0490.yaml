@@ -8,26 +8,33 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: The Disappointing Scaling Factor
-scenario: You are training a 70B parameter LLM using a data-parallel strategy across two servers. Each server contains 8 H100 GPUs connected with NVLink 4.0. The two servers are connected via an InfiniBand NDR switch. When you scale your training job from one server (8 GPUs) to two servers (16 GPUs), you only see a 1.2x speedup, not the near-linear 2x you hoped for. Your profiler shows that the All-Reduce operation for gradient synchronization is taking up a massive portion of each training step.
+scenario: 'You are training a 70B parameter LLM using a data-parallel strategy across two servers. Each server contains 8 H100 GPUs connected with NVLink 4.0. The two servers are connected via an InfiniBand NDR switch. When you scale your training job from one server (8 GPUs) to two servers (16 GPUs), you only see a 1.2x speedup, not the near-linear 2x you hoped for. Your profiler shows that the All-Reduce operation for gradient synchronization is taking up a massive portion of each training step.'
 question: Why does the 70B data-parallel job get only 1.2x speedup when All-Reduce crosses two InfiniBand-connected H100 servers?
 details:
-  realistic_solution: The primary bottleneck is the InfiniBand interconnect between the two servers. While NVLink provides massive bandwidth for communication within a server, the All-Reduce operation for a 16-GPU job must synchronize gradients across the two servers. The bandwidth of the InfiniBand link is an order of magnitude lower than the aggregated NVLink bandwidth inside each server, and this inter-node communication now dominates the entire step time, leading to disastrous scaling efficiency.
+  realistic_solution: 'The primary bottleneck is the InfiniBand interconnect between the two servers. While NVLink provides massive bandwidth for communication within a server, the All-Reduce operation for a 16-GPU job must synchronize gradients across the two servers. The bandwidth of the InfiniBand link is an order of magnitude lower than the aggregated NVLink bandwidth inside each server, and this inter-node communication now dominates the entire step time, leading to disastrous scaling efficiency.'
   common_mistake: |
     **The Pitfall:** Blaming the PCIe bus or the NVLink switch for the communication bottleneck.
     **The Rationale:** Engineers often misattribute scaling bottlenecks because they don't realize modern GPU servers use NVLink to bypass the PCIe bus, or they underestimate the vast bandwidth difference between NVLink and InfiniBand.
     **The Consequence:** Wasting time tuning intra-node communication or purchasing unnecessary hardware instead of addressing the inter-node network bottleneck.
   napkin_math: |
-    - **Gradient Size:** 70B parameters with FP16 gradients = **140 GB**.
-    - **Single-node Step:** Compute (7.15s) + NVLink All-Reduce (~0.5s) = **7.65s**.
-    - **Two-node Scale Compute:** Compute halves on 16 GPUs to **3.57s**.
-    - **Two-node Communication:** An NDR InfiniBand link is 400 Gbps (50 GB/s). Transferring 140 GB across 50 GB/s takes **2.8s**.
-    - **Two-node Step:** 3.57s (compute) + 2.8s (communication) = **6.37s**.
-    - **Speedup:** 7.65s / 6.37s = **1.2x**, matching the observed scaling wall exactly.
+    **Assumptions & Constraints:**
+    - Model: 70B parameters. FP16 gradients = 140 GB.
+    - InfiniBand Link: 400 Gbps (50 GB/s).
+    - Single-node step time: 7.65s (7.15s compute + 0.5s NVLink All-Reduce).
+    
+    **Calculations:**
+    - Two-node compute time: 7.15s / 2 = 3.57s.
+    - Two-node InfiniBand All-Reduce time: 140 GB / 50 GB/s = 2.8s.
+    - Two-node total step time: 3.57s + 2.8s = 6.37s.
+    - Scaling factor: 7.65s (1 node) / 6.37s (2 nodes) = 1.2x.
+    
+    **Conclusion & Interpretation:**
+    - **Result: 1.2x Speedup (Network-Bandwidth Bound)**. The severe bandwidth drop from intra-node NVLink to inter-node InfiniBand makes communication dominate the step time, destroying distributed scaling efficiency.
   options:
-  - The PCIe Gen5 bus in each server is saturated from copying gradients between the GPUs and the CPU's main memory.
-  - The InfiniBand network connecting the two servers has insufficient bandwidth for the 140 GB gradient synchronization required at each step.
-  - The NVLink switch within each 8-GPU server is the bottleneck, as it cannot handle the All-Reduce traffic from 8 H100s simultaneously.
-  - The model is too large. Using a smaller 7B parameter model would resolve the communication bottleneck without changing hardware.
+  - 'The PCIe Gen5 bus in each server is saturated from copying gradients between the GPUs and the CPU''s main memory.'
+  - 'The InfiniBand network connecting the two servers has insufficient bandwidth for the 140 GB gradient synchronization required at each step.'
+  - 'The NVLink switch within each 8-GPU server is the bottleneck, as it cannot handle the All-Reduce traffic from 8 H100s simultaneously.'
+  - 'The model is too large. Using a smaller 7B parameter model would resolve the communication bottleneck without changing hardware.'
   correct_index: 1
 status: published
 provenance: imported

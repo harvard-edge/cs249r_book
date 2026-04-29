@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: LLM Stateless Serving Database Bottleneck
-scenario: 'An LLM-based customer support platform serves traffic using 50 worker pods. To maximize fault tolerance, the system uses strict stateless serving: a Layer 7 load balancer distributes requests round-robin. Clients send a session_id and the latest message. Workers fetch the full conversation history from a central PostgreSQL database, run inference, and write the new turn back to the DB. At peak load (5,000 req/sec), p99 latency spikes from 800ms to over 6s, while GPU utilization drops to 25%. Database CPU hits 100%.'
+scenario: An LLM-based customer support platform serves traffic using 50 worker pods. To maximize fault tolerance, the system uses strict stateless serving where a Layer 7 load balancer distributes requests round-robin. Clients send a session_id and the latest message. Workers fetch the full conversation history from a central PostgreSQL database, run inference, and write the new turn back to the DB. At peak load (5,000 req/sec), p99 latency spikes from 800ms to over 6s, while GPU utilization drops to 25%. Database CPU hits 100%.
 question: Why does the stateless LLM serving design bottleneck on PostgreSQL at 5,000 req/sec despite adding GPU worker pods?
 details:
   realistic_solution: Offload session state to a high-throughput, low-latency KV store (e.g., Redis Cluster) or transition to stateful routing (sticky sessions) combined with KV cache sharing to eliminate the relational DB bottleneck.
@@ -17,16 +17,18 @@ details:
     **The Rationale:** Candidates see slow serving latency and immediately blame the LLM inference step.
     **The Consequence:** Scaling the workers exacerbates the "thundering herd" problem on the database, making latency even worse.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Load: 5,000 requests/sec.
-       - Payload: 4,000 tokens ≈ 8 KB per row.
-       - Architecture: Stateless (1 DB read + 1 DB write per inference).
-    2. **Calculations:**
-       - DB Operations: 5,000 reads + 5,000 writes = 10,000 IOPS.
-       - DB Throughput: 10,000 IOPS * 8 KB = 80 MB/s of BLOB churn.
-       - Relational databases scale poorly on high-concurrency BLOB updates, completely bottlenecking before the GPUs can execute the sub-50ms inference.
-    3. **Conclusion & Interpretation:**
-       - **Result: IO-Bound. The architecture crushes the database with 10k IOPS. Stateful routing and KV caches are required.**
+    **Assumptions & Constraints:**
+    - Load: 5,000 requests/sec.
+    - Payload: 4,000 tokens ≈ 8 KB per row.
+    - Architecture: Stateless (1 DB read + 1 DB write per inference).
+
+    **Calculations:**
+    - DB Operations: 5,000 reads + 5,000 writes = 10,000 IOPS.
+    - DB Throughput: 10,000 IOPS * 8 KB = 80 MB/s of BLOB churn.
+    - Relational databases scale poorly on high-concurrency BLOB updates, completely bottlenecking before the GPUs can execute the sub-50ms inference.
+
+    **Conclusion & Interpretation:**
+    - **Result: 10,000 IOPS (IO-Bound)**. The architecture crushes the relational database. Stateful routing and KV caches are required.
 status: published
 provenance: imported
 requires_explanation: false

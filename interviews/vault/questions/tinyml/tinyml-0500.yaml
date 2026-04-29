@@ -7,46 +7,32 @@ topic: mcu-compute-constraints
 competency_area: precision
 bloom_level: apply
 phase: inference
-title: The Silent Activation Overflow
-scenario: 'You are a TinyML engineer tasked with deploying a CNN-based keyword spotting model onto a Cortex-M4
-  microcontroller. Your FP32 model achieves 95% accuracy in simulation. After performing a standard post-training
-  quantization to full INT8 (for both weights and activations), the on-device accuracy plummets to less
-  than 10%. Using a debugger, you examine the output tensor of the first `ReLU` activation layer. You
-  find that for most real-world audio clips, a large percentage of the activation values are saturated
-  at the maximum INT8 value (127). Solve this diagnostics problem: what is the most likely cause of this
-  catastrophic accuracy drop?'
-question: "Solve this diagnostics problem: what is the most likely cause of this catastrophic accuracy drop?"
+title: 'The Silent Activation Overflow'
+scenario: 'You are a TinyML engineer tasked with deploying a CNN-based keyword spotting model onto a Cortex-M4 microcontroller. Your FP32 model achieves 95% accuracy in simulation. After performing a standard post-training quantization to full INT8 (for both weights and activations), the on-device accuracy plummets to less than 10%. Using a debugger, you examine the output tensor of the first `ReLU` activation layer. You find that for most real-world audio clips, a large percentage of the activation values are saturated at the maximum INT8 value (127).'
+question: 'What is the most likely cause of this catastrophic accuracy drop?'
 details:
-  realistic_solution: The most likely cause is an unrepresentative calibration dataset. The calibration
-    process uses a small set of data to determine the scaling factor for mapping the FP32 activation range
-    to the INT8 range [-128, 127]. Your calibration set likely contained clean, normalized speech, resulting
-    in a narrow dynamic range. When a real-world audio clip contains a loud background noise or a sharp
-    vocal transient, the FP32 activation values spike, exceeding the range observed during calibration.
-    These outliers are then 'clipped' or 'saturated' at 127 during INT8 inference, destroying the relative
-    information in the feature map and causing the model to fail. The correct solution is to re-calibrate
-    using a more diverse dataset that includes these noisy, real-world samples to establish a more robust
-    quantization range. If saturation persists in specific layers, you may need to apply mixed-precision,
-    keeping that single problematic layer in FP16 while the rest of the model remains in INT8.
-  common_mistake: Engineers often immediately blame the quantization toolchain for introducing too much
-    error, or suspect a bug in the hardware's INT8 implementation. While possible, it's far more common
-    that the data used to calibrate the model was not representative of the data the model sees in production.
-    They underestimate how sensitive INT8's tiny dynamic range is to outliers.
-  napkin_math: Let's diagnose this quantitatively. Your model has a 250KB memory footprint in FP32. On
-    a Cortex-M4 with 256KB of SRAM, this is too large. Quantizing to INT8 reduces the footprint by nearly
-    4x to ~65KB, making it feasible. During calibration on clean speech, the max activation value for
-    your first ReLU layer was `6.0`. The quantization scale is therefore `Scale = 127 / 6.0 ≈ 21.17`.
-    Now, in the wild, a door slams, creating a noise spike that results in an FP32 activation of `10.0`.
-    The quantized value becomes `QuantizedValue = round(10.0 * 21.17) = 212`. Since INT8 cannot represent
-    212, it is clamped to `127`. Another, even louder spike at `15.0` also gets clamped to `127`. The
-    information that `15.0 > 10.0` is completely lost. This saturation, happening across thousands of
-    values in an activation map, obliterates the features the next layer depends on.
+  realistic_solution: 'The most likely cause is an unrepresentative calibration dataset. The calibration process uses a small set of data to determine the scaling factor for mapping the FP32 activation range to the INT8 range [-128, 127]. Your calibration set likely contained clean, normalized speech, resulting in a narrow dynamic range. When a real-world audio clip contains a loud background noise or a sharp vocal transient, the FP32 activation values spike, exceeding the range observed during calibration. These outliers are then ''clipped'' or ''saturated'' at 127 during INT8 inference, destroying the relative information in the feature map and causing the model to fail. The correct solution is to re-calibrate using a more diverse dataset that includes these noisy, real-world samples to establish a more robust quantization range. If saturation persists in specific layers, you may need to apply mixed-precision, keeping that single problematic layer in FP16 while the rest of the model remains in INT8.'
+  common_mistake: 'Engineers often immediately blame the quantization toolchain for introducing too much error, or suspect a bug in the hardware''s INT8 implementation. While possible, it''s far more common that the data used to calibrate the model was not representative of the data the model sees in production. They underestimate how sensitive INT8''s tiny dynamic range is to outliers.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - FP32 calibration max: 6.0.
+    - INT8 max value: 127.
+    - Real-world outlier FP32 value: 10.0 and 15.0.
+
+    **Calculations:**
+    - Quantization Scale = 127 / 6.0 ≈ 21.17.
+    - Real-world outlier 1 (10.0) quantized = round(10.0 * 21.17) = 212.
+    - Clamped value 1 = 127.
+    - Real-world outlier 2 (15.0) quantized = round(15.0 * 21.17) = 318.
+    - Clamped value 2 = 127.
+
+    **Conclusion & Interpretation:**
+    - **Result: 127 (Precision-Bound)**. Since both 10.0 and 15.0 are clamped to exactly 127, all relative signal information is destroyed, causing the model to fail on real-world transients.
   options:
-  - The weight quantization process introduced too much error, shifting the model's decision boundary.
-  - The microcontroller's specific instruction set for INT8 convolutions has a bug, producing incorrect
-    results.
-  - The calibration dataset was not representative of real-world audio, causing activation values to overflow
-    the narrow INT8 dynamic range.
-  - The device has insufficient SRAM, causing the tensor arena memory to be corrupted during inference.
+  - "The weight quantization process introduced too much error, shifting the model's decision boundary."
+  - "The microcontroller's specific instruction set for INT8 convolutions has a bug, producing incorrect results."
+  - "The calibration dataset was not representative of real-world audio, causing activation values to overflow the narrow INT8 dynamic range."
+  - "The device has insufficient SRAM, causing the tensor arena memory to be corrupted during inference."
   correct_index: 2
 status: published
 provenance: imported

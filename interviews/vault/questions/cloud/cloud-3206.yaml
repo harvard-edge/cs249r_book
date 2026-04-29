@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: both
 title: MoE Auxiliary Loss Interaction with Gradient Accumulation
 scenario: You switch your MoE training from gradient accumulation steps=1 to steps=8 (to simulate larger effective batch). After the change, expert utilization becomes severely imbalanced despite the same auxiliary loss coefficient. Training loss degrades.
-question: Why does changing gradient accumulation from 1 to 8 destabilize MoE routing, and how would you fix the load-balancing signal?
+question: 'Why does changing gradient accumulation from 1 to 8 destabilize MoE routing, and how would you fix the load-balancing signal?'
 details:
   realistic_solution: 'The root cause is that the load-balancing loss operates on micro-batch statistics, not accumulated-batch statistics. With accumulation=8, each micro-batch is 8x smaller. A micro-batch of e.g. 64 tokens with top-2 routing across 64 experts means each expert ideally gets 2 tokens — the variance of per-expert load is extremely high at this granularity (Poisson-like with λ=2). The aux loss gradient becomes very noisy, providing poor balancing signal. Fixes: (1) Compute load-balance statistics across accumulation steps by maintaining a running expert-count buffer, updating the aux loss only after all micro-batches. (2) Use exponential moving average of expert loads rather than per-batch counts for the balancing loss. (3) Increase micro-batch size by reducing accumulation steps and using more GPUs for data parallelism. DeepSeek-V3 addresses this by computing the balance loss over a window of recent batches rather than per-micro-batch.'
   common_mistake: |
@@ -17,13 +17,16 @@ details:
     **The Rationale:** The auxiliary load-balancing loss is computed per micro-batch, but with 8 accumulation steps, each micro-batch is 8x smaller, dramatically changing routing statistics.
     **The Consequence:** The aux loss gradient becomes noisy, providing poor balancing signal and degrading training loss.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Before: batch=512, top-2, 64 experts.
-       - After: micro-batch=64.
-    2. **Calculations:**
-       - Before: Tokens/expert = 512 * 2 / 64 = 16. Poisson Variance: sqrt(16)/16 = 25% CV.
-       - After: Tokens/expert = 64 * 2 / 64 = 2. Poisson Variance: sqrt(2)/2 = 70% CV.
-    3. **Conclusion & Interpretation:** **Result: Math-Bound.** The balance signal is 2.8x noisier.
+    **Assumptions & Constraints:**
+    - Before: batch=512, top-2, 64 experts.
+    - After: micro-batch=64.
+
+    **Calculations:**
+    - Before: Tokens/expert = 512 * 2 / 64 = 16. Poisson Variance: sqrt(16)/16 = 25% CV.
+    - After: Tokens/expert = 64 * 2 / 64 = 2. Poisson Variance: sqrt(2)/2 = 70% CV.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2.8x noisier (Math-Bound)**. The balance signal is 2.8x noisier.
 status: published
 provenance: imported
 requires_explanation: false

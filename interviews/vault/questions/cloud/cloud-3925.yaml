@@ -7,9 +7,9 @@ topic: communication-computation-overlap
 competency_area: parallelism
 bloom_level: apply
 phase: both
-title: Gradient Bucket Size Tuning for Optimal Communication Overlap
-scenario: Your DDP training of a 1.3B parameter model across 32 GPUs has 40% communication overhead despite gradient bucketing. The current bucket size is 25MB (PyTorch default). Network is 400 Gbps InfiniBand. Profiling shows many small AllReduce calls with high startup latency.
-question: How would you tune DDP gradient bucket size to reduce the 40% communication overhead for the 1.3B model?
+title: 'Gradient Bucket Size Tuning for Optimal Communication Overlap'
+scenario: 'Your DDP training of a 1.3B parameter model across 32 GPUs has 40% communication overhead despite gradient bucketing. The current bucket size is 25MB (PyTorch default). Network is 400 Gbps InfiniBand. Profiling shows many small AllReduce calls with high startup latency.'
+question: 'How would you tune DDP gradient bucket size to reduce the 40% communication overhead for the 1.3B model?'
 details:
   realistic_solution: 'Optimal bucket size depends on the tradeoff between AllReduce startup latency and overlap opportunity. Profile and find the knee. Typically 50-100MB for InfiniBand. Also try NCCL tree AllReduce and set NCCL_MIN_NCHANNELS=4 for better bandwidth utilization. Use torch.nn.parallel.DistributedDataParallel(bucket_cap_mb=100) and measure throughput.'
   common_mistake: |
@@ -17,12 +17,22 @@ details:
     **The Rationale:** Engineers try to eliminate all startup latency by making the bucket as large as possible.
     **The Consequence:** Extremely large buckets prevent communication from starting early, destroying the ability to overlap AllReduce with the backward pass computation and drastically increasing step time.
   napkin_math: |
-    1. Calculate total gradients: 1.3B params * 4 bytes = 5.2GB.
-    2. Analyze 25MB buckets: 5.2GB / 25MB = 208 buckets. At 50μs startup latency per AllReduce, 208 * 50μs = 10.4ms wasted purely on startup.
-    3. Analyze 100MB buckets: 52 buckets. Startup drops to 2.6ms, but larger buckets slightly delay the start of communication overlap.
-    4. Calculate baseline theoretical time: 5.2GB / 50 GB/s (400Gbps) = 104ms. Backward pass is ~200ms.
-    5. Evaluate overhead: Perfect overlap yields max(200, 104) = 200ms. A 40% overhead means 200 + 80ms = 280ms.
-    6. Conclude: Finding the optimal bucket size (often 50-100MB) can reduce step time from 280ms to **~210-220ms**.
+    **Assumptions & Constraints:**
+    - 1.3B parameter model across 32 GPUs.
+    - 4 bytes per parameter.
+    - 50μs startup latency per AllReduce.
+    - Network is 400 Gbps (50 GB/s) InfiniBand.
+    - Backward pass is ~200ms.
+
+    **Calculations:**
+    - Total gradients: 1.3B params * 4 bytes = 5.2GB.
+    - 25MB buckets: 5.2GB / 25MB = 208 buckets. Startup latency = 208 * 50μs = 10.4ms wasted purely on startup.
+    - 100MB buckets: 52 buckets. Startup drops to 2.6ms.
+    - Baseline theoretical time: 5.2GB / 50 GB/s = 104ms.
+    - Perfect overlap yields max(200, 104) = 200ms. A 40% overhead means 200 + 80ms = 280ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~210-220ms step time (Network-Bound)**. Finding the optimal bucket size (often 50-100MB) can reduce step time significantly.
 status: published
 provenance: imported
 requires_explanation: false

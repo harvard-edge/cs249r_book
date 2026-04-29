@@ -8,8 +8,8 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The Chatbot Lag Catastrophe
-scenario: You are the tech lead for an LLM-powered chatbot service running a 70B parameter model. The service has a strict P99 Time-To-First-Token (TTFT) SLO of 250ms. Your current system uses static batching with a timeout of 150ms to form batches. During peak load, you observe that while average TTFT is acceptable, P99 TTFT is spiking to over 800ms, and GPU utilization is only 40%.
-question: "What is the most likely cause of the P99 TTFT violation with a 150ms static batching timeout and only 40% GPU utilization?"
+scenario: 'You are the tech lead for an LLM-powered chatbot service running a 70B parameter model. The service has a strict P99 Time-To-First-Token (TTFT) SLO of 250ms. Your current system uses static batching with a timeout of 150ms to form batches. During peak load, you observe that while average TTFT is acceptable, P99 TTFT is spiking to over 800ms, and GPU utilization is only 40%.'
+question: What is the most likely cause of the P99 TTFT violation with a 150ms static batching timeout and only 40% GPU utilization?
 details:
   realistic_solution: 'The primary cause is head-of-line blocking, a classic problem with static batching. The 40% GPU utilization isn''t a sign of a slow data pipe, but rather the GPU being starved for work. A new, short user request gets stuck waiting for two things: 1) the current, long-running batch to completely finish generating all its tokens, and 2) its own batch to fill up or hit the 150ms timeout. This combination creates a massive P99 latency tail. Switching to a continuous batching scheduler (like those in vLLM or TGI) would solve this. It decouples prefill from decode, allowing new requests to be processed and added to the KV cache while older requests are decoding. This eliminates head-of-line blocking, dramatically improves GPU utilization, and shrinks the P99 TTFT.'
   common_mistake: |
@@ -17,12 +17,20 @@ details:
     **The Rationale:** Engineers often assume the hardware is slow, leading them to propose expensive upgrades. The real issue is the static scheduling algorithm causing the GPU to sit idle waiting for batches.
     **The Consequence:** Spending millions on unneeded hardware while failing to solve the latency SLA.
   napkin_math: |
-    - Worst-case TTFT under static batching: A request arrives right after a batch is dispatched.
-    - Active batch generates 100 tokens. Decode takes ~41.8ms/token.
-    - 100 * 41.8ms = 4.18s wait.
-    - Then it waits the 150ms batching timeout.
-    - TTFT = 4180ms + 150ms + T_prefill = **>4.3 seconds**.
-    - This creates massive P99 latency tails despite low average GPU utilization.
+    **Assumptions & Constraints:**
+    - 70B parameter model.
+    - Static batching timeout: 150ms.
+    - P99 TTFT SLA: 250ms.
+    - Decode time: ~41.8ms per token.
+
+    **Calculations:**
+    - Worst-case scenario: A request arrives immediately after a new static batch begins processing.
+    - Current batch generates 100 tokens: 100 * 41.8ms = 4,180ms block.
+    - The request then waits the 150ms batching timeout.
+    - TTFT = 4,180ms + 150ms + T_prefill = >4.3 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: >4.3 seconds TTFT (Latency-Bound)**. The low GPU utilization is deceptive; it is a symptom of head-of-line blocking where the GPU idles waiting for static batch boundaries, completely destroying the P99 latency SLA.
   options:
   - The H100's memory bandwidth is insufficient, causing a bottleneck when loading model weights for each batch. We should use tensor parallelism to split the model across multiple GPUs.
   - The static batching timeout is too short. We should increase it to 300ms to create larger, more efficient batches, which will increase the 40% GPU utilization.

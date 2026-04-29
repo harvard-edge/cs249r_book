@@ -8,24 +8,26 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: The Contextual Awareness Crash
-scenario: "You are designing the firmware for a next-gen hearing aid that runs multiple ML models. It uses an always-on Wake Word model. When the wake word is detected, it invokes a larger Speaker ID model to verify the user. The team implements a naive approach: load both models at startup using a shared tensor arena, assuming they won't run simultaneously. However, when the Wake Word is detected and the Speaker ID model is invoked, the system crashes from an OOM error, even though the maximum required memory at any time is well within total system SRAM. TFLite Micro's default `SingleArenaBufferAllocator` is being used."
+scenario: 'You are designing the firmware for a next-gen hearing aid that runs multiple ML models. It uses an always-on Wake Word model. When the wake word is detected, it invokes a larger Speaker ID model to verify the user. The team implements a naive approach: load both models at startup using a shared tensor arena, assuming they won''t run simultaneously. However, when the Wake Word is detected and the Speaker ID model is invoked, the system crashes from an OOM error, even though the maximum required memory at any time is well within total system SRAM. TFLite Micro''s default SingleArenaBufferAllocator is being used.'
 question: What memory management architecture avoids the TFLite Micro single-arena OOM when switching between wake-word and speaker ID models?
 details:
-  realistic_solution: 'The root cause is the `SingleArenaBufferAllocator` used by TFLite for Microcontrollers. It is a simple, fast bump allocator that allocates memory from a large, contiguous block (the "tensor arena"). Crucially, it cannot free memory. When the Wake Word model is initialized, it permanently carves its memory from the start of the arena. When the Speaker ID model is initialized, it attempts to carve its memory right after that, exceeding the limit and causing an OOM. The memory is never reclaimed. The solution is to dynamically destroy the TFLite Micro interpreter and model state for the Wake Word model, and then re-initialize the interpreter with the Speaker ID model using the exact same starting memory address for the arena.'
+  realistic_solution: 'The root cause is the SingleArenaBufferAllocator used by TFLite for Microcontrollers. It is a simple, fast bump allocator that allocates memory from a large, contiguous block (the "tensor arena"). Crucially, it cannot free memory. When the Wake Word model is initialized, it permanently carves its memory from the start of the arena. When the Speaker ID model is initialized, it attempts to carve its memory right after that, exceeding the limit and causing an OOM. The memory is never reclaimed. The solution is to dynamically destroy the TFLite Micro interpreter and model state for the Wake Word model, and then re-initialize the interpreter with the Speaker ID model using the exact same starting memory address for the arena.'
   common_mistake: |
     **The Pitfall:** Blaming generic memory fragmentation or suggesting standard `malloc`/`free`.
     **The Rationale:** Candidates do not understand the underlying mechanics of TFLite Micro's bump allocator, which cannot free memory sequentially.
     **The Consequence:** Implementing convoluted dynamic memory schemes that violate hard real-time constraints instead of simply orchestrating a rapid interpreter teardown/re-init.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Wake model: 20KB arena. Speaker ID: 150KB arena.
-       - Allocator: SingleArenaBufferAllocator (bump allocator, no free()).
-    2. **Calculations:**
-       - Load wake model: Allocates 20KB at offset 0.
-       - Load speaker model: Attempts to allocate 150KB at offset 20KB, requiring 170KB total.
-       - 170KB > 150KB shared arena size.
-    3. **Conclusion & Interpretation:**
-       - **Result: OOM Crash.** Destroy wake model interpreter (~0.1ms), then allocate 150KB speaker model at offset 0 (~2-5ms). Total latency penalty: **~5ms for a safe model swap.**
+    **Assumptions & Constraints:**
+    - Wake model: 20KB arena. Speaker ID: 150KB arena.
+    - Allocator: SingleArenaBufferAllocator (bump allocator, no free()).
+
+    **Calculations:**
+    - Load wake model: Allocates 20KB at offset 0.
+    - Load speaker model: Attempts to allocate 150KB at offset 20KB, requiring 170KB total.
+    - 170KB > 150KB shared arena size.
+
+    **Conclusion & Interpretation:**
+    - **Result: OOM Crash (Memory-Bound)**. Destroy wake model interpreter (~0.1ms), then allocate 150KB speaker model at offset 0 (~2-5ms). Total latency penalty: ~5ms for a safe model swap.
 status: published
 provenance: imported
 requires_explanation: true

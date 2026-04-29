@@ -7,9 +7,9 @@ topic: pipeline-parallelism
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: Diagnose Load Imbalance Across Pipeline Stages on H100
+title: 'Diagnose Load Imbalance Across Pipeline Stages on H100'
 scenario: 'A 4-stage pipeline of a 32-layer transformer on H100 GPUs shows stage latencies: Stage 0: 12ms (embedding + layers 1-8), Stage 1: 8ms (layers 9-16), Stage 2: 8ms (layers 17-24), Stage 3: 14ms (layers 25-32 + LM head). Pipeline throughput is limited to 14ms per stage cycle.'
-question: What is causing the 4-stage pipeline imbalance, and how would you rebalance the stages to recover throughput?
+question: 'What is causing the 4-stage pipeline imbalance, and how would you rebalance the stages to recover throughput?'
 details:
   realistic_solution: 'Stage 0 slow: embedding lookup (128K×8192 table, FP16) = 2GB; load time = 2GB/2000GB/s (H100 HBM) = 1ms + compute = 2ms. Main issue: first 8 layers include self-attention with KV cache allocation overhead. Stage 3 slow: LM head projection (8192→128K) = 8192×128K×2B = 2GB → 4ms + layer 32. Fix: (1) Move embedding to Stage 0 but parallelize vocab dimension. (2) Move LM head to Stage 1 and pipeline embedding lookup. (3) Rebalance: Stage 0: emb + layers 1-6; Stage 1: layers 7-16; Stage 2: layers 17-26; Stage 3: layers 27-32 + LM head. Test new latencies targeting <=10ms per stage.'
   common_mistake: |
@@ -17,11 +17,20 @@ details:
     **The Rationale:** Candidates assume all transformer layers are completely identical in computational cost.
     **The Consequence:** They ignore the massive embedding lookup and LM head operations that dominate the first and last stages when vocabulary sizes are large (e.g., 128K tokens), maintaining the exact bottleneck they tried to solve.
   napkin_math: |
-    1. **Current Bottleneck:** Stage 3 dominates at 14 ms.
-    2. **Pipeline Bubble:** With M=8 microbatches and P=4 stages, bubble fraction is $(4-1)/(8+4-1) = 3/11 = 27.3\%$.
-    3. **Current Efficiency:** Ideal perfectly balanced stage is $42 / 4 = 10.5$ ms. Efficiency = $(10.5/14) \times (1 - 0.273) = 54.5\%$.
-    4. **Rebalanced Efficiency:** Targeting 11 ms max stage. Efficiency = $(10.5/11) \times (1 - 0.273) = 69.4\%$.
-    5. **Throughput Gain:** $69.4\% / 54.5\% =$ **1.27× improvement**.
+    **Assumptions & Constraints:**
+    - M = 8 microbatches, P = 4 stages
+    - Current Stage Latencies: 12ms, 8ms, 8ms, 14ms
+    - Current Bottleneck = 14 ms
+
+    **Calculations:**
+    - Pipeline Bubble Fraction = (4 - 1) / (8 + 4 - 1) = 3/11 = 27.3%
+    - Perfectly Balanced Stage = 42 ms total / 4 = 10.5 ms
+    - Current Efficiency = (10.5 / 14) * (1 - 0.273) = 54.5%
+    - Rebalanced Target Stage = 11 ms max
+    - Rebalanced Efficiency = (10.5 / 11) * (1 - 0.273) = 69.4%
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.27x Improvement (Compute-Bound)**. Rebalancing the heavy embedding and LM head operations significantly improves pipeline efficiency.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,9 +7,9 @@ topic: congestion-control
 competency_area: networking
 bloom_level: analyze
 phase: both
-title: Victim Flow Starvation Under PFC
-scenario: On a 64-GPU cluster, a checkpoint save operation writes 192GB from each GPU to a remote NFS server over the same RoCE fabric used for training. During checkpointing, AllReduce throughput drops by 70%, even though checkpoint traffic uses only 15% of total fabric bandwidth. Priority Flow Control (PFC) is enabled on all ports.
-question: Why does checkpoint traffic using only 15% of fabric bandwidth cause a 70% AllReduce throughput drop with PFC enabled?
+title: 'Victim Flow Starvation Under PFC'
+scenario: 'On a 64-GPU cluster, a checkpoint save operation writes 192GB from each GPU to a remote NFS server over the same RoCE fabric used for training. During checkpointing, AllReduce throughput drops by 70%, even though checkpoint traffic uses only 15% of total fabric bandwidth. Priority Flow Control (PFC) is enabled on all ports.'
+question: 'Why does checkpoint traffic using only 15% of fabric bandwidth cause a 70% AllReduce throughput drop with PFC enabled?'
 details:
   realistic_solution: 'The root cause is PFC''s per-priority granularity combined with shared priority classes. Both checkpoint (storage) and AllReduce (training) traffic use the same RoCE priority. When checkpoint traffic causes congestion at the NFS server''s ToR, PFC pause frames propagate backward. These pauses stop ALL priority traffic on the paused port, including AllReduce flows that have nothing to do with the congestion. Fix: (1) Assign checkpoint traffic to a separate PFC priority class. (2) Rate-limit checkpoint traffic. (3) Use separate VLANs.'
   common_mistake: |
@@ -17,11 +17,17 @@ details:
     **The Rationale:** If a workload is only using 15% of link capacity, engineers assume there is plenty of room for other traffic.
     **The Consequence:** Priority Flow Control acts per-priority, not per-flow. The shared priority class means congestion from storage traffic completely pauses unrelated training traffic, creating the classic "victim flow" starvation.
   napkin_math: |
-    1. Calculate total checkpoint size: 64 GPUs * 192GB = 12.3 TB total.
-    2. Calculate transfer limits: Over 8 x 400G uplinks to storage (400 GB/s aggregate). Write time = 12.3TB / 400 GB/s = 30.7 seconds.
-    3. Analyze PFC impact: Because both traffic types share priority 3, PFC pause frames from the storage congestion halt AllReduce traffic.
-    4. Evaluate wasted compute: A 70% throughput loss for 30 seconds in a 100ms iteration cycle delays ~300 iterations.
-    5. Conclude: This is equivalent to **~210 seconds of pure compute wasted**.
+    **Assumptions & Constraints:**
+    - 64 GPUs writing 192GB each (checkpoint).
+    - 8 x 400G uplinks to storage (400 GB/s aggregate).
+
+    **Calculations:**
+    - Total checkpoint size: 64 GPUs * 192GB = 12.3 TB total.
+    - Write time: 12.3TB / 400 GB/s = 30.7 seconds.
+    - Compute waste: A 70% throughput loss for 30 seconds in a 100ms iteration cycle delays ~300 iterations.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~210 seconds of pure compute wasted (Network-Bound)**. PFC pause frames from shared priority classes halt AllReduce traffic, wasting compute.
 status: published
 provenance: imported
 requires_explanation: false

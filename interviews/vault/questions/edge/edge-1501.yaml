@@ -11,23 +11,26 @@ title: Latency Spikes in Conditional Privacy Guardrails on Hailo-8
 scenario: A smart security camera on a dataflow accelerator (26 TOPS INT8, 2.5W, no local DRAM) conditionally triggers a secondary 5MB 'face-blurring' model when a person is detected by the primary 25MB model. In crowded environments, latency spikes from 30ms to over 300ms, but compute utilization remains under 30%.
 question: What hardware architecture constraint causes these extreme latency spikes despite low compute utilization?
 details:
-  realistic_solution: The root cause is PCIe bandwidth saturation and massive context-switching overhead. Because the accelerator has no local DRAM, conditionally swapping between the primary model and the guardrail model requires re-streaming the network weights and graph over the host interface each time. The solution is either to co-compile both models into a single unified dataflow context to avoid swapping, or to offload the lightweight privacy guardrail to the host CPU.
+  realistic_solution: |
+    The root cause is PCIe bandwidth saturation and massive context-switching overhead. Because the accelerator has no local DRAM, conditionally swapping between the primary model and the guardrail model requires re-streaming the network weights and graph over the host interface each time. The solution is either to co-compile both models into a single unified dataflow context to avoid swapping, or to offload the lightweight privacy guardrail to the host CPU.
   common_mistake: |
     **The Pitfall:** Misdiagnosing the issue as thermal throttling or compute saturation.
     **The Rationale:** Engineers ignore the specific "no local DRAM" architecture of the accelerator.
     **The Consequence:** Attempting to optimize model FLOPs instead of fixing the catastrophic I/O memory streaming bottleneck.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Primary model: 25MB. Secondary model: 5MB. Total = 30MB swap.
-       - Accelerator relies strictly on host PCIe memory (no local DRAM).
-       - PCIe Gen3 x4 bandwidth: ~4 GB/s.
-       - Crowd scenario: ~30 triggers per frame.
-    2. **Calculations:**
-       - Transfer penalty per swap: 30MB / 4,000 MB/s = 7.5 ms.
-       - Total I/O penalty (30 triggers): 30 * 7.5 ms = 225 ms pure latency overhead.
-       - Total Frame Latency: ~30ms (base) + 225ms (swap) = 255ms+.
-    3. **Conclusion & Interpretation:**
-       - **Result: 225ms+ swap penalty.** Re-streaming weights over PCIe for conditional logic destroys the real-time budget. Both models must be co-compiled. **System Bottleneck: I/O-Bound (Host PCIe Streaming)**.
+    **Assumptions & Constraints:**
+    - Primary model: 25MB. Secondary model: 5MB. Total = 30MB swap.
+    - Accelerator relies strictly on host PCIe memory (no local DRAM).
+    - PCIe Gen3 x4 bandwidth: ~4 GB/s.
+    - Crowd scenario: ~30 triggers per frame.
+
+    **Calculations:**
+    - Transfer penalty per swap: 30MB / 4,000 MB/s = 7.5 ms.
+    - Total I/O penalty (30 triggers): 30 * 7.5 ms = 225 ms pure latency overhead.
+    - Total Frame Latency: ~30ms (base) + 225ms (swap) = 255ms+.
+
+    **Conclusion & Interpretation:**
+    - **Result: 225ms+ swap penalty (I/O-Bound)**. Re-streaming weights over PCIe for conditional logic destroys the real-time budget; models must be co-compiled.
 status: published
 provenance: imported
 requires_explanation: false

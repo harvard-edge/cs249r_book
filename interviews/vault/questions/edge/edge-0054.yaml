@@ -13,15 +13,11 @@ question: Why is your latency violently oscillating between 12ms and 28ms?
 details:
   realistic_solution: 'You are suffering from VSync and Frame Buffer Polling Misalignment. The camera produces frames at a fixed 60 FPS cadence — a new frame appears in the buffer every 16.6ms. Your code calls `capture_frame()` which reads the *latest available* frame from the buffer. The timing depends on when the previous iteration finished:
 
-
     Fast path (12.1ms total): If inference finishes and `capture_frame()` is called just *after* the next VSync, a fresh frame is in the buffer (e.g., 0.1ms old). Total latency: 0.1ms stale + 12ms inference + actuator = ~12.1ms.
-
 
     Slow path (28.5ms total): If `capture_frame()` is called just *before* a VSync boundary, it retrieves the previous frame, which has been sitting in the buffer for 16.5ms. Total latency: 16.5ms stale + 12ms inference + actuator = ~28.5ms.
 
-
     The oscillation occurs because even tiny timing jitter pushes the `capture_frame()` call to either side of the VSync boundary, causing the latency to jump by exactly one frame period.
-
 
     Fix: Use a double-buffered, interrupt-driven capture pipeline. Have the camera DMA write frames into a ring buffer asynchronously, and use an interrupt to wake the inference thread immediately when a new frame is fully written. This locks the inference loop to the VSync cadence.'
   common_mistake: |
@@ -29,15 +25,17 @@ details:
     **The Rationale:** Candidates assume ML inference latency is highly variable like a congested web server, rather than recognizing the NPU's deterministic nature.
     **The Consequence:** Wasting time debugging the deterministic NPU instead of fixing the frame buffer polling misalignment in the camera capture loop.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Frame interval = 16.6ms (60 FPS).
-       - Inference = 12ms. Actuator = ~0.1ms.
-    2. **Calculations:**
-       - Fast path: If `capture_frame()` is called 0.1ms after VSync, frame is fresh. Total latency = 0.1 + 12 = 12.1ms.
-       - Slow path: If `capture_frame()` is called just before VSync, frame in buffer is 16.5ms old. Total latency = 16.5 + 12 = 28.5ms.
-       - Latency Jitter = 28.5ms - 12.1ms = 16.4ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Frame Buffer Polling Misalignment.** A tiny 0.2ms shift in loop timing around the VSync boundary causes a massive 16.4ms jump in visual latency.
+    **Assumptions & Constraints:**
+    - Frame interval = 16.6ms (60 FPS).
+    - Inference = 12ms. Actuator = ~0.1ms.
+
+    **Calculations:**
+    - Fast path: If `capture_frame()` is called 0.1ms after VSync, frame is fresh. Total latency = 0.1 + 12 = 12.1ms.
+    - Slow path: If `capture_frame()` is called just before VSync, frame in buffer is 16.5ms old. Total latency = 16.5 + 12 = 28.5ms.
+    - Latency Jitter = 28.5ms - 12.1ms = 16.4ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Frame Buffer Polling Misalignment (I/O-Bound).** A tiny 0.2ms shift in loop timing around the VSync boundary causes a massive 16.4ms jump in visual latency.
 status: published
 provenance: imported
 requires_explanation: false

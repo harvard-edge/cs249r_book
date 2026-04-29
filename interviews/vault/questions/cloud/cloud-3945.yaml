@@ -7,9 +7,9 @@ topic: communication-computation-overlap
 competency_area: parallelism
 bloom_level: apply
 phase: both
-title: Overlapping Embedding Table AllReduce in Hybrid Parallelism
-scenario: Your recommendation model has a 50GB embedding table (table-parallel across 8 GPUs) and a 2B-parameter MLP (data-parallel across the same 8 GPUs). The embedding lookup produces sparse gradients, while the MLP produces dense gradients. Both need synchronization across the 8 GPUs.
-question: Can the dense MLP AllReduce and the sparse embedding AlltoAll overlap, and what is the latency impact?
+title: 'Overlapping Embedding Table AllReduce in Hybrid Parallelism'
+scenario: 'Your recommendation model has a 50GB embedding table (table-parallel across 8 GPUs) and a 2B-parameter MLP (data-parallel across the same 8 GPUs). The embedding lookup produces sparse gradients, while the MLP produces dense gradients. Both need synchronization across the 8 GPUs.'
+question: 'Can the dense MLP AllReduce and the sparse embedding AlltoAll overlap, and what is the latency impact?'
 details:
   realistic_solution: 'Overlap strategy: (1) MLP backward finishes before embedding backward (MLP is on top of the network). Start dense AllReduce for MLP gradients immediately on NCCL stream 1. (2) Embedding backward produces sparse gradients (only ~1% of the table is accessed per batch). Use AlltoAll (not AllReduce) to route sparse gradients to the owning GPU on NCCL stream 2. (3) Both communications overlap with each other AND with any remaining embedding backward computation. (4) Key: sparse gradient communication is much smaller than dense. 50GB table with 1% sparsity: only 500MB of sparse gradients vs 8GB dense MLP gradients. The sparse AlltoAll finishes first, allowing the embedding optimizer to start while MLP AllReduce is still in progress.'
   common_mistake: |
@@ -17,10 +17,18 @@ details:
     **The Rationale:** Treating all gradients equally in the backward pass without recognizing the extreme sparsity of embedding lookups.
     **The Consequence:** Forcing massive amounts of zero-value gradients across the network, turning a fast 0.56ms AlltoAll into a multi-millisecond bottleneck.
   napkin_math: |
-    - **MLP Dense AllReduce**: 8GB dense gradients at 900 GB/s NVLink = 8.9ms.
-    - **Embedding Sparse AlltoAll**: 50GB table with 1% sparsity = 500MB. At 900 GB/s = 0.56ms.
-    - **Overlap Impact**: If overlapped on separate NCCL streams, total communication = `max(8.9, 0.56)` = **8.9ms** (vs serial 9.46ms).
-    - **Result**: While the absolute time savings is small, the sparse AlltoAll finishes almost instantly, allowing the embedding optimizer to start 8.9ms earlier in the pipeline.
+    **Assumptions & Constraints:**
+    - 50GB embedding table, 1% sparsity.
+    - 2B-parameter MLP (8GB dense gradients).
+    - 8 GPUs on 900 GB/s NVLink.
+
+    **Calculations:**
+    - MLP Dense AllReduce Time: 8GB / 900 GB/s = 8.9ms.
+    - Embedding Sparse AlltoAll Time: 500MB (1% of 50GB) / 900 GB/s = 0.56ms.
+    - Overlapped total time: max(8.9, 0.56) = 8.9ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 8.9ms (Bandwidth-Bound)**. By overlapping on separate NCCL streams, the sparse AlltoAll finishes almost instantly, allowing the embedding optimizer to execute while the MLP AllReduce continues.
 status: published
 provenance: imported
 requires_explanation: true

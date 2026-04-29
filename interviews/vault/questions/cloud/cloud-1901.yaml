@@ -8,24 +8,26 @@ competency_area: data
 bloom_level: analyze
 phase: both
 title: Diagnosing Metadata Server Collapse on Lustre
-scenario: You are training a vision model on a cluster with 8xA100 GPUs using a Lustre parallel file system.
-  The dataset consists of 14 million individual 150KB JPEG images stored directly in a standard directory
-  hierarchy. The training pipeline reports that GPU utilization is fluctuating wildly between 10% and
-  80%, and the storage team alerts you that the Lustre Metadata Server (MDS) CPU utilization is pinned
-  at 100%, while the Object Storage Targets (OSTs) are barely seeing 5% throughput utilization. Analyze
-  the root cause of this performance bottleneck.
-question: "What is causing low GPU utilization and 100% Lustre MDS CPU, and how should the dataset be stored instead?"
+scenario: 'You are training a vision model on a cluster with 8xA100 GPUs using a Lustre parallel file system. The dataset consists of 14 million individual 150KB JPEG images stored directly in a standard directory hierarchy. The training pipeline reports that GPU utilization is fluctuating wildly between 10% and 80%, and the storage team alerts you that the Lustre Metadata Server (MDS) CPU utilization is pinned at 100%, while the Object Storage Targets (OSTs) are barely seeing 5% throughput utilization.'
+question: What is causing low GPU utilization and 100% Lustre MDS CPU, and how should the dataset be stored instead?
 details:
-  realistic_solution: The system is suffering from the 'Small File Problem'. The solution is to pack the
-    150KB images into larger sequential formats (e.g., TFRecords, WebDataset tar archives, or Petastorm)
-    of 100MB to 1GB each. This reduces metadata lookups by orders of magnitude and converts random I/O
-    into large sequential reads.
-  common_mistake: Assuming the storage network bandwidth is insufficient or that the GPUs are bottlenecked
-    by CPU data decoding, rather than identifying metadata operations as the true limiting factor.
-  napkin_math: 'Reading 1000 images/sec/GPU individually = 8000 metadata lookups/sec cluster-wide (stat/open/read/close).
-    A single MDS often saturates at ~30k-50k IOPS, creating a massive bottleneck. Packing into 1GB WebDataset
-    shards (~6000 images per shard): reading 8000 images/sec requires <2 metadata lookups/sec. MDS load
-    drops by >99.9%.'
+  realistic_solution: 'The system is suffering from the ''Small File Problem''. The solution is to pack the 150KB images into larger sequential formats (e.g., TFRecords, WebDataset tar archives, or Petastorm) of 100MB to 1GB each. This reduces metadata lookups by orders of magnitude and converts random I/O into large sequential reads.'
+  common_mistake: 'Assuming the storage network bandwidth is insufficient or that the GPUs are bottlenecked by CPU data decoding, rather than identifying metadata operations as the true limiting factor.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: 8x A100 GPUs.
+    - Workload: 1000 images/sec/GPU.
+    - Single Lustre MDS capacity: ~30k-50k IOPS.
+    
+    **Calculations:**
+    - Individual files: 8 GPUs * 1000 images/sec = 8000 images/sec.
+    - Required IOPS (individual): 8000 * 4 (stat/open/read/close) = 32,000 IOPS (saturates MDS).
+    - WebDataset shards: 1GB shards containing ~6000 images each.
+    - Required IOPS (sharded): 8000 images/sec / 6000 images/shard = ~1.3 shards/sec.
+    - New IOPS load: ~1.3 * 4 = 5.2 IOPS.
+    
+    **Conclusion & Interpretation:**
+    - **Result: 99.9% IOPS Reduction (Metadata-Bound)**. Packing files drops the MDS metadata load from 32,000 IOPS to roughly 5 IOPS, completely unblocking the pipeline.
 status: published
 provenance: imported
 requires_explanation: false

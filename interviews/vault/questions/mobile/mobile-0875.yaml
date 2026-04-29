@@ -7,9 +7,9 @@ topic: compound-ai-systems
 competency_area: deployment
 bloom_level: analyze
 phase: inference
-title: Diagnosing Retrieval Quality Degradation After App Update on Snapdragon 8 Gen 3
-scenario: After an app update on Snapdragon 8 Gen 3 (45 TOPS, 16GB), users report that the on-device assistant gives less relevant answers despite the LLM being unchanged. The update replaced the embedding model from a 256-dim model (v1) to a 384-dim model (v2) but kept the existing FAISS index built with v1 embeddings.
-question: How would you diagnose why retrieval quality degraded and quantify the impact?
+title: 'Diagnosing Retrieval Quality Degradation After App Update on Snapdragon 8 Gen 3'
+scenario: 'After an app update on Snapdragon 8 Gen 3 (45 TOPS, 16GB), users report that the on-device assistant gives less relevant answers despite the LLM being unchanged. The update replaced the embedding model from a 256-dim model (v1) to a 384-dim model (v2) but kept the existing FAISS index built with v1 embeddings.'
+question: 'How would you diagnose why retrieval quality degraded and quantify the impact?'
 details:
   realistic_solution: |
     Root cause: embedding space mismatch. v1 and v2 are different models with different learned projections — their vector spaces are not aligned. A v2 query vector searching a v1 index will return essentially random results (cosine similarity ~0 for unrelated vectors, not correlated with semantic similarity). Fix requires rebuilding the index with v2 embeddings. Schedule index rebuild as a background task on first launch after update, serving from v1 index until complete, then atomic swap.
@@ -18,11 +18,19 @@ details:
     **The Rationale:** Candidates fail to recognize that the FAISS index was built with v1 embeddings.
     **The Consequence:** They miss that v2 query vectors are incompatible with v1 document vectors, rendering the cosine similarity meaningless.
   napkin_math: |
-    - v2 re-embedding: 10,000 docs * (1/200 s/doc) = 50 seconds on Snapdragon 8 Gen 3.
-    - Memory during rebuild: v1 index (10K*256*4=10MB) + v2 index building (10K*384*4=15.4MB) + v2 model (larger, ~40MB INT8) = 65.4MB overhead (negligible on 16GB).
-    - Index swap: atomic rename of FAISS file (< 1ms).
-    - User impact window: **50s** of degraded retrieval (v1 index with v2 queries).
-    - Mitigation: pre-build new index on backend, push as OTA update alongside model, swap atomically on first launch.
+    **Assumptions & Constraints:**
+    - Index size: 10,000 documents.
+    - v1 embedding dimension: 256; v2 embedding dimension: 384.
+    - Re-embedding speed: 1/200 s/doc on Snapdragon 8 Gen 3.
+
+    **Calculations:**
+    - Total re-embedding time: 10,000 docs * (1/200) = 50 seconds.
+    - Memory for v1 index: 10,000 * 256 * 4 bytes = ~10MB.
+    - Memory for v2 index building: 10,000 * 384 * 4 bytes = ~15.4MB.
+    - Total overhead: 10MB + 15.4MB + 40MB (v2 model) = 65.4MB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 50s Rebuild (Latency-Bound).** The 50-second window requires the app to either serve degraded results or be pre-built backend-side, but the memory overhead is highly manageable.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,22 +11,25 @@ title: HPA Scaling Latency for GPU Inference Pods
 scenario: A Kubernetes HPA scales A100 inference pods based on GPU utilization. Traffic spikes 3x over 2 minutes. HPA takes 4 minutes to provision new pods. During this window, P99 latency SLA is violated.
 question: How would you redesign autoscaling so the A100 inference service handles a 3x traffic spike before the HPA's 4-minute reaction time?
 details:
-  realistic_solution: Implement predictive scaling using KEDA with Prometheus metrics and a custom scaler that triggers scale-up when queue depth exceeds threshold (not GPU utilization, which lags). Pre-warm a pool of 2 idle pods (scaled to 0 GPU allocation but with model loaded) that can accept traffic immediately. Use pod disruption budgets to prevent scale-down during ramp-up.
+  realistic_solution: |
+    Implement predictive scaling using KEDA with Prometheus metrics and a custom scaler that triggers scale-up when queue depth exceeds threshold (not GPU utilization, which lags). Pre-warm a pool of 2 idle pods (scaled to 0 GPU allocation but with model loaded) that can accept traffic immediately. Use pod disruption budgets to prevent scale-down during ramp-up.
   common_mistake: |
     **The Pitfall:** Tuning the HPA stabilization window to 0s to force immediate scaling.
     **The Rationale:** Engineers assume reacting faster fixes the latency, ignoring the hard physical delays of provisioning instances and loading large models into VRAM.
     **The Consequence:** The cluster thrashes wildly, driving up cloud costs by 40% without actually fixing the latency gap during the 4-minute boot sequence.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 4 pods serving 1,000 RPS each (75% utilization). Max capacity = 4,000 RPS.
-       - Spike: Traffic hits 12,000 RPS in 2 mins.
-       - HPA needs 4 mins to provision 8 more pods.
-       - Idle A100 power is ~50W vs active 400W.
-    2. **Calculations:**
-       - Deficit: For 4 mins, a queue builds at 8,000 RPS, severely destroying P99 latency.
-       - Pre-warm 4 pods: 4 * 50W = 200W of power overhead.
-    3. **Conclusion & Interpretation:**
-       - **Result: 4 pre-warmed pods provide instant 4,000 RPS capacity for just 200W of power overhead, safely absorbing the spike. System is Initialization-Latency-Bound.**
+    **Assumptions & Constraints:**
+    - 4 pods serving 1,000 RPS each (75% utilization). Max capacity = 4,000 RPS.
+    - Spike: Traffic hits 12,000 RPS in 2 mins.
+    - HPA needs 4 mins to provision 8 more pods.
+    - Idle A100 power is ~50W vs active 400W.
+
+    **Calculations:**
+    - Deficit: For 4 mins, a queue builds at 8,000 RPS, severely destroying P99 latency.
+    - Pre-warm 4 pods: 4 * 50W = 200W of power overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: 4 pre-warmed pods (Initialization-Latency-Bound)**. Provides instant 4,000 RPS capacity for just 200W of power overhead, safely absorbing the spike.
 status: published
 provenance: imported
 requires_explanation: true

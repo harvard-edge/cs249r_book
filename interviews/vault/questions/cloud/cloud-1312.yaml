@@ -8,24 +8,26 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Diagnosing DDP Overhead in Gradient Accumulation
-scenario: A team is training a 7B parameter LLM on 8x GPUs. To achieve a target effective batch size of 1024, they use a micro-batch size of 4 per GPU and 32 gradient accumulation steps. They are using PyTorch's DistributedDataParallel (DDP) for data parallelism. Profiling reveals that GPU utilization is critically low (around 40%), and step times are dominated by massive network communication delays during the accumulation phase rather than compute.
+scenario: 'A team is training a 7B parameter LLM on 8x GPUs. To achieve a target effective batch size of 1024, they use a micro-batch size of 4 per GPU and 32 gradient accumulation steps. They are using PyTorch''s DistributedDataParallel (DDP) for data parallelism. Profiling reveals that GPU utilization is critically low (around 40%), and step times are dominated by massive network communication delays during the accumulation phase rather than compute.'
 question: Why is DDP utilization low during 32 gradient accumulation steps, and how do you fix the communication overhead?
 details:
-  realistic_solution: Wrap the forward and backward passes of the first 31 accumulation steps in DDP's `no_sync()` context manager. This accumulates gradients locally without network communication. Only the 32nd (final) step triggers the AllReduce, reducing network overhead dramatically.
+  realistic_solution: 'Wrap the forward and backward passes of the first 31 accumulation steps in DDP''s `no_sync()` context manager. This accumulates gradients locally without network communication. Only the 32nd (final) step triggers the AllReduce, reducing network overhead dramatically.'
   common_mistake: |
     **The Pitfall:** Naively trusting DDP to optimize synchronization during gradient accumulation.
     **The Rationale:** Engineers assume standard distributed libraries are heavily optimized out-of-the-box.
     **The Consequence:** DDP synchronizes gradients on every micro-batch backward pass by default, wasting 97% of communication on intermediate accumulation steps.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 7B param FP16 = ~14GB gradients.
-       - NVLink bandwidth = 600 GB/s.
-    2. **Calculations:**
-       - Intra-node AllReduce: 2 * (7/8) * 14GB / 600 GB/s ≈ 41ms.
-       - Naive approach overhead: 32 syncs * 41ms = 1.3s.
-       - `no_sync()` overhead: 1 sync * 41ms = 0.04s.
-    3. **Conclusion & Interpretation:**
-       - **Result: Using `no_sync()` yields a 32x reduction in network overhead.**
+    **Assumptions & Constraints:**
+    - 7B param FP16 = ~14GB gradients.
+    - NVLink bandwidth = 600 GB/s.
+    
+    **Calculations:**
+    - Intra-node AllReduce: 2 * (7/8) * 14GB / 600 GB/s ≈ 41ms.
+    - Naive approach overhead: 32 syncs * 41ms = 1.3s.
+    - `no_sync()` overhead: 1 sync * 41ms = 0.04s.
+    
+    **Conclusion & Interpretation:**
+    - **Result: 0.04s (Network-Bound)**. Using `no_sync()` yields a 32x reduction in network overhead.
 status: published
 provenance: imported
 requires_explanation: false

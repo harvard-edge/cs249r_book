@@ -7,56 +7,25 @@ topic: quantization-fundamentals
 competency_area: precision
 bloom_level: analyze
 phase: inference
-title: Asymmetric Weight Quantization Penalty
-scenario: We are deploying an anomaly detection model on an ARM Cortex-M4 (STM32F4)
-  operating at 168 MHz with 256 KB SRAM, 1 MB flash, and no FPU. The system relies
-  on CMSIS-NN to leverage SIMD instructions that perform 2x INT8 MACs per cycle. A
-  junior engineer switches the quantization scheme from symmetric weights (with asymmetric
-  activations) to fully asymmetric INT8 quantization for both weights and activations
-  to try to squeeze out 1% more accuracy. The model still fits easily in the 1 MB
-  flash, but the inference latency unexpectedly increases by nearly 50%. Explain mathematically
-  why changing the weights to asymmetric quantization causes such a drastic latency
-  spike on this specific hardware.
-question: How would you explain mathematically why changing the weights to asymmetric
-  quantization causes such a drastic latency spike on this specific hardware?
+title: 'Asymmetric Weight Quantization Penalty'
+scenario: 'We are deploying an anomaly detection model on an ARM Cortex-M4 (STM32F4) operating at 168 MHz with 256 KB SRAM, 1 MB flash, and no FPU. The system relies on CMSIS-NN to leverage SIMD instructions that perform 2x INT8 MACs per cycle. A junior engineer switches the quantization scheme from symmetric weights (with asymmetric activations) to fully asymmetric INT8 quantization for both weights and activations to try to squeeze out 1% more accuracy. The model still fits easily in the 1 MB flash, but the inference latency unexpectedly increases by nearly 50%.'
+question: 'How would you explain mathematically why changing the weights to asymmetric quantization causes such a drastic latency spike on this specific hardware?'
 details:
-  realistic_solution: In quantization, the core dot product expands to `(A - Z_a)
-    * (W - Z_w) = A*W - A*Z_w - W*Z_a + Z_a*Z_w`. Terms involving only weights and
-    constants (`W*Z_a` and `Z_a*Z_w`) can be precomputed offline and folded into the
-    bias, making asymmetric activations 'free' at runtime. However, if weights are
-    asymmetric (`Z_w != 0`), the `A*Z_w` term requires calculating the sum of the
-    input activations (`sum(A) * Z_w`) at runtime because activations change every
-    inference. On the Cortex-M4 without an FPU, this forces the integer ALU to execute
-    an additional accumulation pass over the input vector before applying the standard
-    CMSIS-NN SIMD MACs, fundamentally breaking the tightly unrolled convolution loops.
-  common_mistake: Candidates often assume all INT8 quantization is computationally
-    identical because zero-points are just integer constants. They fail to decompose
-    the mathematical cross-multiplication terms and don't realize that asymmetric
-    weights require calculating the dynamic sum of input activations at runtime, which
-    disrupts the hardware's SIMD MAC efficiency.
-  napkin_math: 'Consider an inner dot product with K=256 multiply-accumulates. With
-    symmetric INT8 weights: The CMSIS-NN SIMD processes 2x INT8 MACs/cycle. Theoretical
-    compute = 256 / 2 = 128 cycles. With asymmetric INT8 weights: We must also compute
-    `sum(A)` across 256 activations at runtime. Using SIMD adds (2 adds/cycle), this
-    takes 256 / 2 = 128 cycles. Total cycles per output = 128 (for A*W) + 128 (for
-    sum(A)) + 1 (multiply sum by Z_w) = 257 cycles. This represents roughly a 100%
-    increase in basic inner-loop arithmetic instructions (from 128 to 257 cycles).
-    At 168 MHz, doubling the inner loop overhead completely accounts for the 50% system-level
-    latency spike, despite fitting comfortably within the 1 MB flash and 256 KB SRAM.'
+  realistic_solution: 'In quantization, the core dot product expands to `(A - Z_a) * (W - Z_w) = A*W - A*Z_w - W*Z_a + Z_a*Z_w`. Terms involving only weights and constants (`W*Z_a` and `Z_a*Z_w`) can be precomputed offline and folded into the bias, making asymmetric activations ''free'' at runtime. However, if weights are asymmetric (`Z_w != 0`), the `A*Z_w` term requires calculating the sum of the input activations (`sum(A) * Z_w`) at runtime because activations change every inference. On the Cortex-M4 without an FPU, this forces the integer ALU to execute an additional accumulation pass over the input vector before applying the standard CMSIS-NN SIMD MACs, fundamentally breaking the tightly unrolled convolution loops.'
+  common_mistake: 'Candidates often assume all INT8 quantization is computationally identical because zero-points are just integer constants. They fail to decompose the mathematical cross-multiplication terms and don''t realize that asymmetric weights require calculating the dynamic sum of input activations at runtime, which disrupts the hardware''s SIMD MAC efficiency.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Inner dot product K=256.
+    - CMSIS-NN SIMD executes 2x INT8 MACs/cycle.
+
+    **Calculations:**
+    - Symmetric Weights: 256 MACs / 2 = 128 cycles.
+    - Asymmetric Weights Penalty: Computes `sum(A)` dynamically = 256 / 2 = 128 cycles.
+    - Total Asymmetric: 128 (AW) + 128 (sum A) + 1 = 257 cycles.
+
+    **Conclusion & Interpretation:**
+    - **Result: 100% Cycle Increase (Compute Bound)**. The dynamic accumulation of input activations needed for asymmetric zero-points breaks the SIMD loop efficiency, doubling latency.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 5
-validated: true
-validation_status: OK
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

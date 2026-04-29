@@ -8,37 +8,24 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Sizing Paged Memory for Multi-Tenant LLM Inference
-scenario: You are deploying an LLM-based intelligent routing service on an on-premise
-  Qualcomm Cloud AI 100 inference accelerator. The hardware features 32 GB of LPDDR4x
-  memory and delivers 400 TOPS at INT8 precision within a 75W power envelope. Given
-  a 13B parameter model quantized to INT8, you need to design a continuous batching
-  system that handles highly variable sequence lengths without suffering from memory
-  fragmentation or OS-level OOM evictions.
-question: How would you design continuous batching for a 13B INT8 model on 32 GB Cloud
-  AI 100 to avoid KV-cache fragmentation and OOMs?
+scenario: You are deploying an LLM-based intelligent routing service on an on-premise Qualcomm Cloud AI 100 inference accelerator. The hardware features 32 GB of LPDDR4x memory and delivers 400 TOPS at INT8 precision within a 75W power envelope. Given a 13B parameter model quantized to INT8, you need to design a continuous batching system that handles highly variable sequence lengths without suffering from memory fragmentation or OS-level OOM evictions.
+question: How would you design continuous batching for a 13B INT8 model on 32 GB Cloud AI 100 to avoid KV-cache fragmentation and OOMs?
 details:
-  realistic_solution: The optimal approach is to implement a paged memory manager
-    (like PagedAttention) that pre-allocates the entire available memory pool into
-    fixed-size block tables (e.g., 16 tokens per block). To handle pressure gracefully,
-    the system must track page utilization and implement an application-level eviction
-    policy—preempting and swapping the lowest-priority request's KV cache back to
-    host RAM before the accelerator's 32GB limit triggers a hard crash.
-  common_mistake: Candidates often suggest static memory allocation based on the maximum
-    possible sequence length, which drastically limits concurrent batch size. Alternatively,
-    they might rely on standard dynamic allocation (e.g., malloc), which quickly leads
-    to external memory fragmentation and unpredictable OS-level OOM kills during usage
-    spikes.
-  napkin_math: '1. Static Memory: 13B INT8 weights = 13 GB. OS/Driver overhead = ~2
-    GB. Total available for KV Cache = 32 GB - 15 GB = 17 GB.
+  realistic_solution: The optimal approach is to implement a paged memory manager (like PagedAttention) that pre-allocates the entire available memory pool into fixed-size block tables (e.g., 16 tokens per block). To handle pressure gracefully, the system must track page utilization and implement an application-level eviction policy—preempting and swapping the lowest-priority request's KV cache back to host RAM before the accelerator's 32GB limit triggers a hard crash.
+  common_mistake: Candidates often suggest static memory allocation based on the maximum possible sequence length, which drastically limits concurrent batch size. Alternatively, they might rely on standard dynamic allocation (e.g., malloc), which quickly leads to external memory fragmentation and unpredictable OS-level OOM kills during usage spikes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory: 32 GB total. 13B INT8 weights = 13 GB. OS overhead = ~2 GB.
+    - Available for KV Cache: 17 GB.
+    - Token spec: 40 layers, 40 heads, 128 head dim.
 
-    2. KV Cache per token: Assume 40 layers, 40 heads, 128 head dimension. 2 (K, V)
-    * 40 * 40 * 128 * 1 byte (INT8 KV cache) = 409,600 bytes.
+    **Calculations:**
+    - KV Cache per token = 2 (K, V) * 40 * 40 * 128 * 1 byte = 409,600 bytes.
+    - Total Token Capacity = 17,000,000,000 bytes / 409,600 bytes = 41,503 tokens.
+    - Max Batch Size (2048 token avg) = 41,503 / 2048 = 20 concurrent requests.
 
-    3. Total Token Capacity: 17 GB (17,000,000,000 bytes) / 409,600 bytes = 41,503 total tokens.
-
-    4. Sizing: If the average request uses 2048 tokens, the system can support a maximum
-    batch size of floor(41,503 / 2048) = 20 concurrent requests. Paged blocks of 16
-    tokens (~6.55 MB each) ensure exactly 0% external fragmentation.'
+    **Conclusion & Interpretation:**
+    - **Result: 20 concurrent requests (Memory-Bound)**. Paged blocks of 16 tokens ensure zero external fragmentation while supporting up to 20 concurrent requests.
 status: published
 provenance: imported
 requires_explanation: false

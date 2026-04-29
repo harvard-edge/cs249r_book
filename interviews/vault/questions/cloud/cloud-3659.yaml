@@ -8,29 +8,25 @@ competency_area: architecture
 bloom_level: create
 phase: inference
 title: Kubernetes Operator Design for Distributed Training Jobs
-scenario: Your team runs distributed PyTorch training jobs on H100 (80GB HBM3) using
-  kubeflow/training-operator (PyTorchJob). A 64-GPU training run (8 nodes * 8 GPUs)
-  fails when 1 node is preempted. The job restarts from scratch, wasting 3 hours of
-  compute. Design a fault-tolerant orchestration strategy.
-question: How would you orchestrate the 64-GPU PyTorchJob so a single node preemption
-  does not restart 3 hours of training from scratch?
+scenario: Your team runs distributed PyTorch training jobs on H100 (80GB HBM3) using kubeflow/training-operator (PyTorchJob). A 64-GPU training run (8 nodes * 8 GPUs) fails when 1 node is preempted. The job restarts from scratch, wasting 3 hours of compute.
+question: How would you orchestrate the 64-GPU PyTorchJob so a single node preemption does not restart 3 hours of training from scratch?
 details:
-  realistic_solution: Use Elastic Training (torch.distributed.elastic) with min_nodes=7,
-    max_nodes=8 to continue training with 7 nodes after preemption. Write checkpoints
-    asynchronously to S3 (5-10GB/s multipart) every 15 minutes. Use pod priority classes
-    to prevent training pods from being preempted; reserve spot-instance nodes for
-    training with on-demand for masters. Implement checkpoint sharding across ranks
-    to parallelize writes.
-  common_mistake: 'Using CheckpointSave callbacks that write to NFS every epoch. NFS
-    write throughput for 140GB (70B FP16 checkpoint) is 1GB/s = 140 seconds. At 100B
-    tokens with 2-minute epochs: checkpointing takes 12% of training time and creates
-    a serialization bottleneck.'
-  napkin_math: '64-GPU job, 3-hour failure = 64 * 400W * 3h = 76.8 kWh wasted. At
-    $0.12/kWh = $9.22 wasted energy + $3-8/GPU-hour cloud cost = ~$600 wasted per
-    failure. Checkpoint to S3 via multipart: 140GB at 10GB/s = 14 seconds. Every 15
-    minutes: 14s/900s = 1.6% overhead. Elastic training with 7/8 nodes: throughput
-    drops 12.5%, adds 12.5% to training time — vastly better than full restart. Breakeven:
-    if failure probability >1% per hour, elastic training pays off.'
+  realistic_solution: 'Use Elastic Training (torch.distributed.elastic) with min_nodes=7, max_nodes=8 to continue training with 7 nodes after preemption. Write checkpoints asynchronously to S3 (5-10GB/s multipart) every 15 minutes. Use pod priority classes to prevent training pods from being preempted; reserve spot-instance nodes for training with on-demand for masters. Implement checkpoint sharding across ranks to parallelize writes.'
+  common_mistake: 'Using CheckpointSave callbacks that write to NFS every epoch. NFS write throughput for 140GB (70B FP16 checkpoint) is 1GB/s = 140 seconds. At 100B tokens with 2-minute epochs: checkpointing takes 12% of training time and creates a serialization bottleneck.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64-GPU job, 3-hour failure = 64 * 400W * 3h = 76.8 kWh wasted.
+    - Energy cost: $0.12/kWh, Cloud cost: $3-8/GPU-hour.
+    - Checkpoint to S3 via multipart: 140GB at 10GB/s.
+
+    **Calculations:**
+    - Cost of failure: $9.22 wasted energy + ~$600 wasted cloud cost.
+    - S3 checkpoint write time: 140GB / 10GB/s = 14 seconds.
+    - Overhead every 15 minutes: 14s / 900s = 1.6% overhead.
+    - Elastic training throughput drop: 12.5% (running on 7/8 nodes).
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.6% overhead prevents ~$600 loss per failure (Reliability-Bound)**. Elastic training combined with frequent async checkpointing is highly cost-effective if failure probability >1% per hour.
 status: published
 provenance: imported
 requires_explanation: true

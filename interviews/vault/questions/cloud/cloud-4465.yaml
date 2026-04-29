@@ -17,10 +17,19 @@ details:
     **The Rationale:** It guarantees no stale data is served and is conceptually simple to implement.
     **The Consequence:** With a 128MB L2 cache and updates every 5 minutes, a full cache flush eliminates the cache hit rate benefit entirely, causing a 100% cache miss rate after each update and spiking embedding lookup latency.
   napkin_math: |
-    1. **Cache Capacity:** 128MB cache / 256B per embedding (64-dim FP32) = 500K rows.
-    2. **Cache Hit Rate:** With 2B total rows, 500K covers 0.025%. By Zipf's law, this top 0.025% absorbs ~15% of traffic.
-    3. **Update Rate:** 1% of 2B rows = 20M updated rows per cycle.
-    4. **Staleness Probability:** If updates hit popular items more often, ~10% of the 15% cached traffic hits a stale row, leading to **~1.5% - 15%** stale requests overall.
+    **Assumptions & Constraints:**
+    - Total embeddings: 2 Billion rows.
+    - Cache capacity: 128MB L2 cache (fits ~500K FP32 64-dim rows, or 0.025% of total).
+    - Update rate: 1% of total rows updated per cycle (20M rows).
+    - 500K top rows serve ~15% of all traffic due to Zipfian distribution.
+
+    **Calculations:**
+    - Flushing the entire 128MB cache drops the hit rate to 0% every 5 minutes.
+    - A Bloom filter tracking 20M dirty rows takes ~20MB of memory (at 1% false positive rate).
+    - Downloading a 20MB Bloom filter takes <1ms and allows lazy, surgical invalidation.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~20MB Bloom Filter (Latency-Bound)**. Indiscriminate cache flushing destroys L2 hit rates and spikes backend load. Broadcasting a compact Bloom filter enables O(1) version checking and preserves the hot cache.
 status: published
 provenance: imported
 requires_explanation: false

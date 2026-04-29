@@ -11,7 +11,8 @@ title: Optimizing KV-Cache on AMD MI300X for High-Throughput LLM Inference
 scenario: 'You are the lead ML Systems engineer responsible for deploying a large language model with a 128k context window on an AMD MI300X accelerator, featuring 192 GB HBM3 memory and 5.3 TB/s memory bandwidth. Each token''s KV-cache entry (key and value vectors across all layers for a single token) requires approximately 64 KB of memory (e.g., for a large Llama-like model using FP16). Your objective is to maximize the number of concurrent active contexts while adhering to strict latency targets.'
 question: How would you design KV-cache paging and eviction on MI300X to maximize concurrent 128k-token contexts with 64 KB of KV per token?
 details:
-  realistic_solution: A realistic solution would involve implementing paged attention, where the KV-cache is stored in fixed-size blocks (e.g., 4KB or 16KB per block) dynamically allocated from the HBM3. This decouples logical context from physical memory layout, significantly mitigating fragmentation. Memory allocation would be managed by a custom GPU-aware allocator. For eviction, a policy that considers block usage frequency (LFU) or recency (LRU) at the block level, possibly combined with request priority, would be crucial. Strategies like 'pre-filling' short contexts and dynamically extending with paged attention for longer ones could also be considered. Maximizing the 5.3 TB/s memory bandwidth utilization would involve optimizing memory access patterns for block transfers and implementing efficient batching strategies to coalesce memory accesses.
+  realistic_solution: |
+    A realistic solution would involve implementing paged attention, where the KV-cache is stored in fixed-size blocks (e.g., 4KB or 16KB per block) dynamically allocated from the HBM3. This decouples logical context from physical memory layout, significantly mitigating fragmentation. Memory allocation would be managed by a custom GPU-aware allocator. For eviction, a policy that considers block usage frequency (LFU) or recency (LRU) at the block level, possibly combined with request priority, would be crucial. Strategies like 'pre-filling' short contexts and dynamically extending with paged attention for longer ones could also be considered. Maximizing the 5.3 TB/s memory bandwidth utilization would involve optimizing memory access patterns for block transfers and implementing efficient batching strategies to coalesce memory accesses.
   common_mistake: |
     **The Pitfall:** Allocating contiguous memory for the entire context window.
     
@@ -19,12 +20,18 @@ details:
     
     **The Consequence:** Dramatically reduced concurrency, frequent OOMs, and the inability to fully utilize the MI300X's massive 192 GB HBM.
   napkin_math: |
-    * **KV Cache per Token:** 64 KB (for K and V across all layers)
-    * **Max Context Memory:** 128,000 tokens × 64 KB = 8.19 GB per full context
-    * **Theoretical Max Contexts (Full):** 192 GB HBM / 8.19 GB = ~23 contexts
-    * **Average Context Memory (Paged):** 32,000 tokens × 64 KB = 2.05 GB
-    * **Theoretical Average Contexts:** 192 GB / 2.05 GB = ~93 contexts
-    * **Result:** **Paged attention increases the active context capacity from ~23 to ~93 by sharing memory dynamically.**
+    **Assumptions & Constraints:**
+    - KV Cache per Token: 64 KB (for K and V across all layers).
+    - HBM Capacity: 192 GB.
+
+    **Calculations:**
+    - Max Context Memory: 128,000 tokens * 64 KB = 8.19 GB per full context.
+    - Theoretical Max Contexts (Full): 192 GB HBM / 8.19 GB = ~23 contexts.
+    - Average Context Memory (Paged): 32,000 tokens * 64 KB = 2.05 GB.
+    - Theoretical Average Contexts: 192 GB / 2.05 GB = ~93 contexts.
+
+    **Conclusion & Interpretation:**
+    - **Result: 93 Contexts (Memory-Bound)**. Paged attention increases the active context capacity from ~23 to ~93 by sharing memory dynamically.
 status: published
 provenance: imported
 requires_explanation: true

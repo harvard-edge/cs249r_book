@@ -11,19 +11,21 @@ title: Investigating Tail Latency Spikes Under Memory Pressure
 scenario: 'An on-device LLM is deployed on a TPU with 12 GB shared RAM. Production telemetry shows a recurring anomaly: when the OS broadcasts memory pressure warnings, the p99 token generation latency spikes from 40ms to over 800ms, while TPU utilization drops to near zero. The 1.8GB model weights are loaded via memory mapping (mmap).'
 question: Why does the TPU utilization drop during memory pressure events, and what is the expected tail latency floor assuming a flash storage read speed of 2.5 GB/s?
 details:
-  realistic_solution: "Because the model weights are loaded via `mmap`, the OS treats them as file-backed, clean memory pages. Under system-wide memory pressure, the kernel aggressively evicts these unmodified pages from the RAM to satisfy other applications. When the LLM proceeds to generate the next token, accessing the weights triggers a cascade of major page faults. The TPU stalls completely, bound by the host CPU fetching the 1.8GB weight tensor synchronously from NAND flash storage over the NVMe interface."
+  realistic_solution: 'Because the model weights are loaded via `mmap`, the OS treats them as file-backed, clean memory pages. Under system-wide memory pressure, the kernel aggressively evicts these unmodified pages from the RAM to satisfy other applications. When the LLM proceeds to generate the next token, accessing the weights triggers a cascade of major page faults. The TPU stalls completely, bound by the host CPU fetching the 1.8GB weight tensor synchronously from NAND flash storage over the NVMe interface.'
   common_mistake: |
     **The Pitfall:** Blaming the TPU utilization drop on thermal throttling or CPU thread pausing.
     **The Rationale:** Candidates fail to understand the low-level OS interaction between mmap and memory pressure, where unmodified mapped files are instantly evicted from RAM.
     **The Consequence:** Misdiagnosing the latency spike as a compute bottleneck rather than a catastrophic flash I/O bottleneck caused by major page faults.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Evicted model payload: 1.8 GB.
-       - Flash storage read bandwidth: 2.5 GB/s.
-       - Base generation latency: 40 ms.
-    2. **Calculations:**
-       - Major page fault I/O penalty: 1.8 GB / 2.5 GB/s = 0.72 seconds (720 ms).
-       - Total tail latency: 720 ms + 40 ms = 760 ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Flash I/O-Bound.** The math perfectly aligns with the >800ms p99 telemetry spikes, proving the hardware is stalled entirely on major page faults rather than compute limitations.
+    **Assumptions & Constraints:**
+    - Evicted model payload: 1.8 GB.
+    - Flash storage read bandwidth: 2.5 GB/s.
+    - Base generation latency: 40 ms.
+
+    **Calculations:**
+    - Major page fault I/O penalty: 1.8 GB / 2.5 GB/s = 0.72 seconds (720 ms).
+    - Total tail latency: 720 ms + 40 ms = 760 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 760 ms (Flash I/O-Bound)**. The math perfectly aligns with the >800ms p99 telemetry spikes, proving the hardware is stalled entirely on major page faults rather than compute limitations.
 status: published

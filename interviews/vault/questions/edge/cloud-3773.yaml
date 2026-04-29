@@ -7,20 +7,24 @@ topic: load-balancing
 competency_area: deployment
 bloom_level: analyze
 phase: inference
-title: KV-Cache-Aware Load Balancing at the Edge
+title: 'KV-Cache-Aware Load Balancing at the Edge'
 scenario: 'You run a distributed inference service across 4 edge nodes (each with one GPU), serving a conversational AI. Users report that multi-turn conversations are much slower than single-turn queries. Your load balancer uses round-robin.'
 question: 'Why are multi-turn conversations slower with round-robin routing across 4 edge nodes, and how would you fix it?'
 details:
-  realistic_solution: 'When round-robin sends turn 2 of a conversation to a different node than turn 1, the new node has no KV cache for the prior context. It must reprocess all previous tokens (prefix recomputation) before generating the response, adding latency proportional to the conversation history length. For a conversation with 2000 tokens of history, this adds ~1-2 seconds of unnecessary prefill. Solution: session-affinity routing (sticky sessions). Hash the conversation_id to a specific node and route all turns of that conversation to the same node, preserving the KV cache. Implementation: (1) hash(conversation_id) → node_id, (2) if node is overloaded, migrate the conversation (send serialized KV cache to new node, ~50 MB for 2K context on 7B model, takes ~10ms over 10GbE), (3) set KV cache TTL to expire idle conversations and free GPU memory. This is exactly what prefix caching in vLLM solves at the framework level.'
-  common_mistake: |
-    **The Pitfall:** Thinking the model weights need to be reloaded per turn.
-    **The Rationale:** Candidates know that loading models is slow, so they misattribute the latency spike to weight IO.
-    **The Consequence:** They try to fix the issue by pinning weights into memory, which solves nothing since the actual bottleneck is prefix recomputation of the KV cache.
+  realistic_solution: 'When round-robin sends turn 2 of a conversation to a different node than turn 1, the new node has no KV cache for the prior context. It must reprocess all previous tokens (prefix recomputation). Solution: session-affinity routing (sticky sessions). Hash the conversation_id to a specific node to preserve the KV cache, similar to prefix caching in vLLM.'
+  common_mistake: 'Thinking the model weights need to be reloaded per turn. Pinning weights into memory solves nothing since the actual bottleneck is prefix recomputation of the KV cache.'
   napkin_math: |
-    * 2000-token history recompute: 2000 tokens × 1ms/token prefill = 2 seconds added latency per turn.
-    * With session affinity: 0s recompute.
-    * KV cache per conversation (7B model, 2K context): 32 layers × 2 × 4096 × 2000 × 2 bytes = ~1 GB.
-    * **Session affinity eliminates the 2-second prefill penalty at the cost of 1 GB KV cache memory per active conversation.**
+    **Assumptions & Constraints:**
+    - 7B model, 2K context, 32 layers.
+    - 2000-token history.
+    - Prefill speed: 1ms/token.
+
+    **Calculations:**
+    - Prefix recompute time: 2000 tokens * 1ms/token = 2 seconds added latency per turn.
+    - KV cache memory per conversation: 32 layers * 2 * 4096 * 2000 * 2 bytes ≈ 1 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0s Recompute vs 2s (Compute-Bound)**. Session affinity eliminates the 2-second prefill penalty at the cost of 1 GB KV cache memory per active conversation.
 status: published
 provenance: imported
 requires_explanation: false

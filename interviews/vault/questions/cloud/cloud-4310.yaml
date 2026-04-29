@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: inference
 title: Prefill Throughput Saturation Diagnosis
 scenario: Your prefill pool of 4 GPUs is processing at 150k tokens/s aggregate, but expected throughput is 400k tokens/s. Profiling shows GPU compute utilization at 35% and PCIe transfer utilization at 90%. All requests have sequence lengths of 512 tokens.
-question: Why is the 4-GPU prefill pool stuck at 150k tokens/s with 35% GPU compute and 90% PCIe utilization, and how would you fix it?
+question: 'Why is the 4-GPU prefill pool stuck at 150k tokens/s with 35% GPU compute and 90% PCIe utilization, and how would you fix it?'
 details:
   realistic_solution: 'PCIe at 90% utilization is the bottleneck. At 512-token sequences with FP16 tokens (embedding dim=8192 for a large model), input activations per request = 512 × 8192 × 2 bytes = 8.4 MB. At 150k tok/s, input transfer rate = 150e3/512 × 8.4 MB = 2.46 GB/s — not enough to saturate PCIe. The bottleneck is likely KV-cache output transfer to CPU pinned memory (pre-transfer staging before InfiniBand send). At 150k tokens/s output with 384 MB per 4096-token sequence: for 512-token sequences, KV = 384/8 = 48 MB. At 300 completions/s: 300 × 48 MB = 14.4 GB/s — close to PCIe 4.0 x16 limit of 32 GB/s but not over. Re-examine: are weight tensors being reloaded from CPU? Suspect the model doesn''t fit in 80 GB H100 and is paging weights over PCIe. 80 GB < model_size means PCIe is streaming weights. Fix: use tensor-parallel across all 4 H100s (total 320 GB) so weights fit in HBM, eliminating PCIe weight paging.'
   common_mistake: |
@@ -17,13 +17,16 @@ details:
     **The Rationale:** The real bottleneck is PCIe bandwidth.
     **The Consequence:** Increasing batch size only increases PCIe pressure further, resulting in zero or negative throughput gains.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 150k tok/s / 512 tok/seq = 293 forward passes/s.
-    2. **Calculations:**
-       - Model Size: 175B FP16 = 350 GB (exceeds 4x80GB = 320GB).
-       - Required PCIe Transfer: 293 * 350 GB = 102 TB/s.
-       - PCIe Limit: 32 GB/s.
-    3. **Conclusion & Interpretation:** **Result: Memory-Bandwidth-Bound.** The system is bottlenecked by a 3000x PCIe bandwidth deficit due to weight paging.
+    **Assumptions & Constraints:**
+    - 150k tok/s / 512 tok/seq = 293 forward passes/s.
+
+    **Calculations:**
+    - Model Size: 175B FP16 = 350 GB (exceeds 4x80GB = 320GB).
+    - Required PCIe Transfer: 293 * 350 GB = 102 TB/s.
+    - PCIe Limit: 32 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 102 TB/s vs 32 GB/s (Memory-Bandwidth-Bound)**. The system is bottlenecked by a 3000x PCIe bandwidth deficit due to weight paging.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,21 +11,23 @@ title: The Distillation Performance Trap
 scenario: Your team is optimizing a perception model for a forward-facing camera running on a Jetson AGX Orin with a hard real-time deadline of 33ms per frame (30 FPS). The current ResNet-based detection model is heavily optimized with TensorRT and runs in 22ms.
 question: Why could a lower-FLOP custom replacement for ResNet's Conv-BN-ReLU blocks run slower than the 22ms TensorRT baseline?
 details:
-  realistic_solution: The optimization traded a compute-bound problem for a memory-bound one by breaking operator fusion. TensorRT aggressively fuses standard `Conv-BN-ReLU` blocks into a single GPU kernel, keeping intermediate activations in fast on-chip L2 cache or registers. The custom operator prevents this fusion, forcing the intermediate outputs of the convolution, batch norm, and activation to be written to and read from main DRAM, severely throttling the pipeline on memory bandwidth despite fewer total FLOPs.
+  realistic_solution: The optimization traded a compute-bound problem for a memory-bound one by breaking operator fusion. TensorRT aggressively fuses standard Conv-BN-ReLU blocks into a single GPU kernel, keeping intermediate activations in fast on-chip L2 cache or registers. The custom operator prevents this fusion, forcing the intermediate outputs of the convolution, batch norm, and activation to be written to and read from main DRAM, severely throttling the pipeline on memory bandwidth despite fewer total FLOPs.
   common_mistake: |
     **The Pitfall:** Focusing only on arithmetic and assuming fewer FLOPs always means faster inference.
     **The Rationale:** Missing the systemic hardware interaction where breaking operator fusion forces intermediate data to spill from cache back to main memory.
     **The Consequence:** Deploying a "lighter" model that actually increases latency by 3x due to severe memory-bound thrashing.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Orin Memory Bandwidth: 204.8 GB/s.
-       - Fused Conv-BN-ReLU block memory traffic: Read input+weights (12MB), write output (10MB) = 22MB total.
-       - Unfused custom block: Conv writes 10MB, BN reads/writes 10MB/10MB, ReLU reads/writes 10MB/10MB = 62MB total.
-    2. **Calculations:**
-       - Fused kernel transfer time = 22 MB / 204.8 GB/s = 0.107 ms.
-       - Unfused kernel transfer time = 62 MB / 204.8 GB/s = 0.302 ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Latency increases ~3x per block. The unfused architecture shifts the bottleneck from compute-bound to strictly memory-bandwidth bound.**
+    **Assumptions & Constraints:**
+    - Orin Memory Bandwidth: 204.8 GB/s.
+    - Fused Conv-BN-ReLU block memory traffic: Read input+weights (12MB), write output (10MB) = 22MB total.
+    - Unfused custom block: Conv writes 10MB, BN reads/writes 10MB/10MB, ReLU reads/writes 10MB/10MB = 62MB total.
+
+    **Calculations:**
+    - Fused kernel transfer time = 22 MB / 204.8 GB/s = 0.107 ms.
+    - Unfused kernel transfer time = 62 MB / 204.8 GB/s = 0.302 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3x Latency Increase (Memory-Bandwidth-Bound)**. The unfused architecture shifts the bottleneck from compute-bound to strictly memory-bandwidth bound.
 status: published
 provenance: imported
 requires_explanation: false

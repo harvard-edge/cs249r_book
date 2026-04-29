@@ -11,17 +11,23 @@ title: Diagnosing LLM Latency Spikes with KV Cache Offloading
 scenario: You are deploying a 70B parameter LLM (140GB in FP16) on a node with 4x A100 40GB GPUs (160GB total HBM2). To support high concurrency, you configure your serving engine to offload the KV cache to the host's CPU RAM (1TB DDR4) over PCIe Gen4 x16. Under normal load, Time Per Output Token (TPOT) is 50ms. However, during peak traffic, TPOT suddenly degrades to >800ms while GPU compute utilization drops below 30% and PCIe TX/RX traffic saturates.
 question: What is causing TPOT to jump above 800ms with low GPU utilization and saturated PCIe traffic?
 details:
-  realistic_solution: The root cause is PCIe Gen4 bandwidth saturation due to KV cache thrashing. The model weights consume 140GB, leaving only 20GB of HBM for the active KV cache. Once concurrency exceeds this 20GB threshold, the system must constantly swap active KV blocks between slower CPU RAM and fast HBM for every generated token. The solution is to strictly cap maximum concurrency so the active KV cache fits within the 20GB HBM, implement PagedAttention to eliminate memory fragmentation, or upgrade to 80GB A100s.
+  realistic_solution: 'The root cause is PCIe Gen4 bandwidth saturation due to KV cache thrashing. The model weights consume 140GB, leaving only 20GB of HBM for the active KV cache. Once concurrency exceeds this 20GB threshold, the system must constantly swap active KV blocks between slower CPU RAM and fast HBM for every generated token. The solution is to strictly cap maximum concurrency so the active KV cache fits within the 20GB HBM, implement PagedAttention to eliminate memory fragmentation, or upgrade to 80GB A100s.'
   common_mistake: |
     **The Pitfall:** Blaming CPU RAM capacity exhaustion or compute-bound self-attention.
     **The Rationale:** Engineers see the latency spike and low GPU utilization and assume the CPU or GPU cores are failing, rather than the interconnect.
     **The Consequence:** Expensive CPU or GPU upgrades are purchased without fixing the actual PCIe bandwidth bottleneck.
   napkin_math: |
-    *   **Available HBM for KV Cache:** 160 GB (Total) - 140 GB (Weights) = 20 GB.
-    *   **PCIe Gen4 x16 Bandwidth:** ~32 GB/s.
-    *   **Thrashing State:** Concurrency requires 40 GB of active KV cache, meaning 20 GB must be swapped per generation step.
-    *   **Swap Latency:** 20 GB / 32 GB/s = 625 ms.
-    *   **Total TPOT:** 50 ms (Base Compute) + 625 ms (PCIe Swap) + Engine Overhead = **~800 ms latency spike.**
+    **Assumptions & Constraints:**
+    - Available HBM for KV Cache: 160 GB (Total) - 140 GB (Weights) = 20 GB.
+    - PCIe Gen4 x16 Bandwidth: ~32 GB/s.
+    - Thrashing State: Concurrency requires 40 GB of active KV cache, meaning 20 GB must be swapped per generation step.
+
+    **Calculations:**
+    - Swap Latency: 20 GB / 32 GB/s = 625 ms.
+    - Total TPOT: 50 ms (Base Compute) + 625 ms (PCIe Swap) + Engine Overhead = ~800 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~800 ms (Bandwidth-Bound)**. The limited PCIe bandwidth causes severe latency spikes due to thrashing when offloading the KV Cache.
 status: published
 provenance: imported
 requires_explanation: false

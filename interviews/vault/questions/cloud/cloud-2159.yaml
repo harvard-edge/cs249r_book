@@ -9,7 +9,7 @@ bloom_level: evaluate
 phase: training
 title: The Slow Training Step Diagnosis
 scenario: Your 70B model training on 256 GPUs shows each training step takes 12 seconds, but your napkin math predicts it should take ~4 seconds. GPU utilization averages 35%.
-question: "How would you profile a 70B run on 256 GPUs to find why steps take 12s instead of the expected 4s?"
+question: How would you profile a 70B run on 256 GPUs to find why steps take 12s instead of the expected 4s?
 details:
   realistic_solution: 'Systematic decomposition of one training step: (1) **Forward pass**: profile with nsys — check kernel occupancy and whether matmuls are hitting Tensor Cores (look for SM efficiency >80%). (2) **Backward pass**: should be ~2× forward. If >2.5×, check for unintended gradient computation on frozen layers or recomputation without checkpointing benefits. (3) **AllReduce**: time the gradient sync. For 70B params in BF16 = 140 GB. Ring AllReduce with 256 GPUs over NVLink+IB: theoretical ~1.5s. If actual >3s, check for stragglers or network congestion. (4) **Optimizer step**: Adam update on 70B params = ~0.2s. (5) **Data loading**: if data pipeline is not prefetched, the GPU waits for the next batch. (6) **CUDA synchronization overhead and Python GIL**: torch.compile or CUDA graph capture eliminates this. Most common culprits in order: data loading stalls (~40% of cases), AllReduce stragglers (~25%), poor Tensor Core utilization (~20%), other (~15%).'
   common_mistake: |
@@ -17,15 +17,17 @@ details:
     **The Rationale:** A 3x performance gap requires systematically decomposing the step into all components (compute, sync, data loading).
     **The Consequence:** Wasting time tuning network parameters when the bottleneck might be data loading or poor utilization.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Expected step: Forward (1s) + Backward (2s) + AllReduce (1s) + Optimizer (0.2s) = 4.2s.
-       - Observed step: 12 seconds.
-    2. **Calculations:**
-       - Data loading stall: Adds 3s.
-       - AllReduce straggler: Adds 5s.
-       - Simultaneous overlap: 4.2s + 3s + 5s = 12.2s.
-    3. **Conclusion & Interpretation:**
-       - **Result: Pipeline-Bound Stalls**. `nsys` profiling reveals gaps between backward end and AllReduce start, isolating data pipeline stalls and stragglers.
+    **Assumptions & Constraints:**
+    - Expected step: Forward (1s) + Backward (2s) + AllReduce (1s) + Optimizer (0.2s) = 4.2s.
+    - Observed step: 12 seconds.
+
+    **Calculations:**
+    - Data loading stall: Adds 3s.
+    - AllReduce straggler: Adds 5s.
+    - Simultaneous overlap: 4.2s + 3s + 5s = 12.2s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Pipeline-Bound Stalls**. `nsys` profiling reveals gaps between backward end and AllReduce start, isolating data pipeline stalls and stragglers.
 status: published
 provenance: imported
 requires_explanation: false

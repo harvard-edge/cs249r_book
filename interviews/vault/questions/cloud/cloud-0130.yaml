@@ -8,33 +8,30 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The Chatbot Latency Spike
-scenario: You are an MLE on the AI Chatbot team, responsible for a real-time LLM inference service using
-  a 7B parameter model on H100 GPUs. Users are complaining about 'laggy' responses. Your monitoring dashboard
-  shows that while average Time-To-First-Token (TTFT) is acceptable at ~30ms, the P99 TTFT is over 200ms.
-  Furthermore, `nvidia-smi` shows GPU utilization is spiky and averages only 40%, well below your 90%
-  target.
-question: "What scheduling issue explains low 40% GPU utilization and P99 TTFT over 200ms when average TTFT is only 30ms?"
+scenario: You are an MLE on the AI Chatbot team, responsible for a real-time LLM inference service using a 7B parameter model on H100 GPUs. Users are complaining about 'laggy' responses. Your monitoring dashboard shows that while average Time-To-First-Token (TTFT) is acceptable at ~30ms, the P99 TTFT is over 200ms. Furthermore, `nvidia-smi` shows GPU utilization is spiky and averages only 40%, well below your 90% target.
+question: What scheduling issue explains low 40% GPU utilization and P99 TTFT over 200ms when average TTFT is only 30ms?
 details:
-  realistic_solution: The root cause is head-of-line blocking introduced by the static batching strategy.
-    This approach forces requests that arrive early in the 50ms window to wait unnecessarily, directly
-    causing high tail latency (P99). This fixed wait also leads to inefficient, small batches when the
-    request rate is low or bursty, causing the low GPU utilization. The combination of high latency and
-    low utilization is a classic symptom of a poorly designed scheduling/batching system that fails to
-    adapt to a variable workload.
-  common_mistake: Engineers often focus only on the raw model execution time (prefill and decode) and
-    forget the queueing and scheduling time, which often dominates the end-to-end latency in a live service.
-    They mistakenly blame the hardware's speed (e.g., 'we need faster GPUs') instead of the system's scheduling
-    logic, which is the actual source of the bottleneck.
-  napkin_math: 'Theoretical Time Per Output Token (TPOT) for a 7B model (14GB weights) on H100 (3.35TB/s) is 14GB / 3.35TB/s = 4.17ms at batch size 1. This means the decode phase is extremely fast. The 30ms average TTFT indicates that the prefill and network overhead are also fast. However, a P99 TTFT of >200ms means a request is sitting completely idle in a queue for ~170ms before it even hits the GPU. This happens when a request arrives just after a batch starts computing; it must wait for the current batch to generate its tokens (e.g., 30 tokens * ~4.2ms = ~126ms) plus the static batching window (50ms), totaling ~176ms of queue time. The 40% GPU utilization confirms the GPU is starved for work while requests are artificially held back by the static batching window.'
+  realistic_solution: 'The root cause is head-of-line blocking introduced by the static batching strategy. This approach forces requests that arrive early in the 50ms window to wait unnecessarily, directly causing high tail latency (P99). This fixed wait also leads to inefficient, small batches when the request rate is low or bursty, causing the low GPU utilization. The combination of high latency and low utilization is a classic symptom of a poorly designed scheduling/batching system that fails to adapt to a variable workload.'
+  common_mistake: 'Engineers often focus only on the raw model execution time (prefill and decode) and forget the queueing and scheduling time, which often dominates the end-to-end latency in a live service. They mistakenly blame the hardware''s speed (e.g., ''we need faster GPUs'') instead of the system''s scheduling logic, which is the actual source of the bottleneck.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B model (14GB weights) on H100 (3.35TB/s bandwidth).
+    - Average TTFT: ~30ms, P99 TTFT: >200ms.
+    - Batch window: 50ms (inferred from wait times).
+
+    **Calculations:**
+    - Theoretical TPOT (batch 1): 14GB / 3.35TB/s = 4.17ms.
+    - Token generation time (30 tokens): 30 * 4.2ms ≈ 126ms.
+    - Worst-case queue time: generation time (126ms) + batch window (50ms) = 176ms.
+    - Worst-case TTFT: 176ms wait + 30ms processing = ~206ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~206ms worst-case TTFT (Queueing-Delay-Bound)**. Spiky GPU utilization and high P99 TTFT are classic symptoms of static batching overhead causing head-of-line blocking.
   options:
-  - The H100's memory bandwidth is insufficient for the 7B model, making the memory-bound decode step
-    (TPOT) the bottleneck.
-  - The prefill computation for processing the input prompt is too slow, making the service compute-bound
-    on the GPU.
-  - The static batching timeout creates head-of-line blocking and inefficient small batches, leading to
-    high queueing delay and low GPU utilization.
-  - Network latency for incoming requests is highly variable, and the serving system has no control over
-    this external factor.
+  - The H100's memory bandwidth is insufficient for the 7B model, making the memory-bound decode step (TPOT) the bottleneck.
+  - The prefill computation for processing the input prompt is too slow, making the service compute-bound on the GPU.
+  - The static batching timeout creates head-of-line blocking and inefficient small batches, leading to high queueing delay and low GPU utilization.
+  - Network latency for incoming requests is highly variable, and the serving system has no control over this external factor.
   correct_index: 2
 status: published
 provenance: imported

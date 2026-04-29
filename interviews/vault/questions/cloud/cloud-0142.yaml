@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: inference
 title: The Continuous Batching Plateau
 scenario: 'A team migrates their Llama-70B service from static batching to a continuous batching system (like PagedAttention) on H100 GPUs. They expected a 2-3x throughput increase based on papers, but they only observe a modest ~30% gain at their target latency. Profiling shows high KV cache utilization, but the GPU is not at 100% utilization.'
-question: What practical system constraint is preventing them from reaching the theoretical throughput gains from continuous batching?
+question: 'What practical system constraint is preventing them from reaching the theoretical throughput gains from continuous batching?'
 details:
   realistic_solution: "Continuous batching brilliantly solves the problem of memory fragmentation by allowing requests of different lengths to be packed together efficiently. This is why KV cache utilization is high. However, it does not eliminate the fundamental costs of inference. The modest throughput gain and sub-100% GPU utilization suggest the system is now bottlenecked by the *prefill phase* for new, incoming requests. While the GPU is efficiently decoding tokens for the existing batch (a memory-bandwidth bound task), it must periodically switch to the compute-heavy prefill operation for new requests. If new requests arrive frequently, the system spends a significant fraction of its time in this compute-bound prefill state, which has a lower arithmetic intensity than the decode phase and can't always saturate the H100's massive compute resources. The 'plateau' occurs because they have traded a memory capacity/fragmentation bottleneck for a prefill compute bottleneck."
   common_mistake: |
@@ -17,9 +17,15 @@ details:
     **The Rationale:** Engineers often realize it solves memory fragmentation but fail to recognize it trades one bottleneck for another (often prefill compute or memory bandwidth).
     **The Consequence:** The team might incorrectly diagnose the lower-than-expected gains as a network issue or a bug in the implementation.
   napkin_math: |
-    - **Decode Phase**: To generate one token for the batch, the GPU must stream the 70B model weights from HBM.
-    - **Time Calculation**: `(70B params * 2 bytes/param) / 3.35 TB/s` = `140 GB / 3350 GB/s`.
-    - **Final Result**: **~41.8 ms** (or ~42ms). This is the theoretical time per token for the *entire batch* during the memory-bound decode phase.
+    **Assumptions & Constraints:**
+    - Model: Llama-70B (70B params * 2 bytes/param = 140 GB).
+    - Memory Bandwidth: H100 at 3.35 TB/s.
+
+    **Calculations:**
+    - Decode Phase streaming time: 140 GB / 3350 GB/s = 41.8 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~42ms (Compute-Bound)**. The system trades memory capacity limits for compute-heavy prefill bottlenecks, lowering overall arithmetic intensity.
 status: published
 provenance: imported
 requires_explanation: false

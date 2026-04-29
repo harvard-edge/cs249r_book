@@ -11,22 +11,24 @@ title: The NPU Context-Switching Tax
 scenario: 'A cloud-managed edge gateway in a smart retail store processes camera streams by running 3 models sequentially per frame: Detection (10ms), Tracking (5ms), and Pose Estimation (15ms). The sum of individual model latencies is 30ms. All three models are perfectly compiled for the edge NPU. However, the measured end-to-end pipeline latency per frame is 80ms, limiting throughput to 12 FPS instead of the expected 33 FPS.'
 question: Why is the three-model edge pipeline 80ms instead of 30ms, and how would you restructure serving to improve throughput?
 details:
-  realistic_solution: "The hidden latency comes from NPU SRAM weight swapping (Context Switching). Edge NPUs typically have very small on-chip SRAM (e.g., 4MB to 8MB) to save power and die area. \n\nIf the combined weights of the 3 models (e.g., 15MB total) exceed the NPU's SRAM capacity, the NPU driver must constantly swap model weights in and out of main DRAM for every single frame. This requires tearing down the NPU context, flushing SRAM, copying new weights over the memory bus, and initializing the next model. The hardware-algorithm tradeoff requires restructuring the serving pattern: instead of running the pipeline sequentially per frame (D -> T -> P -> D -> T -> P), you should batch frames per model (e.g., run Detection on 5 frames, then Tracking on 5 frames). This amortizes the context-switching overhead over multiple frames, increasing throughput at the cost of slightly higher pipeline latency for the first frame."
+  realistic_solution: 'The hidden latency comes from NPU SRAM weight swapping (Context Switching). Edge NPUs typically have very small on-chip SRAM (e.g., 4MB to 8MB) to save power and die area. \n\nIf the combined weights of the 3 models (e.g., 15MB total) exceed the NPU''s SRAM capacity, the NPU driver must constantly swap model weights in and out of main DRAM for every single frame. This requires tearing down the NPU context, flushing SRAM, copying new weights over the memory bus, and initializing the next model. The hardware-algorithm tradeoff requires restructuring the serving pattern: instead of running the pipeline sequentially per frame (D -> T -> P -> D -> T -> P), you should batch frames per model (e.g., run Detection on 5 frames, then Tracking on 5 frames). This amortizes the context-switching overhead over multiple frames, increasing throughput at the cost of slightly higher pipeline latency for the first frame.'
   common_mistake: |
     **The Pitfall:** Blaming Python GIL overhead, image preprocessing, or PCIe transfer times for the camera frames.
     **The Rationale:** Candidates often default to system-level software overheads without considering the hardware realities of accelerator memory hierarchies.
     **The Consequence:** Proposing software-level optimizations that completely fail to address the fundamental hardware bottleneck, leaving throughput constrained.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Compute latencies: 10ms + 5ms + 15ms = 30ms.
-       - Model size: 5MB each. DRAM BW: 4 GB/s. NPU overhead: 15ms/swap.
-    2. **Calculations:**
-       - Swap read = 5MB / 4GB/s = 1.25ms.
-       - Total swap cost = 1.25ms + 15ms = 16.25ms.
-       - 3 swaps * 16.25ms = 48.75ms overhead.
-       - Total latency = 30ms + 48.75ms = 78.75ms (~80ms).
-    3. **Conclusion & Interpretation:**
-       - **Result: Context-Switching Bound.** Restructuring to batch frames per model amortizes the massive 48.75ms swap overhead.
+    **Assumptions & Constraints:**
+    - Compute latencies: 10ms + 5ms + 15ms = 30ms.
+    - Model size: 5MB each. DRAM BW: 4 GB/s. NPU overhead: 15ms/swap.
+
+    **Calculations:**
+    - Swap read = 5MB / 4GB/s = 1.25ms.
+    - Total swap cost = 1.25ms + 15ms = 16.25ms.
+    - 3 swaps * 16.25ms = 48.75ms overhead.
+    - Total latency = 30ms + 48.75ms = 78.75ms (~80ms).
+
+    **Conclusion & Interpretation:**
+    - **Result: 48.75ms overhead (Context-Switching Bound)**. Restructuring to batch frames per model amortizes the massive 48.75ms swap overhead.
 status: published
 provenance: imported
 requires_explanation: false

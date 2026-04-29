@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: both
 title: Diagnosing Bottlenecks in Disaggregated LLM Inference
 scenario: 'You operate a disaggregated serving architecture for a 70B parameter LLM, routing prefill requests to an A100 pool and decode requests to an H100 pool. With a workload of 8192 input tokens and 128 output tokens, Time-To-First-Token (TTFT) is <1s, but Time-Per-Output-Token (TPOT) degrades severely from 20ms to >150ms. Decode nodes exhibit frequent Out-Of-Memory (OOM) errors despite low compute utilization. The cluster uses 100 Gbps Ethernet between the pools.'
-question: "What is causing the decode-pool TPOT degradation and OOMs for 8192-token contexts over 100 Gbps Ethernet?"
+question: 'What is causing the decode-pool TPOT degradation and OOMs for 8192-token contexts over 100 Gbps Ethernet?'
 details:
   realistic_solution: 'The root cause is a severe network bottleneck and memory exhaustion from transferring massive KV caches for long-context requests. Moving a 2.68 GB KV cache for an 8K context request across a 100 Gbps (12.5 GB/s) link takes 214ms, blocking the decode node. A batch of 10 completed prefill requests creates a 2.14s transfer bottleneck and a sudden 26.8 GB memory spike on the decode node, starving active decoding sequences (ruining TPOT) and risking OOMs. The fix is to implement KV cache streaming with priority scheduling and admission control based on available decode memory.'
   common_mistake: |
@@ -17,17 +17,19 @@ details:
     **The Rationale:** Candidates assume TPOT is strictly a function of decode node throughput, ignoring the massive state transfer overhead required by disaggregated architectures for long contexts.
     **The Consequence:** The TPOT degradation and OOM crashes persist because the actual bottleneck—the network transfer latency and sudden memory spikes from massive KV caches—is completely unaddressed.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model: 70B params (80 layers, 64 heads, 128 head dim, FP16). GQA with 8 KV heads.
-       - Context: 8192 tokens.
-       - Network: 100 Gbps (12.5 GB/s) Ethernet.
-       - Prefill batch size: 10.
-    2. **Calculations:**
-       - KV cache size per request = 2 (K,V) × 2 bytes × 80 layers × 8 KV heads × 128 dim × 8192 tokens ≈ 2.68 GB.
-       - Single request transfer latency = 2.68 GB / 12.5 GB/s ≈ 214 ms.
-       - Batch of 10 requests = 26.8 GB spike and 2.14s network transfer stall.
-    3. **Conclusion & Interpretation:**
-       - **Result: Network and Memory Bound**. The 2.14s network transfer blocks the decode node entirely, ruining TPOT, while the sudden 26.8 GB influx of KV cache memory triggers immediate OOMs on active sequences.
+    **Assumptions & Constraints:**
+    - Model: 70B params (80 layers, 64 heads, 128 head dim, FP16). GQA with 8 KV heads.
+    - Context: 8192 tokens.
+    - Network: 100 Gbps (12.5 GB/s) Ethernet.
+    - Prefill batch size: 10.
+
+    **Calculations:**
+    - KV cache size per request = 2 (K,V) × 2 bytes × 80 layers × 8 KV heads × 128 dim × 8192 tokens ≈ 2.68 GB.
+    - Single request transfer latency = 2.68 GB / 12.5 GB/s ≈ 214 ms.
+    - Batch of 10 requests = 26.8 GB spike and 2.14s network transfer stall.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network and Memory Bound**. The 2.14s network transfer blocks the decode node entirely, ruining TPOT, while the sudden 26.8 GB influx of KV cache memory triggers immediate OOMs on active sequences.
 status: published
 provenance: imported
 requires_explanation: false

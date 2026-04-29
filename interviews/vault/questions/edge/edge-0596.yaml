@@ -7,21 +7,25 @@ topic: real-time-deadlines
 competency_area: precision
 bloom_level: evaluate
 phase: inference
-title: The Headlight Blindness Quantization Failure
-scenario: 'Your team is optimizing a critical pedestrian detection model for an automotive ECU, targeting a Jetson AGX Orin. To meet the 33ms hard real-time deadline, you''ve quantized the model from FP16 to INT8 using post-training quantization (PTQ). Your calibration dataset consists of 10,000 diverse daytime driving scenes. The resulting INT8 model maintains 99% of the FP16 accuracy on your daytime validation set. However, during in-car night testing, the model''s recall for pedestrians drops to nearly zero when the camera sees oncoming headlights, whereas the original FP16 model handled the scene correctly. The on-call playbook suggests "re-calibrating with more diverse data, including night scenes."'
-question: "Why did PTQ pass daytime validation but fail under headlight glare, and what immediate fix beats simply adding night calibration data?"
+title: 'The Headlight Blindness Quantization Failure'
+scenario: 'Your team is optimizing a critical pedestrian detection model for an automotive ECU, targeting a Jetson AGX Orin. To meet the 33ms hard real-time deadline, you''ve quantized the model from FP16 to INT8 using post-training quantization (PTQ). Your calibration dataset consists of 10,000 diverse daytime driving scenes. The resulting INT8 model maintains 99% of the FP16 accuracy on your daytime validation set. However, during in-car night testing, the model''s recall for pedestrians drops to nearly zero when the camera sees oncoming headlights, whereas the original FP16 model handled the scene correctly.'
+question: 'Why did PTQ pass daytime validation but fail under headlight glare, and what immediate fix beats simply adding night calibration data?'
 details:
-  realistic_solution: 'The playbook is wrong because this isn''t a simple data distribution mismatch; it''s a catastrophic failure caused by activation range overflow. The daytime calibration set established a relatively narrow dynamic range for the activation values. The intense, localized brightness of headlights creates activation values that are orders of magnitude larger than anything seen during calibration. In INT8, these extreme values are clipped (or ''saturated'') to the maximum representable value (e.g., 127), causing a massive, non-linear loss of information in critical layers. The model can no longer distinguish between ''bright'' and ''blinding,'' effectively erasing the features needed for detection.'
-  common_mistake: |
-    **The Pitfall:** Blindly following the playbook to "add more data" without diagnosing the mathematical failure.
-    **The Rationale:** It's standard practice to treat accuracy regressions as a data distribution mismatch.
-    **The Consequence:** Re-calibrating with night data applies a massive, overly conservative scale factor to handle the headlights, permanently degrading daytime precision by compressing normal activation ranges.
+  realistic_solution: 'The catastrophic failure is caused by activation range overflow. The daytime calibration set established a narrow dynamic range. Headlights create values orders of magnitude larger, which get saturated to the maximum representable value in INT8 (127), destroying gradients. A simple data fix degrades daytime precision.'
+  common_mistake: 'Blindly following the playbook to add more data without diagnosing the mathematical failure. Re-calibrating with night data applies a massive scale factor that permanently degrades daytime precision.'
   napkin_math: |
-    * Assume a key daytime convolutional layer activation range is `[-6.0, 6.0]`.
-    * PTQ maps this to INT8 `[-128, 127]`. Scaling factor S = 12.0 / 255 ≈ 0.047.
-    * Headlight glare causes activation values of `50.0`.
-    * 50.0 / 0.047 = 1063, which massively overflows the INT8 max of 127.
-    * **The INT8 clipping destroys the signal gradient completely, erasing the features needed for detection.**
+    **Assumptions & Constraints:**
+    - Daytime activation range: [-6.0, 6.0].
+    - PTQ maps to INT8 [-128, 127].
+    - Headlight glare activation: 50.0.
+
+    **Calculations:**
+    - Scaling factor S = 12.0 / 255 ≈ 0.047.
+    - Unclipped value for headlight: 50.0 / 0.047 = 1063.
+    - 1063 massively overflows the INT8 max of 127.
+
+    **Conclusion & Interpretation:**
+    - **Result: 127 Hard Clip (Precision-Bound)**. The INT8 clipping destroys the signal gradient completely, erasing the features needed for detection.
 status: published
 provenance: imported
 requires_explanation: false

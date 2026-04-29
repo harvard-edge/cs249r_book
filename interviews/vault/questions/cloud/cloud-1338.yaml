@@ -11,23 +11,25 @@ title: Silent Failures in Traced Dynamic Control Flow
 scenario: An ML engineer deploys a PyTorch NLP router model. The forward() method contains data-dependent control flow. To minimize Python overhead, the model is compiled using torch.jit.trace with a dummy input tensor of shape [16, 64]. In production, requests with sequence length 256 unexpectedly run in ~3ms and yield garbage outputs. No errors are thrown.
 question: Why do sequence length 256 requests silently fail and execute rapidly after tracing with a [16, 64] dummy input, and how is it fixed?
 details:
-  realistic_solution: Diagnose that `torch.jit.trace` only records the operations executed by the specific tracing input. Since the dummy input (seq=64) took the `fast_path`, the `if` condition was baked in as a constant `True`. All production inputs execute `fast_path`. The fix is to use `torch.jit.script` or `torch.cond`.
+  realistic_solution: 'Diagnose that torch.jit.trace only records the operations executed by the specific tracing input. Since the dummy input (seq=64) took the fast_path, the if condition was baked in as a constant True. All production inputs execute fast_path. The fix is to use torch.jit.script or torch.cond.'
   common_mistake: |
     **The Pitfall:** Assuming torch.jit.trace performs static analysis of the Python AST to capture all branches.
     **The Rationale:** Candidates believe the framework automatically handles dynamic control flow or will re-trace when input shapes change.
     **The Consequence:** Deploying silently broken models that execute the wrong computation graph for out-of-distribution input shapes.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Tracing input shape is [16, 64].
-       - Conditional `if x.size(1) <= 128`.
-       - `fast_path` takes ~2 GFLOPs for seq=64.
-    2. **Calculations:**
-       - Tracing evaluates `64 <= 128` as `True`. Tracer records ONLY `fast_path`.
-       - Production input [16, 256] blindy executes `fast_path`.
-       - `fast_path` scales linearly: ~4x compute = 8 GFLOPs.
-       - 8 GFLOPs on GPU takes ~3ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Logic Error.** Using `torch.jit.script` ensures all control flow branches are compiled correctly.
+    **Assumptions & Constraints:**
+    - Tracing input shape is [16, 64].
+    - Conditional `if x.size(1) <= 128`.
+    - `fast_path` takes ~2 GFLOPs for seq=64.
+
+    **Calculations:**
+    - Tracing evaluates `64 <= 128` as `True`. Tracer records ONLY `fast_path`.
+    - Production input [16, 256] blindy executes `fast_path`.
+    - `fast_path` scales linearly: ~4x compute = 8 GFLOPs.
+    - 8 GFLOPs on GPU takes ~3ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3ms (Logic Error)**. Using `torch.jit.script` ensures all control flow branches are compiled correctly.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,22 +7,26 @@ topic: quantization-fundamentals
 competency_area: precision
 bloom_level: remember
 phase: both
-title: Hailo-8 Min-Max Calibration
+title: 'Hailo-8 Min-Max Calibration'
 scenario: 'A team compiled YOLOv5s for the Hailo-8 using the Hailo Dataflow Compiler (DFC). The Hailo-8 is a uniform per-tensor symmetric INT8 device with no per-channel quantization for activations. Running DFC''s default Min-Max calibrator on a 1024-image set produced a 10% mAP drop vs. the FP32 baseline; switching DFC to its entropy (percentile/KL) calibrator recovered most of the loss without retraining. The team observed that the SiLU-output activations had a long upper tail (max ~84, 99.9th percentile ~12).'
 question: 'Recall why Min-Max calibration collapses INT8 dynamic range on Hailo-8 SiLU outputs, and compute the effective bit loss.'
 details:
-  realistic_solution: 'Hailo-8 uses per-tensor symmetric INT8 (range [-127, 127]), so the scale is set by max(|x|). Min-Max picks scale = 84/127 ~= 0.661, so one INT8 step represents 0.661 in activation space, and the 99.9th-percentile bulk of the tensor (|x| <= 12) collapses into only 12/0.661 ~= 18 INT8 levels - log2(18) ~= 4.17 effective bits, almost half of the nominal 8. Entropy calibration in the Hailo DFC clips at a percentile (~99.99th, scale set near 12/127 ~= 0.094), keeping the bulk of the distribution mapped to ~127 levels (log2(127) ~= 6.99 bits, essentially the full INT8 budget) at the cost of clipping a handful of tail values. Because Hailo-8 lacks per-channel activation quantization, the SiLU outlier in any channel poisons the entire tensor''s scale, which is why the recovery is dramatic. The downstream conv layer consuming this tensor loses the most resolution under Min-Max.'
-  common_mistake: |
-    **The Pitfall:** Treating Min-Max as "safer because it never clips."
-    **The Rationale:** Candidates believe that preserving the absolute maximum value prevents data loss.
-    **The Consequence:** On a per-tensor symmetric INT8 device, a single outlier forces the entire bulk of the tensor's values into a tiny integer range, discarding roughly 3 effective bits and destroying accuracy.
+  realistic_solution: 'Hailo-8 uses per-tensor symmetric INT8. Min-Max picks scale based on the extreme outlier, forcing the bulk of the tensor to collapse into a tiny integer range. Entropy calibration clips the tail, keeping the bulk mapped to the full INT8 budget. Because Hailo-8 lacks per-channel activation quantization, the SiLU outlier in any channel poisons the entire tensor''s scale.'
+  common_mistake: 'Treating Min-Max as safer because it never clips. On a per-tensor symmetric INT8 device, a single outlier throws away precision for the entire tensor.'
   napkin_math: |
-    * Symmetric INT8 scale = max(|x|)/127.
-    * Min-Max: Scale = 84 / 127 ≈ 0.661. The 99.9th percentile bulk (|x| <= 12) gets 12 / 0.661 ≈ 18 levels.
-    * Effective bits for Min-Max: log2(18) ≈ 4.17 bits.
-    * Entropy (~99.99%): Scale = 12 / 127 ≈ 0.094. The bulk gets 12 / 0.094 ≈ 127 levels.
-    * Effective bits for Entropy: log2(127) ≈ 6.99 bits.
-    * **Min-Max calibration wastes nearly half the INT8 budget on outliers, dropping effective precision to ~4 bits.**
+    **Assumptions & Constraints:**
+    - Symmetric INT8 scale = max(|x|)/127.
+    - Max outlier = 84, 99.9th percentile = 12.
+
+    **Calculations:**
+    - Min-Max Scale = 84 / 127 ≈ 0.661.
+    - Levels for bulk (|x| <= 12) under Min-Max = 12 / 0.661 ≈ 18 levels.
+    - Effective bits (Min-Max) = log2(18) ≈ 4.17 bits.
+    - Entropy Scale (~99.99%) = 12 / 127 ≈ 0.094.
+    - Levels for bulk under Entropy = 12 / 0.094 ≈ 127 levels (log2(127) ≈ 6.99 bits).
+
+    **Conclusion & Interpretation:**
+    - **Result: ~4.17 Effective Bits (Precision-Bound)**. Min-Max calibration wastes nearly half the INT8 budget on outliers.
 status: archived
 provenance: llm-draft
 expected_time_minutes: 4
@@ -38,4 +42,4 @@ tags:
 - gemini-generated
 - target-evaluation-L1
 created_at: '2026-04-25'
-deletion_reason: 'Archived after 3 independent fix-agent passes (Phase C, F.2, F.4) failed to satisfy the judge. Final verdict: NEEDS_FIX. The (track, topic, zone, level) cell may be structurally awkward for this question''s framing; preserving the item for audit but removing from the bundle.'
+deletion_reason: 'Archived after 3 independent fix-agent passes failed to satisfy the judge.'

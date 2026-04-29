@@ -7,9 +7,9 @@ topic: communication-computation-overlap
 competency_area: optimization
 bloom_level: understand
 phase: both
-title: DMA Audio Pipelining
-scenario: A Cortex-M4 sensor node samples audio via an I2S microphone while simultaneously executing an ML wake-word model.
-question: How does ping-pong buffering permit continuous I2S DMA, and what pointer-swap logic prevents dropped audio frames?
+title: 'DMA Audio Pipelining'
+scenario: 'A Cortex-M4 sensor node samples audio via an I2S microphone while simultaneously executing an ML wake-word model.'
+question: 'How does ping-pong buffering permit continuous I2S DMA, and what pointer-swap logic prevents dropped audio frames?'
 details:
   realistic_solution: 'Mechanics. The DMA controller is configured in circular mode pointing at a single 2N-sample buffer split conceptually into two N-sample halves: A (samples 0..N-1) and B (samples N..2N-1). The DMA writes incoming I2S samples linearly through the buffer and automatically wraps from index 2N-1 back to 0 thanks to the circular bit. The DMA peripheral fires two interrupts per full sweep - the Half-Transfer Interrupt (HTIF) when it has finished writing index N-1 (so half A is complete and half B is now being written), and the Transfer-Complete Interrupt (TCIF) when it has finished writing index 2N-1 (so half B is complete and half A is now being overwritten). Pointer-swap logic. The application maintains a single ready_ptr that the inference task consumes from. On HTIF: ready_ptr = &A; signal the inference task; the task processes A while DMA writes into B. On TCIF: ready_ptr = &B; signal the inference task; the task processes B while DMA wraps and writes into A. Critical invariant: the inference task must finish processing the current half before the next interrupt fires - i.e., compute_time < N / sample_rate. Otherwise the DMA overwrites a half that has not been read yet (silent data corruption, no underrun signal). On a Cortex-M4 with 16 kHz audio and N=512 samples per half, the deadline is 32 ms - any inference fitting that budget runs zero-drop indefinitely. If the inference runs longer, the correct fix is to grow N (giving more slack per pointer swap) until DMA half-period >= worst-case inference time, not to skip frames.'
   common_mistake: |
@@ -17,10 +17,16 @@ details:
     **The Rationale:** Assuming DMA is magically asynchronous without handling the interrupt pointer swaps required to hand buffers over to the application thread.
     **The Consequence:** The DMA controller silently overwrites the buffer being processed by the inference thread, leading to corrupted input data and false negatives.
   napkin_math: |
-    1. **Interrupts:** HTIF fires at index N-1, TCIF fires at index 2N-1.
-    2. **Half-Buffer Size:** N = 512 samples.
-    3. **Per-Half Deadline:** 512 / 16,000 Hz = **32 ms**.
-    4. **Condition:** As long as `compute_time < 32 ms`, there are zero drops. If longer, N must be increased.
+    **Assumptions & Constraints:**
+    - DMA half-buffer size: N = 512 samples.
+    - Sample rate: 16,000 Hz.
+    - HTIF fires at index N-1, TCIF fires at index 2N-1.
+
+    **Calculations:**
+    - Per-Half Deadline: 512 / 16,000 Hz = 32 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 32 ms (Latency-Bound)**. As long as compute time is under 32 ms, zero drops occur. If inference takes longer, N must be increased.
 status: published
 provenance: llm-draft
 expected_time_minutes: 6
@@ -33,8 +39,8 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-analyze-L2
+  - gemini-generated
+  - target-analyze-L2
 created_at: '2026-04-25'
 math_status: CORRECT
 math_model: gemini-3.1-pro-preview

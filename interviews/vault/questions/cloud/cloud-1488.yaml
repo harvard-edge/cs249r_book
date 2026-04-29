@@ -11,19 +11,26 @@ title: Diagnosing Distributed Training Scaling Failure
 scenario: A team upgrades their training cluster of 32 nodes from 4x V100 GPUs per node to 8x A100 GPUs per node, increasing theoretical compute capacity by ~5x. However, when training a 30B parameter model, their actual tokens/sec throughput only increases by 38%. The inter-node fabric was left unchanged at a single 100 Gbps Ethernet link per node.
 question: Why did the 5x compute upgrade to 8x A100 nodes increase 30B training throughput by only 38%?
 details:
-  realistic_solution: The root cause is a severe network fabric bottleneck. By upgrading from 4x V100 to 8x A100 per node, compute time per step dropped from 5.0s to 1.0s (5x faster). However, the 100 Gbps inter-node network was not upgraded. Ring AllReduce of 60GB FP16 gradients (120GB transferred) takes ~9.6s at 12.5 GB/s — now dominating the step time. The system went from ~66% communication-bound (5.0s compute, 9.6s comm) to ~91% communication-bound (1.0s compute, 9.6s comm). A 5x compute upgrade yields only a 38% throughput gain due to Amdahl's Law applied to the network bottleneck.
+  realistic_solution: 'The root cause is a severe network fabric bottleneck. By upgrading from 4x V100 to 8x A100 per node, compute time per step dropped from 5.0s to 1.0s (5x faster). However, the 100 Gbps inter-node network was not upgraded. Ring AllReduce of 60GB FP16 gradients (120GB transferred) takes ~9.6s at 12.5 GB/s — now dominating the step time. The system went from ~66% communication-bound (5.0s compute, 9.6s comm) to ~91% communication-bound (1.0s compute, 9.6s comm). A 5x compute upgrade yields only a 38% throughput gain due to Amdahl''s Law applied to the network bottleneck.'
   common_mistake: |
     **The Pitfall:** Blaming CPU bottlenecks or PyTorch configurations for the poor scaling.
     **The Rationale:** Engineers intuitively suspect software overheads when a hardware upgrade underdelivers.
     **The Consequence:** The team wastes time profiling data loaders instead of identifying the glaring hard network bandwidth limitation.
   napkin_math: |
-    *   **Gradients Size:** 30B parameters × 2 bytes (FP16) = 60 GB.
-    *   **Ring AllReduce Transfer:** ~2 × 60 GB = 120 GB per node.
-    *   **Network Bandwidth:** 100 Gbps = 12.5 GB/s.
-    *   **Communication Time:** 120 GB / 12.5 GB/s = 9.6 seconds.
-    *   **V100 Step Time:** 5.0s (compute) + 9.6s (comm) = 14.6s.
-    *   **A100 Step Time:** 1.0s (compute) + 9.6s (comm) = 10.6s.
-    *   **Speedup:** 14.6s / 10.6s = 1.377 = **~38% throughput gain, entirely bound by Amdahl's Law applied to the network.**
+    **Assumptions & Constraints:**
+    - Gradients Size: 30B parameters * 2 bytes (FP16) = 60 GB.
+    - Network Bandwidth: 100 Gbps = 12.5 GB/s.
+    - Upgrading from 4x V100 to 8x A100.
+
+    **Calculations:**
+    - Ring AllReduce Transfer: ~2 * 60 GB = 120 GB per node.
+    - Communication Time: 120 GB / 12.5 GB/s = 9.6 seconds.
+    - V100 Step Time: 5.0s (compute) + 9.6s (comm) = 14.6s.
+    - A100 Step Time: 1.0s (compute) + 9.6s (comm) = 10.6s.
+    - Speedup: 14.6s / 10.6s = 1.377.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~38% throughput gain (Network-Bound)**. Completely bound by Amdahl's Law applied to the fixed network bandwidth.
 status: published
 provenance: imported
 requires_explanation: false

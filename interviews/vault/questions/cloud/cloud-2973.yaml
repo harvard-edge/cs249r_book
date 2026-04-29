@@ -11,19 +11,27 @@ title: 'Fault Tolerance: Evaluate ZeRO vs Full Replica Checkpointing'
 scenario: Your 70B model training uses ZeRO-3 across 256 H100s, sharding optimizer state, gradients, and parameters.
 question: For ZeRO-3 on 256 H100s, should checkpointing save each rank's shard or gather the full model on rank 0, and why?
 details:
-  realistic_solution: 'Strategy (A) distributed checkpoint is always correct for ZeRO-3. Each rank saves its shard. Recovery: all ranks restore their own shards. Partial failure: if 1 node fails and its shard is lost, must restore from previous checkpoint.'
+  realistic_solution: |
+    Strategy (A) distributed checkpoint is always correct for ZeRO-3. Each rank saves its shard. Recovery: all ranks restore their own shards. Partial failure: if 1 node fails and its shard is lost, must restore from previous checkpoint.
   common_mistake: |
     **The Pitfall:** Gathering the full model to rank 0 for checkpointing.
     **The Rationale:** Engineers are accustomed to saving a single `model.pt` file from smaller training runs and apply the same logic to ZeRO-3.
     **The Consequence:** The entire cluster sits idle for minutes while rank 0 single-handedly serializes hundreds of gigabytes to disk.
   napkin_math: |
-    *   **Model Size:** 280 GB total (ZeRO-3 sharded).
-    *   **Per-Rank Shard:** 280 GB / 256 GPUs = 1.094 GB.
-    *   **Strategy A (Distributed):** 256 GPUs write 1.094 GB in parallel at 2 GB/s NVMe = 0.55 seconds total time.
-    *   **Strategy B (Gather to Rank 0):** Rank 0 collects 280 GB over network (e.g., 50 GB/s IB) ≈ 5.6 seconds.
-    *   **Strategy B Write Time:** Rank 0 writes 280 GB to NVMe at 2 GB/s = 140 seconds.
-    *   **Lost Time (Strategy B):** 255 ranks idle for ~145 seconds = 36,975 GPU-seconds.
-    *   **Financial Waste:** 36,975 / 3600 hrs × $3/GPU-hr = ~$30.81 wasted per checkpoint. Over 672 checkpoints = **~$20,000 wasted.**
+    **Assumptions & Constraints:**
+    - Model Size: 280 GB total (ZeRO-3 sharded).
+    - Cluster Size: 256 GPUs.
+
+    **Calculations:**
+    - Per-Rank Shard: 280 GB / 256 GPUs = 1.094 GB.
+    - Strategy A (Distributed): 256 GPUs write 1.094 GB in parallel at 2 GB/s NVMe = 0.55 seconds total time.
+    - Strategy B (Gather to Rank 0): Rank 0 collects 280 GB over network (e.g., 50 GB/s IB) ≈ 5.6 seconds.
+    - Strategy B Write Time: Rank 0 writes 280 GB to NVMe at 2 GB/s = 140 seconds.
+    - Lost Time (Strategy B): 255 ranks idle for ~145 seconds = 36,975 GPU-seconds.
+    - Financial Waste: 36,975 / 3600 hrs * $3/GPU-hr = ~$30.81 wasted per checkpoint. Over 672 checkpoints = ~$20,000 wasted.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~$20,000 wasted (I/O-Bound)**. Gathering the model serially limits throughput entirely to a single NVMe drive's write speed.
 status: published
 provenance: imported
 requires_explanation: false

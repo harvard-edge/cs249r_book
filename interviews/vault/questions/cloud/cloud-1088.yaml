@@ -8,27 +8,29 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Diagnosing DDP Network Bottlenecks
-scenario: You are training a 2-billion parameter model using PyTorch Distributed Data Parallel (DDP) across 4 nodes. The framework uses hierarchical AllReduce. Single-node GPU utilization is 98%, but drops to 42% when scaling to 4 nodes. Profiling shows GPUs are stalling during the inter-node step of the backward-pass synchronization.
-question: Under hierarchical AllReduce, why does utilization drop from 98% to 42% across 4 nodes, and what software-only fix improves scaling?
+scenario: 'You are training a 2-billion parameter model using PyTorch Distributed Data Parallel (DDP) across 4 nodes. The framework uses hierarchical AllReduce. Single-node GPU utilization is 98%, but drops to 42% when scaling to 4 nodes. Profiling shows GPUs are stalling during the inter-node step of the backward-pass synchronization.'
+question: 'Under hierarchical AllReduce, why does utilization drop from 98% to 42% across 4 nodes, and what software-only fix improves scaling?'
 details:
-  realistic_solution: The inter-node step of hierarchical AllReduce is the binding constraint. Use gradient accumulation (e.g., 4 micro-steps via `no_sync()`) so compute per AllReduce climbs, lifting serial utilization. Combined with bucketed AllReduce that overlaps the inter-node step with later parts of backward, achievable utilization climbs into the 80-90% range.
+  realistic_solution: 'The inter-node step of hierarchical AllReduce is the binding constraint. Use gradient accumulation (e.g., 4 micro-steps via `no_sync()`) so compute per AllReduce climbs, lifting serial utilization. Combined with bucketed AllReduce that overlaps the inter-node step with later parts of backward, achievable utilization climbs into the 80-90% range.'
   common_mistake: |
     **The Pitfall:** Computing AllReduce traffic as 2*(N-1)/N * size with N=32 (the flat-rank count) instead of N=4 (the inter-node ring).
     **The Rationale:** Candidates often forget that hierarchical AllReduce's bottleneck is the inter-node reduction over Ethernet, not a flat ring.
     **The Consequence:** Proposing hardware changes or completely incorrect optimization strategies.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 2B FP16 parameters = 4 GB gradients per rank.
-       - Inter-node comms on 100 Gbps (12.5 GB/s) Ethernet ring, N=4 nodes.
-       - Compute time per step = 0.2 s.
-    2. **Calculations:**
-       - Inter-node AllReduce volume = 2*(N-1)/N * 4 GB = 6 GB.
-       - Comm Time = 6 GB / 12.5 GB/s = 0.48 s.
-       - Current Utilization = 0.2 / (0.2 + 0.48) = 29.4%.
-       - With 4 micro-steps: Compute = 0.8 s. Serial utilization = 0.8 / (0.8 + 0.48) = 62.5%.
-       - With bucketed overlap: Exposed comm drops to ~0.1 s.
-    3. **Conclusion & Interpretation:**
-       - **Result: Utilization improves to ~88% (0.8 / 0.9). Bottleneck: Network Bandwidth-Bound.**
+    **Assumptions & Constraints:**
+    - 2B FP16 parameters = 4 GB gradients per rank.
+    - Inter-node comms on 100 Gbps (12.5 GB/s) Ethernet ring, N=4 nodes.
+    - Compute time per step = 0.2 s.
+
+    **Calculations:**
+    - Inter-node AllReduce volume = 2*(N-1)/N * 4 GB = 6 GB.
+    - Comm Time = 6 GB / 12.5 GB/s = 0.48 s.
+    - Current Utilization = 0.2 / (0.2 + 0.48) = 29.4%.
+    - With 4 micro-steps: Compute = 0.8 s. Serial utilization = 0.8 / (0.8 + 0.48) = 62.5%.
+    - With bucketed overlap: Exposed comm drops to ~0.1 s.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~88% Utilization (Network Bandwidth-Bound)**. Implementing gradient accumulation and bucketed overlap directly masks the inter-node bottleneck.
 status: published
 provenance: imported
 requires_explanation: false

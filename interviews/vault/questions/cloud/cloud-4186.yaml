@@ -11,21 +11,24 @@ title: Warp Divergence in Attention Masking
 scenario: Your custom attention kernel on MI300X shows 35% lower throughput than expected for causal (triangular) masking. Profiling reveals high warp divergence in the masking branch.
 question: Explain why causal masking causes warp divergence and how FlashAttention's tiling strategy eliminates it. With thread coarsening at stride 2048, which sequence positions does thread 49 process?
 details:
-  realistic_solution: Thread 49 with stride 2048 processes positions 49, 2097, 4145, etc. Implementing causal masking as an if-else branch inside the attention kernel causes divergence because some threads compute valid scores while others are masked to -inf. FlashAttention eliminates this by tiling the computation into blocks and completely skipping the blocks that fall outside the causal mask.
+  realistic_solution: |
+    Thread 49 with stride 2048 processes positions 49, 2097, 4145, etc. Implementing causal masking as an if-else branch inside the attention kernel causes divergence because some threads compute valid scores while others are masked to -inf. FlashAttention eliminates this by tiling the computation into blocks and completely skipping the blocks that fall outside the causal mask.
   common_mistake: |
     **The Pitfall:** Implementing causal masking as an if-else branch inside the innermost GPU kernel loop.
     **The Rationale:** Developers accustomed to CPU programming assume branching is cheap, ignoring that GPU threads in a warp execute in lockstep.
     **The Consequence:** The warp must execute both the `if` and `else` paths sequentially, effectively halving throughput for boundary blocks.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Thread coarsening stride = 2048.
-       - Thread i processes positions i, i + stride, i + 2*stride.
-    2. **Calculations:**
-       - Thread 49 accesses positions: 49, 49 + 2048 = 2097, 49 + 4096 = 4145.
-       - At sequence position 2048, thread 0 maps to it. Thread 49 is at 2097.
-       - Divergence only occurs in blocks crossing the causal diagonal.
-    3. **Conclusion & Interpretation:**
-       - **Result: For N=4096, wasted threads average to roughly 1-3% across the sequence. The 35% throughput drop is caused by lack of block-level tiling, making it Warp-Divergence-Bound.**
+    **Assumptions & Constraints:**
+    - Thread coarsening stride = 2048.
+    - Thread i processes positions i, i + stride, i + 2*stride.
+
+    **Calculations:**
+    - Thread 49 accesses positions: 49, 49 + 2048 = 2097, 49 + 4096 = 4145.
+    - At sequence position 2048, thread 0 maps to it. Thread 49 is at 2097.
+    - Divergence only occurs in blocks crossing the causal diagonal.
+
+    **Conclusion & Interpretation:**
+    - **Result: 35% throughput drop (Warp-Divergence-Bound)**. For N=4096, wasted threads average 1-3% overall, but boundary blocks severely penalize throughput without FlashAttention block-level tiling.
 status: published
 provenance: imported
 requires_explanation: false

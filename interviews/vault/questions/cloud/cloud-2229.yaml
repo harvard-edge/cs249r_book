@@ -9,7 +9,7 @@ bloom_level: apply
 phase: both
 title: The Write Amplification Tax
 scenario: Your training infrastructure uses local NVMe SSDs as a staging tier for checkpoints before asynchronously flushing to a parallel filesystem. Each checkpoint is 2 TB. After six months, the SSDs are failing at 3x the expected rate. The vendor says the drives have exceeded their rated write endurance.
-question: "How is a 2 TB checkpoint causing more than 2 TB of physical writes to the SSD?"
+question: How is a 2 TB checkpoint causing more than 2 TB of physical writes to the SSD?
 details:
   realistic_solution: 'Flash SSDs cannot overwrite data in place. They must erase entire blocks (typically 256 KB - 4 MB) before writing new data. When a 2 TB checkpoint is written to an SSD that is already 80% full, the SSD''s flash translation layer (FTL) must perform garbage collection: reading valid pages from partially-used blocks, erasing the block, and writing the valid pages back along with the new data. This ''write amplification factor'' (WAF) means 1 logical write can cause 3-10x physical writes depending on drive fullness and write pattern. At WAF = 4x, each 2 TB checkpoint causes 8 TB of physical writes. Checkpointing every 30 minutes = 48 checkpoints/day = 384 TB/day of physical writes. A typical enterprise NVMe with 1 DWPD (Drive Write Per Day) endurance on a 3.84 TB drive can sustain 3.84 TB/day. At 384 TB/day, the drive''s 5-year rated endurance is consumed in ~18 days.'
   common_mistake: |
@@ -17,12 +17,17 @@ details:
     **The Rationale:** Engineers who haven't worked with flash storage often ignore write amplification entirely.
     **The Consequence:** Rapid and unexpected degradation of NVMe storage media.
   napkin_math: |
+    **Assumptions & Constraints:**
     - Checkpoint = 2 TB logical. WAF at 80% capacity ≈ 4×.
-    - Physical writes per checkpoint = 8 TB.
     - Checkpoints per day at 30-min interval = 48.
-    - Physical writes/day = 48 × 8 = 384 TB.
     - Drive endurance: 3.84 TB drive × 1 DWPD = 3.84 TB/day rated.
-    - **Conclusion:** **Actual load is 384 / 3.84 = 100× over-provisioned.**
+
+    **Calculations:**
+    - Physical writes per checkpoint = 8 TB.
+    - Physical writes/day = 48 × 8 = 384 TB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 100× over-provisioned (I/O-Bound)**. Actual load is 384 / 3.84 = 100× over-provisioned.
   options:
   - 'Flash SSDs cannot overwrite data in place; they must erase entire blocks. This forces the flash translation layer to read, erase, and rewrite valid pages along with new data, multiplying the physical writes (write amplification).'
   - 'The operating system caches the checkpoint in RAM and continuously flushes it to the SSD, resulting in duplicate physical writes for the same file due to fsync operations.'

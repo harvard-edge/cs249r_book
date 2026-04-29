@@ -17,11 +17,21 @@ details:
     **The Rationale:** These are common sources of distributed training overhead, masking the true massive data I/O issue.
     **The Consequence:** Wasting engineering effort optimizing container startup times while ignoring the catastrophic S3 prefix throttling caused by the thundering herd.
   napkin_math: |
-    - **Naive Approach Traffic:** 1,024 ranks * 2.8TB = ~2.8PB of concurrent read requests.
-    - **S3 Throttle Limit:** An S3 prefix might cap at ~100 Gbps (12.5 GB/s), leading to 2.8PB / 12.5 GB/s = ~62 hours theoretically (triggering massive 503 backoffs and timeouts).
-    - **Tiered Approach:** 1 rank downloads 2.8TB at 12.5 GB/s = 224 seconds.
-    - **Broadcast Time:** Broadcasting 2.8TB over a 400 Gbps (50 GB/s) InfiniBand network takes 2.8TB / 50 GB/s = 56 seconds.
-    - **Conclusion:** **Total Time is 224s + 56s = 280 seconds, dropping I/O time from 45+ minutes to under 5 minutes.**
+    **Assumptions & Constraints:**
+    - Cluster: 1,024 GPUs.
+    - Checkpoint size: 2.8 TB.
+    - S3 Prefix throttling limit: ~100 Gbps (12.5 GB/s).
+    - InfiniBand network bandwidth: 400 Gbps (50 GB/s per node).
+
+    **Calculations:**
+    - Thundering herd S3 demand: 1,024 ranks * 2.8 TB = ~2.8 PB of simultaneous read pressure.
+    - Thundering herd theoretical download time: 2.8 PB / 12.5 GB/s = ~62 hours (leads to 503s).
+    - Tiered approach step 1 (1 rank downloads from S3): 2.8 TB / 12.5 GB/s = 224 seconds.
+    - Tiered approach step 2 (IB Broadcast): 2.8 TB / 50 GB/s = 56 seconds.
+    - Total Tiered Time: 224 + 56 = 280 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: 280 seconds (I/O-Bound)**. A thundering herd of 1,024 ranks crushes the S3 prefix, causing massive timeouts. Funneling the download through a single rank and leveraging the 400 Gbps backend IB network bypasses the cloud storage bottleneck entirely.
 status: published
 provenance: imported
 requires_explanation: false

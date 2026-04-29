@@ -7,9 +7,9 @@ topic: congestion-control
 competency_area: networking
 bloom_level: apply
 phase: both
-title: Buffer Management with Dynamic Thresholds
-scenario: Your 64-port 400G switch has 64MB of shared buffer serving a MI300X cluster. You notice that during AllReduce, 4 elephant flows consume 80% of the buffer, causing packet drops for 60 smaller flows sharing the remaining 20%. The switch uses static per-port buffer allocation of 1MB each.
-question: How would you redesign switch buffer management so 4 elephant flows do not starve 60 mice flows on the 64-port 400G switch?
+title: 'Buffer Management with Dynamic Thresholds'
+scenario: 'Your 64-port 400G switch has 64MB of shared buffer serving a MI300X cluster. You notice that during AllReduce, 4 elephant flows consume 80% of the buffer, causing packet drops for 60 smaller flows sharing the remaining 20%. The switch uses static per-port buffer allocation of 1MB each.'
+question: 'How would you redesign switch buffer management so 4 elephant flows do not starve 60 mice flows on the 64-port 400G switch?'
 details:
   realistic_solution: 'Switch from static to dynamic buffer management using the alpha threshold algorithm. Set alpha = 8 for the AllReduce traffic class, allowing a single port to use up to alpha/(1+alpha) × free_buffer = 8/9 × free_buffer when other ports are idle. Reserve 8MB (12.5%) as a headroom pool that only PFC-paused ports can use. Configure per-traffic-class minimums: 256KB guaranteed per port for mice flows (TC3), with the remaining buffer dynamically shared for elephant flows (TC0). This ensures that when 4 ports run elephant flows, each can burst up to ~14MB during incast, while mice flows always have their 256KB × 64 = 16MB guaranteed pool. Enable ECN at 40% of per-port dynamic limit.'
   common_mistake: |
@@ -17,11 +17,18 @@ details:
     **The Rationale:** Assuming strict static limits prevent starvation, or using overly conservative dynamic parameters.
     **The Consequence:** Wasting buffer on idle ports while artificially throttling active elephant flows and degrading AllReduce throughput.
   napkin_math: |
-    - **Buffer Allocation**: 64MB total - 8MB headroom - 16MB guaranteed (256KB × 64 ports) = 40MB dynamic pool.
-    - **Dynamic Alpha Tuning**: Set `alpha=8`. With 4 active elephant flow ports, each can use up to 8/9 × (40MB - usage_by_others).
-    - **Elephant Provision**: In steady state, each elephant port gets ~10MB dynamic + 256KB guaranteed = ~10.25MB.
-    - **Mice Provision**: Mice flows always have 256KB guaranteed. At a 100Mbps control traffic rate, 256KB = **2.6ms of buffering**.
-    - **Result**: Elephant flows can burst up to 14MB without starving mice flows.
+    **Assumptions & Constraints:**
+    - 64MB shared buffer.
+    - Headroom: 8MB. Guaranteed per-port: 256KB.
+
+    **Calculations:**
+    - Dynamic Pool: 64MB - 8MB - (256KB * 64) = 40MB.
+    - Dynamic Alpha Tuning: Set alpha=8. Elephant ports use 8/9 * free buffer.
+    - Steady state provision: ~10MB dynamic + 256KB guaranteed = ~10.25MB per elephant port.
+    - Mice provision: 256KB guaranteed at 100Mbps = 2.6ms buffering.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~14MB burst (Memory-Bound)**. Elephant flows can burst significantly without starving mice flows, keeping AllReduce throughput high.
 status: published
 provenance: imported
 requires_explanation: false

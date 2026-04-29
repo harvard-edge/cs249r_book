@@ -8,19 +8,26 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: The Continuous Batching Paradox (cloud-0170)
-scenario: Your team just deployed a new LLM inference server using continuous batching to improve GPU utilization for a 7B parameter model on an H100. As expected, average throughput (tokens/sec) has increased by 50% and GPU utilization is stable at 95%. However, you receive an alert that P99 Time-To-First-Token (TTFT) has increased from 150ms to 400ms, violating your 250ms SLA. Your on-call playbook suggests increasing the maximum batch size to improve throughput further.
-question: "Why is increasing maximum batch size the wrong playbook response when continuous batching raised P99 TTFT from 150ms to 400ms?"
+scenario: 'Your team just deployed a new LLM inference server using continuous batching to improve GPU utilization for a 7B parameter model on an H100. As expected, average throughput (tokens/sec) has increased by 50% and GPU utilization is stable at 95%. However, you receive an alert that P99 Time-To-First-Token (TTFT) has increased from 150ms to 400ms, violating your 250ms SLA. Your on-call playbook suggests increasing the maximum batch size to improve throughput further.'
+question: 'Why is increasing maximum batch size the wrong playbook response when continuous batching raised P99 TTFT from 150ms to 400ms?'
 details:
-  realistic_solution: The playbook is wrong because increasing the maximum batch size typically worsens P99 Time-To-First-Token (TTFT) due to **prefill blocking** (or prefill-decode interference). In continuous batching, when new requests arrive, they must undergo a compute-intensive prefill phase to compute their initial KV cache. If the maximum batch size is large, the scheduler may group a massive number of prefill tokens together, or cram a heavy prefill phase alongside ongoing decode steps. This large compute block monopolizes the GPU for a long duration, delaying the first token generation for newly arrived requests in the queue and causing P99 TTFT to spike. While average throughput is high, tail latency suffers because requests must wait through longer, heavier batched iterations.
+  realistic_solution: 'The playbook is wrong because increasing the maximum batch size typically worsens P99 Time-To-First-Token (TTFT) due to **prefill blocking** (or prefill-decode interference). In continuous batching, when new requests arrive, they must undergo a compute-intensive prefill phase to compute their initial KV cache. If the maximum batch size is large, the scheduler may group a massive number of prefill tokens together, or cram a heavy prefill phase alongside ongoing decode steps. This large compute block monopolizes the GPU for a long duration, delaying the first token generation for newly arrived requests in the queue and causing P99 TTFT to spike. While average throughput is high, tail latency suffers because requests must wait through longer, heavier batched iterations.'
   common_mistake: |
     **The Pitfall:** Assuming continuous batching completely eliminates all blocking.
     **The Rationale:** While it solves generation-phase padding waste, it introduces prefill-decode interference.
     **The Consequence:** Increasing max batch sizes to improve throughput while inadvertently destroying tail latency SLAs due to massive prefill computations.
   napkin_math: |
-    1. At BS=32, a prefill of 1000 tokens on a 7B model takes ~40ms on H100.
-    2. If max batch size increases to 128, a prefill chunk of 4000 tokens could take ~160ms.
-    3. A newly arriving request queued behind this massive prefill will have its TTFT blocked by at least 160ms.
-    4. **This pushes its P99 TTFT well beyond the 150ms SLA, despite overall throughput improving.**
+    **Assumptions & Constraints:**
+    - At BS=32, a prefill of 1000 tokens on a 7B model takes ~40ms on H100.
+    - Max batch size might increase to 128.
+    - SLA for TTFT is 250ms.
+
+    **Calculations:**
+    - Prefill chunk of 4000 tokens (BS=128) could take: ~160ms.
+    - A newly arriving request queued behind this massive prefill will have its TTFT blocked by at least 160ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Prefill Blocking** (This pushes its P99 TTFT well beyond the 150ms SLA, despite overall throughput improving).
 status: deleted
 provenance: imported
 requires_explanation: false

@@ -11,17 +11,25 @@ title: M/G/c/K Queue Sizing for LLM Inference
 scenario: You are architecting an API gateway for a fleet of 8 vLLM instances (c=8) running Llama-3-70B on 8xH100 nodes. Inbound requests follow a Poisson process (M) at 120 req/s. Due to highly variable output token lengths, the service time distribution is heavily right-skewed with a mean of 50ms and a coefficient of variation (Cv) of 2.5 (G). To protect the backend during traffic bursts, you must configure the maximum queue depth (K). If the queue is full, new requests are dropped (HTTP 503).
 question: For the M/G/c/K 70B API gateway, should K be set to 16 or 64 to balance drops against P99 wait time, and why?
 details:
-  realistic_solution: Model the system as an M/G/c/K queue. With service time CV=2.5, Kingman's approximation shows wait times are (1+6.25)/2 = 3.6x longer than an M/M/c model would predict. A queue depth of 16 limits max queued per replica to 2, capping worst-case wait at ~100ms. A queue depth of 64 allows 8 queued per replica, pushing worst-case wait to ~400ms — likely violating the 200ms P99 SLA during traffic bursts. Choose the smaller queue (16) and shed excess load via HTTP 429 responses.
+  realistic_solution: 'Model the system as an M/G/c/K queue. With service time CV=2.5, Kingman''s approximation shows wait times are (1+6.25)/2 = 3.6x longer than an M/M/c model would predict. A queue depth of 16 limits max queued per replica to 2, capping worst-case wait at ~100ms. A queue depth of 64 allows 8 queued per replica, pushing worst-case wait to ~400ms — likely violating the 200ms P99 SLA during traffic bursts. Choose the smaller queue (16) and shed excess load via HTTP 429 responses.'
   common_mistake: |
     **The Pitfall:** Using basic M/M/c formulas to size the queue.
     **The Rationale:** Engineers assume exponential service times (CV=1) because the math is easier.
     **The Consequence:** They dramatically underestimate tail latency (driven by high CV from output variance), leading to P99 SLA violations during bursts.
   napkin_math: |
-    *   **Utilization (ρ):** 120 / (8 × (1/0.050)) = 120 / 160 = 0.75.
-    *   **Kingman's Variance Multiplier:** (1 + Cv²) / 2 = (1 + 6.25) / 2 = 3.625x longer waits than M/M/c.
-    *   **Scenario A (Queue=16):** Max queued per replica = 16 / 8 = 2. Max wait = 2 × 50ms = 100ms.
-    *   **Scenario B (Queue=64):** Max queued per replica = 64 / 8 = 8. Max wait = 8 × 50ms = 400ms.
-    *   **Result: Queue=16 limits worst-case wait to 100ms, keeping it within a 200ms P99 SLA, whereas Queue=64 violates it.**
+    **Assumptions & Constraints:**
+    - 8 vLLM instances (c=8).
+    - Arrival rate: 120 req/s.
+    - Service time distribution: heavily right-skewed with mean 50ms and Cv=2.5.
+
+    **Calculations:**
+    - Utilization (ρ): 120 / (8 * (1/0.050)) = 120 / 160 = 0.75.
+    - Kingman's Variance Multiplier: (1 + Cv²) / 2 = (1 + 6.25) / 2 = 3.625x longer waits than M/M/c.
+    - Scenario A (Queue=16): Max queued per replica = 16 / 8 = 2. Max wait = 2 * 50ms = 100ms.
+    - Scenario B (Queue=64): Max queued per replica = 64 / 8 = 8. Max wait = 8 * 50ms = 400ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 100ms vs 400ms (Latency-Bound)**. Queue=16 limits worst-case wait to 100ms, keeping it within a 200ms P99 SLA, whereas Queue=64 violates it.
 status: published
 provenance: imported
 requires_explanation: true

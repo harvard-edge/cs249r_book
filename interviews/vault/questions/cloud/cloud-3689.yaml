@@ -8,8 +8,8 @@ competency_area: reliability
 bloom_level: apply
 phase: inference
 title: Spot Instance Preemption Handling in Training Clusters
-scenario: You run a 32-GPU A100 training job on AWS spot instances to save 70% on costs. Spot interruption notices arrive with a 2-minute warning. Your training step takes 15 seconds and checkpoints take 8 minutes (full model save). You need to handle preemptions without losing more than 10 minutes of training.
-question: How would you design a fault-tolerant checkpointing strategy for 32 A100 spot training so a 2-minute interruption notice loses under 10 minutes of work?
+scenario: 'You run a 32-GPU A100 training job on AWS spot instances to save 70% on costs. Spot interruption notices arrive with a 2-minute warning. Your training step takes 15 seconds and checkpoints take 8 minutes (full model save). You need to handle preemptions without losing more than 10 minutes of training.'
+question: 'How would you design a fault-tolerant checkpointing strategy for 32 A100 spot training so a 2-minute interruption notice loses under 10 minutes of work?'
 details:
   realistic_solution: 'Implement incremental/delta checkpointing: save only changed optimizer state tensors (typically 20-30% of full state per step). Use PyTorch''s FSDP with save_on_each_rank=True and write to local NVMe first, then async-copy to S3. On receiving SIGTERM (2-min warning), trigger an emergency lightweight checkpoint: save only model weights (not optimizer state), accepting a slight training regression. Full checkpoint every 30 steps (7.5 min).'
   common_mistake: |
@@ -17,11 +17,18 @@ details:
     **The Rationale:** Candidates assume standard periodic checkpointing is sufficient, ignoring the strict 2-minute termination window.
     **The Consequence:** When a 2-minute preemption notice arrives, the job cannot complete a full checkpoint before termination, losing up to 15 minutes of work.
   napkin_math: |
-    - **Full Checkpoint Size:** 32 GPUs * 5 GB model shard = 160 GB.
-    - **Write Speed Limit:** NFS/EFS bottleneck often limits to 10-20 GB/s total.
-    - **Full Checkpoint Time:** 160 GB / 10 GB/s = 16 seconds.
-    - **Emergency Checkpoint (Weights Only):** 160 GB / 2 = 80 GB.
-    - **Emergency Write Time:** 80 GB / 10 GB/s = **8 seconds (Easily fits in the 2-minute preemption window).**
+    **Assumptions & Constraints:**
+    - 32 GPUs * 5 GB model shard = 160 GB full checkpoint.
+    - Write Speed Limit: NFS/EFS bottleneck often limits to 10-20 GB/s total.
+    - 2-minute preemption window.
+
+    **Calculations:**
+    - Full Checkpoint Time: 160 GB / 10 GB/s = 16 seconds.
+    - Emergency Checkpoint (Weights Only): 160 GB / 2 = 80 GB.
+    - Emergency Write Time: 80 GB / 10 GB/s = 8 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: 8 seconds emergency write time (Storage Bandwidth-Bound)**. The weight-only checkpoint easily fits within the 2-minute preemption window.
 status: published
 provenance: imported
 requires_explanation: false

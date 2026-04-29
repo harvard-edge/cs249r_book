@@ -8,8 +8,8 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: Diagnosing OOM Failures in Long-Context Transformer Training
-scenario: A team is fine-tuning a 7B parameter LLM on an 8x A100 (80GB) node. They are attempting to increase the context length from 4,096 to 32,768 tokens. During training, the model consistently fails with CUDA OutOfMemory errors, even when the per-GPU batch size is reduced to 1. The team has already enabled activation checkpointing and DeepSpeed ZeRO-3.
-question: What causes the 32,768-token CUDA OOM despite ZeRO-3 and checkpointing, and what exact attention change fixes it?
+scenario: 'A team is fine-tuning a 7B parameter LLM on an 8x A100 (80GB) node. They are attempting to increase the context length from 4,096 to 32,768 tokens. During training, the model consistently fails with CUDA OutOfMemory errors, even when the per-GPU batch size is reduced to 1. The team has already enabled activation checkpointing and DeepSpeed ZeRO-3.'
+question: 'What causes the 32,768-token CUDA OOM despite ZeRO-3 and checkpointing, and what exact attention change fixes it?'
 details:
   realistic_solution: |
     The root cause is the quadratic activation memory of the attention matrix. The team must implement FlashAttention to fuse the attention computation and avoid materializing the full N x N matrix in HBM, reducing memory complexity from O(N^2) to O(N).
@@ -18,10 +18,17 @@ details:
     **The Rationale:** Candidates ignore the quadratic memory complexity of the attention probability matrix.
     **The Consequence:** Wasting time tuning sharding strategies instead of fixing the fundamental O(N^2) memory scaling limit.
   napkin_math: |
+    **Assumptions & Constraints:**
+    - 32,768 tokens sequence length.
+    - 32 attention heads. FP16 (2 bytes).
+
+    **Calculations:**
     - Attention matrix size per head: N^2 = 32,768^2 ≈ 1.07B elements.
     - Memory at 16-bit precision: 1.07B * 2 bytes ≈ 2.14 GB per head.
     - Total activation memory per layer (32 heads): 2.14 GB * 32 ≈ 68.7 GB.
-    - **Materializing the attention matrix instantly exhausts the 80GB limit, requiring FlashAttention to resolve.**
+
+    **Conclusion & Interpretation:**
+    - **Result: Materializing the attention matrix requires ~68.7 GB per layer, necessitating FlashAttention. (Memory-Capacity-Bound Activations)**. Quadratic memory growth crashes long-context models without fusion.
 status: published
 provenance: imported
 requires_explanation: false

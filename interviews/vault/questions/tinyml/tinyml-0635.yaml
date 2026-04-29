@@ -11,22 +11,24 @@ title: The Silent Sensor Death Spiral
 scenario: Your team deployed a firmware update to a fleet of 100,000 battery-powered environmental sensors used in autonomous agricultural vehicles. The update improved a model's audio event classification accuracy. Two weeks later, field reports indicate that ~1% of sensors are unresponsive. Your remote logs show these devices rebooting every 2 minutes before going completely silent. The hardware watchdog timer is configured with a 2-minute timeout. The new model passed all integration tests, including a static analysis check that verified its peak memory usage was within the device's budget.
 question: Why would a model update that passed memory checks cause a catastrophic watchdog loop, and why would it only affect a small subset of the fleet?
 details:
-  realistic_solution: The root cause is an interaction between real-world data drift and an optimistic static analysis of the model's memory usage. The static analysis calculated peak memory based on the test dataset. The ~1% of failing devices are exposed to a new, specific audio environment (e.g., a new type of harvester) that was not in the test set. This audio triggers a rare, worst-case execution path in the DSP frontend requiring a larger intermediate tensor, overflowing the arena. This overflow silently corrupts the call stack. When a function returns using a corrupted address, the CPU faults, the main loop halts, and the watchdog reboots the device after 2 minutes. The persistent environmental sound triggers the failure repeatedly, draining the battery.
+  realistic_solution: The root cause is an interaction between real-world data drift (covariate shift) and an optimistic static analysis of the model's memory usage. The static analysis calculated peak memory based on the test dataset. The ~1% of failing devices are exposed to a new, specific audio environment (e.g., a new type of harvester) that was not in the test set. This audio triggers a rare, worst-case execution path in the DSP frontend requiring a larger intermediate tensor, overflowing the arena. This overflow silently corrupts the call stack. When a function returns using a corrupted address, the CPU faults, the main loop halts, and the watchdog reboots the device after 2 minutes. The persistent environmental sound triggers the failure repeatedly, draining the battery.
   common_mistake: |
     **The Pitfall:** Blaming a memory leak or suggesting the watchdog timer is too aggressive.
     **The Rationale:** Engineers assume a memory leak is the only cause of slow degradation.
     **The Consequence:** They might shorten the watchdog timeout or hunt for leaks instead of realizing the failure is a data-dependent peak memory overflow.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware SRAM: 256 KB.
-       - Planned arena peak memory based on static analysis: 170 KB.
-       - Call stack and local variables consume > 78 KB.
-    2. **Calculations:**
-       - Buffer increases from novel audio trigger (2x MFCC buffer): grows from 8 KB to 16 KB (+8 KB).
-       - True peak memory in the field = 170 KB + 8 KB = 178 KB.
-       - Total SRAM usage = 178 KB + 78 KB = 256 KB.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bound Crash.** The memory limit is breached, causing stack corruption, a crash, and a WDT reboot every 2 minutes, draining the battery rapidly.
+    **Assumptions & Constraints:**
+    - Hardware SRAM: 256 KB.
+    - Planned arena peak memory based on static analysis: 170 KB.
+    - Call stack and local variables consume > 78 KB.
+
+    **Calculations:**
+    - Buffer increases from novel audio trigger (2x MFCC buffer): grows from 8 KB to 16 KB (+8 KB).
+    - True peak memory in the field = 170 KB + 8 KB = 178 KB.
+    - Total SRAM usage = 178 KB + 78 KB = 256 KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 256 KB Limit Breached (Memory-Bound)**. The memory limit is breached, causing stack corruption, a crash, and a WDT reboot every 2 minutes, draining the battery rapidly.
 status: published
 provenance: imported
 requires_explanation: false

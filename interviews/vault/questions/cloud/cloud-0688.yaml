@@ -8,19 +8,26 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: The Communication Wall
-scenario: We have a 512-GPU cluster connected via 10 Gbps Ethernet. We are training a 70B parameter model using standard Data Parallelism. Despite having 512 GPUs, our training speed is barely faster than a single machine.
-question: Based on the network diagram, why has our scaling efficiency collapsed?
+scenario: 'We have a 512-GPU cluster connected via 10 Gbps Ethernet. We are training a 70B parameter model using standard Data Parallelism. Despite having 512 GPUs, our training speed is barely faster than a single machine.'
+question: 'Based on the network diagram, why has our scaling efficiency collapsed?'
 details:
-  realistic_solution: This cluster will experience **near-zero scaling efficiency**. To train a 70B model using Data Parallelism, all 512 GPUs must synchronize their gradients via an AllReduce operation at the end of *every single training step*. This requires moving hundreds of gigabytes of data across the network simultaneously. The 10 Gbps Ethernet uplinks to the Core Switch will instantly choke, turning a matrix-multiplication workload into a pure network-wait workload. Training large models requires specialized topologies like a non-blocking Fat-Tree (Clos) with InfiniBand (200-400 Gbps) and NVLink (900 GB/s) within nodes.
+  realistic_solution: 'This cluster will experience **near-zero scaling efficiency**. To train a 70B model using Data Parallelism, all 512 GPUs must synchronize their gradients via an AllReduce operation at the end of *every single training step*. This requires moving hundreds of gigabytes of data across the network simultaneously. The 10 Gbps Ethernet uplinks to the Core Switch will instantly choke, turning a matrix-multiplication workload into a pure network-wait workload. Training large models requires specialized topologies like a non-blocking Fat-Tree (Clos) with InfiniBand (200-400 Gbps) and NVLink (900 GB/s) within nodes.'
   common_mistake: |
     **The Pitfall:** Assuming 10 Gbps is plenty for gradient sync or that 512 GPUs will give a linear ~512x speedup.
     **The Rationale:** Engineers accustomed to standard web workloads vastly underestimate the volume of data that must cross the network during every single training step in large-scale Data Parallelism.
     **The Consequence:** Building an expensive cluster that acts as a pure network-wait workload, wasting millions of dollars in idle compute.
   napkin_math: |
-    1. A 70B model has ~140 GB of gradients (FP16).
-    2. In a Ring AllReduce, each GPU transfers approximately 2x the gradient size (reduce-scatter + all-gather), so ~280 GB per GPU.
-    3. Over a 10 Gbps (1.25 GB/s) link, a single sync of ~280 GB would take ~224 seconds.
-    4. **Result:** **If your forward/backward pass takes 2 seconds, you spend over 99% of your time waiting for the network.**
+    **Assumptions & Constraints:**
+    - A 70B model has ~140 GB of gradients (FP16).
+    - Over a 10 Gbps (1.25 GB/s) link.
+    - Forward/backward pass takes 2 seconds.
+
+    **Calculations:**
+    - In a Ring AllReduce, each GPU transfers approximately 2x the gradient size (reduce-scatter + all-gather), so ~280 GB per GPU.
+    - A single sync of ~280 GB would take ~224 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~224 seconds (Network-Bound)**. If your forward/backward pass takes 2 seconds, you spend over 99% of your time waiting for the network.
 status: published
 provenance: imported
 requires_explanation: false

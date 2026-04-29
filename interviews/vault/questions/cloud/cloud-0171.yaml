@@ -8,19 +8,26 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: The In-Flight Priority Queue Failure
-scenario: You run a multi-tenant LLM API on a cluster of H100s. 'Premium' users have a strict P99 TTFT SLA of 200ms. To enforce this, you implemented a priority queue, ensuring premium requests always go to the front of the line. However, you are still paying SLA violation penalties. Digging into the logs, you confirm a premium request arrived, was immediately placed at the front of the queue, but its TTFT was still 500ms. The model, a 13B parameter LLM, has not changed. The system is busy but not overloaded.
-question: Why is a priority queue insufficient for guaranteeing the SLA, and what physical constraint of the hardware is it failing to account for?
+scenario: 'You run a multi-tenant LLM API on a cluster of H100s. ''Premium'' users have a strict P99 TTFT SLA of 200ms. To enforce this, you implemented a priority queue, ensuring premium requests always go to the front of the line. However, you are still paying SLA violation penalties. Digging into the logs, you confirm a premium request arrived, was immediately placed at the front of the queue, but its TTFT was still 500ms. The model, a 13B parameter LLM, has not changed. The system is busy but not overloaded.'
+question: 'Why is a priority queue insufficient for guaranteeing the SLA, and what physical constraint of the hardware is it failing to account for?'
 details:
-  realistic_solution: The priority queue is insufficient because it can only reorder the *waiting room* of requests; it cannot preempt a **batch already in-flight on the GPU**. LLM inference is not a continuously divisible process; it proceeds in discrete, atomic generation steps (iterations). Once the GPU begins a generation step for a batch, that computation must run to completion, which can take 50-100ms for a large batch. Your premium request is experiencing 'service time' blocking. It gets to the front of the line, but has to wait for the *current* batch of lower-priority users to finish its ongoing, non-interruptible computation step. The wait time is dominated not by queueing, but by waiting for the GPU to become available again. The priority queue design correctly addresses queueing delay but fails to account for the physical, non-preemptible service time of the hardware.
+  realistic_solution: 'The priority queue is insufficient because it can only reorder the *waiting room* of requests; it cannot preempt a **batch already in-flight on the GPU**. LLM inference is not a continuously divisible process; it proceeds in discrete, atomic generation steps (iterations). Once the GPU begins a generation step for a batch, that computation must run to completion, which can take 50-100ms for a large batch. Your premium request is experiencing ''service time'' blocking. It gets to the front of the line, but has to wait for the *current* batch of lower-priority users to finish its ongoing, non-interruptible computation step. The wait time is dominated not by queueing, but by waiting for the GPU to become available again. The priority queue design correctly addresses queueing delay but fails to account for the physical, non-preemptible service time of the hardware.'
   common_mistake: |
     **The Pitfall:** Blaming network latency or server overload for the SLA violation.
     **The Rationale:** It is easy to ignore explicit evidence that the queueing worked and assume external factors caused the delay.
     **The Consequence:** Failing to recognize that priority queues only reorder waiting requests and cannot preempt non-interruptible, in-flight GPU batch computations.
   napkin_math: |
-    1. Assume a continuous batcher starts a new iteration every 50ms on a 13B model.
-    2. The compute time for this batch iteration is 40ms.
-    3. The GPU is busy for 40ms out of every 50ms cycle.
-    4. **A premium request arriving mid-cycle must wait for the current 40ms compute block to finish, regardless of queue priority.**
+    **Assumptions & Constraints:**
+    - A continuous batcher starts a new iteration every 50ms on a 13B model.
+    - The compute time for this batch iteration is 40ms.
+    - The GPU is busy for 40ms out of every 50ms cycle.
+
+    **Calculations:**
+    - Wait time calculation depends on the arrival time relative to the 40ms compute block.
+    - A premium request arriving mid-cycle must wait for the current 40ms compute block to finish.
+
+    **Conclusion & Interpretation:**
+    - **Result: Hardware Preemption Bound** (A premium request must wait for the current 40ms compute block to finish, regardless of queue priority).
 status: published
 provenance: imported
 requires_explanation: false

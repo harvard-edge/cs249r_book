@@ -8,44 +8,31 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: The Low-Rank Decomposition Latency Paradox
-scenario: You decompose a $4096 \times 4096$ weight matrix in an edge-deployed transformer into two low-rank
-  matrices of dimensions $4096 \times 256$ and $256 \times 4096$ (rank 256). This reduces parameters from
-  16.8M to 2.1M — an 8x reduction. However, inference latency on a Jetson Orin (with Tensor Cores) only
-  drops by 15%, not the expected 8x. Explain why the FLOP reduction does not translate to proportional
-  latency reduction on this hardware.
+scenario: You decompose a $4096 \times 4096$ weight matrix in an edge-deployed transformer into two low-rank matrices of dimensions $4096 \times 256$ and $256 \times 4096$ (rank 256). This reduces parameters from 16.8M to 2.1M — an 8x reduction. However, inference latency on a Jetson Orin (with Tensor Cores) only drops by 15%, not the expected 8x.
 question: "Why does the 8x low-rank FLOP reduction for the 4096x4096 matrix yield only a 15% latency drop on the Jetson Orin?"
 details:
-  realistic_solution: Three factors explain the gap. First, while the parameter reduction is 8× (16.8M
-    → 2.1M), the FLOP reduction is also 8× for matrix-vector products. The original matrix-vector multiply
-    costs $2 \times 4096^2 = 33.6$ MFLOPs. The two low-rank multiplies cost $2 \times 4096 \times 256
-    + 2 \times 256 \times 4096 = 4.2$ MFLOPs — an 8× reduction. However, 8× fewer FLOPs does not yield
-    8× speedup. Second, the two sequential matrix multiplies have lower arithmetic intensity than one
-    large multiply. The original $4096 \times 4096$ matmul has high arithmetic intensity and saturates
-    Tensor Cores; each low-rank multiply ($4096 \times 256$) is a tall-skinny or skinny-tall matrix that
-    may not fill the Tensor Core tile efficiently, reducing hardware utilization from ~40% to ~10%. Third,
-    you now have two kernel launches instead of one, adding overhead and preventing the GPU from amortizing
-    the memory-bandwidth cost of reading activations — the activation vector is read from HBM twice instead
-    of once.
-  common_mistake: Equating parameter reduction with proportional speedup. 'We have 8x fewer parameters,
-    so we should see ~8x speedup.' This confuses model size with compute time and ignores hardware execution
-    realities.
-  napkin_math: 'Original: $4096 \times 4096$ matmul = 33.6M FLOPs, one kernel launch, activations read
-    once. Decomposed: $4096 \times 256$ + $256 \times 4096$ = 2.1M + 2.1M = 4.2M FLOPs, two kernel launches.
-    FLOP ratio: 8× fewer FLOPs. Arithmetic intensity of $4096 \times 256$ matmul: much lower than $4096
-    \times 4096$. On Orin with 275 TOPS INT8, utilization drops from ~40% on large matmuls to ~10% on
-    skinny matmuls → effective throughput drops from ~110 TOPS to ~27.5 TOPS. Net real speedup: roughly
-    $8 \times (27.5/110) = 2\times$, explaining the ~15-20% latency improvement (the matmul is only part
-    of the layer''s total compute).'
+  realistic_solution: Three factors explain the gap. First, while the parameter reduction is 8× (16.8M → 2.1M), the FLOP reduction is also 8× for matrix-vector products. The original matrix-vector multiply costs $2 \times 4096^2 = 33.6$ MFLOPs. The two low-rank multiplies cost $2 \times 4096 \times 256 + 2 \times 256 \times 4096 = 4.2$ MFLOPs — an 8× reduction. However, 8× fewer FLOPs does not yield 8× speedup. Second, the two sequential matrix multiplies have lower arithmetic intensity than one large multiply. The original $4096 \times 4096$ matmul has high arithmetic intensity and saturates Tensor Cores; each low-rank multiply ($4096 \times 256$) is a tall-skinny or skinny-tall matrix that may not fill the Tensor Core tile efficiently, reducing hardware utilization from ~40% to ~10%. Third, you now have two kernel launches instead of one, adding overhead and preventing the GPU from amortizing the memory-bandwidth cost of reading activations — the activation vector is read from HBM twice instead of once.
+  common_mistake: Equating parameter reduction with proportional speedup. 'We have 8x fewer parameters, so we should see ~8x speedup.' This confuses model size with compute time and ignores hardware execution realities.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Original matmul: 4096x4096.
+    - Decomposed matmuls: 4096x256 + 256x4096.
+    - Jetson Orin: 275 TOPS INT8.
+    
+    **Calculations:**
+    - Original FLOPs = 33.6M FLOPs.
+    - Decomposed FLOPs = 2.1M + 2.1M = 4.2M FLOPs (8x reduction).
+    - Skinny matmuls drop utilization from ~40% to ~10%.
+    - Effective throughput drops from ~110 TOPS to ~27.5 TOPS.
+    - Real speedup = 8 * (27.5/110) = 2x.
+    
+    **Conclusion & Interpretation:**
+    - **Result: 2x Speedup (Compute-Bound)**. The lower arithmetic intensity of tall-skinny matrices slashes Tensor Core utilization, diminishing the theoretical 8x speedup.
   options:
-  - Three factors explain the gap. First, while the parameter reduction is 8× (16.8M → 2.1M), the FLOP
-    reduction is also 8× for matrix-vector products. The original matrix-vector multiply costs 2 \times
-    4096^2 = 33.6 MFLOPs.
-  - Graph-level optimizations are always superior to kernel-level optimizations because they capture global
-    data flow patterns.
-  - Equating parameter reduction with proportional speedup. 'We have 8x fewer parameters, so we should
-    see ~8x speedup.' This confuses model size with compute time and ignores hardware execution realities.
-  - The latency is dominated by data preprocessing on the CPU; moving to GPU-accelerated preprocessing
-    will resolve the bottleneck.
+  - Three factors explain the gap. First, while the parameter reduction is 8× (16.8M → 2.1M), the FLOP reduction is also 8× for matrix-vector products. The original matrix-vector multiply costs 2 \times 4096^2 = 33.6 MFLOPs.
+  - Graph-level optimizations are always superior to kernel-level optimizations because they capture global data flow patterns.
+  - Equating parameter reduction with proportional speedup. 'We have 8x fewer parameters, so we should see ~8x speedup.' This confuses model size with compute time and ignores hardware execution realities.
+  - The latency is dominated by data preprocessing on the CPU; moving to GPU-accelerated preprocessing will resolve the bottleneck.
   correct_index: 0
 status: published
 provenance: imported
@@ -57,8 +44,7 @@ validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_status_pro: ERROR
 validation_issues_pro:
-- The solution's central claim that FLOP reduction is 4x is incorrect; the FLOP reduction is 8x, the same
-  as the parameter reduction. Additionally, the FLOP counts are mislabeled as GFLOPs instead of MFLOPs.
+- The solution's central claim that FLOP reduction is 4x is incorrect; the FLOP reduction is 8x, the same as the parameter reduction. Additionally, the FLOP counts are mislabeled as GFLOPs instead of MFLOPs.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

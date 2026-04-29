@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: training
 title: The Cost Model vs Profiling Dilemma
 scenario: Your ML compiler's auto-tuner uses an analytical cost model to predict kernel performance and select tiling configurations. After upgrading from A100 to H100 GPUs, you find that the cost model consistently selects suboptimal tile sizes — the auto-tuned kernels run 30% slower than the best configuration found by random search.
-question: "Why did the analytical cost model break on the new hardware, and how would you fix it for future GPU generations?"
+question: 'Why did the analytical cost model break on the new hardware, and how would you fix it for future GPU generations?'
 details:
   realistic_solution: 'The cost model broke because the H100 changed several microarchitectural parameters that the analytical model didn''t account for: (1) The TMA (Tensor Memory Accelerator) unit changes the cost of shared memory loads — the A100 cost model assumes explicit `cp.async` loads while H100''s TMA can load entire tiles asynchronously. (2) The H100''s L2 cache is 50MB vs A100''s 40MB, changing the effective working set boundary. (3) The H100''s Transformer Engine with FP8 changes the compute-to-memory ratio, shifting optimal tile sizes. The scalable fix is a hybrid approach: use a learned cost model (small neural network trained on profiling data) instead of a purely analytical one, with a hardware feature vector as input. The feature vector encodes cache sizes, memory bandwidth, compute units, and special hardware features. When new hardware arrives, run a small calibration set (~1,000 profiling samples) to fine-tune the model. This amortizes the cost model across GPU generations. XLA, TVM, and Triton all use variants of this approach.'
   common_mistake: |
@@ -17,20 +17,22 @@ details:
     **The Rationale:** Engineers treat the cost model discrepancy as a simple configuration bug, ignoring the introduction of completely new microarchitectural features (like TMA and larger L2 cache boundaries).
     **The Consequence:** The team incurs massive technical debt, constantly playing catch-up to reverse-engineer proprietary hardware changes for every new GPU generation.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Suboptimal config wastes 30% performance.
-       - Random Search: 4096 configs * 5ms = 20.48s/kernel. 80 kernels = ~27.3 mins.
-       - Learned Model: 1000 calibration samples * 5ms = 5s one-time. 100 guided trials * 80 kernels * 5ms = 40s total.
-    2. **Calculations:**
-       - Random Search total: ~1638 seconds.
-       - Learned Model total: 45 seconds.
-    3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound compilation reduced. Learned model saves >26 minutes per compilation run.**
+    **Assumptions & Constraints:**
+    - Suboptimal config wastes 30% performance.
+    - Random Search: 4096 configs * 5ms = 20.48s/kernel. 80 kernels = ~27.3 mins.
+    - Learned Model: 1000 calibration samples * 5ms = 5s one-time. 100 guided trials * 80 kernels * 5ms = 40s total.
+
+    **Calculations:**
+    - Random Search total: ~1638 seconds.
+    - Learned Model total: 45 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: 45 seconds (Compute-Bound)**. Learned model saves >26 minutes per compilation run.
   options:
-  - The H100 has a smaller L2 cache than the A100, causing the analytical model to overestimate cache hits. The fix is to hardcode the new cache sizes.
-  - The H100 changed microarchitectural features (like TMA and larger L2 cache) that the analytical model ignored. The scalable fix is to use a learned cost model calibrated with profiling data.
-  - The A100 cost model relies on Tensor Cores, which were replaced by CUDA cores in the H100. The fix is to switch entirely to random search for all compilations.
-  - The auto-tuner was profiling kernels using CPU memory instead of GPU HBM. The fix is to ensure all tensors are moved to device memory before tracing.
+  - 'The H100 has a smaller L2 cache than the A100, causing the analytical model to overestimate cache hits. The fix is to hardcode the new cache sizes.'
+  - 'The H100 changed microarchitectural features (like TMA and larger L2 cache) that the analytical model ignored. The scalable fix is to use a learned cost model calibrated with profiling data.'
+  - 'The A100 cost model relies on Tensor Cores, which were replaced by CUDA cores in the H100. The fix is to switch entirely to random search for all compilations.'
+  - 'The auto-tuner was profiling kernels using CPU memory instead of GPU HBM. The fix is to ensure all tensors are moved to device memory before tracing.'
   correct_index: 1
 status: published
 provenance: imported

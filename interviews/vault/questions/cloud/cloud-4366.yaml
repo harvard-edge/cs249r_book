@@ -8,8 +8,8 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: TPU v5e BF16 Accumulation and Training Stability vs H100
-scenario: A team migrates transformer training from H100 (FP16 with FP32 accumulation via Tensor Cores) to TPU v5e (BF16 with BF16 accumulation). After 50K training steps, the TPU run shows 1.8% higher loss than the H100 baseline at the same number of steps.
-question: Why is the TPU v5e BF16 run 1.8% higher loss after 50K steps than the H100 FP16 baseline, and how would you fix it on TPU?
+scenario: 'A team migrates transformer training from H100 (FP16 with FP32 accumulation via Tensor Cores) to TPU v5e (BF16 with BF16 accumulation). After 50K training steps, the TPU run shows 1.8% higher loss than the H100 baseline at the same number of steps.'
+question: 'Why is the TPU v5e BF16 run 1.8% higher loss after 50K steps than the H100 FP16 baseline, and how would you fix it on TPU?'
 details:
   realistic_solution: 'The root cause is BF16 accumulation in MXU (TPU''s matrix unit). H100 Tensor Cores accumulate in FP32 even when inputs are FP16 — this is critical for gradient accumulation across large batch sizes and long sequences where small gradient signals would otherwise be rounded to zero in lower precision accumulators. TPU v5e MXU can be configured for BF16 accumulation (fast) or FP32 accumulation (slower but numerically accurate). If the team used BF16 matmul with BF16 accumulation, gradient updates for small learning rates are systematically rounded, causing the loss divergence. Fix: enable FP32 accumulation in JAX/XLA via `jax.lax.Precision.HIGHEST` or `tf.matmul(..., use_32bit_accumulation=True)`. Expected performance cost: ~15-25% throughput reduction. Alternatively, use stochastic rounding (available on TPU v5e) which provides unbiased accumulation in BF16 with minimal throughput cost.'
   common_mistake: |
@@ -17,12 +17,17 @@ details:
     **The Rationale:** Engineers know BF16 has fewer mantissa bits than FP16 (7 vs 10), so they incorrectly blame the weight format itself.
     **The Consequence:** Failing to configure the TPU's MXU for FP32 accumulation, leaving the gradient updates systematically rounded to zero.
   napkin_math: |
+    **Assumptions & Constraints:**
     - BF16 representable step at magnitude 1e-3: epsilon = 2^-7 * 1e-3 ≈ 7.8e-6.
     - FP32 epsilon at 1e-3: 2^-23 * 1e-3 ≈ 1.2e-10.
-    - Rounding error in BF16 accumulation: 7.8e-6 per multiply-add.
-    - Over 1B accumulations in a large matmul, drift ≈ √(1e9) * 7.8e-6 = 0.25.
-    - FP32 drift: √(1e9) * 1.2e-10 = 3.8e-6.
-    - **BF16 accumulation introduces ~66,000x larger numerical drift, explaining the 1.8% loss divergence.**
+    - Accumulations: ~1B.
+
+    **Calculations:**
+    - Rounding error in BF16 accumulation drift ≈ √(1e9) * 7.8e-6 = 0.25.
+    - FP32 drift ≈ √(1e9) * 1.2e-10 = 3.8e-6.
+
+    **Conclusion & Interpretation:**
+    - **Result: 66,000x Larger Drift (Numerical Instability)**. BF16 accumulation introduces massive numerical drift over 1B ops, explaining the 1.8% loss divergence.
 status: published
 provenance: imported
 requires_explanation: false

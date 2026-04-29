@@ -9,7 +9,7 @@ bloom_level: apply
 phase: training
 title: The Illusion of Sparsity
 scenario: A team applied a new unstructured pruning algorithm to a 100B parameter LLM, achieving 50% sparsity. They expected this to roughly double inference throughput on H100 GPUs. In production, they observe less than a 5% throughput improvement. The model is half the original size on disk, and GPU utilization is at 100% during requests.
-question: "Why is the speedup so negligible?"
+question: Why is the speedup so negligible?
 details:
   realistic_solution: The root cause is the use of unstructured pruning. H100 GPUs achieve their performance through Tensor Cores, which are specialized hardware units designed to perform matrix-matrix multiplications on small, dense blocks of data (e.g., 16x16). Unstructured pruning creates a fine-grained, random pattern of zeros in the weight matrices. The GPU cannot use its Tensor Cores on these sparse matrices. It falls back to general-purpose CUDA cores, which are much less efficient, or it loads the data as if it were dense and uses masking, nullifying the potential compute savings. The memory access patterns also become irregular, leading to cache inefficiency. The solution is to use structured pruning, where entire blocks, channels, or attention heads are removed, resulting in smaller *dense* matrices that can be efficiently processed by Tensor Cores.
   common_mistake: |
@@ -17,14 +17,16 @@ details:
     **The Rationale:** Candidates ignore the critical difference between theoretical FLOPs and actual hardware execution on modern AI accelerators.
     **The Consequence:** Engineering time is wasted on unstructured sparsity algorithms that cannot be physically accelerated by the GPU's dense Tensor Cores.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware: H100 Tensor Cores require dense blocks for acceleration.
-       - Algorithm: Unstructured pruning creates fine-grained sparsity.
-    2. **Calculations:**
-       - Dense Tensor Core throughput vs CUDA core fallback: Massively reduced FLOPS.
-       - Sparse index reading: Irregular HBM access (~300 ns latency).
-    3. **Conclusion & Interpretation:**
-       - **Result: Architecture Mismatch.** The theoretical 2x FLOP reduction is nullified by the massive penalty from losing structured, dense computation and sequential memory reads.
+    **Assumptions & Constraints:**
+    - Hardware: H100 Tensor Cores require dense blocks for acceleration.
+    - Algorithm: Unstructured pruning creates fine-grained sparsity.
+
+    **Calculations:**
+    - Dense Tensor Core throughput vs CUDA core fallback: Massively reduced FLOPS.
+    - Sparse index reading: Irregular HBM access (~300 ns latency).
+
+    **Conclusion & Interpretation:**
+    - **Result: Architecture Mismatch (Compute-Bound).** The theoretical 2x FLOP reduction is nullified by the massive penalty from losing structured, dense computation and sequential memory reads.
   options:
   - The model is now memory-bandwidth bound because loading the sparse weight indices from HBM is slower than the compute savings.
   - The pruning is unstructured, which prevents the H100's Tensor Cores from accelerating the matrix math and leads to inefficient, irregular memory access.

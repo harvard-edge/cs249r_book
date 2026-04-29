@@ -9,7 +9,7 @@ bloom_level: apply
 phase: inference
 title: Session-Based Recommendation Temporal Features
 scenario: 'You want to add temporal sequence features to your DLRM: the last 50 items a user interacted with (their session history). Naive approach: concatenate 50 item embeddings (each 64-dim) as a 3200-dim feature vector, passing it into the bottom MLP.'
-question: What is wrong with concatenating 50 item embeddings into a 3200-dim DLRM input, and what session encoder would you use instead?
+question: 'What is wrong with concatenating 50 item embeddings into a 3200-dim DLRM input, and what session encoder would you use instead?'
 details:
   realistic_solution: 'Problems with naive concatenation: (1) Order is not encoded — item 1 and item 50 in the session are treated identically unless positional encodings are added. (2) Input dimension scales with session length (3200 vs 64), requiring the bottom MLP to have 50× more parameters and compute for this feature alone. (3) All 50 items must be looked up (50 embedding reads) even for users with short sessions (wasteful). Better architecture: (1) Self-attention session encoder: apply a lightweight Transformer (1-2 layers, attention over 50-item sequence) to produce a single 64-dim session embedding. The Transformer handles ordering naturally via positional embeddings. (2) Pooling with attention weights: compute attention-weighted sum of item embeddings with a query vector derived from the target item. This is equivalent to a one-layer cross-attention (much cheaper than self-attention). (3) Recurrent encoding: GRU over item embeddings → final hidden state as session embedding (O(T) compute, O(1) output). All approaches produce a single 64-dim session embedding fed into the existing DLRM pipeline — no change to bottom MLP input size.'
   common_mistake: |
@@ -17,12 +17,17 @@ details:
     **The Rationale:** Many engineers focus strictly on the algorithmic deficiency (order-agnostic) rather than the systems implication (50x input growth).
     **The Consequence:** Recommending a solution that simply adds positional embeddings to the concatenated vector, which fails to resolve the massive parameter and compute overhead.
   napkin_math: |
+    **Assumptions & Constraints:**
     - Naive bottom MLP input = 64 * 50 = 3200 dims.
+    - Attention session encoder: 50 items * 64 dim.
+
+    **Calculations:**
     - First MLP layer (3200 -> 512): 3200 * 512 = 1.64M params * 4 bytes = 6.6 MB per layer.
     - FLOPs per sample: 2 * 3200 * 512 = 3.28 MFLOPs vs original 2 * 64 * 512 = 65k FLOPs (50x more).
-    - Attention session encoder: 50 items * 64 dim.
     - Self-attention cost per sample = 4 * 50^2 * 64 = 640k FLOPs. Output is 64 dim (same as original).
-    - **The attention encoder requires 640k FLOPs vs 3.28M FLOPs for naive concatenation (5x less compute) with the same expressiveness.**
+
+    **Conclusion & Interpretation:**
+    - **Result: 640k FLOPs vs 3.28M FLOPs (Compute Overhead)**. The attention encoder requires 640k FLOPs vs 3.28M FLOPs for naive concatenation (5x less compute) with the same expressiveness.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,20 +8,27 @@ competency_area: optimization
 bloom_level: create
 phase: inference
 title: Dual-Core Operator Scheduling for Heterogeneous Memory
-scenario: You are deploying a custom keyword spotting and speaker verification cascade on an ESP32-S3. The model consists of a depthwise separable CNN followed by an LSTM, and requires 800 KB of peak working memory if scheduled naively, which exceeds the 512 KB internal SRAM. The 8 MB PSRAM is available but has significantly higher access latency.
-question: How should the ESP32-S3 schedule the CNN-LSTM cascade across cores and memory tiers to fit 512 KB SRAM and 50 ms?
+scenario: 'You are deploying a custom keyword spotting and speaker verification cascade on an ESP32-S3. The model consists of a depthwise separable CNN followed by an LSTM, and requires 800 KB of peak working memory if scheduled naively, which exceeds the 512 KB internal SRAM. The 8 MB PSRAM is available but has significantly higher access latency.'
+question: 'How should the ESP32-S3 schedule the CNN-LSTM cascade across cores and memory tiers to fit 512 KB SRAM and 50 ms?'
 details:
-  realistic_solution: The optimal strategy uses depth-first scheduling and layer fusion for the CNN to eliminate intermediate activation buffers, fitting the CNN working set entirely into SRAM. Core 0 executes the INT8 CNN using the vector extensions. Concurrently, Core 1 is scheduled as a background orchestrator, double-buffering the LSTM weights from PSRAM into a dedicated SRAM ping-pong buffer just-in-time, effectively hiding the PSRAM latency behind Core 0's compute.
+  realistic_solution: 'The optimal strategy uses depth-first scheduling and layer fusion for the CNN to eliminate intermediate activation buffers, fitting the CNN working set entirely into SRAM. Core 0 executes the INT8 CNN using the vector extensions. Concurrently, Core 1 is scheduled as a background orchestrator, double-buffering the LSTM weights from PSRAM into a dedicated SRAM ping-pong buffer just-in-time, effectively hiding the PSRAM latency behind Core 0''s compute.'
   common_mistake: |
     **The Pitfall:** Naively placing all weights in the 8 MB PSRAM and activations in SRAM.
     **The Rationale:** Candidates overlook the dual-core nature of the ESP32-S3 for software pipelining and layer fusion techniques.
     **The Consequence:** The PSRAM latency stalls the compute, causing the inference to miss the strict 50ms latency constraint.
   napkin_math: |
-    - Naive peak memory: 400KB weights + 400KB activations = 800KB (> 512KB SRAM).
-    - CNN layer fusion drops peak activations to 100KB, making the 500KB CNN working set fit in SRAM.
-    - 400KB LSTM weights reside in PSRAM. Assuming 40 MB/s PSRAM bandwidth, fetching 400KB takes 10ms.
-    - CNN takes 15ms on Core 0. Core 1 prefetches LSTM weights concurrently, hiding the 10ms fetch latency.
-    - **Total latency:** 15ms (CNN) + 20ms (LSTM compute) = **35ms** (< 50ms constraint).
+    **Assumptions & Constraints:**
+    - Naive peak memory requires 800 KB, but SRAM is 512 KB.
+    - PSRAM latency is high (40 MB/s fetch rate).
+    - Core 0 runs CNN in 15ms; Core 1 fetches LSTM weights concurrently.
+
+    **Calculations:**
+    - CNN layer fusion shrinks 400KB activations to 100KB (fit to SRAM).
+    - Fetching 400KB LSTM weights from PSRAM: 400 KB / 40,000 KB/s = 10 ms.
+    - Since 10 ms fetch < 15 ms CNN compute, fetch latency is completely hidden.
+
+    **Conclusion & Interpretation:**
+    - **Result: 35 ms Total Latency (Memory-Bound)**. Core 1 prefetching masks PSRAM bottlenecking, cleanly satisfying the 50 ms deadline and 512 KB threshold.
 status: published
 provenance: imported
 requires_explanation: true

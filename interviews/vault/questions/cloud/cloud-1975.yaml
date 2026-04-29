@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: both
 title: Diagnosing Single-Threaded Consumer Lag in Kafka
 scenario: 'A real-time fraud detection pipeline ingests 100,000 events/sec from Kafka. Events are JSON-encoded, averaging 1KB each. The ingestion service runs on `c6i.4xlarge` (16 vCPU, 32GB RAM) instances. During peak bursts, consumer lag spikes drastically. System metrics show one CPU core pegged at 100% while the remaining 15 are nearly idle. Network I/O is steady at ~100 MB/s.'
-question: "What is the root cause of the ingestion bottleneck when one CPU core is pegged and the other 15 are idle?"
+question: 'What is the root cause of the ingestion bottleneck when one CPU core is pegged and the other 15 are idle?'
 details:
   realistic_solution: 'The root cause is a single-threaded consumer loop bottlenecked by CPU-intensive JSON deserialization. The solution is to decouple the Kafka network polling thread from the processing logic using a worker thread pool, distributing the deserialization across all 16 vCPUs, and ideally migrating from JSON to a faster binary format like Protobuf.'
   common_mistake: |
@@ -17,16 +17,18 @@ details:
     **The Rationale:** Engineers see high throughput and consumer lag and immediately jump to infrastructure scaling, ignoring the thread utilization skew clearly indicated by the single pegged core.
     **The Consequence:** Horizontal scaling multiplies costs but the single-threaded JSON deserialization chokepoint persists within every pod, leaving the pipeline fundamentally unable to drain the Kafka queue.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Event rate: 100,000 msgs/s. Payload: 1 KB JSON.
-       - Network I/O: 100 MB/s (well within instance limits).
-       - Deserialization cost: ~10 µs per 1KB JSON payload.
-    2. **Calculations:**
-       - Total compute required per second = 100,000 msgs × 10 µs = 1,000,000 µs.
-       - 1,000,000 µs = 1.0 CPU core-second of sustained work.
-       - The single Kafka consumer thread is pulling data AND parsing it, maxing out its 1.0 core capacity exactly.
-    3. **Conclusion & Interpretation:**
-       - **Result: Single-Thread CPU Bound**. The application is bottlenecked by synchronous JSON parsing. The architecture must decouple the Kafka polling loop from a worker thread pool to spread the deserialization load across the 15 idle vCPUs.
+    **Assumptions & Constraints:**
+    - Event rate: 100,000 msgs/s. Payload: 1 KB JSON.
+    - Network I/O: 100 MB/s (well within instance limits).
+    - Deserialization cost: ~10 µs per 1KB JSON payload.
+
+    **Calculations:**
+    - Total compute required per second = 100,000 msgs × 10 µs = 1,000,000 µs.
+    - 1,000,000 µs = 1.0 CPU core-second of sustained work.
+    - The single Kafka consumer thread is pulling data AND parsing it, maxing out its 1.0 core capacity exactly.
+
+    **Conclusion & Interpretation:**
+    - **Result: Single-Thread CPU Bound**. The application is bottlenecked by synchronous JSON parsing. The architecture must decouple the Kafka polling loop from a worker thread pool to spread the deserialization load across the 15 idle vCPUs.
 status: published
 provenance: imported
 requires_explanation: false

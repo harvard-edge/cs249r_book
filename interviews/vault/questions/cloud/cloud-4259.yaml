@@ -8,7 +8,7 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Understanding graph break costs in torch.compile for a custom CUDA extension
-scenario: You have a custom CUDA extension for a specialized attention variant. After wrapping the model with `torch.compile`, you get a graph break at every custom op call because the compiler cannot trace through the custom extension's C++ dispatch.
+scenario: 'You have a custom CUDA extension for a specialized attention variant. After wrapping the model with `torch.compile`, you get a graph break at every custom op call because the compiler cannot trace through the custom extension''s C++ dispatch.'
 question: How would you make the custom attention CUDA op traceable by torch.compile without graph breaks?
 details:
   realistic_solution: 'Register the custom op using torch.library: define torch.ops.custom_ext.attention_fwd with a schema via torch.library.Library and use torch.library.impl_abstract() to provide a shape-inference function for TorchDynamo. This allows Dynamo to trace through the op symbolically without needing to execute it. Alternatively, use torch._dynamo.allow_in_graph(custom_func) for simpler cases where you want Dynamo to treat the function as an opaque leaf.'
@@ -17,10 +17,19 @@ details:
     **The Rationale:** By default, unknown Python callables or C++ extensions cause graph breaks because TorchDynamo cannot symbolically trace through them.
     **The Consequence:** Unintended graph breaks that ruin fusion opportunities and tank performance.
   napkin_math: |
-    - Without registration: every attention call (32 transformer layers) causes a graph break.
-    - Lost fusion opportunities: Q/K/V projection + attention could be 1 kernel; instead it is 4+ separate kernels.
-    - Fusion benefit: 4 kernels * 5μs launch overhead vs 1 kernel = 15μs saved.
-    - Total savings: 15μs * 32 layers = **480μs per step**.
+    **Assumptions & Constraints:**
+    - Transformer with 32 layers using a custom CUDA attention extension.
+    - Kernel launch overhead is ~5μs per kernel.
+    - A graph break prevents fusing Q/K/V projection and attention into a single operation.
+
+    **Calculations:**
+    - Without fusion: At least 4 separate kernels are launched per layer.
+    - With fusion: 1 kernel is launched per layer.
+    - Overhead saved per layer: (4 kernels - 1 kernel) * 5μs = 15μs.
+    - Total overhead saved per step: 15μs * 32 layers = 480μs.
+
+    **Conclusion & Interpretation:**
+    - **Result: 480μs savings (Compute-Bound)**. Registering the custom op allows TorchDynamo to trace the graph symbolically, preventing graph breaks and enabling aggressive kernel fusions that eliminate launch overheads.
 status: published
 provenance: imported
 requires_explanation: false

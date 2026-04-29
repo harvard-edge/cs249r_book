@@ -7,24 +7,27 @@ topic: data-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: Cloud New 0018
+title: Sequence Parallelism for 100k Contexts on 1T Models
 scenario: Training a 1T parameter model on an H100 cluster with massive 100k token context lengths. Activations are causing OOM errors.
 question: How would you combine sequence parallelism with Megatron-style training to handle 100k contexts for a 1T model without hitting HBM3 limits?
 details:
-  realistic_solution: Architect a Ring-Self-Attention mechanism integrated with Tensor Parallelism. Distribute the 100k sequence length across the TP group (e.g., TP=8 means 12.5k tokens per GPU). During the attention computation, pass the Key and Value blocks around the GPUs in a ring topology using the high-speed NVLink. For LayerNorm and Dropout, shard the sequence dimension. This drastically reduces the activation memory footprint proportionally to the TP degree, preventing HBM3 OOM errors.
+  realistic_solution: |
+    Architect a Ring-Self-Attention mechanism integrated with Tensor Parallelism. Distribute the 100k sequence length across the TP group (e.g., TP=8 means 12.5k tokens per GPU). During the attention computation, pass the Key and Value blocks around the GPUs in a ring topology using the high-speed NVLink. For LayerNorm and Dropout, shard the sequence dimension. This drastically reduces the activation memory footprint proportionally to the TP degree, preventing HBM3 OOM errors.
   common_mistake: |
     **The Pitfall:** Relying exclusively on activation recomputation (gradient checkpointing) to solve massive context lengths.
     **The Rationale:** Engineers default to standard memory-saving techniques without realizing the computational penalty of re-calculating massive 100k attention matrices.
     **The Consequence:** The VRAM limit is technically bypassed, but training throughput plummets to unusable levels due to massive recomputation waste.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 1T model, 100k context length, batch size 1.
-       - 8192 dim, 2 bytes/param (FP16/BF16).
-    2. **Calculations:**
-       - Baseline Activation Memory: 100k tokens * 1 * 8192 dim * 2 bytes = 1.6GB per layer. Over 100 layers = 160GB (OOM on 80GB H100).
-       - Sequence Parallelism: With Tensor Parallel degree TP=8, the sequence dimension is sharded across GPUs.
-    3. **Conclusion & Interpretation:**
-       - **Result: Activation footprint per GPU drops to 160GB / 8 = 20GB, easily fitting within HBM3. System avoids being Memory-Capacity-Bound.**
+    **Assumptions & Constraints:**
+    - 1T model, 100k context length, batch size 1.
+    - 8192 dim, 2 bytes/param (FP16/BF16).
+
+    **Calculations:**
+    - Baseline Activation Memory: 100k tokens * 1 * 8192 dim * 2 bytes = 1.6GB per layer. Over 100 layers = 160GB (OOM on 80GB H100).
+    - Sequence Parallelism: With Tensor Parallel degree TP=8, the sequence dimension is sharded across GPUs.
+
+    **Conclusion & Interpretation:**
+    - **Result: 20GB activation footprint per GPU (Memory-Capacity-Bound)**. Sharding the sequence dimension prevents HBM3 exhaustion and avoids OOM crashes.
 status: published
 provenance: imported
 requires_explanation: true

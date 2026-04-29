@@ -8,7 +8,7 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Diagnosing CXL Cache Thrashing
-scenario: A 1TB embedding table is hosted on a CXL 2.0 Type 3 memory expansion module (32 GB/s bandwidth). A batch of 1 million random sparse lookups takes 120ms. When the same table is temporarily forced into local DDR5 (acting as a cache), the lookups take 5ms. The CXL link monitoring shows only 2 GB/s utilization.
+scenario: 'A 1TB embedding table is hosted on a CXL 2.0 Type 3 memory expansion module (32 GB/s bandwidth). A batch of 1 million random sparse lookups takes 120ms. When the same table is temporarily forced into local DDR5 (acting as a cache), the lookups take 5ms. The CXL link monitoring shows only 2 GB/s utilization.'
 question: Why do 1M random lookups on the 1TB CXL memory table take 120ms while bandwidth is only 2GB/s, and how would you speed them up?
 details:
   realistic_solution: |
@@ -18,12 +18,20 @@ details:
     **The Rationale:** Random sparse lookups cause cache thrashing, making the system latency-bound rather than bandwidth-bound.
     **The Consequence:** Wasting time debugging hardware when software batching and prefetching is required.
   napkin_math: |
-    - **Data Size:** 1 million fetches of 64 bytes = 64MB total data.
-    - **Theoretical Time:** CXL transfer time = 64MB / 32 GB/s = 2ms.
-    - **Serial Latency:** If fetches are partially serial (e.g., Memory Level Parallelism = 2): 1M fetches * 250ns latency = 250ms total serial time.
-    - **Observed Latency:** MLP of ~2 yields 125ms (matching the 120ms observed).
-    - **DDR5 Baseline:** 1M * 80ns / 16 (higher MLP) = 5ms.
-    - **Conclusion: Random sparse lookups are entirely latency-bound due to cache thrashing, requiring software batching to saturate the bandwidth.**
+    **Assumptions & Constraints:**
+    - 1 million random fetches of 64 bytes.
+    - CXL 2.0 bandwidth: 32 GB/s.
+    - CXL latency: ~250ns. Local DDR5 latency: ~80ns.
+    - Memory Level Parallelism (MLP) ≈ 2.
+
+    **Calculations:**
+    - Total data transferred: 1,000,000 * 64 bytes = 64 MB.
+    - Theoretical bandwidth-bound time: 64 MB / 32 GB/s = 2ms.
+    - Latency-bound time on CXL (MLP=2): (1,000,000 * 250ns) / 2 = 125ms.
+    - Latency-bound time on DDR5 (higher MLP ≈ 16): (1,000,000 * 80ns) / 16 = 5ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 125ms (Latency-Bound)**. Random sparse lookups thrash the CPU cache, turning a bandwidth-bound operation into a serial latency-bound one. Software batching is required to saturate the 32 GB/s CXL link.
   options:
   - The CXL 2.0 module is defective because it is only achieving 2GB/s instead of 32GB/s. The hardware should be RMAd and replaced with a module that has working PCIe lanes.
   - The PCIe Gen5 bus is congested by other background traffic, artificially capping the CXL module to 2GB/s. The application should use PCIe Quality of Service (QoS) to prioritize embedding fetches.

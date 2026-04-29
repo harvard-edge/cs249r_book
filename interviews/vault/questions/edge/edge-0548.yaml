@@ -7,21 +7,28 @@ topic: data-parallelism
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: The Autonomous Vehicle 'FSDP' Fallacy
-scenario: You are leading the perception team for an autonomous vehicle. Your multi-sensor fusion model has grown too large to meet its 33ms latency budget on a single Jetson AGX Orin. A junior engineer, citing experience with training LLMs, implements a plan to shard the model across two Orin modules connected by a PCIe Gen4 x8 switch, mimicking the behavior of FSDP/ZeRO. They distribute the model's layers and insert `AllReduce` collectives to synchronize the 512MB of activations after each of the 4 sharded transformer blocks. The team expected a near-2x performance gain, but end-to-end latency doubled to over 80ms.
-question: Why did FSDP/ZeRO-style sharding across two Orins over PCIe Gen4 x8 double latency, and what architecture should replace it?
+title: 'The Autonomous Vehicle ''FSDP'' Fallacy'
+scenario: 'You are leading the perception team for an autonomous vehicle. Your multi-sensor fusion model has grown too large to meet its 33ms latency budget on a single Jetson AGX Orin. A junior engineer, citing experience with training LLMs, implements a plan to shard the model across two Orin modules connected by a PCIe Gen4 x8 switch, mimicking the behavior of FSDP/ZeRO. They distribute the model''s layers and insert `AllReduce` collectives to synchronize the 512MB of activations after each of the 4 sharded transformer blocks. The team expected a near-2x performance gain, but end-to-end latency doubled to over 80ms.'
+question: 'Why did FSDP/ZeRO-style sharding across two Orins over PCIe Gen4 x8 double latency, and what architecture should replace it?'
 details:
-  realistic_solution: The fundamental issue is the communication-to-compute ratio. Cloud parallelism techniques like FSDP are designed for environments with ultra-high bandwidth interconnects like NVLink (900 GB/s), where communication overhead is a small fraction of compute time. At the edge, the PCIe Gen4 x8 bus (~16 GB/s) is the bottleneck. The time spent shuffling gigabytes of activation data across the PCIe bus for every forward pass overwhelms any computational gains from splitting the model. The observed 80ms latency is dominated by communication.
+  realistic_solution: 'The fundamental issue is the communication-to-compute ratio. Cloud parallelism techniques like FSDP are designed for environments with ultra-high bandwidth interconnects like NVLink (900 GB/s), where communication overhead is a small fraction of compute time. At the edge, the PCIe Gen4 x8 bus (~16 GB/s) is the bottleneck. The time spent shuffling gigabytes of activation data across the PCIe bus for every forward pass overwhelms any computational gains from splitting the model. The observed 80ms latency is dominated by communication.'
   common_mistake: |
     **The Pitfall:** Misapplying datacenter parallelism strategies to edge hardware without checking interconnect bandwidth.
     **The Rationale:** Candidates familiar with FSDP/ZeRO over NVLink (900 GB/s) assume the same logic applies to a PCIe Gen4 switch.
     **The Consequence:** The model becomes completely bottlenecked by communication over the slow PCIe bus, leading to massively increased latency instead of a speedup.
   napkin_math: |
-    * Activation tensor per layer: 128 MB. Total transfer (4 layers) = 512 MB.
-    * PCIe Gen4 x8 bandwidth = 16 GB/s.
-    * Transfer time = 512 MB / 16 GB/s = 32 ms.
-    * Budget remaining for compute = 33 ms - 32 ms = 1 ms.
-    * **The 32 ms communication time completely starves the compute units, causing the end-to-end latency to double.**
+    **Assumptions & Constraints:**
+    - Activation tensor per layer: 128 MB.
+    - Total transfer (4 layers) = 512 MB.
+    - PCIe Gen4 x8 bandwidth = 16 GB/s.
+    - Latency budget = 33 ms.
+
+    **Calculations:**
+    - Transfer time = 512 MB / 16 GB/s = 32 ms.
+    - Budget remaining for compute = 33 ms - 32 ms = 1 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 32 ms (I/O-Bound)**. The 32 ms communication time completely starves the compute units, causing the end-to-end latency to double.
 status: published
 provenance: imported
 requires_explanation: false

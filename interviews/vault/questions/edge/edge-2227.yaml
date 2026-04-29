@@ -8,22 +8,23 @@ competency_area: optimization
 bloom_level: apply
 phase: training
 title: Implementing efficient knowledge distillation with autograd on Jetson Orin
-scenario: You are performing on-device knowledge distillation on Jetson Orin to adapt
-  a compressed 2M parameter student model using soft labels from a 20M parameter teacher.
-  The teacher is frozen. Current implementation runs both models in the same forward
-  pass, consuming 22GB of activation memory — nearly 70% of Orin's 32GB.
-question: How would you reduce activation memory for on-device distillation when the
-  20M-parameter teacher is frozen?
+scenario: You are performing on-device knowledge distillation on Jetson Orin to adapt a compressed 2M parameter student model using soft labels from a 20M parameter teacher. The teacher is frozen. Current implementation runs both models in the same forward pass, consuming 22GB of activation memory — nearly 70% of Orin's 32GB.
+question: How would you reduce activation memory for on-device distillation when the 20M-parameter teacher is frozen?
 details:
-  realistic_solution: 'Run teacher inference with torch.no_grad() to get soft labels.
-    Only the student''s computational graph needs to be built. This reduces activation
-    memory from 22GB to ~2GB (student only). In code: `with torch.no_grad(): teacher_logits = teacher(x)`
-    followed by loss = kd_loss(student_logits, teacher_logits, hard_labels).'
-  common_mistake: Running teacher and student in the same forward-backward pass, allowing
-    the computational graph to track both models. The teacher's activations are stored
-    for a backward pass that never happens (teacher is frozen), wasting ~20GB of the
-    22GB activation budget.
-  napkin_math: 'Teacher (20M params) activation memory saved for backward pass: ~20GB. Student (2M params) activation memory: ~2GB. Without no_grad, both are traced: 20GB + 2GB = 22GB activation memory. With no_grad on teacher, its activations are immediately freed after the forward pass, and only the student''s 2GB computational graph is kept. The model weights themselves only take ~44MB (FP16), so activation memory dominates. After fix: 2GB total activation memory, leaving ~30GB for OS and other processes.'
+  realistic_solution: 'Run teacher inference with torch.no_grad() to get soft labels. Only the student''s computational graph needs to be built. This reduces activation memory from 22GB to ~2GB (student only). In code: `with torch.no_grad(): teacher_logits = teacher(x)` followed by loss computation.'
+  common_mistake: Running teacher and student in the same forward-backward pass, allowing the computational graph to track both models. The teacher's activations are stored for a backward pass that never happens.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Teacher: 20M parameters (~20GB activations if tracked)
+    - Student: 2M parameters (~2GB activations)
+
+    **Calculations:**
+    - Total without no_grad = 20GB + 2GB = 22GB
+    - Total with torch.no_grad() on teacher = 2GB (teacher activations immediately freed)
+    - Savings = 22GB - 2GB = 20GB
+
+    **Conclusion & Interpretation:**
+    - **Result: 20GB Saved (Memory-Capacity-Bound)**. Explicitly disabling autograd for frozen models prevents massive activation retention during the forward pass.
 status: published
 provenance: imported
 requires_explanation: false

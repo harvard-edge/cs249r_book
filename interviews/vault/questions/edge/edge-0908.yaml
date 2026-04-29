@@ -8,8 +8,8 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Edge GPU LLM KV Cache Thrashing
-scenario: You are deploying an 8-billion parameter LLM on a Jetson AGX Orin. Token generation is heavily bandwidth-bound, achieving only 8 tokens/sec. The model weights take 8GB (INT8). The KV cache for a 4096-token context takes about 1GB. The GPU has an 8MB L2 cache. Profiling shows massive L2 cache thrashing during the attention phase of decode.
-question: What is causing L2 thrashing during decode, and how would you reduce KV-cache bandwidth to improve tokens/sec?
+scenario: 'You are deploying an 8-billion parameter LLM on a Jetson AGX Orin. Token generation is heavily bandwidth-bound, achieving only 8 tokens/sec. The model weights take 8GB (INT8). The KV cache for a 4096-token context takes about 1GB. The GPU has an 8MB L2 cache. Profiling shows massive L2 cache thrashing during the attention phase of decode.'
+question: 'What is causing L2 thrashing during decode, and how would you reduce KV-cache bandwidth to improve tokens/sec?'
 details:
   realistic_solution: 'During auto-regressive decoding, the attention mechanism must read the entire KV cache from DRAM for every single generated token. Even though the 1GB KV cache easily fits in the 64GB unified memory, it is vastly larger than the 8MB L2 cache. This causes a complete L2 cache eviction on every token step, forcing the GPU to pull the 1GB cache across the 204 GB/s memory bus repeatedly. The solution requires algorithmic-hardware co-design: implement Grouped Query Attention (GQA) or Multi-Query Attention (MQA) combined with KV cache quantization (INT8/INT4) or FlashAttention-2. By reducing the size of the KV cache by 4-8x, you lower the DRAM bandwidth requirement per token step, and using FlashAttention-2 splits the KV cache across thread blocks to maximize SRAM reuse, significantly improving tokens/sec.'
   common_mistake: |
@@ -17,24 +17,25 @@ details:
     **The Rationale:** Candidates assume weight loading is always the sole bottleneck without recognizing the sheer size of the KV cache relative to the 8MB L2 cache.
     **The Consequence:** Minor throughput gains that completely fail to resolve the core attention-phase memory bandwidth limit.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Weights read per token: 8 GB.
-       - KV Cache read per token: 1 GB.
-       - Memory bus bandwidth: 204 GB/s.
-    2. **Calculations:**
-       - Unoptimized read per token: 9 GB.
-       - Max theoretical unoptimized throughput: 204 GB/s / 9 GB/token = 22.6 tokens/sec.
-       - Optimized (GQA + INT8 KV Cache): 1 GB / 16 = 62.5 MB.
-       - Optimized total read: 8 GB + 0.0625 GB = 8.0625 GB.
-       - Optimized throughput: 204 GB/s / 8.0625 GB/token = 25.3 tokens/sec.
-    3. **Conclusion & Interpretation:**
-       - **Result: GQA and INT8 drop KV cache to 62.5 MB, fitting closer to L2 and reducing bandwidth load.**
-       - **Memory-Bandwidth-Bound**
+    **Assumptions & Constraints:**
+    - Weights read per token: 8 GB.
+    - KV Cache read per token: 1 GB.
+    - Memory bus bandwidth: 204 GB/s.
+
+    **Calculations:**
+    - Unoptimized read per token: 9 GB.
+    - Max theoretical unoptimized throughput: 204 GB/s / 9 GB/token = 22.6 tokens/sec.
+    - Optimized (GQA + INT8 KV Cache): 1 GB / 16 = 62.5 MB.
+    - Optimized total read: 8 GB + 0.0625 GB = 8.0625 GB.
+    - Optimized throughput: 204 GB/s / 8.0625 GB/token = 25.3 tokens/sec.
+
+    **Conclusion & Interpretation:**
+    - **Result: GQA and INT8 drop KV cache to 62.5 MB, fitting closer to L2 and reducing bandwidth load (Memory-Bandwidth-Bound)**.
   options:
-  - During auto-regressive decoding, the attention mechanism must read the entire KV cache from DRAM for every single generated token. Even though the 1GB KV cache easily fits in the 64GB unified memory, it is vastly larger than the 8MB L2 cache.
-  - Quantizing the model weights further to INT4, which won't fix the attention phase bottleneck.
-  - The low utilization is due to kernel launch overhead on the NPU; fusing all layers into a single kernel will achieve near-peak throughput.
-  - Increasing the number of inference threads will proportionally increase throughput, since modern accelerators scale linearly with thread count.
+  - 'During auto-regressive decoding, the attention mechanism must read the entire KV cache from DRAM for every single generated token. Even though the 1GB KV cache easily fits in the 64GB unified memory, it is vastly larger than the 8MB L2 cache.'
+  - 'Quantizing the model weights further to INT4, which won''t fix the attention phase bottleneck.'
+  - 'The low utilization is due to kernel launch overhead on the NPU; fusing all layers into a single kernel will achieve near-peak throughput.'
+  - 'Increasing the number of inference threads will proportionally increase throughput, since modern accelerators scale linearly with thread count.'
   correct_index: 0
 status: published
 provenance: imported

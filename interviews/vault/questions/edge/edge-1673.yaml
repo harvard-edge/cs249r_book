@@ -11,18 +11,26 @@ title: Architecting a Streaming Pipeline for Dataflow Roofline Optimization
 scenario: You are designing a multi-camera perception system for an autonomous guided vehicle (AGV) using a host processor connected to a Hailo-8 accelerator via PCIe. The Hailo-8 provides 26 TOPS of INT8 compute at 2.5W but has no local DRAM, meaning all inputs, outputs, and any spilled intermediate tensors must stream directly from host memory.
 question: How would you design the Hailo-8 host streaming path, analyze the roofline, and restructure YOLOX for 4-camera 1080p60 inference?
 details:
-  realistic_solution: The correct approach involves calculating the required PCIe bandwidth for streaming 4x 1080p60 video feeds and contrasting it with the theoretical peak of 26 TOPS. Because it's a dataflow accelerator, the candidate should design the network to fit entirely within the Hailo-8's internal SRAM to avoid intermediate spills. If the model must be partitioned, they should architect the split at a bottleneck layer (e.g., after a spatial pooling operation) where the tensor size is minimal, thereby maintaining an operational intensity that keeps the system compute-bound rather than bottlenecked by the host-to-device PCIe bandwidth.
+  realistic_solution: 'The correct approach involves calculating the required PCIe bandwidth for streaming 4x 1080p60 video feeds and contrasting it with the theoretical peak of 26 TOPS. Because it''s a dataflow accelerator, the candidate should design the network to fit entirely within the Hailo-8''s internal SRAM to avoid intermediate spills. If the model must be partitioned, they should architect the split at a bottleneck layer (e.g., after a spatial pooling operation) where the tensor size is minimal, thereby maintaining an operational intensity that keeps the system compute-bound rather than bottlenecked by the host-to-device PCIe bandwidth.'
   common_mistake: |
     **The Pitfall:** Applying a standard GPU roofline model and assuming high operational intensity based on total FLOPs.
     **The Rationale:** Candidates forget that without local DRAM, all intermediate activation spills must cross the PCIe bus.
     **The Consequence:** The workload plummets into a severe memory-bound state, drastically lowering effective TOPS and failing the real-time constraints.
   napkin_math: |
-    - **Input Streaming:** 4 cameras * 1920 * 1080 * 3 bytes * 60 FPS = **1.49 GB/s**.
-    - **PCIe Availability:** PCIe Gen3 x4 connection provides **~3.9 GB/s**.
-    - **Base Bus Utilization:** Input consumes ~38% of available bandwidth.
-    - **Target Intensity:** 26e12 OPs / 3.9e9 Bytes/s = **~6666 OPs/Byte** needed across PCIe.
-    - **Spill Cost:** Spilling a 10MB tensor per frame per camera: 4 * 60 * 10MB * 2 (read/write) = **4.8 GB/s**.
-    - **Conclusion:** Total bandwidth (1.49 + 4.8 = 6.29 GB/s) exceeds the 3.9 GB/s limit, creating a hard memory bottleneck.
+    **Assumptions & Constraints:**
+    - Input is 4 cameras at 1080p60 (1920x1080x3 bytes).
+    - PCIe Gen3 x4 bandwidth is ~3.9 GB/s.
+    - Hailo-8 compute is 26 TOPS.
+    - Intermediate tensor spill size is 10MB per frame per camera.
+
+    **Calculations:**
+    - Input Streaming bandwidth is 4 * 1920 * 1080 * 3 * 60 = 1.49 GB/s.
+    - Target Intensity is 26e12 OPs / 3.9e9 Bytes/s = ~6666 OPs/Byte.
+    - Spill Cost bandwidth is 4 cameras * 60 FPS * 10MB * 2 (read/write) = 4.8 GB/s.
+    - Total bandwidth with spills is 1.49 + 4.8 = 6.29 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 6.29 GB/s (Memory-Bound)**. Total bandwidth drastically exceeds the 3.9 GB/s PCIe limit, creating a hard memory bottleneck.
 status: published
 provenance: imported
 requires_explanation: true

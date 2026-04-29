@@ -7,9 +7,9 @@ topic: model-adaptation-systems
 competency_area: architecture
 bloom_level: apply
 phase: both
-title: Multi-Adapter Batching and Shared Base Model
-scenario: Your serving system hosts 50 different LoRA adapters (rank-16) concurrently on top of a shared 13B parameter base model.
-question: How would you lay out memory and batch requests for 50 rank-16 LoRA adapters sharing one 13B base model?
+title: 'Multi-Adapter Batching and Shared Base Model'
+scenario: 'Your serving system hosts 50 different LoRA adapters (rank-16) concurrently on top of a shared 13B parameter base model.'
+question: 'How would you lay out memory and batch requests for 50 rank-16 LoRA adapters sharing one 13B base model?'
 details:
   realistic_solution: 'Share the base model: one 13B BF16 copy = 26 GB. All 50 rank-16 adapters: 50 × 26.2 MB = 1.31 GB. Total: 26 GB + 1.31 GB = 27.31 GB — fits on one H100. For batching, group requests by adapter (adapter-aware batching): requests using the same adapter are batched together to avoid adapter switching overhead between tokens. Use S-LoRA-style paged adapter management for adapters not fitting in GPU memory.'
   common_mistake: |
@@ -17,13 +17,19 @@ details:
     **The Rationale:** Treating fine-tuned adapters as completely distinct, standalone models in the serving layer.
     **The Consequence:** Attempting to load 50 × 26 GB = 1.3 TB of weights, immediately triggering Out-of-Memory (OOM) errors and failing to serve the workload on a single node.
   napkin_math: |
-    - **Base Model**: 13B parameters in BF16 = 26 GB.
-    - **Rank-16 Adapter**: 2 matrices × (A & B) × 16 × 5120 × 40 layers = 13.1M params × 2B = 26.2 MB per adapter.
-    - **Total Adapter Memory**: 50 adapters × 26.2 MB = 1.31 GB.
-    - **Total Weight Memory**: 26 GB + 1.31 GB = **27.31 GB** (Easily fits on one 80GB H100).
-    - **KV Cache Allocation**: ~52.7 GB remains for KV cache.
-    - **Per-Request KV**: 40 layers × 2 × 5120 × 4096 seq × 2B = 3.35 GB.
-    - **Result**: You can fit the base model, all 50 adapters, and ~15 concurrent requests in memory simultaneously using adapter-aware batching.
+    **Assumptions & Constraints:**
+    - Base Model: 13B BF16 (26 GB).
+    - 50 rank-16 adapters, 40 layers.
+    - 80GB H100 GPU.
+
+    **Calculations:**
+    - Adapter Memory: 2 matrices * 16 * 5120 * 40 * 2B = 26.2 MB per adapter.
+    - Total Adapters: 50 * 26.2 MB = 1.31 GB.
+    - Total Weights: 26 GB + 1.31 GB = 27.31 GB.
+    - KV Cache per request: 3.35 GB. Remaining VRAM: ~52.7 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 27.31 GB Weights (Memory-Bound)**. You can easily fit the shared base model, all 50 adapters, and ~15 concurrent requests in memory using adapter-aware batching.
 status: published
 provenance: imported
 requires_explanation: true

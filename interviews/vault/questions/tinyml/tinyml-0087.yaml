@@ -8,7 +8,7 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: The FPU Register Thrashing
-scenario: Your Cortex-M4F runs an RTOS. The ML model runs in a low-priority thread using heavily optimized floating-point math. You have a high-priority timer interrupt (ISR) that fires every 1ms to read an analog sensor. To be 'accurate', you decide to convert the sensor's integer value to a float inside the ISR before saving it. Suddenly, your ML thread's overall latency spikes dramatically.
+scenario: Your Cortex-M4F runs an RTOS. The ML model runs in a low-priority thread using heavily optimized floating-point math. You have a high-priority timer interrupt (ISR) that fires every 1ms to read an analog sensor. To be accurate, you decide to convert the sensor's integer value to a float inside the ISR before saving it. Suddenly, your ML thread's overall latency spikes dramatically.
 question: Why does converting ADC values to float inside a 1 kHz Cortex-M4F ISR spike RTOS latency?
 details:
   realistic_solution: 'Using float in the ISR triggers FPU register stacking. ARM Cortex-M4F uses lazy FPU context saving — normally, the FPU registers are NOT saved on interrupt entry. But if the ISR touches any float, the hardware must save the caller-saved FPU registers (S0-S15 and FPSCR) before the ISR runs and restore them after. This adds extra cycles on entry and exit, plus the ML thread''s FPU state is repeatedly disrupted. Fix: keep the ISR integer-only — store the raw ADC integer and convert to float later in the ML thread.'
@@ -17,16 +17,18 @@ details:
     **The Rationale:** Candidates fail to realize that the M4F uses lazy FPU context saving. Touching a float inside an ISR forces the hardware to stack dozens of FPU registers on entry/exit.
     **The Consequence:** Unintentionally doubling interrupt latency and severely starving low-priority ML threads of CPU time.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - ISR frequency: 1 kHz (every 1ms).
-       - Standard integer ISR entry: ~12 cycles.
-       - FPU stacking ISR entry: ~29 cycles.
-    2. **Calculations:**
-       - Entry/exit overhead increase: from 24 cycles (12*2) to 58 cycles (29*2) total.
-       - Extra overhead per ISR: 58 - 24 = 34 cycles.
-       - Extra overhead per second: 34 cycles * 1,000 ISRs/sec = 34,000 cycles/sec.
-    3. **Conclusion & Interpretation:**
-       - **Result: Latency Regression.** Adding 1 line of float code increases hardware overhead by **~2.4x**, significantly stealing cycles from the low-priority ML thread.
+    **Assumptions & Constraints:**
+    - ISR frequency: 1 kHz (every 1ms).
+    - Standard integer ISR entry: ~12 cycles.
+    - FPU stacking ISR entry: ~29 cycles.
+
+    **Calculations:**
+    - Entry/exit overhead increase: from 24 cycles (12*2) to 58 cycles (29*2) total.
+    - Extra overhead per ISR: 58 - 24 = 34 cycles.
+    - Extra overhead per second: 34 cycles * 1,000 ISRs/sec = 34,000 cycles/sec.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2.4x hardware overhead (Compute-Bound)**. Adding 1 line of float code increases hardware overhead by ~2.4x, significantly stealing cycles from the low-priority ML thread.
 status: published
 provenance: imported
 requires_explanation: false

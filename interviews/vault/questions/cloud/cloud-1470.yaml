@@ -11,22 +11,24 @@ title: Diagnosing LLM Serving OOMs
 scenario: You are serving Llama-2-70B on an 8x 40GB GPU node (320GB total). The serving engine pre-allocates the KV cache for a max sequence length of 4096 and batch size of 128. Load testing triggers an instant OutOfMemory error.
 question: What exact KV-cache memory bottleneck causes OOM for 128 concurrent 4096-token Llama-2-70B requests on 320GB VRAM?
 details:
-  realistic_solution: Calculate the exact KV cache size and realize it consumes 160 GiB. Combined with the 140 GiB model weights and ~16 GiB of CUDA contexts, the total VRAM required (316 GiB) leaves only 4 GiB for actual compute activations, leading to OOM during the prefill phase. The solution is to implement PagedAttention (e.g., vLLM) for dynamic block allocation, or to lower the maximum batch size.
+  realistic_solution: 'Calculate the exact KV cache size and realize it consumes 160 GiB. Combined with the 140 GiB model weights and ~16 GiB of CUDA contexts, the total VRAM required (316 GiB) leaves only 4 GiB for actual compute activations, leading to OOM during the prefill phase. The solution is to implement PagedAttention (e.g., vLLM) for dynamic block allocation, or to lower the maximum batch size.'
   common_mistake: |
     **The Pitfall:** Blaming the OOM on forward-pass activation memory or intermediate tensor states.
     **The Rationale:** Activation footprints cause OOMs during standard model training, a familiar failure mode.
     **The Consequence:** Missing the fact that standard serving engines statically allocate massive VRAM for KV cache based purely on max sequence length, causing instant failure.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 320GB total VRAM. Llama-2-70B: 80 layers, 8 KV heads, dim 128, FP16 (2 bytes).
-       - Batch: 128, Seq: 4096.
-    2. **Calculations:**
-       - KV cache/token = 2 (K+V) × 8 × 128 × 80 × 2 = 327,680 bytes = 320 KiB.
-       - KV cache/sequence = 320 KiB × 4096 = 1.25 GiB.
-       - KV cache for batch = 1.25 GiB × 128 = 160 GiB.
-       - Total Required = 140 GiB weights + 160 GiB KV = 300 GiB. Remaining 20 GiB is consumed by CUDA contexts.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bound.** Static allocation immediately exhausts VRAM during prefill. PagedAttention is required to dynamically allocate blocks and prevent upfront OOMs.
+    **Assumptions & Constraints:**
+    - 320GB total VRAM. Llama-2-70B: 80 layers, 8 KV heads, dim 128, FP16 (2 bytes).
+    - Batch: 128, Seq: 4096.
+
+    **Calculations:**
+    - KV cache/token = 2 (K+V) × 8 × 128 × 80 × 2 = 327,680 bytes = 320 KiB.
+    - KV cache/sequence = 320 KiB × 4096 = 1.25 GiB.
+    - KV cache for batch = 1.25 GiB × 128 = 160 GiB.
+    - Total Required = 140 GiB weights + 160 GiB KV = 300 GiB. Remaining 20 GiB is consumed by CUDA contexts.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound.** Static allocation immediately exhausts VRAM during prefill. PagedAttention is required to dynamically allocate blocks and prevent upfront OOMs.
 status: published
 provenance: imported
 requires_explanation: false

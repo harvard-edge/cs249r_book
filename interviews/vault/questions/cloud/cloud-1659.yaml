@@ -7,9 +7,9 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: Debugging Block-wise Softmax for Long-Context Attention
-scenario: You are implementing a custom attention kernel for a 32,768 context window LLM on an NVIDIA A100 (80GB HBM). To avoid materializing the 32k x 32k attention matrix in HBM, you partition the query and key sequences into tiles of 128x128. However, after computing the localized softmax per block and aggregating the results, your model's perplexity spikes and generates NaNs. Profiling shows incorrect attention weights compared to standard PyTorch nn.functional.softmax.
-question: "How do you diagnose and fix the tile-based softmax computation to match exact attention?"
+title: 'Debugging Block-wise Softmax for Long-Context Attention'
+scenario: 'You are implementing a custom attention kernel for a 32,768 context window LLM on an NVIDIA A100 (80GB HBM). To avoid materializing the 32k x 32k attention matrix in HBM, you partition the query and key sequences into tiles of 128x128. However, after computing the localized softmax per block and aggregating the results, your model''s perplexity spikes and generates NaNs. Profiling shows incorrect attention weights compared to standard PyTorch nn.functional.softmax.'
+question: 'How do you diagnose and fix the tile-based softmax computation to match exact attention?'
 details:
   realistic_solution: 'Implement Online Softmax. Maintain a running max (m_i) and sum (l_i) for each row i in SRAM. For a new block j, update the global max: m_new = max(m_i, m_local). Rescale the running sum: l_new = l_i * exp(m_i - m_new) + l_local * exp(m_local - m_new). Finally, rescale the accumulated output matrix by the global l_new to ensure exact softmax equivalence without materializing the full N x N matrix.'
   common_mistake: |
@@ -17,17 +17,19 @@ details:
     **The Rationale:** Candidates try to apply block-level mathematical operations without accounting for the required global normalization denominator across all tiles in a row.
     **The Consequence:** Generating locally valid but globally incorrect attention distributions, resulting in FP16 overflow (NaNs) and severe perplexity degradation.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Sequence length (N): 32,768.
-       - Tile size: 128x128.
-       - Number of heads: 32.
-       - Precision: FP16 (2 bytes/element), FP32 accumulators (4 bytes).
-    2. **Calculations:**
-       - Standard HBM matrix per head: N^2 * 2 bytes = 32768^2 * 2 = 2.14 GB (68.7 GB for 32 heads).
-       - Online Softmax SRAM footprint per head: Requires tracking m_i (max) and l_i (sum) vectors of length N.
-       - SRAM size: 32768 * 4 bytes * 2 vectors =~ 262 KB.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bound Optimization.** By updating a global running max and sum in SRAM (~262 KB), Online Softmax perfectly matches exact attention while completely avoiding the 68 GB HBM materialization that causes OOMs.
+    **Assumptions & Constraints:**
+    - Sequence length (N): 32,768.
+    - Tile size: 128x128.
+    - Number of heads: 32.
+    - Precision: FP16 (2 bytes/element), FP32 accumulators (4 bytes).
+
+    **Calculations:**
+    - Standard HBM matrix per head: N^2 * 2 bytes = 32768^2 * 2 = 2.14 GB (68.7 GB for 32 heads).
+    - Online Softmax SRAM footprint per head: Requires tracking m_i (max) and l_i (sum) vectors of length N.
+    - SRAM size: 32768 * 4 bytes * 2 vectors =~ 262 KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound Optimization**. By updating a global running max and sum in SRAM (~262 KB), Online Softmax perfectly matches exact attention while completely avoiding the 68 GB HBM materialization that causes OOMs.
 status: published
 provenance: imported
 requires_explanation: false

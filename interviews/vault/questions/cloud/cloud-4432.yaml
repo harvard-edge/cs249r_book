@@ -8,7 +8,7 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: 'Continual Adaptation: Catastrophic Forgetting in LoRA Updates'
-scenario: A production LLM is updated monthly with new LoRA adapters trained on fresh data. After 4 months, benchmark performance on original tasks has degraded 15% even though the base model weights are frozen.
+scenario: 'A production LLM is updated monthly with new LoRA adapters trained on fresh data. After 4 months, benchmark performance on original tasks has degraded 15% even though the base model weights are frozen.'
 question: Why did original-task performance degrade 15% after four monthly LoRA adapter updates even though the base weights were frozen, and how would you prevent it?
 details:
   realistic_solution: 'Frozen base prevents catastrophic forgetting of base knowledge. But if the deployment pattern merges adapters into the base (for efficiency) and then trains new adapters on top of the merged base, the frozen base is different each month and gradually drifts. Fix A (no merge): maintain versioned separate adapters, serve them in ensemble. Fix B (merge with regularization): when merging adapter n, add EWC (Elastic Weight Consolidation) penalty for parameters important to previous tasks. Fix C (adapter capacity): train each monthly adapter to be orthogonal to previous adapters using Gram-Schmidt on the LoRA B matrices. Fix D (replay): include 5% of old task data in each monthly training run. Most practical: Fix D with 5% replay buffer sampled from each of the 4 previous months.'
@@ -17,10 +17,20 @@ details:
     **The Rationale:** The LoRA adapters themselves can accumulate task interference across monthly updates if each new adapter is merged additively into the base.
     **The Consequence:** Gradual drift of the effective base model, leading to degraded performance on older tasks.
   napkin_math: |
-    - 4 months of updates, 15% degradation = ~3.75% per update.
-    - EWC regularization cost: compute Fisher information matrix of 15M LoRA params = 15M * 4B = 60MB storage per checkpoint.
-    - Replay 5% of 3 previous months: if monthly dataset = 10K examples, replay = 0.05 * 30K = 1500 examples.
-    - Adds ~15% to training time, but expected forgetting with replay is **<0.5%/month empirically**.
+    **Assumptions & Constraints:**
+    - 4 months of adapter updates.
+    - Observed degradation: 15%.
+    - EWC regularization uses a 15M param Fisher matrix (FP32).
+    - Replay buffer uses 5% of monthly dataset (10K examples).
+
+    **Calculations:**
+    - Degradation rate: 15% / 4 updates = ~3.75% drift per update.
+    - EWC storage cost: 15,000,000 params * 4 bytes = 60MB per checkpoint.
+    - Replay examples needed (3 previous months): 0.05 * 30,000 = 1500 examples.
+    - Adding 1500 examples to a 10K dataset increases training time by ~15%.
+
+    **Conclusion & Interpretation:**
+    - **Result: <0.5% drift/month (Capacity-Bound)**. Additive merging of LoRA weights pollutes the effective base model. A small 5% replay buffer is computationally cheap and empirically prevents catastrophic forgetting.
 status: published
 provenance: imported
 requires_explanation: false

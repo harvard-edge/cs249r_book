@@ -7,22 +7,28 @@ topic: graceful-degradation
 competency_area: reliability
 bloom_level: analyze
 phase: inference
-title: Diagnosing A17 Pro Neural Engine OOM Under Thermal Throttling
-scenario: Your real-time video analytics app runs a heavy segmentation model on the Apple A17 Pro Neural Engine. Users report that after 15 minutes of use in warm environments, the app suddenly crashes with out-of-memory (OOM) OS jetsam events, even though memory usage was previously completely stable. Telemetry indicates that right before the crash, the SoC reaches its thermal limit and triggers a degradation ladder that attempts to shed load by dropping the camera pipeline from 60 FPS to 15 FPS.
-question: Why does an A17 Pro video app encounter sudden OOM crashes during thermal degradation after a period of stable memory use?
+title: 'Diagnosing A17 Pro Neural Engine OOM Under Thermal Throttling'
+scenario: 'Your real-time video analytics app runs a heavy segmentation model on the Apple A17 Pro Neural Engine. Users report that after 15 minutes of use in warm environments, the app suddenly crashes with out-of-memory (OOM) OS jetsam events, even though memory usage was previously completely stable. Telemetry indicates that right before the crash, the SoC reaches its thermal limit and triggers a degradation ladder that attempts to shed load by dropping the camera pipeline from 60 FPS to 15 FPS.'
+question: 'Why does an A17 Pro video app encounter sudden OOM crashes during thermal degradation after a period of stable memory use?'
 details:
-  realistic_solution: The root cause is asynchronous queue buildup in the shared unified memory during the thermal throttling transition. When the A17 Pro exceeds its thermal envelope, iOS aggressively throttles the Neural Engine's clock speed. If the camera capture pipeline continues enqueueing frames at 60 FPS while the throttled NE can now only process 10 FPS, unprocessed high-resolution frames rapidly pile up. Because the CPU, GPU, and NE share this 8 GB pool, the sudden spike in unreferenced frame buffers triggers an OS jetsam OOM kill before the application's degradation logic fully kicks in.
+  realistic_solution: 'The root cause is asynchronous queue buildup in the shared unified memory during the thermal throttling transition. When the A17 Pro exceeds its thermal envelope, iOS aggressively throttles the Neural Engine''s clock speed. If the camera capture pipeline continues enqueueing frames at 60 FPS while the throttled NE can now only process 10 FPS, unprocessed high-resolution frames rapidly pile up. Because the CPU, GPU, and NE share this 8 GB pool, the sudden spike in unreferenced frame buffers triggers an OS jetsam OOM kill before the application''s degradation logic fully kicks in.'
   common_mistake: |
     **The Pitfall:** Diagnosing the crash as a standard application-layer memory leak.
     **The Rationale:** Developers see an OOM crash and assume there is a retain cycle in their Swift code, failing to consider the physical system dynamics of a heterogeneous SoC under thermal stress.
     **The Consequence:** Spending weeks auditing application code for leaks that don't exist, while the fundamental producer-consumer queue imbalance remains unfixed.
   napkin_math: |
-    - **Frame Size:** Uncompressed 4K NV12 video frame = 3840 × 2160 × 1.5 bytes ≈ 12.4 MB.
-    - **Camera Throughput:** At 60 FPS, the camera enqueues ~744 MB/s.
-    - **Throttled NPU:** Thermal throttling reduces the Neural Engine to 25% capacity (processing drops to 10 FPS).
-    - **Queue Buildup:** 50 unprocessed frames accumulate per second (60 FPS in - 10 FPS out).
-    - **Memory Bloat:** 50 frames × 12.4 MB × 5 seconds of delay = 3.1 GB.
-    - **Result:** **A sudden 3.1 GB spike inside an 8 GB unified memory pool instantly exhausts the remaining OS RAM, directly triggering an OOM kill.**
+    **Assumptions & Constraints:**
+    - Frame Size: Uncompressed 4K NV12 video = 3840 * 2160 * 1.5 bytes ≈ 12.4 MB.
+    - Camera Throughput: 60 FPS.
+    - Throttled NPU: 10 FPS (due to thermal throttling).
+
+    **Calculations:**
+    - Camera enqueue rate: 60 FPS * 12.4 MB = ~744 MB/s.
+    - Queue Buildup: 60 FPS (in) - 10 FPS (out) = 50 unprocessed frames/second.
+    - Memory Bloat: 50 frames * 12.4 MB * 5 seconds = 3.1 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3.1 GB Memory Spike (Memory-Bound).** A sudden 3.1 GB spike inside an 8 GB unified memory pool instantly exhausts the remaining OS RAM, directly triggering an OOM kill.
 status: published
 provenance: imported
 requires_explanation: false

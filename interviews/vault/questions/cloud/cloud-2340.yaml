@@ -8,8 +8,8 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: INT4 Weight-Only Quantization Slowdown on A100
-scenario: To save memory, your team applies INT4 weight-only quantization to a 65B parameter model deployed on GPUs that lack native INT4 Tensor Cores. The model size shrinks from 130GB to 35GB. However, the token generation latency increases from 40ms/token (BF16) to 95ms/token (INT4). Profiling shows high ALU utilization but low Tensor Core utilization.
-question: "Why does INT4 weight-only quantization make the 65B model slower despite shrinking weights, and what quantization/deployment fix would you choose?"
+scenario: 'To save memory, your team applies INT4 weight-only quantization to a 65B parameter model deployed on GPUs that lack native INT4 Tensor Cores. The model size shrinks from 130GB to 35GB. However, the token generation latency increases from 40ms/token (BF16) to 95ms/token (INT4). Profiling shows high ALU utilization but low Tensor Core utilization.'
+question: 'Why does INT4 weight-only quantization make the 65B model slower despite shrinking weights, and what quantization/deployment fix would you choose?'
 details:
   realistic_solution: |
     The hardware lacks native INT4 Tensor Cores, so the custom kernel must fetch INT4 weights, unpack them into INT8 or FP16 inside the CUDA cores (ALUs) using bit-shifts and masks, and then feed them to Tensor Cores. For memory-bound decoding, the time saved fetching 35GB is completely overshadowed by the massive instruction overhead of unpacking 65 billion weights per token. Fix by using INT8 quantization (supported natively) or pre-packing weights.
@@ -18,22 +18,24 @@ details:
     **The Rationale:** Candidates fail to account for the ALU instruction overhead required to unpack non-native bit-widths.
     **The Consequence:** Deploying slower models in production despite memory savings, degrading user experience.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - BF16 size: 130GB. INT4 size: 35GB.
-       - Bandwidth: 2000 GB/s (1x GPU). ALU limit: ~19 TOPS.
-       - Unpacking INT4 requires ~3 instructions per element.
-    2. **Calculations:**
-       - INT4 fetch time: 35GB / 2000 GB/s = 17.5ms.
-       - Unpack instructions: 65B elements * 3 = 195 billion ops.
-       - Ideal unpack time: 195e9 / 19e12 = 10.2ms. (With divergence/register pressure, real overhead adds ~80ms).
-       - Total time: 17.5ms + 80ms = 97.5ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound (ALU Unpacking).** The latency shifts from memory bandwidth to ALU instruction throughput due to lack of native INT4 support.
+    **Assumptions & Constraints:**
+    - BF16 size: 130GB. INT4 size: 35GB.
+    - Bandwidth: 2000 GB/s (1x GPU). ALU limit: ~19 TOPS.
+    - Unpacking INT4 requires ~3 instructions per element.
+
+    **Calculations:**
+    - INT4 fetch time: 35GB / 2000 GB/s = 17.5ms.
+    - Unpack instructions: 65B elements * 3 = 195 billion ops.
+    - Ideal unpack time: 195e9 / 19e12 = 10.2ms. (With divergence/register pressure, real overhead adds ~80ms).
+    - Total time: 17.5ms + 80ms = 97.5ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 97.5ms (Compute-Bound)**. The latency shifts from memory bandwidth to ALU instruction throughput due to lack of native INT4 support.
   options:
-  - The GPU lacks native INT4 Tensor Cores, so ALUs must unpack INT4 to FP16, creating an 80ms compute bottleneck; fix by using INT8 natively or pre-packing weights.
-  - The memory bandwidth drops to 17.5ms, but unaligned accesses add 78ms of penalty; fix by using FP16.
-  - CPU-to-GPU transfer of the 35GB INT4 weights is bottlenecked by the PCIe Gen4 bus.
-  - INT4 quantization causes massive activation scale outliers that force a fallback to FP32 kernels.
+  - 'The GPU lacks native INT4 Tensor Cores, so ALUs must unpack INT4 to FP16, creating an 80ms compute bottleneck; fix by using INT8 natively or pre-packing weights.'
+  - 'The memory bandwidth drops to 17.5ms, but unaligned accesses add 78ms of penalty; fix by using FP16.'
+  - 'CPU-to-GPU transfer of the 35GB INT4 weights is bottlenecked by the PCIe Gen4 bus.'
+  - 'INT4 quantization causes massive activation scale outliers that force a fallback to FP32 kernels.'
   correct_index: 0
 status: published
 provenance: imported

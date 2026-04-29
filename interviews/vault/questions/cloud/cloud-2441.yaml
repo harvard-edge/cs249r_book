@@ -11,19 +11,22 @@ title: Tensor vs Pipeline Parallelism Roofline
 scenario: 'Deploying a 70B parameter LLM (140GB weights) on an 8-GPU node (each GPU: 80GB HBM, 2 TB/s bandwidth). At batch size 1, a system engineer argues for Pipeline Parallelism (PP=8) because it requires zero intra-layer communication, saving NVLink bandwidth and lowering latency.'
 question: At batch size 1, should the 70B model use PP=8 or TP=8 on the 8-GPU node, and why?
 details:
-  realistic_solution: LLM decoding at batch size 1 is entirely memory-bandwidth bound. In PP=8, each token must sequentially traverse 8 GPUs. Each GPU loads its 17.5GB weight shard at 2 TB/s, taking ~8.75ms. Total sequential latency is $8 \times 8.75 = 70$ms per token. In TP=8, the matrix multiplications are split. All 8 GPUs load their 17.5GB shards *simultaneously*. The aggregate memory bandwidth becomes 16 TB/s. The weight loading takes 8.75ms total. Even with an AllReduce communication overhead of ~1ms per layer, TP=8 delivers drastically lower latency because it aggregates memory bandwidth.
+  realistic_solution: 'LLM decoding at batch size 1 is entirely memory-bandwidth bound. In PP=8, each token must sequentially traverse 8 GPUs. Each GPU loads its 17.5GB weight shard at 2 TB/s, taking ~8.75ms. Total sequential latency is $8 \times 8.75 = 70$ms per token. In TP=8, the matrix multiplications are split. All 8 GPUs load their 17.5GB shards *simultaneously*. The aggregate memory bandwidth becomes 16 TB/s. The weight loading takes 8.75ms total. Even with an AllReduce communication overhead of ~1ms per layer, TP=8 delivers drastically lower latency because it aggregates memory bandwidth.'
   common_mistake: |
     **The Pitfall:** Prioritizing small communication savings over memory-bandwidth aggregation.
     **The Rationale:** Candidates intuitively avoid inter-GPU communication without quantifying the massive penalty of un-aggregated memory bandwidth.
     **The Consequence:** Selecting an architecture that is severely bottlenecked by single-GPU bandwidth for memory-bound decoding.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 70B model weights: 140 GB.
-       - 8 GPUs, each with 2 TB/s bandwidth.
-    2. **Calculations:**
-       - PP=8 Latency: 8 * (17.5 GB / 2 TB/s) = 70 ms.
-       - TP=8 Latency: (140 GB / 16 TB/s) + 1 ms communication = 8.75 ms + 1 ms = 9.75 ms.
-    3. **Conclusion & Interpretation:** **Result: Memory-Bandwidth-Bound.** TP=8 aggregates memory bandwidth, making it ~7x faster for latency than PP=8 despite communication overhead.
+    **Assumptions & Constraints:**
+    - 70B model weights: 140 GB.
+    - 8 GPUs, each with 2 TB/s bandwidth.
+
+    **Calculations:**
+    - PP=8 Latency: 8 * (17.5 GB / 2 TB/s) = 70 ms.
+    - TP=8 Latency: (140 GB / 16 TB/s) + 1 ms communication = 8.75 ms + 1 ms = 9.75 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 9.75 ms (Memory-Bandwidth-Bound)**. TP=8 aggregates memory bandwidth, making it ~7x faster for latency than PP=8 despite communication overhead.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,8 +8,8 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: TP with Activation Checkpointing Interaction
-scenario: You enable full activation checkpointing on a TP=8 training job.
-question: During full activation checkpointing with TP=8, which forward TP collectives are recomputed in backward, and does TP communication increase?
+scenario: 'You enable full activation checkpointing on a TP=8 training job.'
+question: 'During full activation checkpointing with TP=8, which forward TP collectives are recomputed in backward, and does TP communication increase?'
 details:
   realistic_solution: 'With full activation checkpointing, only the input to each transformer block is saved. During backward, the entire forward pass is recomputed to regenerate intermediate activations. This recomputation includes the TP collectives: the AllReduce after row-parallel layers must be re-executed. For a model with N blocks, forward TP communication = 2N AllReduces (attention + MLP). Backward recomputation adds another 2N AllReduces. Backward''s own gradient AllReduces add 2N more. Total: 6N AllReduces per step (vs 4N without checkpointing) — a 50% increase in TP communication. This is usually acceptable because: (1) TP communication is fast over NVLink, (2) recomputed collectives overlap with recomputed GEMMs, (3) the memory savings from checkpointing (often 5-10× activation memory reduction) enable larger batch sizes that amortize the overhead.'
   common_mistake: |
@@ -17,11 +17,18 @@ details:
     **The Rationale:** Candidates often forget that recomputation in a model-parallel setup requires re-executing the distributed collectives as well.
     **The Consequence:** Underestimating the communication overhead added by activation checkpointing in tensor parallel training.
   napkin_math: |
-    1. Without checkpointing: 4N AllReduces per step.
-    2. With full activation checkpointing: 6N AllReduces per step.
-    3. For 80 layers: 320 -> 480 AllReduces.
-    4. At 0.15 ms each: 48 ms -> 72 ms.
-    5. **Communication time increases by 24 ms, but the ~30 GB activation memory saved enables a 2x batch size, amortizing the overhead.**
+    **Assumptions & Constraints:**
+    - TP=8 training job with full activation checkpointing.
+    - Model has N=80 layers.
+    - AllReduce time is 0.15 ms each.
+
+    **Calculations:**
+    - Without checkpointing: 4N AllReduces per step. For 80 layers: 320 AllReduces * 0.15 ms = 48 ms.
+    - With full activation checkpointing: 6N AllReduces per step. For 80 layers: 480 AllReduces * 0.15 ms = 72 ms.
+    - Communication time increase: 72 ms - 48 ms = 24 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Communication Time Increases** (Communication time increases by 24 ms, but the ~30 GB activation memory saved enables a 2x batch size, amortizing the overhead).
 status: published
 provenance: imported
 requires_explanation: true

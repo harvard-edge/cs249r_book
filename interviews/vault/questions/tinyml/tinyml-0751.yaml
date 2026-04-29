@@ -17,10 +17,16 @@ details:
     **The Rationale:** `GetTensor()` just returns a pointer; it does not read or copy the whole tensor data. The delay is entirely in resolving the pointer from the FlatBuffer schema.
     **The Consequence:** Developers might try to move weights to SRAM to speed up inference, unnecessarily wasting precious memory without solving the underlying framework overhead.
   napkin_math: |
-    *   **Model complexity:** Assume a 50-layer model with 3 tensors per layer = 150 `GetTensor` calls per inference.
-    *   **Lookup cost:** A dynamic lookup and bounds check takes ~1,000 cycles due to poor cache locality on the scattered FlatBuffer.
-    *   **Total overhead:** 150 * 1,000 = 150,000 cycles.
-    *   **Time equivalent:** At typical MCU clocks (e.g., ~50-100 MHz), 150,000 cycles equates to **1-3ms of pure framework overhead**.
+    **Assumptions & Constraints:**
+    - Model complexity: 50 layers * 3 tensors/layer = 150 GetTensor() calls.
+    - Pointer lookup and bounds check cost: ~1,000 cycles (due to poor FlatBuffer cache locality).
+
+    **Calculations:**
+    - Total cycle overhead: 150 calls * 1,000 cycles = 150,000 cycles.
+    - Time equivalent at MCU clocks (e.g., 50-100 MHz): 150,000 cycles ≈ 1-3ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1-3ms Overhead (Compute-Bound)**. The delay is entirely framework overhead from resolving the pointer in the FlatBuffer schema, not reading tensor data.
   options:
   - GetTensor() is slow because it reads the full tensor data from flash memory into SRAM on each call, wasting time copying data that's already accessible via XIP.
   - 'TFLite Micro stores tensors in a FlatBuffer format. Each GetTensor() call parses offset tables, performs bounds checking, and resolves nested pointers. With poor cache locality on scattered vtable structures, each lookup incurs multiple cache misses. For 150 GetTensor calls per inference at ~1000 cycles each: 150K cycles = 1-3ms overhead. Fix: use TFLite Micro''s static memory planner (pre-resolves all pointers at init) or cache resolved pointers in a lookup table after first inference.'

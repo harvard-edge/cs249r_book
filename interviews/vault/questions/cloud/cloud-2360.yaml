@@ -7,9 +7,9 @@ topic: transformer-systems-cost
 competency_area: architecture
 bloom_level: evaluate
 phase: both
-title: Diagnosing PCIe Contention from Checkpointing
-scenario: During an LLM training run on a 4x GPU node, iteration time is perfectly stable at 2.5s, except every 1000 steps it spikes to 18.5 seconds. Asynchronous checkpointing is enabled, offloading 80GB of optimizer states from GPU memory to the host, and then writing to a local NVMe RAID. GPU utilization drops to 0% during the spike.
-question: Why does iteration time spike from 2.5s to 18.5s every 1000 steps during async 80GB checkpointing, and how would you reduce the stall?
+title: 'Diagnosing PCIe Contention from Checkpointing'
+scenario: 'During an LLM training run on a 4x GPU node, iteration time is perfectly stable at 2.5s, except every 1000 steps it spikes to 18.5 seconds. Asynchronous checkpointing is enabled, offloading 80GB of optimizer states from GPU memory to the host, and then writing to a local NVMe RAID. GPU utilization drops to 0% during the spike.'
+question: 'Why does iteration time spike from 2.5s to 18.5s every 1000 steps during async 80GB checkpointing, and how would you reduce the stall?'
 details:
   realistic_solution: |
     The root cause is PCIe bus contention. The asynchronous checkpointing process initiates a massive 80GB DMA transfer from Device-to-Host over the PCIe Gen4 x16 bus. This completely saturates the PCIe root complex. Simultaneously, the dataloader is trying to send the next batch's data from Host-to-Device over the same shared PCIe lanes. Because the upstream (D2H) transfer hogs the switch bandwidth and CPU I/O resources, the downstream (H2D) dataloader transfer is starved, blocking the next training iteration until the D2H transfer completes. The solution is to explicitly rate-limit/throttle the DMA copy of the checkpoint (e.g., chunking the copy with sleeps) or pin the checkpointing thread to a separate NUMA node's PCIe lanes to isolate the traffic.
@@ -18,10 +18,18 @@ details:
     **The Rationale:** The candidate sees a slow I/O bound checkpoint and immediately assumes the physical disk is the bottleneck.
     **The Consequence:** The team wastes money upgrading to faster NVMe drives or in-memory caches, completely failing to fix the shared PCIe bus saturation that is starving the dataloader.
   napkin_math: |
-    - **D2H Transfer Time:** 80 GB / 20 GB/s (PCIe Gen4 x16) = 4 seconds of fully saturated PCIe bus.
-    - **NVMe Write Time:** 80 GB / 5 GB/s = 16 seconds.
-    - **Total Stall:** If the write thread holds locks, the 2.5s compute + 16s write stall = **18.5 seconds**.
-    - **Conclusion: During the 4 seconds of D2H transfer, the downstream H2D dataloader gets starved, blocking the pipeline and creating the observed spike.**
+    **Assumptions & Constraints:**
+    - Checkpoint size: 80 GB
+    - PCIe Gen4 x16 bandwidth: 20 GB/s
+    - NVMe write speed: 5 GB/s
+
+    **Calculations:**
+    - D2H Transfer Time = 80 GB / 20 GB/s = 4 seconds of fully saturated PCIe bus
+    - NVMe Write Time = 80 GB / 5 GB/s = 16 seconds
+    - Total Stall = 2.5s compute + 16s write stall = 18.5 seconds
+
+    **Conclusion & Interpretation:**
+    - **Result: 18.5 seconds (I/O-Bound)**. During the 4 seconds of D2H transfer, the downstream H2D dataloader gets starved, blocking the pipeline and creating the observed spike.
 status: published
 provenance: imported
 requires_explanation: false

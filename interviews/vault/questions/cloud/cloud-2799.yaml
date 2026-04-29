@@ -8,7 +8,7 @@ competency_area: parallelism
 bloom_level: create
 phase: training
 title: Privacy-Preserving Cross-Tenant Data-Parallel Aggregation
-scenario: Architect a privacy-preserving cross-tenant data-parallel training system for a 70B language model across three cloud regions, each with a pod of 64 H100 GPUs. Tenants will not share raw gradients in plaintext. Inter-region WAN is 200 Gbps.
+scenario: A privacy-preserving cross-tenant data-parallel training system must be architected for a 70B language model across three cloud regions, each with a pod of 64 H100 GPUs. Tenants will not share raw gradients in plaintext. Inter-region WAN is 200 Gbps.
 question: How would you architect privacy-preserving 3-region data-parallel aggregation for a 70B model on 192 H100s with secure cross-region averaging?
 details:
   realistic_solution: Use hierarchical AllReduce with a secure-aggregation outer step. Inside each pod, run a standard NCCL ring AllReduce on the FP16 gradient over NVLink/IB; this produces one 140 GB FP16 tensor per region. Compress the per-region tensor with PowerSGD (rank-8) to roughly 14 GB before cross-region transmission, then run a Bonawitz-style secret-shared additive aggregation across the three regional aggregators over the 200 Gbps WAN. Pipeline the cross-region step by issuing the secure-aggregation AllReduce immediately when the local pod finishes reduce-scatter, so the cross-region 14 GB / 25 GB/s ≈ 0.56 s overlaps with the next step's ~0.7 s backward pass. Use bounded staleness of 1 step for the cross-region average so any straggler region does not block intra-pod progress.
@@ -17,15 +17,17 @@ details:
     **The Rationale:** Candidates miss the core bottleneck (WAN bandwidth) and apply edge-device memory constraints instead, or fail to compress before applying expensive MPC protocols.
     **The Consequence:** Starving the GPUs of compute because the uncompressed WAN transfer would take 5.6s per step.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model: 70B parameters, FP16 gradients (2 bytes per param = 140 GB per region).
-       - Compression: PowerSGD rank-8 (compresses 140 GB to ~14 GB).
-       - WAN Bandwidth: 200 Gbps (25 GB/s).
-    2. **Calculations:**
-       - Cross-Region Transfer: Secure aggregate moves 2 * (2/3) * 14 GB = 18.6 GB.
-       - Transfer Time: 18.6 GB / 25 GB/s ≈ 0.75 s.
-    3. **Conclusion & Interpretation:**
-       - **Result: Network-Bound (WAN).** The ~0.75s cross-region step can be effectively hidden behind the next step's backward pass using bounded staleness.
+    **Assumptions & Constraints:**
+    - Model: 70B parameters, FP16 gradients (2 bytes per param = 140 GB per region).
+    - Compression: PowerSGD rank-8 (compresses 140 GB to ~14 GB).
+    - WAN Bandwidth: 200 Gbps (25 GB/s).
+
+    **Calculations:**
+    - Cross-Region Transfer: Secure aggregate moves 2 * (2/3) * 14 GB = 18.6 GB.
+    - Transfer Time: 18.6 GB / 25 GB/s ≈ 0.75 s.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~0.75s Transfer (Network-Bound).** The ~0.75s cross-region step can be effectively hidden behind the next step's backward pass using bounded staleness.
 status: published
 provenance: imported
 requires_explanation: true

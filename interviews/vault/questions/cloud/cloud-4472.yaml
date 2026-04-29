@@ -7,9 +7,9 @@ topic: recommendation-systems-engineering
 competency_area: architecture
 bloom_level: apply
 phase: inference
-title: ANN Index Rebuild Latency for Embedding Table Updates
-scenario: A retrieval system uses an HNSW index over 10M item embeddings (128-dim). Embeddings are retrained daily and require a full index rebuild. The rebuild currently takes 4 hours on a CPU server, causing a 4-hour window where the retrieval index is stale.
-question: How would you architect the system to cut the daily 10M-item HNSW index rebuild from 4 hours to under 30 minutes?
+title: 'ANN Index Rebuild Latency for Embedding Table Updates'
+scenario: 'A retrieval system uses an HNSW index over 10M item embeddings (128-dim). Embeddings are retrained daily and require a full index rebuild. The rebuild currently takes 4 hours on a CPU server, causing a 4-hour window where the retrieval index is stale.'
+question: 'How would you architect the system to cut the daily 10M-item HNSW index rebuild from 4 hours to under 30 minutes?'
 details:
   realistic_solution: 'Parallel index construction: (1) HNSW GPU construction: use FAISS GPU with HNSW-like graph. GPU HNSW build on 10M items, 128-dim: using GPU IVF-PQ as a two-step approach — IVF clustering (fast on GPU) + PQ quantization. Build time on A100: ~5 minutes. (2) Hierarchical index: build a coarse IVF index. (3) Delta index: only rebuild the index for items whose embeddings changed significantly. (4) Background rebuild with hot-swap: maintain old index until new index is fully built and validated.'
   common_mistake: |
@@ -17,10 +17,17 @@ details:
     **The Rationale:** Standard HNSW implementations (like `hnswlib`) are deeply single-threaded or CPU-bound due to the sequential nature of graph insertions.
     **The Consequence:** The build is completely choked by CPU memory bandwidth limits for random accesses, taking 4 hours and leaving production models stale.
   napkin_math: |
-    1. Analyze CPU HNSW build complexity: O(n * M * log(n)) where M=32 (connectivity). For 10M items: 10M * 32 * 23 = 7.36B ops.
-    2. Evaluate CPU I/O bounds: Random memory accesses (graph neighbor lookups) dominate. 10M * 32 neighbors * 128dim * 4B = 163GB random accesses.
-    3. Analyze GPU acceleration: FAISS GPU uses batched k-NN search (coalesced memory access). 10M items * 128-dim.
-    4. Calculate GPU time: GPU k-NN at 1M queries/sec takes 10M / 1M = 10 seconds. Plus sorting/edge selection, total is **~5 minutes on a modern GPU**.
+    **Assumptions & Constraints:**
+    - 10M items, 128-dim.
+    - M=32 connectivity for HNSW.
+
+    **Calculations:**
+    - CPU HNSW build ops: 10M * 32 * 23 = 7.36B ops.
+    - CPU I/O accesses: 10M * 32 neighbors * 128dim * 4B = 163GB random accesses.
+    - GPU k-NN time: At 1M queries/sec, takes 10M / 1M = 10 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~5 minutes on GPU (Compute-Bound)**. CPU builds are limited by random access memory bandwidth, while GPUs batch searches and finish in ~5 minutes.
 status: published
 provenance: imported
 requires_explanation: false

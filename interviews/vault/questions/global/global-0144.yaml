@@ -7,27 +7,29 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: The Poisoned Prefix Cache
-scenario: A multi-turn customer support chatbot on GPUs uses RadixAttention (prefix caching). The average conversation has 10 turns, accumulating up to 8k tokens. You expect a high KV cache hit rate (~80%) because the massive 2k-token system prompt and previous history are reused. However, metrics show the prefix cache hit rate is stuck at 0%, and VRAM is exhausted at just 60 concurrent chats.
-question: Why is the RadixAttention prefix cache hit rate 0% despite reused system prompts, and how would you restore it?
+title: 'The Poisoned Prefix Cache'
+scenario: 'A multi-turn customer support chatbot on GPUs uses RadixAttention (prefix caching). The average conversation has 10 turns, accumulating up to 8k tokens. You expect a high KV cache hit rate (~80%) because the massive 2k-token system prompt and previous history are reused. However, metrics show the prefix cache hit rate is stuck at 0%, and VRAM is exhausted at just 60 concurrent chats.'
+question: 'Why is the RadixAttention prefix cache hit rate 0% despite reused system prompts, and how would you restore it?'
 details:
-  realistic_solution: The root cause is 'prefix poisoning' due to dynamic header injection. RadixAttention (and prefix caching in general) relies on strict, exact token-by-token prefix matching starting from the very first token (index 0). If the application layer prepends a unique identifier—such as a UUID, timestamp, or unique user ID—at the very beginning of the prompt for logging or tracing, it instantly breaks the prefix match for the entire sequence. Because the first token differs, the Radix tree branches immediately, and none of the subsequent 2000 tokens of the system prompt or history can be shared. Moving the dynamic UUID to the end of the prompt, or keeping it out of the prompt entirely, restores the 80% hit rate.
+  realistic_solution: 'The root cause is ''prefix poisoning'' due to dynamic header injection. RadixAttention (and prefix caching in general) relies on strict, exact token-by-token prefix matching starting from the very first token (index 0). If the application layer prepends a unique identifier—such as a UUID, timestamp, or unique user ID—at the very beginning of the prompt for logging or tracing, it instantly breaks the prefix match for the entire sequence. Because the first token differs, the Radix tree branches immediately, and none of the subsequent 2000 tokens of the system prompt or history can be shared. Moving the dynamic UUID to the end of the prompt, or keeping it out of the prompt entirely, restores the 80% hit rate.'
   common_mistake: |
     **The Pitfall:** Assuming RadixAttention is evicting the cache too early due to a small LRU cache size.
     **The Rationale:** Misdiagnosing strict tree-matching failures as standard temporal cache eviction behavior.
     **The Consequence:** Over-provisioning massive amounts of GPU VRAM to fix a 0% hit rate that is actually caused by a single prepended UUID token.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - System prompt: 2k tokens. Chat history: up to 8k tokens.
-       - 60 concurrent chats.
-       - KV per token: ~320 KB.
-    2. **Calculations:**
-       - Without cache (0% hit rate): 60 * 8000 * 320 KB = 153.6 GB.
-       - With successful prefix caching (2k shared): Shared system prompt = 2000 * 320 KB = 640 MB.
-       - Unique user portions: 60 * 6000 * 320 KB = 115.2 GB.
-       - Total with cache: 115.8 GB vs 153.6 GB.
-    3. **Conclusion & Interpretation:**
-       - **Result: 37.8 GB saved. Cache-Match-Bound by dynamic prefix poisoning.**
+    **Assumptions & Constraints:**
+    - System prompt: 2k tokens. Chat history: up to 8k tokens.
+    - 60 concurrent chats.
+    - KV per token: ~320 KB.
+
+    **Calculations:**
+    - Without cache (0% hit rate): 60 * 8000 * 320 KB = 153.6 GB.
+    - With successful prefix caching (2k shared): Shared system prompt = 2000 * 320 KB = 640 MB.
+    - Unique user portions: 60 * 6000 * 320 KB = 115.2 GB.
+    - Total with cache: 115.8 GB vs 153.6 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 37.8 GB saved (Cache-Match-Bound)**. By dynamic prefix poisoning.
 status: published
 provenance: imported
 requires_explanation: false

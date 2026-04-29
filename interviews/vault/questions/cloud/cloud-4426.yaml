@@ -8,8 +8,8 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Multi-Adapter Hot-Swap Serving with S-LoRA
-scenario: A serving system hosts 500 LoRA adapters over a single Llama-3 8B base model on 4xH100. Average request rate is 200 QPS with a Zipf distribution (20% of adapters handle 80% of traffic).
-question: How would you load and cache 500 LoRA adapters for the 4xH100 serving system to keep P99 TTFT below 100 ms at 200 QPS?
+scenario: 'A serving system hosts 500 LoRA adapters over a single Llama-3 8B base model on 4xH100. Average request rate is 200 QPS with a Zipf distribution (20% of adapters handle 80% of traffic).'
+question: 'How would you load and cache 500 LoRA adapters for the 4xH100 serving system to keep P99 TTFT below 100 ms at 200 QPS?'
 details:
   realistic_solution: 'S-LoRA paged adapter system: maintain a hot-adapter pool in GPU memory (top 100 adapters by request rate = 400MB) and a warm pool on CPU memory (next 200 adapters = 800MB, NVLink-accessible). Cold adapters (remaining 200) stay on NVMe. Serving: for hot adapters, LoRA weights are fused into the compute path with no loading overhead. For warm adapters, NVLink transfer at 900 GB/s: 4MB at 900 GB/s = 4.4us, negligible. For cold adapters: NVMe read at 7 GB/s = 571us + PCIe transfer 64 GB/s = 62us = ~633us total. Prefill for typical prompt (512 tokens) on 8B model: ~10ms. Cold load: 0.6ms, total ~11ms, within 100ms budget.'
   common_mistake: |
@@ -17,12 +17,19 @@ details:
     **The Rationale:** Candidates might calculate that 500 adapters * 4MB = 2GB, which easily fits in VRAM, ignoring the runtime overhead.
     **The Consequence:** The per-adapter KV cache context and batching overhead will fragment GPU memory and drastically increase scheduling latency.
   napkin_math: |
-    1. Zipf distribution: top 20% adapters (100) handle 80% of 200 QPS = 160 QPS. Bottom 80% handle 40 QPS.
-    2. Miss rate is 20% = 40 QPS need cold loading.
-    3. Each cold load: 4MB via NVMe. NVMe (7 GB/s) handles 1750 loads/sec. Bandwidth is not a bottleneck.
-    4. TTFT budget: 100ms. Prefill for 512 tokens on 8B model: ~10ms on H100.
-    5. Cold load overhead: 0.6ms. Total: 10.6ms.
-    6. **At 10.6ms, TTFT is well within the 100ms budget, even with a 3x traffic spike.**
+    **Assumptions & Constraints:**
+    - Zipf distribution: top 20% adapters (100) handle 80% of 200 QPS = 160 QPS. Bottom 80% handle 40 QPS.
+    - Miss rate is 20% = 40 QPS need cold loading.
+    - Cold load: 4MB via NVMe (7 GB/s).
+    - TTFT budget: 100ms. Prefill for 512 tokens on 8B model: ~10ms on H100.
+
+    **Calculations:**
+    - NVMe (7 GB/s) handles 1750 loads/sec. Bandwidth is not a bottleneck.
+    - Cold load overhead: 0.6ms.
+    - Total TTFT for cold load: 10ms (prefill) + 0.6ms (load) = 10.6ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Within TTFT Budget** (At 10.6ms, TTFT is well within the 100ms budget, even with a 3x traffic spike).
 status: published
 provenance: imported
 requires_explanation: false

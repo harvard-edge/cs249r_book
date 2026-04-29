@@ -8,24 +8,26 @@ competency_area: networking
 bloom_level: analyze
 phase: inference
 title: Diagnosing InfiniBand Adaptive Routing Loop
-scenario: A 2048-GPU InfiniBand NDR (400Gbps) fat-tree cluster is running an MoE model. During the All-to-All
-  phase, tail latency spikes intermittently from 20μs to over 8ms. Network counters show zero packet drops
-  and no buffer overruns, yet the application level reports massive reassembly delays for 2MB messages.
+scenario: A 2048-GPU InfiniBand NDR (400Gbps) fat-tree cluster is running an MoE model. During the All-to-All phase, tail latency spikes intermittently from 20μs to over 8ms. Network counters show zero packet drops and no buffer overruns, yet the application level reports massive reassembly delays for 2MB messages.
 question: "What is causing the 8 ms All-to-All tail latency with zero drops, and how would you fix it?"
 details:
-  realistic_solution: The root cause is InfiniBand Adaptive Routing (AR) causing severe out-of-order (OOO)
-    packet delivery. In a fat-tree, AR dynamically balances load by sending packets of the same flow across
-    different spine switches. If paths have varying latencies (due to transient microbursts), packets
-    arrive out of order. The ConnectX-7 NIC has to buffer and reorder them. For large 2MB All-to-All messages,
-    the NIC's limited reassembly buffer gets exhausted, causing pipeline stalls and massive latency spikes
-    without triggering switch-level packet drops. The solution is to tune AR thresholds to only switch
-    paths on flow boundaries or use SHARP to offload collective operations.
-  common_mistake: Assuming switch buffer congestion or congestion control (CC) drops, leading to misconfiguring
-    DCQCN parameters when no drops are actually occurring.
-  napkin_math: 'A 2MB message at 4KB MTU = 500 packets. At 400Gbps (50GB/s), 2MB takes 40μs to transmit.
-    If packet #1 takes a path with a 1ms transient queuing delay, but packets 2-500 arrive in 40μs, the
-    NIC must buffer 499 OOO packets. If 100 concurrent flows do this, 50,000 packets (200MB) need buffering,
-    exceeding the NIC''s on-chip SRAM and forcing a slow fallback to host memory.'
+  realistic_solution: 'The root cause is InfiniBand Adaptive Routing (AR) causing severe out-of-order (OOO) packet delivery. In a fat-tree, AR dynamically balances load by sending packets of the same flow across different spine switches. If paths have varying latencies (due to transient microbursts), packets arrive out of order. The ConnectX-7 NIC has to buffer and reorder them. For large 2MB All-to-All messages, the NIC''s limited reassembly buffer gets exhausted, causing pipeline stalls and massive latency spikes without triggering switch-level packet drops. The solution is to tune AR thresholds to only switch paths on flow boundaries or use SHARP to offload collective operations.'
+  common_mistake: 'Assuming switch buffer congestion or congestion control (CC) drops, leading to misconfiguring DCQCN parameters when no drops are actually occurring.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 2MB All-to-All message.
+    - MTU = 4KB, making 500 packets per message.
+    - 400Gbps (50GB/s) InfiniBand NDR link.
+    
+    **Calculations:**
+    - 2MB transmit time at 50GB/s = 40 microseconds.
+    - Packet #1 takes a path with a 1ms transient queueing delay.
+    - Packets 2-500 arrive in 40 microseconds.
+    - The NIC must buffer 499 out-of-order packets.
+    - Across 100 concurrent flows, 50,000 packets (200MB) need buffering.
+    
+    **Conclusion & Interpretation:**
+    - **Result: 8ms Tail Latency (Buffer Capacity Bound)**. The 200MB out-of-order buffer requirement vastly exceeds the ConnectX-7 NIC's on-chip SRAM, forcing a slow fallback to host memory and spiking latency without dropping packets.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,20 +11,22 @@ title: Shared Mmap vs Heap Allocation for Multi-Process Edge LLM
 scenario: You are designing a local AI assistant on an edge device (32 GB LPDDR5) that requires three independent processes to concurrently run inference on the same 8 GB INT8 quantized LLM. The OS and base vision stack continuously consume 6 GB of RAM.
 question: Evaluate the tradeoffs between heap allocation and shared memory-mapped (mmap) file access, and determine which architecture is required for this system.
 details:
-  realistic_solution: "Shared memory-mapped (`mmap`) access with `MAP_SHARED` is strictly required. Standard heap allocation (`malloc`) duplicates the 8 GB model into the private virtual address space of each of the three processes, demanding 24 GB of physical RAM solely for weights. This guarantees memory starvation and Out-Of-Memory (OOM) crashes. Conversely, `mmap` loads the weights into the OS page cache exactly once. All three processes map these shared physical pages into their respective virtual address spaces, consuming only 8 GB total for weights. To mitigate cold-start page fault latency, initialize the mmap region using `MAP_POPULATE`."
+  realistic_solution: 'Shared memory-mapped (`mmap`) access with `MAP_SHARED` is strictly required. Standard heap allocation (`malloc`) duplicates the 8 GB model into the private virtual address space of each of the three processes, demanding 24 GB of physical RAM solely for weights. This guarantees memory starvation and Out-Of-Memory (OOM) crashes. Conversely, `mmap` loads the weights into the OS page cache exactly once. All three processes map these shared physical pages into their respective virtual address spaces, consuming only 8 GB total for weights. To mitigate cold-start page fault latency, initialize the mmap region using `MAP_POPULATE`.'
   common_mistake: |
     **The Pitfall:** Assuming heap allocation strictly consumes 24 GB without realizing OS page cache implications.
     **The Rationale:** Engineers forget that standard file I/O operations also populate the OS page cache, meaning the memory pressure is functionally doubled if not managed via shared mmap.
     **The Consequence:** Extreme memory starvation, severe major page faults, and catastrophic Out-Of-Memory (OOM) crashes.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Total RAM Available: 32 GB.
-       - Base OS/Vision RAM: 6 GB.
-       - Processes: 3.
-       - Model size: 8 GB.
-    2. **Calculations:**
-       - Architecture A (Heap): 6 GB (OS) + (3 * 8 GB allocations) = 30 GB base memory. Leaves exactly 2 GB total for KV cache and workspace.
-       - Architecture B (Shared Mmap): 6 GB (OS) + 8 GB (shared weights in page cache) = 14 GB base memory.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory Capacity-Bound.** Architecture B leaves 18 GB remaining (6 GB per process for KV cache), making it the strictly required architecture to prevent immediate OOM failures.
+    **Assumptions & Constraints:**
+    - Total RAM Available: 32 GB.
+    - Base OS/Vision RAM: 6 GB.
+    - Processes: 3.
+    - Model size: 8 GB.
+
+    **Calculations:**
+    - Architecture A (Heap): 6 GB (OS) + (3 * 8 GB allocations) = 30 GB base memory. Leaves exactly 2 GB total for KV cache and workspace.
+    - Architecture B (Shared Mmap): 6 GB (OS) + 8 GB (shared weights in page cache) = 14 GB base memory.
+
+    **Conclusion & Interpretation:**
+    - **Result: 14 GB (Memory Capacity-Bound)**. Architecture B leaves 18 GB remaining (6 GB per process for KV cache), making it the strictly required architecture to prevent immediate OOM failures.
 status: published

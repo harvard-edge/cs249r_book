@@ -7,31 +7,27 @@ topic: autograd-computational-graphs
 competency_area: optimization
 bloom_level: evaluate
 phase: training
-title: Optimizing memory layout of saved tensors for backward on constrained Jetson
-  Orin
-scenario: You are training a custom depthwise separable convolution model on Jetson
-  Orin (32GB unified memory). Profiling shows that 60% of backward pass time is spent
-  on memory transfers between CPU and GPU for saved activation tensors. The model
-  intermittently offloads tensors to CPU during large batch training.
-question: How would you eliminate CPU-GPU activation offload bottlenecks during backward
-  for the depthwise separable model on Orin?
+title: 'Optimizing memory layout of saved tensors for backward on constrained Jetson Orin'
+scenario: 'You are training a custom depthwise separable convolution model on Jetson Orin (32GB unified memory). Profiling shows that 60% of backward pass time is spent on memory transfers between CPU and GPU for saved activation tensors. The model intermittently offloads tensors to CPU during large batch training.'
+question: 'How would you eliminate CPU-GPU activation offload bottlenecks during backward for the depthwise separable model on Orin?'
 details:
-  realistic_solution: 'On Orin (unified memory), ''CPU-GPU transfer'' is still expensive
-    due to cache coherency and memory domain switching overhead. Use activation checkpointing
-    to avoid offloading entirely: recompute cheap activations (ReLU, BN) rather than
-    save-and-offload them. For Orin specifically, pin saved tensors in a specific
-    memory pool using torch.cuda.memory.set_per_process_memory_fraction() to prevent
-    PyTorch from automatically offloading. Profile with torch.cuda.memory_snapshot()
-    to identify which layers are offloading.'
-  common_mistake: Relying on PyTorch's default activation offloading without controlling
-    which tensors are offloaded. PyTorch can offload to CPU when GPU memory pressure
-    is high, but random offloading of large contiguous tensors (like intermediate
-    feature maps) causes expensive PCIe-like transfers over Orin's shared memory bus.
-  napkin_math: 'Orin unified memory: CPU-GPU bandwidth ~200GB/s within SoC (vs PCIe
-    4.0 at 64GB/s). Offloading a 500MB activation tensor and reloading it: 500MB/200GB/s
-    = 2.5ms each way = 5ms round trip. With 50 such offloads per backward: 250ms wasted.
-    Checkpointing those layers: recompute cost ~50ms. Checkpointing saves 200ms per
-    step — justifies the recompute.'
+  realistic_solution: 'On Orin (unified memory), ''CPU-GPU transfer'' is still expensive due to cache coherency and memory domain switching overhead. Use activation checkpointing to avoid offloading entirely: recompute cheap activations (ReLU, BN) rather than save-and-offload them. For Orin specifically, pin saved tensors in a specific memory pool using torch.cuda.memory.set_per_process_memory_fraction() to prevent PyTorch from automatically offloading. Profile with torch.cuda.memory_snapshot() to identify which layers are offloading.'
+  common_mistake: 'Relying on PyTorch''s default activation offloading without controlling which tensors are offloaded. PyTorch can offload to CPU when GPU memory pressure is high, but random offloading of large contiguous tensors (like intermediate feature maps) causes expensive PCIe-like transfers over Orin''s shared memory bus.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Orin unified memory CPU-GPU bandwidth: ~200GB/s.
+    - Activation tensor size: 500MB.
+    - Number of offloads per backward pass: 50.
+
+    **Calculations:**
+    - Single offload transfer time (one way): 500MB / 200GB/s = 2.5ms.
+    - Round trip transfer time: 2.5ms * 2 = 5ms.
+    - Total wasted time per backward step: 5ms * 50 = 250ms.
+    - Cost to recompute (activation checkpointing): ~50ms.
+    - Net savings per step: 250ms - 50ms = 200ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 200ms saved per step (Memory-Bandwidth Bound)**. Using activation checkpointing avoids expensive cache coherency and memory domain switching overheads in Orin's shared memory bus.
 status: published
 provenance: imported
 requires_explanation: false

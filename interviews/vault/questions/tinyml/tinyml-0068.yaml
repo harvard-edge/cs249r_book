@@ -8,7 +8,7 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: The OTA Update Brickening
-scenario: You are the architect for a fleet of 100,000 IoT environmental sensors. After pushing a new ML model via your Over-the-Air (OTA) update system, 10% of the devices are 'bricked' and unresponsive. Your OTA design uses a dual-partition scheme. The bootloader successfully swaps to the new application, but it hangs soon after. Your investigation reveals the new model requires a 140KB tensor arena, an increase from 120KB in the previous version. The `tflite::MicroInterpreter::AllocateTensors()` call is failing.
+scenario: You are the architect for a fleet of 100,000 IoT environmental sensors. After pushing a new ML model via your Over-the-Air (OTA) update system, 10% of the devices are 'bricked' and unresponsive. Your OTA design uses a dual-partition scheme. The bootloader successfully swaps to the new application, but it hangs soon after. Your investigation reveals the new model requires a 140KB tensor arena, an increase from 120KB in the previous version. The tflite::MicroInterpreter::AllocateTensors() call is failing.
 question: Why did a 20 KB tensor-arena increase brick 10% of OTA-updated sensors despite sufficient total free memory and dual partitions?
 details:
   realistic_solution: 'The root cause is heap fragmentation during the new application''s boot sequence. While total free memory is sufficient, if the RTOS and network stack initialize first, they allocate and free various small buffers before the ML model is initialized. This fragments the free SRAM into smaller non-contiguous blocks. When `AllocateTensors()` asks for a single contiguous block, it fails. Since the return value wasn''t checked, a hard fault occurs. The fix is to either statically allocate the tensor arena or allocate it dynamically as the very first step in `main()` before any other subsystem can fragment the heap.'
@@ -17,18 +17,20 @@ details:
     **The Rationale:** Engineers assume the OTA process itself fragmented the memory or they just do `140KB + RTOS_heap < 256KB` without considering the need for contiguous memory blocks in bump allocators.
     **The Consequence:** Intermittent OOM crashes in production because `AllocateTensors()` requires a single contiguous block, which is unavailable if RTOS/networking initialize first and fragment the heap.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Total SRAM: 256KB.
-       - OS/Networking max usage: 64KB.
-       - Total Free: 192KB.
-       - New arena requirement: 140KB.
-    2. **Calculations:**
-       - Free memory check: 192KB > 140KB (Seems sufficient).
-       - Fragmentation scenario: 192KB free is split by tiny OS allocations into, e.g., 80KB, 60KB, and 52KB blocks.
-       - Max contiguous block = 80KB.
-       - Allocation request: 140KB > 80KB.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory Contiguity-Bound.** The allocation fails despite sufficient total free memory. The fix is to allocate the arena statically or first in `main()` before other subsystems fragment the heap.
+    **Assumptions & Constraints:**
+    - Total SRAM: 256KB.
+    - OS/Networking max usage: 64KB.
+    - Total Free: 192KB.
+    - New arena requirement: 140KB.
+
+    **Calculations:**
+    - Free memory check: 192KB > 140KB (Seems sufficient).
+    - Fragmentation scenario: 192KB free is split by tiny OS allocations into, e.g., 80KB, 60KB, and 52KB blocks.
+    - Max contiguous block = 80KB.
+    - Allocation request: 140KB > 80KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Allocation fails (Memory Contiguity-Bound)**. The allocation fails despite sufficient total free memory. The fix is to allocate the arena statically or first in `main()` before other subsystems fragment the heap.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,8 +8,8 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Evaluating Static Inference Trade-offs
-scenario: You are migrating a personalized feed ranking system from dynamic to static inference to handle a 50,000 QPS peak load. The user base includes 20M daily active users (DAUs). Dynamic inference uses GPUs (costing $0.35/hr, max 200 QPS/GPU) yielding 85ms P99 latency. Precomputing the top-100 item IDs (400 bytes per user) takes a daily batch job (2 hours, $50/run).
-question: "Should you precompute all 20M feed profiles in Redis, keep dynamic T4 inference, or use a hybrid architecture at 50,000 QPS, and why?"
+scenario: 'You are migrating a personalized feed ranking system from dynamic to static inference to handle a 50,000 QPS peak load. The user base includes 20M daily active users (DAUs). Dynamic inference uses GPUs (costing $0.35/hr, max 200 QPS/GPU) yielding 85ms P99 latency. Precomputing the top-100 item IDs (400 bytes per user) takes a daily batch job (2 hours, $50/run).'
+question: Should you precompute all 20M feed profiles in Redis, keep dynamic T4 inference, or use a hybrid architecture at 50,000 QPS, and why?
 details:
   realistic_solution: 'Implement a hybrid tier: Use static inference (Redis) for the 2M most active users who drive 80% of traffic, serving them at <2ms latency. Fallback to dynamic T4 inference for the long-tail users and cold-starts. This slashes GPU requirements dramatically while preserving prediction freshness where real-time context matters.'
   common_mistake: |
@@ -17,10 +17,22 @@ details:
     **The Rationale:** This ignores the business cost of stale predictions (intraday changes in user behavior) and the memory overhead of storing 100% of users when a long tail is inactive.
     **The Consequence:** Deploying an architecture that saves money but degrades user experience for the most active cohorts.
   napkin_math: |
-    - Dynamic: 50k QPS / 200 QPS/GPU = 250 GPUs * $0.35/hr = $87.5/hr (~$63k/mo).
-    - Static storage: 20M users * 400B = 8GB (trivial Redis cost, ~$50/mo). Static batch compute: $50/day = $1.5k/mo.
-    - Hybrid (80% traffic static): cuts GPU cost to 50 GPUs (~$12.6k/mo).
-    - Saving: **~$50k/mo** while handling the tail dynamically.
+    **Assumptions & Constraints:**
+    - Peak load: 50,000 QPS.
+    - T4 GPU capacity: 200 QPS/GPU.
+    - GPU Cost: $0.35/hour ($252/month).
+    - DAU: 20M users, top 2M (10%) drive 80% of traffic.
+    - Static profile size: 400 bytes per user.
+
+    **Calculations:**
+    - Pure Dynamic: 50,000 / 200 = 250 GPUs. Cost = 250 * $252 = $63,000/mo.
+    - Pure Static Storage: 20,000,000 * 400 bytes = 8 GB (trivial Redis cost). Batch compute = $50/day * 30 = $1,500/mo.
+    - Hybrid Dynamic Load (20% of 50k QPS): 10,000 QPS.
+    - Hybrid GPUs needed: 10,000 / 200 = 50 GPUs.
+    - Hybrid GPU Cost: 50 * $252 = $12,600/mo.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~$50k/mo savings (Compute-Bound)**. A hybrid tier offloads the heavy hitter query volume to ultra-cheap Redis lookups while maintaining dynamic fallback for the long-tail to preserve recommendation freshness.
 status: published
 provenance: imported
 requires_explanation: true

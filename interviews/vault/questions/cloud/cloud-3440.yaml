@@ -11,26 +11,23 @@ title: PowerSGD vs FP8 Gradients on a 32-MI300X Inter-Node Ring
 scenario: A 100B BF16 model trains across 32 AMD MI300X GPUs. The current ring AllReduce of FP16 gradients exposes 1.6 s of communication per step, dominating wall clock. Compare two production-realistic compression levers — PowerSGD with rank r=8, and FP8 quantized gradients — by computing the post-compression AllReduce time and the convergence-step overhead each typically adds.
 question: On 32 MI300Xs over 200 Gbps RoCE with a 600 ms backward and 1.6 s baseline AllReduce, which gradient compression — PowerSGD r=8 or FP8 — closes the gap, and what is each approach's convergence cost?
 details:
-  realistic_solution: 'Baseline gradient size = 100B * 2 bytes (BF16) = 200 GB. Ring
-    AllReduce on the inter-node 22 GB/s unidirectional ring transfers 2*(31/32) *
-    200 GB ≈ 387.5 GB → ~17.6 s of pure inter-node ring; with hierarchical reduction
-    this collapses to roughly 2*(3/4) * 200 GB / 22 GB/s ≈ 13.6 s on the 4-node ring
-    of per-node-reduced shards. The baseline 1.6 s figure assumes good NVLink/IF reduction
-    first and bucketed overlap. PowerSGD r=8 compresses 200 GB to roughly r * H *
-    2 bytes per layer ≈ 5-10 GB total → AllReduce ~0.4 s, fits inside the 600 ms backward;
-    convergence overhead is typically 1-3% extra steps for r=8. FP8 gradients halve
-    the 200 GB to 100 GB → AllReduce ~0.8 s, *still over* the 600 ms backward; convergence
-    is mostly preserved (within 1%) for FP8 with careful loss-scale calibration. PowerSGD
-    wins on raw throughput; FP8 wins on convergence quality. Recommended: PowerSGD
-    r=8 if the model tolerates rank-r approximation (most LLMs do), else FP8.'
+  realistic_solution: 'Baseline gradient size = 100B * 2 bytes (BF16) = 200 GB. Ring AllReduce on the inter-node 22 GB/s unidirectional ring transfers 2*(31/32) * 200 GB ≈ 387.5 GB → ~17.6 s of pure inter-node ring; with hierarchical reduction this collapses to roughly 2*(3/4) * 200 GB / 22 GB/s ≈ 13.6 s on the 4-node ring of per-node-reduced shards. The baseline 1.6 s figure assumes good NVLink/IF reduction first and bucketed overlap. PowerSGD r=8 compresses 200 GB to roughly r * H * 2 bytes per layer ≈ 5-10 GB total → AllReduce ~0.4 s, fits inside the 600 ms backward; convergence overhead is typically 1-3% extra steps for r=8. FP8 gradients halve the 200 GB to 100 GB → AllReduce ~0.8 s, *still over* the 600 ms backward; convergence is mostly preserved (within 1%) for FP8 with careful loss-scale calibration. PowerSGD wins on raw throughput; FP8 wins on convergence quality. Recommended: PowerSGD r=8 if the model tolerates rank-r approximation (most LLMs do), else FP8.'
   common_mistake: |
     **The Pitfall:** Computing AllReduce time natively as `payload / bandwidth` or ignoring convergence overhead.
     **The Rationale:** Candidates omit the 2*(N-1)/N ring factor and treat gradient compression purely as a throughput knob without accounting for the extra steps required to converge.
     **The Consequence:** Selecting a highly compressed protocol (like 1-bit SGD) that speeds up step time but doubles total training time.
   napkin_math: |
-    1. **Assumptions & Constraints:** 100B params, 32 MI300X GPUs, 200 Gbps RoCE v2 (22 GB/s). Baseline AllReduce = 1.6s. Backward = 600ms.
-    2. **Calculations:** Baseline weights = 100B * 2 bytes = 200 GB. PowerSGD r=8 compresses 200 GB -> ~8 GB. AllReduce Time = ~0.4s (+1-3% steps). FP8 halves 200 GB -> 100 GB. AllReduce Time = ~0.8s (+0-1% steps).
-    3. **Conclusion & Interpretation:** **Result: Network-Bound (Inter-node). PowerSGD completely hides communication inside the 600ms backward, whereas FP8 remains exposed.**
+    **Assumptions & Constraints:**
+    - 100B params, 32 MI300X GPUs, 200 Gbps RoCE v2 (22 GB/s)
+    - Baseline AllReduce = 1.6s. Backward = 600ms
+
+    **Calculations:**
+    - Baseline weights = 100B * 2 bytes = 200 GB
+    - PowerSGD r=8 compresses 200 GB -> ~8 GB. AllReduce Time = ~0.4s (+1-3% steps)
+    - FP8 halves 200 GB -> 100 GB. AllReduce Time = ~0.8s (+0-1% steps)
+
+    **Conclusion & Interpretation:**
+    - **Result: ~0.4s (Network-Bound)**. Inter-node. PowerSGD completely hides communication inside the 600ms backward, whereas FP8 remains exposed.
 status: archived
 provenance: imported
 requires_explanation: false

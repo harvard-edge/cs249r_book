@@ -7,9 +7,9 @@ topic: 3d-parallelism
 competency_area: compute
 bloom_level: create
 phase: training
-title: The Multi-Model Memory Tetris
+title: 'The Multi-Model Memory Tetris'
 scenario: 'A robotics platform runs 5 concurrent models on a Jetson Orin: SLAM (3.2 GB, 40ms), object detection (1.8 GB, 15ms), path planning (0.5 GB, 8ms), speech recognition (0.8 GB, 25ms), and gesture recognition (0.6 GB, 12ms). All models must run within a 50ms window. The total memory for weights is 6.9 GB, but with activations and workspace the total peaks at 18 GB.'
-question: "How would you schedule the 5 models within the 32 GB and 50 ms limits, and what changes when adding a 6th 4 GB, 20 ms model?"
+question: 'How would you schedule the 5 models within the 32 GB and 50 ms limits, and what changes when adding a 6th 4 GB, 20 ms model?'
 details:
   realistic_solution: 'Phase 1 (0-15ms): Run detection (1.8 GB, 15ms), path planning (0.5 GB, 8ms), and gesture (0.6 GB, 12ms) concurrently on GPU. Phase 2: SLAM (3.2 GB, 40ms) and speech (0.8 GB, 25ms). Peak memory fits in 32 GB. Total wall time: 15 + 40 = 55ms > 50ms deadline. Must optimize: overlap Phase 1 tail with Phase 2 start, and reduce SLAM to ~25ms via TensorRT INT8 optimization. Revised schedule: Phase 1 (0-15ms): detection + path + gesture. Phase 2: speech starts at t=12, SLAM starts at t=15. Both finish by max(15+25, 12+25) = 40ms < 50ms deadline. Adding a 6th model (4 GB, 20ms): schedule alongside path planning and gesture in Phase 1, move detection to Phase 2. Phase 1 = max(20, 8, 12) = 20ms, Phase 2 = max(25, 25, 15) = 25ms (using INT8 SLAM). Total = 20 + 25 = 45ms, fitting the deadline but increasing peak memory pressure.'
   common_mistake: |
@@ -17,17 +17,19 @@ details:
     **The Rationale:** Candidates forget about TensorRT workspace sizes and CUDA context overhead.
     **The Consequence:** Severe memory fragmentation or unexpected OOM crashes when all models peak their activation memory simultaneously.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 32 GB total memory limit.
-       - 50ms total latency deadline.
-    2. **Calculations:**
-       - Phase 1 (detection, path, gesture) = max(15, 8, 12) = 15ms.
-       - Phase 2 (SLAM, speech) = max(40, 25) = 40ms.
-       - Unoptimized Total = 55ms.
-       - Optimized SLAM (INT8) = 25ms. New Phase 2 = 25ms. Total = 40ms.
-       - 6th Model Phase 1 = max(20, 8, 12) = 20ms. Phase 2 (with detection) = max(25, 25, 15) = 25ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Compute-Scheduling Bound.** Final total = 20ms + 25ms = 45ms. Fits within the 50ms deadline, but memory pressure increases.
+    **Assumptions & Constraints:**
+    - 32 GB total memory limit.
+    - 50ms total latency deadline.
+
+    **Calculations:**
+    - Phase 1 (detection, path, gesture) = max(15, 8, 12) = 15ms.
+    - Phase 2 (SLAM, speech) = max(40, 25) = 40ms.
+    - Unoptimized Total = 55ms.
+    - Optimized SLAM (INT8) = 25ms. New Phase 2 = 25ms. Total = 40ms.
+    - 6th Model Phase 1 = max(20, 8, 12) = 20ms. Phase 2 (with detection) = max(25, 25, 15) = 25ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 45ms (Compute-Scheduling Bound)**. Final total = 20ms + 25ms = 45ms. Fits within the 50ms deadline, but memory pressure increases.
   options:
   - 'Run all 5 models sequentially: 40+15+8+25+12 = 100ms. This exceeds the deadline, so models must be pruned.'
   - 'Run all 5 models concurrently: max(40,15,8,25,12) = 40ms. This meets the deadline and fits comfortably within the 32 GB memory limit.'

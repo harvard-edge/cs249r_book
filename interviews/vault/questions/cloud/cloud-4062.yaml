@@ -8,7 +8,7 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: Kernel Bypass and Verbs API Overhead
-scenario: RDMA uses kernel bypass to avoid the overhead of system calls for each network operation. A standard TCP send() requires a context switch from user space to kernel space (each costing ~1-2μs).
+scenario: 'RDMA uses kernel bypass to avoid the overhead of system calls for each network operation. A standard TCP send() requires a context switch from user space to kernel space (each costing ~1-2μs).'
 question: For 65,536 TCP packets carrying a 256MB transfer, how much context-switch and kernel overhead does RDMA bypass save?
 details:
   realistic_solution: 'TCP overhead per packet: context switch = 1.5μs (user→kernel + kernel→user) + protocol processing = 0.5μs (checksum, TCP state machine) + buffer copy = 0.3μs (user buffer → socket buffer) + interrupt on receive = 1μs. Total per packet: ~3.3μs. For 65,536 packets: 65,536 × 3.3μs = 216ms of CPU overhead. RDMA (IB verbs) overhead: post work request to send queue = 0.2μs (MMIO doorbell write to HCA). One WR can cover multiple packets via scatter-gather. For 256MB with 1MB WRs: 256 WR postings × 0.2μs = 51.2μs total. Completion: poll CQ = 0.05μs per CQE, 256 completions = 12.8μs. Total RDMA overhead: 64μs. Savings: 216ms - 0.064ms = 215.9ms = 99.97% reduction in CPU overhead. More importantly, RDMA CPU usage = ~0% (HCA handles everything in hardware), while TCP saturates 2-4 CPU cores at 400Gbps line rate. On MI300X systems where CPUs are already busy with data preprocessing, this CPU savings is critical.'
@@ -17,12 +17,20 @@ details:
     **The Rationale:** TCP also incurs protocol processing (checksum, segmentation, congestion control) in the kernel, buffer copies, and interrupt handling per packet. RDMA eliminates ALL of these.
     **The Consequence:** Drastically underestimating the CPU savings provided by RDMA.
   napkin_math: |
+    **Assumptions & Constraints:**
+    - 65,536 TCP packets carrying a 256MB transfer.
     - TCP overhead per packet: context switch (1.5μs) + protocol processing (0.5μs) + buffer copy (0.3μs) + interrupt (1μs) = ~3.3μs.
-    - For 65,536 packets: 65,536 * 3.3μs = 216ms CPU overhead.
-    - RDMA overhead: post work request (0.2μs). 256 WR postings (1MB each) * 0.2μs = 51.2μs.
-    - Completion polling: 256 completions * 0.05μs = 12.8μs.
-    - Total RDMA overhead: 64μs.
-    - Savings: 216ms - 0.064ms = **99.97% reduction in CPU overhead**.
+    - RDMA overhead: post work request (0.2μs), completion polling (0.05μs per completion).
+
+    **Calculations:**
+    - TCP CPU overhead: 65,536 packets * 3.3μs = 216.2ms.
+    - RDMA WR postings (1MB each for 256MB): 256 * 0.2μs = 51.2μs.
+    - RDMA completions: 256 * 0.05μs = 12.8μs.
+    - Total RDMA overhead: 51.2μs + 12.8μs = 64μs (0.064ms).
+    - Savings: 216.2ms - 0.064ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 99.97% reduction (CPU-Bound)**. RDMA eliminates host CPU protocol processing, saving critical CPU cycles for data preprocessing.
 status: published
 provenance: imported
 requires_explanation: false

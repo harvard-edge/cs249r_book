@@ -7,21 +7,29 @@ topic: activation-memory
 competency_area: memory
 bloom_level: evaluate
 phase: training
-title: Evaluating Activation Memory Impact of Batch Size Scaling on Jetson Orin Inference
-scenario: You are optimizing throughput for a YOLOv8-L object detection pipeline on an edge device with 32 GB memory. At batch size 1, inference takes 18 ms and uses 1.2 GB memory. At batch size 8, inference takes 28 ms and uses 6.8 GB. At batch size 16, inference OOMs.
-question: Is YOLOv8-L memory scaling from batch 1 to 8 linear, and what likely causes the OOM at batch 16?
+title: 'Evaluating Activation Memory Impact of Batch Size Scaling on Jetson Orin Inference'
+scenario: 'You are optimizing throughput for a YOLOv8-L object detection pipeline on an edge device with 32 GB memory. At batch size 1, inference takes 18 ms and uses 1.2 GB memory. At batch size 8, inference takes 28 ms and uses 6.8 GB. At batch size 16, inference OOMs.'
+question: 'Is YOLOv8-L memory scaling from batch 1 to 8 linear, and what likely causes the OOM at batch 16?'
 details:
-  realistic_solution: 'From B=1→B=8: memory grows from 1.2 to 6.8 GB. Activation component (linear): ~1.0 GB × 8 = 8.0 GB expected, but actual is 6.8 GB — sublinear, consistent with fixed workspace overhead (~0.2 GB at B=1 not scaling with batch). Extrapolating to B=16: 6.8 - fixed_overhead × (16/8) ≈ 6.8 GB activations at B=8 → 13.6 GB activations + 0.2 GB workspace = 13.8 GB. Plus OS + CUDA context (~3 GB on Orin). Total ≈ 17 GB — does not exceed 32 GB. OOM at B=16 suggests TensorRT is using a larger-than-expected workspace (possibly set to 4 GB) or feature pyramid memory grows superlinearly. Profile with `trtexec --dumpLayerInfo` to identify the offending layer.'
+  realistic_solution: 'From B=1->B=8: memory grows from 1.2 to 6.8 GB. Activation component (linear): ~1.0 GB x 8 = 8.0 GB expected, but actual is 6.8 GB — sublinear, consistent with fixed workspace overhead (~0.2 GB at B=1 not scaling with batch). Extrapolating to B=16: 6.8 - fixed_overhead x (16/8) approx 6.8 GB activations at B=8 -> 13.6 GB activations + 0.2 GB workspace = 13.8 GB. Plus OS + CUDA context (~3 GB on Orin). Total approx 17 GB — does not exceed 32 GB. OOM at B=16 suggests TensorRT is using a larger-than-expected workspace (possibly set to 4 GB) or feature pyramid memory grows superlinearly. Profile with trtexec and nsys profiling to trace workspace allocation.'
   common_mistake: |
     **The Pitfall:** Assuming activation memory scales perfectly linearly with batch size.
     **The Rationale:** Candidates linearly extrapolate from batch=1 to batch=16 without accounting for fixed overheads or workspace buffers.
     **The Consequence:** Misdiagnosing the OOM as an activation issue rather than a TensorRT workspace or memory leak problem.
   napkin_math: |
-    - Linear model: $M(B) = M_{fixed} + M_{per\_sample} * B$
-    - Using data: $M_{fixed} + M_{per} = 1.2$, $M_{fixed} + 8 * M_{per} = 6.8$
-    - Solve: $M_{per} = 0.8$ GB/sample, $M_{fixed} = 0.4$ GB.
-    - Predicted $M(16) = 0.4 + 0.8 * 16 = 13.2$ GB.
-    - OOM at 32 GB is unexpected -> indicates an external memory sink or **superlinear workspace growth**.
+    **Assumptions & Constraints:**
+    - Linear model: M(B) = M_fixed + M_per_sample * B.
+    - B=1: M = 1.2 GB. B=8: M = 6.8 GB.
+    - OOM occurs at 32 GB.
+
+    **Calculations:**
+    - M_fixed + M_per = 1.2.
+    - M_fixed + 8 * M_per = 6.8.
+    - Solve: M_per = 0.8 GB/sample, M_fixed = 0.4 GB.
+    - Predicted M(16) = 0.4 + 0.8 * 16 = 13.2 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 13.2 GB (Memory-Bound)**. OOM at 32 GB is unexpected, indicating superlinear workspace growth.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,9 +7,9 @@ topic: communication-computation-overlap
 competency_area: parallelism
 bloom_level: create
 phase: both
-title: Communication-Aware Model Architecture Design
-scenario: You are designing a new transformer architecture for training on 1024 GPUs. The current architecture has 128 attention heads and hidden_size=16384, requiring tensor-parallel AllReduce of 16384-dimensional vectors per layer.
-question: How would you choose the transformer dimensions and tensor-parallel layout to maximize communication-computation overlap on 1024 GPUs?
+title: 'Communication-Aware Model Architecture Design'
+scenario: 'You are designing a new transformer architecture for training on 1024 GPUs. The current architecture has 128 attention heads and hidden_size=16384, requiring tensor-parallel AllReduce of 16384-dimensional vectors per layer.'
+question: 'How would you choose the transformer dimensions and tensor-parallel layout to maximize communication-computation overlap on 1024 GPUs?'
 details:
   realistic_solution: 'Communication-aware design: (1) Tensor parallelism degree (TP) should divide attention heads evenly. With TP=8: 128/8=16 heads per GPU (good). With TP=16: 128/16=8 heads per GPU (still ok). (2) AllReduce data per layer (2 ARs) = 2 x seq_len x hidden_size x dtype_size. At seq=4096, hidden=16384, BF16: 2 x 4096 x 16384 x 2 = 256MB per layer. At NVLink 900 GB/s: 0.28ms per layer. (3) Compute per layer: ~17.8ms. Comm/compute ratio: 0.28/17.8 = 1.6% — excellent overlap. (4) But with 128 layers at TP=8: 128 layers x 0.28ms = 35.8ms total communication, well within the 2280ms total compute. (5) If hidden_size were 32768 (for more capacity): AllReduce doubles to 512MB = 0.57ms per layer. Still <3% of compute. The bottleneck shifts to memory, not communication. Design principle: keep TP AllReduce size << per-layer compute time.'
   common_mistake: |
@@ -17,11 +17,19 @@ details:
     **The Rationale:** Researchers frequently select parameter counts and attention heads optimally for statistical convergence, completely ignoring how those exact dimensions map to NVLink/InfiniBand communication topologies.
     **The Consequence:** Training hits a massive communication bottleneck where the GPU sits idle waiting for tensor-parallel AllReduces to complete.
   napkin_math: |
-    1. **AllReduce Volume:** 2 × seq_len × hidden_size × 2 bytes = 2 × 4096 × 16384 × 2 = 256 MB per layer.
-    2. **Communication Time:** 256 MB / 900 GB/s (NVLink) = 0.28 ms.
-    3. **Compute Time:** Approximate per-layer compute at 989 TFLOPS = 2 × 4096 × 16384² × 8 / 989 TFLOPS = 17.8 ms.
-    4. **Overlap Ratio:** 0.28 ms / 17.8 ms = **1.6%**.
-    5. **Conclusion:** Architecture is communication-friendly; overhead is completely hidden.
+    **Assumptions & Constraints:**
+    - Sequence length = 4096, hidden_size = 16384, precision = BF16 (2 bytes)
+    - NVLink bandwidth = 900 GB/s
+    - GPU throughput = 989 TFLOPS
+
+    **Calculations:**
+    - AllReduce Volume = 2 * 4096 * 16384 * 2 bytes = 256 MB per layer
+    - Communication Time = 256 MB / 900 GB/s = 0.28 ms
+    - Compute Time = 2 * 4096 * 16384^2 * 8 / 989 TFLOPS = 17.8 ms
+    - Overlap Ratio = 0.28 ms / 17.8 ms = 1.6%
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.6% Overhead (Compute-Bound)**. Architecture is communication-friendly; overhead is completely hidden by overlapping with compute.
 status: published
 provenance: imported
 requires_explanation: true

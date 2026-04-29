@@ -9,7 +9,7 @@ bloom_level: create
 phase: both
 title: 'Systolic Array Mastery: Full Transformer Layer Analysis on TPU'
 scenario: You must perform a complete performance analysis of a single transformer layer (hidden=4096, FFN=16384, heads=32, seq=2048, batch=16) on a TPU v5e instance.
-question: How do the attention and FFN FLOPs and bandwidth break down for this transformer layer, what is the bottleneck, and what tile/dataflow should XLA use?
+question: 'How do the attention and FFN FLOPs and bandwidth break down for this transformer layer, what is the bottleneck, and what tile/dataflow should XLA use?'
 details:
   realistic_solution: 'Attention: QKV projection = 3*(2*batch*seq*hidden^2) = 3*2*16*2048*4096^2 = 3.3 TFLOP. AI = 3.3T / (16*2048*4096*2 + 3*4096^2*2 + 3*16*2048*4096*2) = 3.3T/1.17GB = 2820 FLOPs/byte. Compute bound. QK^T = 2*heads*batch*seq^2*head_dim = 2*32*16*2048^2*128 = 0.55 TFLOP. Hmm: head_dim=4096/32=128. AI = 0.55T / (2*268MB + 4.3GB) = 114 FLOPs/byte. Memory bound (ridge point is 240). FFN: 2*(2*batch*seq*hidden*ffn_dim) = 2*2*16*2048*4096*16384 = 8.8 TFLOP. AI>>ridge. Compute bound. Bottleneck: softmax attention score computation (QK^T and softmax/V) is memory-bandwidth bound. Fix: FlashAttention fused kernel.'
   common_mistake: |
@@ -17,13 +17,19 @@ details:
     **The Rationale:** Candidates fail to decompose the layer into sub-operations with different arithmetic intensities (attention is often memory-bound while FFN is compute-bound).
     **The Consequence:** Incorrectly identifying the bottleneck and failing to propose proper dataflow optimizations.
   napkin_math: |
-    1. QKV: each projection is (batch,seq,hidden)*(hidden,hidden): FLOPs = 2*16*2048*4096*4096 = 1.1T each, 3x = 3.3T. Compute bound.
-    2. QK^T: (batch,heads,seq,head_dim)*(batch,heads,head_dim,seq): FLOPs = 2*16*32*2048*2048*128 = 0.55T.
-    3. Bandwidth: Q = (16*32*2048*128*2) = 268MB, K = 268MB, output = (16*32*2048^2*2) = 4.3GB.
-    4. Total BW ≈ 4.8GB. AI = 0.55T / 4.8G = 114 FLOPs/byte.
-    5. Memory bound! Time = 4.8GB / 819GB/s = 5.9ms.
-    6. FFN: 2*2*16*2048*4096*16384 = 8.8T. Time = 8.8T / 197T = 44.7ms.
-    **Result:** Total ≈ 78ms per layer. 24 layers: 1.9s per forward pass. Attention memory bandwidth is the primary bottleneck.
+    **Assumptions & Constraints:**
+    - QKV projection size: (batch,seq,hidden)*(hidden,hidden).
+    - TPU v5e specs: 197 TFLOPS, 819 GB/s HBM bandwidth.
+
+    **Calculations:**
+    - QKV FLOPs = 2*16*2048*4096*4096 = 1.1T each, 3x = 3.3T (Compute bound).
+    - QK^T: (batch,heads,seq,head_dim)*(batch,heads,head_dim,seq): FLOPs = 2*16*32*2048*2048*128 = 0.55T.
+    - Bandwidth: Q = (16*32*2048*128*2) = 268MB, K = 268MB, output = (16*32*2048^2*2) = 4.3GB.
+    - Total BW = ~4.8GB. AI = 0.55T / 4.8G = 114 FLOPs/byte (Memory bound). Time = 4.8GB / 819GB/s = 5.9ms.
+    - FFN: 2*2*16*2048*4096*16384 = 8.8T. Time = 8.8T / 197T = 44.7ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~78ms per layer (Memory Bandwidth)**. 24 layers: 1.9s per forward pass. Attention memory bandwidth is the primary bottleneck.
 status: published
 provenance: imported
 requires_explanation: true

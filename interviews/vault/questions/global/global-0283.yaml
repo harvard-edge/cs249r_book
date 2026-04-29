@@ -7,9 +7,9 @@ topic: data-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: Trillion-Token Data Pipeline Architecture
-scenario: A 1024-GPU training cluster needs to process 2 trillion tokens for a pre-training run. The cluster consumes tokens at 5 million tokens/sec. Raw data is 4 TB of tokenized shards on S3 (2 trillion tokens at 2 bytes/token). Requirements are zero data starvation, exactly-once epoch ordering, and resumability after failures.
-question: How would you design a data pipeline to feed this 1024-GPU training cluster under these constraints?
+title: 'Trillion-Token Data Pipeline Architecture'
+scenario: 'A 1024-GPU training cluster needs to process 2 trillion tokens for a pre-training run. The cluster consumes tokens at 5 million tokens/sec. Raw data is 4 TB of tokenized shards on S3 (2 trillion tokens at 2 bytes/token). Requirements are zero data starvation, exactly-once epoch ordering, and resumability after failures.'
+question: 'How would you design a data pipeline to feed this 1024-GPU training cluster under these constraints?'
 details:
   realistic_solution: 'Three-tier pipeline: (1) S3 -> NVMe staging: pre-fetch tokenized shards from S3 to local NVMe SSDs on each node. 4 TB dataset. Each of 128 nodes stores 4 TB / 128 = 31 GB locally — fits easily. Pre-fetch next shards into buffer. S3 download at 10 Gbps per node = 1.25 GB/s; full 31 GB subset in 31/1.25 = ~25 seconds per node (parallel). (2) NVMe -> host RAM buffer: memory-mapped shards with 4-shard read-ahead. At 5M tok/s across 1024 GPUs: each GPU needs ~5000 tok/s * 2B = ~10 KB/s — trivial bandwidth. The challenge is random access for shuffling. (3) Deterministic shuffle with resumability: use a seeded permutation of shard indices. Each DP rank reads shards in a deterministic order based on (epoch, rank, seed). On failure recovery, the dataloader reads the last consumed shard index from the checkpoint and resumes from shard N+1. No re-shuffling needed. Exactly-once: each shard is assigned to exactly one DP rank per epoch via round-robin on the shuffled shard list.'
   common_mistake: |
@@ -17,17 +17,19 @@ details:
     **The Rationale:** Assuming cloud object storage operates like a local file system without considering per-prefix request limits and latency spikes.
     **The Consequence:** The massive 1024-GPU cluster is repeatedly starved for data, wasting tens of thousands of dollars per hour in idle compute time.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Cluster: 1024 GPUs, 128 nodes.
-       - Data size: 4 TB total.
-       - Throughput: 5M tokens/sec * 2 bytes = 10 MB/s aggregate.
-    2. **Calculations:**
-       - Local Storage per node: 4 TB / 128 nodes = 31 GB/node.
-       - S3 download speed: 10 Gbps (1.25 GB/s) per node.
-       - Time to fetch full node subset: 31 GB / 1.25 GB/s ≈ 25 seconds.
-       - Total training time: 2T tokens / 5M tok/s = 400,000 seconds ≈ 4.6 days.
-    3. **Conclusion & Interpretation:**
-       - **Result: 31 GB staged locally per node. Network-Starvation Avoided.**
+    **Assumptions & Constraints:**
+    - Cluster: 1024 GPUs, 128 nodes.
+    - Data size: 4 TB total.
+    - Throughput: 5M tokens/sec * 2 bytes = 10 MB/s aggregate.
+
+    **Calculations:**
+    - Local Storage per node: 4 TB / 128 nodes = 31 GB/node.
+    - S3 download speed: 10 Gbps (1.25 GB/s) per node.
+    - Time to fetch full node subset: 31 GB / 1.25 GB/s ≈ 25 seconds.
+    - Total training time: 2T tokens / 5M tok/s = 400,000 seconds ≈ 4.6 days.
+
+    **Conclusion & Interpretation:**
+    - **Result: 31 GB staged locally per node (Network-Starvation-Bound)**. Avoided.
 status: published
 provenance: imported
 requires_explanation: true

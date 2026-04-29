@@ -7,53 +7,27 @@ topic: tensor-arena-planning
 competency_area: memory
 bloom_level: analyze
 phase: inference
-title: Tensor Lifetime Analysis for U-Net on MCU
-scenario: 'You''re deploying a tiny U-Net (for anomaly detection) on Cortex-M7 (512
-  KB SRAM). The U-Net has skip connections: encoder layer 1 output must stay alive
-  until it''s consumed by decoder layer 4 (the last decoder layer). This means the
-  encoder 1 tensor (32 KB) has a very long lifetime — it''s alive during the entire
-  encoder and decoder. Combined with normal activation memory, the arena peaks at
-  580 KB. How do you reduce peak memory below 512 KB without changing the model architecture?'
-question: How do you reduce peak memory below 512 KB without changing the model architecture?
+title: 'Tensor Lifetime Analysis for U-Net on MCU'
+scenario: 'You''re deploying a tiny U-Net (for anomaly detection) on Cortex-M7 (512 KB SRAM). The U-Net has skip connections: encoder layer 1 output must stay alive until it''s consumed by decoder layer 4 (the last decoder layer). This means the encoder 1 tensor (32 KB) has a very long lifetime — it''s alive during the entire encoder and decoder. Combined with normal activation memory, the arena peaks at 580 KB.'
+question: 'How do you reduce peak memory below 512 KB without changing the model architecture?'
 details:
-  realistic_solution: 'The problem is the long-lived skip connection tensors. Three
-    strategies: (1) Tiling: process the input in spatial tiles (e.g., 4 tiles of 24×24
-    instead of 1 tile of 48×48). Each tile''s skip connection tensors are 4× smaller.
-    Peak memory drops proportionally, but you need overlap regions to avoid boundary
-    artifacts. (2) Spill to flash: write the skip connection tensor to flash (using
-    a flash write buffer), read it back when the decoder layer needs it. Flash write:
-    32 KB at 1 MB/s = 32ms. Flash read: 32 KB at 50 MB/s = 0.64ms. Total latency penalty:
-    ~33ms per skip connection × 4 connections = 132ms. If inference budget is 500ms,
-    this is 26% overhead — acceptable. (3) Recomputation: don''t store the encoder
-    output; when the decoder needs it, re-run the encoder layer. Cost: redundant computation
-    of encoder layer 1 (forward pass only). Typically 10-20% compute overhead but
-    saves 32 KB of arena. Best for compute-cheap encoder layers.'
-  common_mistake: Removing skip connections to reduce memory. This fundamentally changes
-    the model architecture and degrades accuracy significantly. Skip connections are
-    essential for U-Net's precision in dense prediction tasks.
-  napkin_math: 'Original peak: 580 KB (exceeds 512 KB by 68 KB). Skip connections
-    total: 32 + 16 + 8 + 4 = 60 KB alive during decoder. Strategy 1 (tiling, 4 tiles):
-    skip tensors = 60/4 = 15 KB. New peak: 580 - 60 + 15 = 535 KB. Still over. Need
-    8 tiles: skip = 7.5 KB. Peak: 527 KB. Still over. Strategy 2 (spill longest skip):
-    spill 32 KB encoder-1 skip. New peak: 580 - 32 = 548 KB. Spill encoder-2 (16 KB)
-    too: 532 KB. Plus encoder-3 (8 KB): 524 KB. Close. Strategy 3 (recompute encoder-1):
-    save 32 KB, recompute cost = 2ms for tiny encoder layer. Combined (spill encoder-1
-    + recompute encoder-2): save 48 KB. Peak: 532 KB. Need more. Combination of all:
-    tiling (2 tiles) + spill encoder-1: peak ≈ 490 KB. Fits.'
+  realistic_solution: 'The problem is the long-lived skip connection tensors. Three strategies: (1) Tiling: process the input in spatial tiles (e.g., 4 tiles of 24×24 instead of 1 tile of 48×48). Each tile''s skip connection tensors are 4× smaller. Peak memory drops proportionally, but you need overlap regions to avoid boundary artifacts. (2) Spill to flash: write the skip connection tensor to flash (using a flash write buffer), read it back when the decoder layer needs it. Flash write: 32 KB at 1 MB/s = 32ms. Flash read: 32 KB at 50 MB/s = 0.64ms. Total latency penalty: ~33ms per skip connection × 4 connections = 132ms. If inference budget is 500ms, this is 26% overhead — acceptable. (3) Recomputation: don''t store the encoder output; when the decoder needs it, re-run the encoder layer. Cost: redundant computation of encoder layer 1 (forward pass only). Typically 10-20% compute overhead but saves 32 KB of arena. Best for compute-cheap encoder layers.'
+  common_mistake: 'Removing skip connections to reduce memory. This fundamentally changes the model architecture and degrades accuracy significantly. Skip connections are essential for U-Net''s precision in dense prediction tasks.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Peak memory: 580 KB (exceeds 512 KB limit).
+    - Skip connections: 32 KB, 16 KB, 8 KB, 4 KB (total 60 KB).
+
+    **Calculations:**
+    - Original Peak: 580 KB (68 KB over).
+    - Strategy 1 (Tiling, 2 tiles): Skip tensors = 60/2 = 30 KB. Peak = 580 - 30 = 550 KB (still over).
+    - Strategy 2 (Spill Encoder-1): Peak = 580 - 32 = 548 KB.
+    - Strategy 3 (Spill Encoder-1 + Recompute Encoder-2): Peak = 580 - 32 - 16 = 532 KB.
+    - Combined (Tiling 2 tiles + Spill Encoder-1): Peak ~490 KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~490 KB Peak (Memory Bound)**. Combining spatial tiling with flash-spilling the longest-lived skip connection tensor successfully reduces peak memory below the 512 KB threshold.
 status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 10
-validated: true
-validation_status: OK
-validation_date: '2026-04-02'
-validation_model: claude-opus-4-6
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null

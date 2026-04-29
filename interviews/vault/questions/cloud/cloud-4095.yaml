@@ -7,24 +7,27 @@ topic: model-tensor-parallelism
 competency_area: parallelism
 bloom_level: evaluate
 phase: training
-title: TP vs Expert Parallelism for MoE Models
+title: 'TP vs Expert Parallelism for MoE Models'
 scenario: 'You are training a Mixture-of-Experts model with 8 experts per layer, each expert having hidden_dim=4096. You have 8 GPUs in a node. You must compare two strategies: (A) Tensor Parallelism (TP=8) applied to each expert, or (B) Expert Parallelism where each GPU holds one complete expert.'
-question: Which parallelism strategy is superior for this MoE model and why?
+question: 'Which parallelism strategy is superior for this MoE model and why?'
 details:
-  realistic_solution: 'Strategy A (TP=8 per expert): Each expert''s FFN weights are split across all 8 GPUs. Every token requires 2 AllReduces per expert layer, regardless of which expert it is routed to. All 8 GPUs participate in every token''s computation. Strategy B (Expert Parallelism): Each GPU holds one complete expert. Tokens are routed via All-to-All dispatch to the owning GPU, processed locally, then All-to-All collected back. Communication volume is comparable to TP''s AllReduce (~2 × batch × hidden × 2B), but there is no synchronization barrier during compute — each GPU works independently. Strategy B wins because: (1) experts are embarrassingly parallel, (2) each GPU does a full GEMM (better utilization than tiny TP shards), (3) no barrier stall during compute. Expert parallelism is the standard for MoE (GShard, Switch Transformer, Mixtral).'
+  realistic_solution: |
+    Strategy A (TP=8 per expert): Each expert's FFN weights are split across all 8 GPUs. Every token requires 2 AllReduces per expert layer, regardless of which expert it is routed to. All 8 GPUs participate in every token's computation. Strategy B (Expert Parallelism): Each GPU holds one complete expert. Tokens are routed via All-to-All dispatch to the owning GPU, processed locally, then All-to-All collected back. Communication volume is comparable to TP's AllReduce (~2 × batch × hidden × 2B), but there is no synchronization barrier during compute — each GPU works independently. Strategy B wins because: (1) experts are embarrassingly parallel, (2) each GPU does a full GEMM (better utilization than tiny TP shards), (3) no barrier stall during compute. Expert parallelism is the standard for MoE (GShard, Switch Transformer, Mixtral).
   common_mistake: |
     **The Pitfall:** Assuming Tensor Parallelism is always the best choice because it is widely used in dense models.
     **The Rationale:** Candidates fail to realize that MoE experts are mathematically independent; there is no need to split a single expert across multiple GPUs.
     **The Consequence:** Implementing a communication-heavy topology with unnecessary synchronization barriers, severely degrading training throughput.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - TP (Strategy A): 2 AllReduce ops per expert layer.
-       - EP (Strategy B): All-to-All routing, ~2 * batch * hidden * 2B volume.
-    2. **Calculations:**
-       - Comm Volume: TP AllReduce roughly equals EP All-to-All.
-       - Synchronization: TP stalls 8 GPUs at barriers; EP has zero barriers during compute.
-    3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound. EP eliminates sync barriers, letting each GPU execute independent GEMMs.**
+    **Assumptions & Constraints:**
+    - TP (Strategy A): 2 AllReduce ops per expert layer.
+    - EP (Strategy B): All-to-All routing, ~2 * batch * hidden * 2B volume.
+
+    **Calculations:**
+    - Comm Volume: TP AllReduce roughly equals EP All-to-All.
+    - Synchronization: TP stalls 8 GPUs at barriers; EP has zero barriers during compute.
+
+    **Conclusion & Interpretation:**
+    - **Result: Zero compute barriers (Compute-Bound)**. EP eliminates sync barriers, letting each GPU execute independent GEMMs.
 status: published
 provenance: imported
 requires_explanation: false

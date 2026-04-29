@@ -8,34 +8,25 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: The Deterministic Inference Mirage
-scenario: 'Your medical device runs a diagnostic neural network on an NXP i.MX 8M Plus (Cortex-A53 + Ethos-U65
-  NPU, 2 TOPS INT8). FDA 510(k) submission requires you to prove that inference time is deterministic
-  — the same input must always produce the same execution time. You run 100,000 inferences with the identical
-  input tensor. The histogram shows a bimodal distribution: 95% of runs at 4.1ms, 5% at 6.8ms. The input
-  is identical every time. What is causing the 2.7ms timing variation on identical inputs?'
-question: "What is causing the 2.7ms timing variation on identical inputs?"
+scenario: 'Your medical device runs a diagnostic neural network on an NXP i.MX 8M Plus (Cortex-A53 + Ethos-U65 NPU, 2 TOPS INT8). FDA 510(k) submission requires you to prove that inference time is deterministic — the same input must always produce the same execution time. You run 100,000 inferences with the identical input tensor. The histogram shows a bimodal distribution: 95% of runs at 4.1ms, 5% at 6.8ms.'
+question: What is causing the 2.7ms timing variation on identical inputs?
 details:
-  realistic_solution: 'The bimodal distribution reveals system-level interference, not NPU non-determinism.
-    The 5% slow cases correlate with: (1) DRAM refresh cycles — LPDDR4 requires periodic refresh (every
-    3.9 µs per row, full refresh every 64ms). When an NPU memory access collides with a refresh cycle,
-    it stalls for ~200-400ns. Over thousands of memory accesses per inference, these stalls accumulate.
-    The 6.8ms cases occur when inference overlaps with a full-bank refresh. (2) Linux kernel timer interrupts
-    — the kernel''s tick interrupt (every 4ms on HZ=250) preempts the NPU driver''s DMA completion handler,
-    adding ~100-500 µs of jitter. (3) Thermal throttling micro-events — the SoC''s DVFS may briefly reduce
-    NPU clock by one step when junction temperature crosses a threshold, then restore it. The fix for
-    FDA compliance: (a) use the Ethos-U65 in standalone mode with a dedicated SRAM (no DRAM access → no
-    refresh interference), (b) run a tickless kernel (`CONFIG_NO_HZ_FULL`) on the NPU-managing core, (c)
-    lock the NPU clock to a fixed frequency below the thermal throttle point. After these fixes, timing
-    variance drops to <50 µs (within measurement noise).'
-  common_mistake: '"The NPU has non-deterministic execution" or "There''s a bug in the driver." The NPU''s
-    datapath is fully deterministic for identical inputs — the variation comes from the system around
-    it.'
-  napkin_math: 'DRAM refresh: 8 Gb LPDDR4 has 65,536 rows, refreshed every 64ms → 1,024 refreshes/ms.
-    Each refresh blocks the bank for ~200ns. NPU makes ~5,000 DRAM accesses per inference. Probability
-    of at least one collision: 1 - (1 - 200ns/977ns)^5000 ≈ very high, but most collisions add only 200ns.
-    The 2.7ms spike occurs during full-rank refresh (all banks busy for ~400 µs) coinciding with a kernel
-    tick. Fix: dedicated 512 KB SRAM for NPU weights + activations eliminates DRAM dependency entirely.
-    MobileNet-V2 INT8 fits in 512 KB with tiling → deterministic 4.1ms ± 20 µs.'
+  realistic_solution: |
+    The bimodal distribution reveals system-level interference, not NPU non-determinism. The 5% slow cases correlate with DRAM refresh cycles (LPDDR4 requires periodic full refreshes) and Linux kernel timer interrupts preempting the NPU driver's DMA completion handler. The fix requires running the NPU in standalone mode with dedicated SRAM to eliminate DRAM dependency, and utilizing a tickless kernel (CONFIG_NO_HZ_FULL).
+  common_mistake: Assuming the NPU hardware is inherently non-deterministic or blaming the model architecture, rather than diagnosing OS scheduling jitter and memory subsystem refresh collisions.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - LPDDR4 refresh every 64ms (full bank ~400 µs)
+    - Kernel tick interrupt every 4ms (~100-500 µs jitter)
+    - ~5,000 DRAM accesses per inference
+
+    **Calculations:**
+    - DRAM full bank refresh blocks access for ~400 µs
+    - Kernel interrupt preemption delays DMA handler by ~1-2 ms
+    - Total system interference = ~2.7 ms latency spike
+
+    **Conclusion & Interpretation:**
+    - **Result: 2.7 ms Variation (Memory-Bandwidth-Bound)**. Migrating weights/activations to dedicated SRAM and using a tickless kernel guarantees deterministic latency by eliminating DRAM and OS jitter.
 status: published
 provenance: imported
 requires_explanation: false
@@ -48,8 +39,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The 'reasoning_competency', 'knowledge_area', and 'reasoning_mode' fields are not populated, which could
-  make the question harder to categorize.
+- The 'reasoning_competency', 'knowledge_area', and 'reasoning_mode' fields are not populated, which could make the question harder to categorize.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

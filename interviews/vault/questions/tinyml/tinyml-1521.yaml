@@ -11,17 +11,23 @@ title: Arena Planning for Multi-Model Deployment
 scenario: 'Your ESP32-S3 (240 MHz, 512 KB SRAM, 8 MB PSRAM) runs 3 models sequentially in a pipeline: voice activity detection (VAD, 15 KB arena), keyword spotting (KWS, 85 KB arena), and intent classification (IC, 120 KB arena). Currently, each model has its own arena — total 220 KB of SRAM reserved.'
 question: How should an ESP32-S3 share arenas for sequential VAD, KWS, and IC models needing 15 KB, 85 KB, and 120 KB?
 details:
-  realistic_solution: 'Two strategies depending on execution model: (1) Strictly sequential (no overlap): allocate one arena of max(15, 85, 120) = 120 KB. Each model runs to completion, then the next model reuses the same arena memory. Savings: 220 → 120 KB (45% reduction). Simple and safe. (2) Pipelined (VAD runs continuously while KWS/IC execute on triggers): VAD arena must be persistent (15 KB). KWS and IC never run simultaneously (KWS triggers IC). Shared arena for KWS+IC: max(85, 120) = 120 KB. Total: 15 + 120 = 135 KB. Implementation: partition the arena buffer at compile time: uint8_t arena[135 KB]; VAD uses arena[0..15KB], KWS/IC share arena[15KB..135KB]. (3) Aggressive: VAD is tiny enough to run from a separate static buffer. KWS and IC share the main arena with double-buffering — KWS writes its output to a small handoff buffer (1 KB) before IC takes over the arena.'
+  realistic_solution: 'Two strategies depending on execution model: (1) Strictly sequential (no overlap): allocate one arena of max(15, 85, 120) = 120 KB. Each model runs to completion, then the next model reuses the same arena memory. Savings: 220 -> 120 KB (45% reduction). Simple and safe. (2) Pipelined (VAD runs continuously while KWS/IC execute on triggers): VAD arena must be persistent (15 KB). KWS and IC never run simultaneously (KWS triggers IC). Shared arena for KWS+IC: max(85, 120) = 120 KB. Total: 15 + 120 = 135 KB. Implementation: partition the arena buffer at compile time: uint8_t arena[135 KB]; VAD uses arena[0..15KB], KWS/IC share arena[15KB..135KB]. (3) Aggressive: VAD is tiny enough to run from a separate static buffer. KWS and IC share the main arena with double-buffering — KWS writes its output to a small handoff buffer (1 KB) before IC takes over the arena.'
   common_mistake: |
     **The Pitfall:** Allocating exactly 120 KB and assuming all models can share it entirely.
     **The Rationale:** Candidates use the global maximum without considering execution overlap constraints.
     **The Consequence:** If the VAD triggers KWS while still processing the next audio frame, both arenas must be live simultaneously, causing memory corruption or an immediate crash.
   napkin_math: |
-    1. **Separate Arenas:** 15 KB (VAD) + 85 KB (KWS) + 120 KB (IC) = 220 KB (43% of SRAM).
-    2. **Sequential Shared (No Overlap):** max(15, 85, 120) = 120 KB.
-    3. **Pipelined (VAD continuous, KWS/IC shared):** 15 KB (VAD persistent) + max(85, 120) = 135 KB.
-    4. **SRAM Savings:** 220 KB - 135 KB = 85 KB freed.
-    5. **Result:** The pipelined shared arena uses **135 KB**, safely freeing 85 KB for audio buffers and RTOS overhead.
+    **Assumptions & Constraints:**
+    - Separate Arenas: 15 KB (VAD) + 85 KB (KWS) + 120 KB (IC) = 220 KB (43% of SRAM).
+    - Execution Overlap: VAD continuous, KWS and IC shared sequentially.
+
+    **Calculations:**
+    - Sequential Shared (No Overlap): max(15, 85, 120) = 120 KB.
+    - Pipelined (VAD continuous, KWS/IC shared): 15 KB (VAD persistent) + max(85, 120) = 135 KB.
+    - SRAM Savings: 220 KB - 135 KB = 85 KB freed.
+
+    **Conclusion & Interpretation:**
+    - **Result: 135 KB total arena (Memory-Bound)**. The pipelined shared arena uses 135 KB, safely freeing 85 KB for audio buffers and RTOS overhead.
 status: published
 provenance: imported
 requires_explanation: true

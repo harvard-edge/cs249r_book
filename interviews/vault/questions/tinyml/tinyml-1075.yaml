@@ -11,18 +11,24 @@ title: PSRAM Latency in Real-Time Audio Streaming
 scenario: An ESP32-S3 (240 MHz, 512 KB SRAM, 8 MB PSRAM) processes a 16kHz, 16-bit audio stream for wake-word detection. A new frame is ingested via DMA every 10ms, requiring strict real-time feature computation. The DSP function requires 4.8 million operations per frame and utilizes the CPU's INT8 vector extensions, executing 4 operations per clock cycle. The FFT algorithm reads each byte of the 1.6 KB rolling audio buffer 100 times during windowing. When the engineer places this DMA ring buffer in the 8 MB PSRAM to save space, the system consistently drops frames. When moved to the 512 KB internal SRAM, it processes flawlessly.
 question: Why does placing the rolling audio DMA buffer in ESP32-S3 PSRAM cause dropped real-time frames?
 details:
-  realistic_solution: The system drops frames because of memory bandwidth starvation caused by the high latency of off-chip PSRAM. While the CPU's INT8 vector extensions can process the math operations extremely fast, the repetitive reads required by the FFT algorithm create massive stall penalties over the SPI bus, pushing total execution time past the 10ms deadline. The correct architectural approach is to place the hot-path DMA streaming buffer in the zero-wait-state internal SRAM, ensuring the vector compute units are constantly fed with data, while pushing larger, infrequently accessed state arrays to PSRAM.
+  realistic_solution: 'The system drops frames because of memory bandwidth starvation caused by the high latency of off-chip PSRAM. While the CPU''s INT8 vector extensions can process the math operations extremely fast, the repetitive reads required by the FFT algorithm create massive stall penalties over the SPI bus, pushing total execution time past the 10ms deadline. The correct architectural approach is to place the hot-path DMA streaming buffer in the zero-wait-state internal SRAM, ensuring the vector compute units are constantly fed with data, while pushing larger, infrequently accessed state arrays to PSRAM.'
   common_mistake: |
     **The Pitfall:** Calculating theoretical compute time without factoring in memory access latency over the SPI bus.
     **The Rationale:** Engineers assume PSRAM and SRAM have identical access speeds and treat memory purely as a capacity bucket.
     **The Consequence:** Placing hot-path rolling DMA buffers in high-latency external memory, resulting in immediate frame drops and broken real-time ingestion.
   napkin_math: |
-    1. **Compute Base:** 4.8M operations / 4 ops/cycle = 1,200,000 cycles.
-    2. **Memory Accesses:** 1,600 bytes * 100 reads = 160,000 read operations.
-    3. **SRAM Path:** 160,000 * 1 cycle = 160,000 memory cycles. Total = 1.36M cycles.
-    4. **SRAM Time:** 1.36M / 240,000,000 Hz = 5.66 ms (**meets 10 ms deadline**).
-    5. **PSRAM Path:** 160,000 * 20 cycles = 3,200,000 memory cycles. Total = 4.4M cycles.
-    6. **Result:** PSRAM Time is 4.4M / 240,000,000 Hz = **18.33 ms** (exceeds deadline, causing dropped frames).
+    **Assumptions & Constraints:**
+    - Compute Base: 4.8M operations / 4 ops/cycle = 1,200,000 cycles.
+    - Memory Accesses: 1,600 bytes * 100 reads = 160,000 read operations.
+
+    **Calculations:**
+    - SRAM Path: 160,000 * 1 cycle = 160,000 memory cycles. Total = 1.36M cycles.
+    - SRAM Time: 1.36M / 240,000,000 Hz = 5.66 ms (meets 10 ms deadline).
+    - PSRAM Path: 160,000 * 20 cycles = 3,200,000 memory cycles. Total = 4.4M cycles.
+    - PSRAM Time: 4.4M / 240,000,000 Hz = 18.33 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 18.33 ms (Memory-Bound)**. PSRAM Time exceeds the deadline, causing dropped frames.
 status: published
 provenance: imported
 requires_explanation: false

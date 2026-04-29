@@ -9,7 +9,7 @@ bloom_level: apply
 phase: both
 title: 'Latency Decomposition: Size the Per-Component Latency for a 70B Model Serving Request'
 scenario: >-
-  Concretely size the per-component latency breakdown for serving a single
+  You need to size the per-component latency breakdown for serving a single
   request to a 70B LLaMA model on one H100 node (80GB HBM3, 3.35TB/s, 989 TFLOPS BF16).
   The request is 256 tokens prompt, 64 tokens output. Assume no batching, no speculative
   decoding, and that weights fit in HBM after tensor-parallel split across 4 GPUs
@@ -24,13 +24,21 @@ details:
     **The Rationale:** Candidates calculate gradient synchronization times (which are bandwidth-heavy for training), failing to see that tiny 16KB activations are bottlenecked entirely by NCCL software overhead.
     **The Consequence:** Over-investing in raw NVLink bandwidth instead of optimizing NCCL overhead or kernel fusion.
   napkin_math: |
-    1. **Activation size (BS=1):** 8192 hidden dim × 2 bytes = 16 KB.
-    2. **AllReduce data sent:** 2 × (4-1)/4 × 16 KB = 24 KB.
-    3. **Bandwidth time:** At 450 GB/s (unidirectional NVLink), 24 KB / 450 GB/s ≈ 0.053 µs.
-    4. **NCCL Latency:** Hardware/software latency is ~3 µs (dominates bandwidth).
-    5. **Total AllReduces:** 2 per layer × 80 layers = 160 AllReduces per token.
-    6. **Time per token:** 160 × 3 µs = 480 µs (≈0.5 ms).
-    7. **Total overhead:** For 64 generated tokens, 64 × 0.5 ms = **~32 ms added latency.**
+    **Assumptions & Constraints:**
+    - 4-GPU Tensor Parallelism, BS=1.
+    - Activation size is 8192 hidden dim × 2 bytes = 16 KB.
+    - Unidirectional NVLink is 450 GB/s.
+    - NCCL Latency is ~3 µs.
+    - 2 AllReduces per layer × 80 layers = 160 AllReduces per token.
+
+    **Calculations:**
+    - AllReduce data sent = 2 × (4-1)/4 × 16 KB = 24 KB.
+    - Bandwidth time = 24 KB / 450 GB/s ≈ 0.053 µs.
+    - Time per token = 160 × 3 µs = 480 µs (≈0.5 ms).
+    - Total overhead for 64 tokens = 64 × 0.5 ms = 32 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~32 ms (Latency-Bound)**. Tiny 16KB activations are bottlenecked entirely by NCCL software overhead, making raw NVLink bandwidth irrelevant for BS=1.
 status: published
 provenance: imported
 requires_explanation: false

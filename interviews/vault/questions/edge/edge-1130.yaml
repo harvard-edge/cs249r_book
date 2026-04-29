@@ -11,19 +11,28 @@ title: 'Edge Systolic Array Design: Systolic Array for Conv Layer on Jetson DLA'
 scenario: 'An output-stationary (OS) dataflow is proposed for a depthwise separable convolution (MobileNetV2 block: 3x3 dw-conv, 64 channels, 112x112 feature map, stride=1) on Jetson Orin DLA.'
 question: How should an output-stationary dataflow run the MobileNetV2 depthwise convolution, and how does it compare with 1x1 pointwise convolution?
 details:
-  realistic_solution: 'DW 3x3, 64ch, 112x112: weights per channel = 3*3=9. Memory bound heavily (DLA ridge ≈ 250). Output-stationary: each output pixel (channel, y, x) is computed by loading all 9 input pixels and 9 weights → 9 MACs. Weight reuse: same 9 weights for all 112*112 positions. Weight Stationary (WS) is actually optimal for DW-conv. PW 1x1 conv (64→128) is still memory bound but has much better Arithmetic Intensity.'
+  realistic_solution: 'DW 3x3, 64ch, 112x112: weights per channel = 3*3=9. Memory bound heavily (DLA ridge \approx 250). Output-stationary: each output pixel (channel, y, x) is computed by loading all 9 input pixels and 9 weights \rightarrow 9 MACs. Weight reuse: same 9 weights for all 112*112 positions. Weight Stationary (WS) is actually optimal for DW-conv. PW 1x1 conv (64\rightarrow128) is still memory bound but has much better Arithmetic Intensity.'
   common_mistake: |
     **The Pitfall:** Applying standard convolution dataflow strategies to depthwise convolutions.
     **The Rationale:** Candidates memorize standard matrix-multiplication tiling but ignore the unique memory access pattern of depthwise layers.
     **The Consequence:** A severe memory bottleneck occurs because depthwise convolutions have no weight reuse across channels, leading to extremely low arithmetic intensity.
   napkin_math: |
-    1. DW: Weights = 64 * 3 * 3 = 576 bytes. Input = 64 * 112² = 803 KB. Output = 803 KB. Total Bytes ≈ 1.6 MB.
-    2. DW FLOPs = 2 * 64 * 112² * 9 = 14.5M.
-    3. DW AI = 14.5M / 1.6 MB = 9.0 FLOPs/byte (Heavily memory bound).
-    4. PW 1x1 (64→128): Weights = 64 * 128 = 8 KB. Input = 803 KB. Output = 1.6 MB. Total Bytes ≈ 2.4 MB.
-    5. PW FLOPs = 2 * 128 * 112² * 64 = 205.5M.
-    6. PW AI = 205.5M / 2.4 MB = 85.0 FLOPs/byte.
-    7. **Assuming 200 GB/s DLA BW, DW time = 1.6MB / 200GB/s = 0.008ms, PW time = 2.4MB / 200GB/s = 0.012ms. Total block time ≈ 0.02ms.**
+    **Assumptions & Constraints:**
+    - DW Conv: 64 channels, 3x3 kernel, 112x112 feature map.
+    - PW 1x1 Conv: 64->128 channels, 112x112 feature map.
+    - DLA BW: 200 GB/s.
+
+    **Calculations:**
+    - DW: Weights = 64 * 3 * 3 = 576 bytes. Input = 64 * 112² = 803 KB. Output = 803 KB. Total Bytes ≈ 1.6 MB.
+    - DW FLOPs = 2 * 64 * 112² * 9 = 14.5M.
+    - DW AI = 14.5M / 1.6 MB = 9.0 FLOPs/byte (Heavily memory bound).
+    - PW 1x1: Weights = 64 * 128 = 8 KB. Input = 803 KB. Output = 1.6 MB. Total Bytes ≈ 2.4 MB.
+    - PW FLOPs = 2 * 128 * 112² * 64 = 205.5M.
+    - PW AI = 205.5M / 2.4 MB = 85.0 FLOPs/byte.
+    - DW time = 1.6MB / 200GB/s = 0.008ms, PW time = 2.4MB / 200GB/s = 0.012ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~0.02ms total block time (Memory-Bound)**. DW is heavily memory bound due to lack of channel reuse.
 status: published
 provenance: imported
 requires_explanation: true

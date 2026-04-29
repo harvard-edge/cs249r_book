@@ -11,22 +11,25 @@ title: A17 Pro Shared Memory Streaming Bottleneck
 scenario: A real-time video analytics pipeline ingests 60Hz high-resolution frames (24MB per frame) and streams them to a feature extraction model on a mobile NPU. The NPU shares an 8 GB unified memory pool with the CPU and GPU. The model requires 100 GOPS per frame, and 100MB of weights are continuously accessed. The ingestion strategy has the CPU copy each incoming 24MB frame to a new memory allocation before passing it to the NPU.
 question: Why does CPU-copying 24 MB 60Hz frames make a video pipeline miss its 16.6 ms budget despite ample NPU compute?
 details:
-  realistic_solution: The pipeline is bottlenecked by redundant memory copies, not compute capacity. In a unified memory architecture, copying the 24MB frame via the CPU wastes cycles and memory bandwidth, starving the NPU. The solution is to implement zero-copy streaming, passing the hardware buffer pointer directly from the camera ISP to the NPU, completely eliminating the CPU copy overhead.
+  realistic_solution: |
+    The pipeline is bottlenecked by redundant memory copies, not compute capacity. In a unified memory architecture, copying the 24MB frame via the CPU wastes cycles and memory bandwidth, starving the NPU. The solution is to implement zero-copy streaming, passing the hardware buffer pointer directly from the camera ISP to the NPU, completely eliminating the CPU copy overhead.
   common_mistake: |
     **The Pitfall:** Assuming the NPU is thermal throttling or lacking compute power.
     **The Rationale:** Engineers focus heavily on the 5W power budget and TOPS, ignoring data movement overhead.
     **The Consequence:** Overlooking the memory bandwidth saturation caused by redundant CPU buffer copying within the shared memory, which is the true cause of dropped frames.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Frame size: 24 MB at 60 FPS.
-       - Compute requirement: 100 GOPS/frame = 6 TOPS.
-       - Weight memory: 100 MB.
-    2. **Calculations:**
-       - Memory ops per frame with copy: 24MB (ISP write) + 24MB (CPU read) + 24MB (CPU write) + 24MB (NPU read) + 100MB (weights) = 196MB per frame.
-       - Required bandwidth: 196MB * 60 FPS = 11.76 GB/s.
-       - By eliminating CPU buffer copy, save 48MB per frame (2.88 GB/s).
-    3. **Conclusion & Interpretation:**
-       - **Eliminating the redundant copy reduces memory contention, allowing the pipeline to hit the 16.6ms budget. (Result: Memory-Bandwidth-Bound)**
+    **Assumptions & Constraints:**
+    - Frame size: 24 MB at 60 FPS.
+    - Compute requirement: 100 GOPS/frame = 6 TOPS.
+    - Weight memory: 100 MB.
+
+    **Calculations:**
+    - Memory ops per frame with copy: 24MB (ISP write) + 24MB (CPU read) + 24MB (CPU write) + 24MB (NPU read) + 100MB (weights) = 196MB per frame.
+    - Required bandwidth: 196MB * 60 FPS = 11.76 GB/s.
+    - By eliminating CPU buffer copy, save 48MB per frame (2.88 GB/s).
+
+    **Conclusion & Interpretation:**
+    - **Result: 11.76 GB/s (Memory-Bandwidth-Bound)**. Eliminating the redundant copy reduces memory contention, allowing the pipeline to hit the 16.6ms budget.
 status: published
 provenance: imported
 requires_explanation: false

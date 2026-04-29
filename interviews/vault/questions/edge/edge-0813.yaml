@@ -9,7 +9,7 @@ bloom_level: evaluate
 phase: training
 title: The CUDA Stream Contention Trap
 scenario: 'On a Jetson Orin (2048 CUDA cores, 275 TOPS INT8), you launch two detection models on separate CUDA streams expecting them to overlap. Model A uses 1800 cores and Model B uses 1600 cores. You observe zero overlap — they run sequentially in 35ms total instead of the expected ~20ms.'
-question: "Why do the two CUDA-stream models on the Orin serialize, and what fix would achieve at least partial overlap?"
+question: Why do the two CUDA-stream models on the Orin serialize, and what fix would achieve at least partial overlap?
 details:
   realistic_solution: 'The Orin has 2048 CUDA cores across 16 SMs (128 cores/SM). Model A requests 1800/128 ≈ 15 SMs. Model B requests 1600/128 ≈ 13 SMs. Combined: 28 SMs needed, but only 16 exist. The GPU cannot overlap these kernels. Fix: Use NVIDIA MPS (Multi-Process Service) or redesign with smaller models. If you reduce Model A to use ~8 SMs and Model B to ~8 SMs (via TensorRT workspace limits or smaller batch sizes), both fit simultaneously. This reduces per-model throughput but the combined pipeline throughput improves from 35ms to max(20,18) ≈ 20ms — a 43% improvement.'
   common_mistake: |
@@ -17,12 +17,20 @@ details:
     **The Rationale:** Candidates know streams enable concurrent scheduling but forget that GPU SMs (Streaming Multiprocessors) are a finite physical resource.
     **The Consequence:** Unexpected pipeline serialization when two kernels together demand more SMs than are physically available on the hardware.
   napkin_math: |
-    * Orin SMs: 2048 cores / 128 cores per SM = 16 SMs.
-    * Model A: 1800 cores -> ceil(1800/128) = 15 SMs.
-    * Model B: 1600 cores -> ceil(1600/128) = 13 SMs.
-    * Total needed: 15 + 13 = 28 SMs. Since 28 > 16, they are **serialized**.
-    * Fix: Cap each at 8 SMs (1024 cores) via TensorRT workspace limits. Both fit in 16 SMs.
-    * Serial time: 35ms. Overlapped time ≈ 20ms. Speedup = 35 / 20 = **1.75x**.
+    **Assumptions & Constraints:**
+    - Orin cores: 2048 (16 SMs, 128 cores/SM).
+    - Model A request: 1800 cores.
+    - Model B request: 1600 cores.
+
+    **Calculations:**
+    - Model A SMs needed = ceil(1800/128) = 15 SMs.
+    - Model B SMs needed = ceil(1600/128) = 13 SMs.
+    - Total SMs needed = 15 + 13 = 28 SMs.
+    - 28 SMs > 16 SMs, so kernels serialize.
+    - Capping each at 8 SMs allows concurrent execution.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.75x Speedup (Compute Resource Serialization).** Overlapped time is ~20ms compared to serial time of 35ms.
 status: published
 provenance: imported
 requires_explanation: true

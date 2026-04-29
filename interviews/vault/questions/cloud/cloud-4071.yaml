@@ -8,7 +8,7 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: RDMA Memory Registration with On-Demand Paging
-scenario: Traditional RDMA requires all memory to be pinned (non-swappable) and registered with the HCA before use. For a 192GB GPU, registering all HBM creates a rigid allocation that conflicts with PyTorch's dynamic memory allocator. Specify an on-demand paging (ODP) architecture for GPUDirect RDMA that allows dynamic GPU memory allocation without pre-registration.
+scenario: Traditional RDMA requires all memory to be pinned (non-swappable) and registered with the HCA before use. For a 192GB GPU, registering all HBM creates a rigid allocation that conflicts with PyTorch's dynamic memory allocator.
 question: What GPUDirect RDMA on-demand paging architecture would let PyTorch allocate GPU memory dynamically without pre-registration?
 details:
   realistic_solution: 'Specification for GPU RDMA ODP: (1) Implicit MR: register the entire 192GB GPU VRAM as a single implicit Memory Region at startup. This establishes the HCA↔GPU PCIe BAR mapping for the full address range. Cost: one-time, ~50ms. (2) Page table callback: register nvidia_p2p_put_pages callback with the GPU driver. When PyTorch''s caching allocator frees or reallocates a VRAM region, the callback notifies the HCA to invalidate those page table entries. (3) Lazy validation: when an RDMA operation references an invalidated page, the HCA traps to the kernel ODP handler, which calls nvidia_p2p_get_pages to re-establish the mapping. This adds ~10μs per page fault — amortized over subsequent accesses. (4) Prefault optimization: before starting AllReduce, NCCL calls ibv_advise_mr on the gradient buffer addresses, pre-faulting all pages into the HCA''s MTT. Cost: 192GB / 2MB pages = 96K entries × 100ns = 9.6ms. (5) Memory pressure: if GPU memory is heavily fragmented, page faults during RDMA increase. Set a threshold: if fault rate exceeds 100/second, log a warning and pre-register active buffers. Expected performance: first AllReduce iteration incurs ~10ms of page faults. Subsequent iterations run at line rate (0 faults) as long as buffers aren''t reallocated.'
@@ -17,15 +17,17 @@ details:
     **The Rationale:** Candidates incorrectly assume GPU VRAM leverages standard virtual memory page faults via an MMU, missing that GPUDirect RDMA requires explicit driver callbacks for page table invalidation.
     **The Consequence:** Designing a system that will fail to synchronize HCA and GPU memory mappings, resulting in silent data corruption or segmentation faults during RDMA transfers.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - GPU VRAM: 192GB.
-       - Page Size: 2MB.
-       - Pre-fault optimization cost: 100ns per entry.
-    2. **Calculations:**
-       - Pre-fault Optimization Entries: 192GB / 2MB = 96,000 entries.
-       - HCA Setup Time: 96,000 * 100ns = 9.6ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Control Plane Overhead.** ODP introduces a ~10ms initial page fault overhead per buffer, but steady-state iterations run at line rate.
+    **Assumptions & Constraints:**
+    - GPU VRAM: 192GB.
+    - Page Size: 2MB.
+    - Pre-fault optimization cost: 100ns per entry.
+
+    **Calculations:**
+    - Pre-fault Optimization Entries: 192GB / 2MB = 96,000 entries.
+    - HCA Setup Time: 96,000 * 100ns = 9.6ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~10ms Overhead (Control Plane Overhead).** ODP introduces a ~10ms initial page fault overhead per buffer, but steady-state iterations run at line rate.
 status: published
 provenance: imported
 requires_explanation: true

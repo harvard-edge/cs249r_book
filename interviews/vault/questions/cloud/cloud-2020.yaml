@@ -7,21 +7,26 @@ topic: tensor-arena-planning
 competency_area: memory
 bloom_level: evaluate
 phase: inference
-title: Evaluating NCHW vs NHWC Layouts
+title: 'Evaluating NCHW vs NHWC Layouts'
 scenario: 'You are optimizing a large computer vision model (ResNet-101 architecture) for inference on an NVIDIA A100 GPU (2000 GB/s memory bandwidth). The activation tensor $X$ at a critical layer has the shape `[N=64, C=512, H=112, W=112]` and is stored in FP16. By default, PyTorch uses contiguous NCHW format `(stride: C*H*W, H*W, W, 1)`. However, cuDNN requires `channels_last` NHWC format `(stride: H*W*C, W*C, C, 1)` to utilize FP16 Tensor Cores for convolutions.'
-question: "Should you leave the ResNet-101 in NCHW with implicit cuDNN transposes, or switch globally to NHWC, and why?"
+question: 'Should you leave the ResNet-101 in NCHW with implicit cuDNN transposes, or switch globally to NHWC, and why?'
 details:
-  realistic_solution: Adopt the NHWC (channels_last) format globally. While a single explicit transposition incurs a bandwidth cost, leaving the model in NCHW forces the cuDNN backend to silently allocate workspace memory and perform a strided memory copy (NCHW -> NHWC) before the computation, and then convert back (NHWC -> NCHW) to return the expected output layout for every single layer.
+  realistic_solution: 'Adopt the NHWC (channels_last) format globally. While a single explicit transposition incurs a bandwidth cost, leaving the model in NCHW forces the cuDNN backend to silently allocate workspace memory and perform a strided memory copy (NCHW -> NHWC) before the computation, and then convert back (NHWC -> NCHW) to return the expected output layout for every single layer.'
   common_mistake: |
     **The Pitfall:** Arguing that NCHW is better for cache locality on modern GPUs.
     **The Rationale:** Candidates incorrectly assume implicit framework conversions are "zero-cost", ignoring that Ampere/Hopper Tensor Cores structurally demand channel-contiguous (NHWC) memory layouts for dot products.
     **The Consequence:** Burning massive memory bandwidth on invisible data striding, drastically slowing down inference.
   napkin_math: |
-    - **Tensor Size:** 64 * 512 * 112 * 112 * 2 bytes = 822 MB.
-    - **Implicit Transpose Overhead:** Read NCHW (822 MB) + Write NHWC (822 MB) = 1.64 GB per layer.
-    - **Total Bandwidth Waste:** 50 layers * 1.64 GB = 82 GB per forward pass.
-    - **Latency Penalty:** 82 GB / 2000 GB/s = ~41 ms of invisible latency per pass.
-    - **Result:** **A single global NHWC conversion upfront costs <1 ms, eliminating the 41 ms penalty.**
+    **Assumptions & Constraints:**
+    - Tensor Size: 64 * 512 * 112 * 112 * 2 bytes = 822 MB.
+    - Implicit Transpose Overhead: Read NCHW (822 MB) + Write NHWC (822 MB) = 1.64 GB per layer.
+
+    **Calculations:**
+    - Total Bandwidth Waste: 50 layers * 1.64 GB = 82 GB per forward pass.
+    - Latency Penalty: 82 GB / 2000 GB/s = ~41 ms of invisible latency per pass.
+
+    **Conclusion & Interpretation:**
+    - **Result: 41 ms invisible latency (Memory-Bandwidth-Bound)**. A global NHWC conversion upfront costs <1 ms and eliminates the per-layer memory overhead.
 status: published
 provenance: imported
 requires_explanation: true

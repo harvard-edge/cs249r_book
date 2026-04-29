@@ -11,18 +11,20 @@ title: 'Edge Queueing Theory Diagnosis: Jetson Orin Pipeline Latency Spike'
 scenario: 'A Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W) autonomous drone shows intermittent 500ms latency spikes on its obstacle detection pipeline (normal P50: 15ms, SLO: 50ms). Average GPU utilization is 35%. The spikes correlate with IMU data logging every 500ms.'
 question: 'What root cause explains the 500 ms obstacle-detection spikes despite 35% GPU utilization, and how much latency can the fix remove?'
 details:
-  realistic_solution: 'Normal operation: ρ=0.35 (GPU), W=15ms. During IMU log: DMA burst writes 500ms * IMU_rate * data_size to LPDDR5. IMU at 1kHz: 1000 samples * 6 axes * 4 bytes * 0.5s = 12KB. But if flash write with 32MB buffer: DMA burst = 32MB to eMMC at 100MB/s = 320ms DMA burst. Memory bus contention: LPDDR5 102.4GB/s, but DMA + GPU inference conflict → GPU stalls 320ms. Fix: use asynchronous DMA with pinned memory, separate DMA controller, or log in background. Expected improvement: eliminate 300ms stall.'
-  common_mistake: |
-    **The Pitfall:** Blaming the GPU because it's running the inference model.
-    **The Rationale:** Latency spikes in ML pipelines are typically assumed to be compute-bound anomalies or OS scheduling jitter.
-    **The Consequence:** Engineers waste time optimizing the inference model or tweaking TensorRT execution contexts, ignoring the actual I/O bottleneck.
+  realistic_solution: 'Memory bus contention caused by DMA burst writes to eMMC. The OS flushes the IMU data to flash in 32MB bursts. During the eMMC write, the shared LPDDR5 bus stalls the GPU memory requests. Fix: use asynchronous DMA with pinned memory or a separate DMA controller to eliminate the 300ms stall.'
+  common_mistake: 'Blaming the GPU because it is running the inference model, leading engineers to waste time optimizing the inference model or TensorRT execution contexts instead of fixing the I/O bottleneck.'
   napkin_math: |
-    * IMU logging: 500ms * 1kHz * 24 bytes = 12KB data.
-    * SD card write: OS flushes 32MB blocks. eMMC bandwidth = 100MB/s.
-    * Burst time: 32MB / 100MB/s = 320ms.
-    * During this 320ms, GPU memory requests queued behind DMA on the shared memory bus.
-    * GPU inference: 14ms per frame. A 320ms stall = 22 missed frames queued up.
-    * **Fixing the DMA contention by logging asynchronously eliminates the 320ms stall entirely.**
+    **Assumptions & Constraints:**
+    - IMU logging: 500ms * 1kHz * 24 bytes = 12KB data.
+    - SD card write: OS flushes 32MB blocks. eMMC bandwidth = 100MB/s.
+    - GPU inference time: 14ms per frame.
+
+    **Calculations:**
+    - Burst time: 32MB / 100MB/s = 320ms.
+    - Missed frames queued behind DMA: 320ms / 14ms ≈ 22 frames.
+
+    **Conclusion & Interpretation:**
+    - **Result: 320ms Stall (I/O-Bound)**. Fixing the DMA contention by logging asynchronously entirely eliminates the 320ms memory bus stall.
 status: published
 provenance: imported
 requires_explanation: false

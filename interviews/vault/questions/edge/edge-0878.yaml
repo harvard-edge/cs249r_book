@@ -7,57 +7,31 @@ topic: extreme-quantization
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: Smart Home KV Cache Crisis
-scenario: A smart home hub runs a local 7B LLM. The system has 8GB unified RAM. The OS requires 2GB, and
-  4-bit AWQ weights consume 3.5GB, leaving 2.5GB for the KV cache. Product requirements mandate supporting
-  3 concurrent family members maintaining distinct conversation histories up to 4,000 tokens each. Standard
-  FP16 KV cache causes hard OOM crashes.
-question: "How would you design the KV cache so three 4000-token conversations fit in the 2.5GB RAM budget without breaking attention quality?"
+title: 'Smart Home KV Cache Crisis'
+scenario: 'A smart home hub runs a local 7B LLM. The system has 8GB unified RAM. The OS requires 2GB, and 4-bit AWQ weights consume 3.5GB, leaving 2.5GB for the KV cache. Product requirements mandate supporting 3 concurrent family members maintaining distinct conversation histories up to 4,000 tokens each. Standard FP16 KV cache causes hard OOM crashes.'
+question: 'How would you design the KV cache so three 4000-token conversations fit in the 2.5GB RAM budget without breaking attention quality?'
 details:
-  realistic_solution: 'The system requires an asymmetrical, group-wise KV cache quantization architecture.
-    LLM attention mechanisms heavily rely on ''Attention Sinks'' (the first few tokens of a sequence)
-    which absorb massive activation values, alongside a few high-magnitude outlier channels. Linearly
-    quantizing these to INT4 causes catastrophic precision loss.
+  realistic_solution: 'The system requires an asymmetrical, group-wise KV cache quantization architecture. LLM attention mechanisms heavily rely on ''Attention Sinks'' (the first few tokens) which absorb massive activation values. The architectural solution is to implement an eviction/quantization router: keep the first 4 tokens and a sliding window of the 128 most recent tokens in FP16. The historical tokens are asynchronously compressed into INT4 using group-wise quantization.'
+  common_mistake: |
+    **The Pitfall:** Quantizing the entire KV cache to INT4 linearly across all tokens.
+    **The Rationale:** Candidates fail to understand how LLM attention works.
+    **The Consequence:** Destroying attention mechanisms due to massive outliers in initial 'sink' tokens.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Budget: 2.5GB for KV cache.
+    - FP16 KV size: 524KB/token.
+    - Users: 3 concurrent (4,000 tokens each).
 
+    **Calculations:**
+    - FP16 Total: 3 $\times$ 4,000 $\times$ 524KB = 6.3GB (OOM).
+    - INT4 KV size: 131KB/token. 4,000 tokens = 524MB/user = 1.57GB for 3 users.
+    - FP16 Window: 132 tokens $\times$ 524KB $\times$ 3 users = 207MB.
 
-    The architectural solution is to implement an eviction/quantization router: keep the first 4 tokens
-    (sink tokens) and a sliding window of the 128 most recent tokens in FP16. The historical tokens are
-    asynchronously compressed into INT4 using group-wise quantization along the channel dimension (e.g.,
-    group size 64). This requires writing a custom NPU/GPU kernel to dequantize historical INT4 KV blocks
-    on the fly during the attention computation, blending them with the FP16 sink/recent tokens.'
-  common_mistake: Quantizing the entire KV cache to INT4 linearly across all tokens, which destroys attention
-    mechanisms due to massive outliers in initial 'sink' tokens.
-  napkin_math: "7B model (32 layers, 4096 hidden dim). 1 token KV in FP16 = 2 (K,V) * 32 layers * 4096\
-    \ dim * 2 bytes = 524KB. 4,000 tokens = 2.1GB per user. For 3 users = 6.3GB (OOM, exceeds 2.5GB budget).\
-    \ \nWith INT4 KV cache: 524KB / 4 = ~131KB/token. 4,000 tokens = 524MB per user. For 3 users = 1.57GB.\
-    \ Adding the small FP16 window (132 tokens * 524KB * 3 = 207MB), total KV memory = 1.78GB. This safely\
-    \ fits within the 2.5GB budget."
+    **Conclusion & Interpretation:**
+    - **Result: 1.78GB (Memory-Bound)**. An asymmetrical INT4 + FP16 sliding window easily fits within the 2.5GB unified RAM budget.
   options:
-  - The system should use standard INT8 quantization across all tokens, which reduces the KV cache size enough to fit 3 users within the 2.5GB budget without accuracy loss.
-  - The system requires an asymmetrical, group-wise KV cache quantization architecture. LLM attention mechanisms heavily rely on 'Attention Sinks' (the first few tokens of a sequence) which absorb massive activation values, alongside a few high-magnitude outlier channels. Linearly quantizing these to INT4 causes catastrophic precision loss.
-  - The system should offload the KV cache to the hub's NVMe SSD storage, as read speeds are sufficient to maintain real-time conversational latency.
-  - Quantizing the entire KV cache to INT4 linearly across all tokens, which destroys attention mechanisms due to massive outliers in initial 'sink' tokens.
-  correct_index: 1
+  - 'The system should use standard INT8 quantization across all tokens.'
+  - 'The system requires an asymmetrical, group-wise KV cache quantization architecture.'
+  - 'The system should offload the KV cache to the hub''s NVMe SSD storage.'
+  - 'Quantizing the entire KV cache to INT4 linearly across all tokens.'
 status: published
-provenance: imported
-requires_explanation: false
-expected_time_minutes: 15
-validated: true
-validation_status: WARN
-validation_date: '2026-04-01'
-validation_model: gemini-2.5-flash
-validation_issues:
-- Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
-math_verified: true
-math_status: CORRECT
-math_date: '2026-04-03'
-math_model: gemini-3.1-pro-preview
-human_reviewed:
-  status: not-reviewed
-  by: null
-  date: null
-  notes: null
-tags:
-- llm
-- kv-cache
-- smart-home

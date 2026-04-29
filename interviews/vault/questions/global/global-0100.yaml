@@ -8,8 +8,8 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Long-Context KV Cache RoPE Failure
-scenario: To increase serving batch size, you quantize the KV cache of a 7B LLM to INT8. Short-context tasks maintain 99% accuracy. However, a 16k-token needle-in-a-haystack passkey test drops from 100% to 4% accuracy.
-question: "What interaction destroyed the long-context retrieval?"
+scenario: 'To increase serving batch size, you quantize the KV cache of a 7B LLM to INT8. Short-context tasks maintain 99% accuracy. However, a 16k-token needle-in-a-haystack passkey test drops from 100% to 4% accuracy.'
+question: 'What interaction destroyed the long-context retrieval?'
 details:
   realistic_solution: 'The root cause is the destructive interaction between INT8 quantization and Rotary Positional Embeddings (RoPE) when quantizing *after* rotation. RoPE injects positional information by rotating the Query and Key vectors. For long contexts, high-frequency dimensions encode fine-grained distances and have very small activation amplitudes. Conversely, LLMs have massive magnitude outliers in specific hidden dimensions. If you apply RoPE and then quantize to INT8 per-tensor or per-token, the large outliers force a large quantization step size. The small-amplitude high-frequency RoPE rotations are rounded to zero, completely erasing long-range positional information. The fix is either to quantize the KV cache *before* applying RoPE or use RoPE-aware per-channel quantization.'
   common_mistake: |
@@ -17,15 +17,17 @@ details:
     **The Rationale:** Candidates attribute the failure to pure capacity limits rather than the mathematical interplay between quantization step sizes and RoPE frequency magnitudes.
     **The Consequence:** Avoids INT8 quantization entirely rather than just reordering the quantization and RoPE application steps.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Max token outlier magnitude = 12.0.
-       - High-frequency RoPE rotation magnitude = ~0.02.
-    2. **Calculations:**
-       - INT8 Step size = 12.0 / 127 = ~0.094.
-       - Rounding threshold = Step size / 2 = 0.047.
-       - Since 0.02 < 0.047, the RoPE rotation is quantized to 0.
-    3. **Conclusion & Interpretation:**
-       - **Result: Representation Collapse.** Tokens at pos 10,000 and 15,000 become positionally indistinguishable due to quantization truncating the rotation.
+    **Assumptions & Constraints:**
+    - Max token outlier magnitude = 12.0.
+    - High-frequency RoPE rotation magnitude = ~0.02.
+
+    **Calculations:**
+    - INT8 Step size = 12.0 / 127 = ~0.094.
+    - Rounding threshold = Step size / 2 = 0.047.
+    - Since 0.02 < 0.047, the RoPE rotation is quantized to 0.
+
+    **Conclusion & Interpretation:**
+    - **Result: Representation Collapse (Accuracy-Bound)**. Tokens become positionally indistinguishable due to quantization truncating the rotation.
 status: published
 provenance: imported
 requires_explanation: false

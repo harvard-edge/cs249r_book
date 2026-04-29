@@ -11,22 +11,25 @@ title: 'Edge Queueing Theory Analyze: Why Jetson Orin Pipeline Stalls'
 scenario: 'A Jetson Orin running a 4-camera inference pipeline shows average GPU utilization of 40% but frame processing latency of 800ms (SLO: 100ms).'
 question: Using queueing theory, why can the 4-camera pipeline have 800ms latency at only 40% GPU utilization, and what stage is the bottleneck?
 details:
-  realistic_solution: 'M/M/1 at ρ=0.4: Wq = 0.4/(μ*(1-0.4)). If GPU were bottleneck with W=800ms: Wq = 800ms - service time. But GPU at 40% means ρ=0.4, so Wq = ρ/(μ(1-ρ)) = 0.4/(μ*0.6). For this to equal ~700ms queue: μ = 0.4/(0.7*0.6) ≈ 0.95 fps — far too slow. The actual bottleneck is LPDDR5 memory bandwidth: 4 cameras * 1080p * 30fps = 4*1080*1920*3*30 = 712MB/s just for raw camera data. Jetson Orin LPDDR5 = 102.4GB/s total. Preprocessing (color convert, resize) saturates CPU/DMA, not GPU.'
+  realistic_solution: |
+    M/M/1 at ρ=0.4: Wq = 0.4/(μ*(1-0.4)). If GPU were bottleneck with W=800ms: Wq = 800ms - service time. But GPU at 40% means ρ=0.4, so Wq = ρ/(μ(1-ρ)) = 0.4/(μ*0.6). For this to equal ~700ms queue: μ = 0.4/(0.7*0.6) ≈ 0.95 fps — far too slow. The actual bottleneck is LPDDR5 memory bandwidth: 4 cameras * 1080p * 30fps = 4*1080*1920*3*30 = 712MB/s just for raw camera data. Jetson Orin LPDDR5 = 102.4GB/s total. Preprocessing (color convert, resize) saturates CPU/DMA, not GPU.
   common_mistake: |
     **The Pitfall:** Assuming that 40% GPU utilization implies the GPU is the bottleneck with 60% slack.
     **The Rationale:** Candidates see low GPU utilization and assume the GPU is slow, missing that high latency with low utilization is the classic signature of an upstream bottleneck starving the processor.
     **The Consequence:** Wasting time optimizing GPU inference kernels when the actual issue is memory bandwidth or CPU preprocessing.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       * 4 cameras at 1920x1080 RGB, 30fps.
-       * Jetson Orin LPDDR5 bandwidth: 102.4 GB/s (shared).
-       * GPU at 40% utilization processing 120 input frames/s.
-    2. **Calculations:**
-       * Raw data ingestion: 4 * 1920 * 1080 * 3 bytes * 30 fps = 746.5 MB/s.
-       * Inference rate at 40% util: 120 * 0.4 = 48 frames/s.
-       * Queue accumulation: 120 input - 48 processed = 72 frames/s surplus.
-    3. **Conclusion & Interpretation:**
-       **Result: Preprocessing-Bound**. The CPU/DMA is saturated by decoding and resizing 746 MB/s of raw video, building a massive queue while starving the GPU. Offloading to NVDEC resolves the latency.
+    **Assumptions & Constraints:**
+    - 4 cameras at 1920x1080 RGB, 30fps.
+    - Jetson Orin LPDDR5 bandwidth: 102.4 GB/s (shared).
+    - GPU at 40% utilization processing 120 input frames/s.
+
+    **Calculations:**
+    - Raw data ingestion: 4 * 1920 * 1080 * 3 bytes * 30 fps = 746.5 MB/s.
+    - Inference rate at 40% util: 120 * 0.4 = 48 frames/s.
+    - Queue accumulation: 120 input - 48 processed = 72 frames/s surplus.
+
+    **Conclusion & Interpretation:**
+    - **Result: Preprocessing-Bound (Compute-Bound Mitigated)**. The CPU/DMA is saturated by decoding and resizing 746 MB/s of raw video, building a massive queue while starving the GPU. Offloading to NVDEC resolves the latency.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,19 +9,25 @@ bloom_level: apply
 phase: training
 title: Implementing Gradient Checkpointing with Custom Autograd for a Non-Standard Layer
 scenario: You are implementing a custom Mixture-of-Experts (MoE) layer for a 30B sparse model on H100. The MoE layer has a routing sub-layer followed by 64 expert FFNs. PyTorch's `torch.utils.checkpoint.checkpoint()` wraps the entire layer, but profiling shows it is saving intermediate gating logits (64×B×S float32 tensors) unnecessarily before the checkpoint boundary.
-question: How would you implement fine-grained MoE checkpointing so gating logits are discarded and only routing is recomputed in backward?
+question: "How would you implement fine-grained MoE checkpointing so gating logits are discarded and only routing is recomputed in backward?"
 details:
-  realistic_solution: Implement a custom `torch.autograd.Function` with `forward()` saving only the expert assignment indices (int8, negligible memory) and `backward()` recomputing the router logits from the saved input. Expert FFN activations can then be checkpointed independently using `torch.utils.checkpoint.checkpoint()` per expert group. This reduces saved activation memory from 4.19 MB (float32 logits) to ~16 KB (int8 routing indices) with minimal recompute overhead since the router is a single linear layer.
+  realistic_solution: 'Implement a custom `torch.autograd.Function` with `forward()` saving only the expert assignment indices (int8, negligible memory) and `backward()` recomputing the router logits from the saved input. Expert FFN activations can then be checkpointed independently using `torch.utils.checkpoint.checkpoint()` per expert group. This reduces saved activation memory from 4.19 MB (float32 logits) to ~16 KB (int8 routing indices) with minimal recompute overhead since the router is a single linear layer.'
   common_mistake: |
     **The Pitfall:** Using `torch.utils.checkpoint.checkpoint()` at the coarse layer level.
     **The Rationale:** It's the simplest API to wrap an entire MoE block for memory savings.
     **The Consequence:** Wastes recompute budget on cheap routing operations and saves unnecessarily large float32 intermediate tensors.
   napkin_math: |
-    1. Gating logits: 64 experts * 8 (B) * 2048 (S) * 4 bytes (float32) = 4.19 MB.
-    2. Expert indices (int8): 8 * 2048 * 1 byte = 16 KB.
-    3. Recompute cost of router (linear layer): 2 * 8 * 2048 * 8192 * 64 = 17.18 GFLOPs.
-    4. Time on H100: 17.18e9 / 989e12 = ~0.017 ms (negligible).
-    5. **Result: Saving int8 indices instead of float32 logits drops memory from 4.19 MB to 16 KB with nearly zero compute overhead.**
+    **Assumptions & Constraints:**
+    - Gating logits: 64 experts * 8 (B) * 2048 (S) * 4 bytes (float32) = 4.19 MB.
+    - Expert indices (int8): 8 * 2048 * 1 byte = 16 KB.
+    - Recompute cost of router (linear layer): 2 * 8 * 2048 * 8192 * 64 = 17.18 GFLOPs.
+    - Time on H100: 17.18e9 / 989e12 = ~0.017 ms (negligible).
+
+    **Calculations:**
+    - Memory diff = 4.19 MB - 16 KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 4.19 MB reduced to 16 KB (Memory Bandwidth)**. Saving int8 indices instead of float32 logits drops memory significantly with nearly zero compute overhead.
 status: published
 provenance: imported
 requires_explanation: false

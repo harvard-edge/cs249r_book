@@ -9,26 +9,24 @@ bloom_level: evaluate
 phase: training
 title: The Connected Components Problem in Fuzzy Deduplication
 scenario: 'After running MinHash LSH deduplication on your 5 billion document corpus, you have 800 million candidate pairs of near-duplicate documents. Now you must decide which documents to keep and which to remove. A colleague proposes: for each pair, keep the longer document and remove the shorter one. After running this, you discover you only removed 200 million documents, but manual inspection shows there are clusters of 50-100 near-identical documents. The pairwise approach only removed one document per pair, leaving 49 duplicates in each cluster.'
-question: "How do you efficiently resolve this at the scale of 800M edges over 5B nodes?"
+question: How do you efficiently resolve this at the scale of 800M edges over 5B nodes?
 details:
-  realistic_solution: 'This is a connected components problem on a graph with 5B nodes and 800M edges.
-    Build the similarity graph (document = node, near-duplicate pair = edge), find connected components,
-    and within each component keep only the highest-quality representative. Distributed connected components
-    at this scale: use the Hash-to-Min algorithm (or the more efficient Alternating algorithm): (1) Initialize
-    each node''s component label as its own ID. (2) Each node sends its current minimum label to all neighbors.
-    (3) Each node updates its label to the minimum received. (4) Repeat until convergence (~log(diameter)
-    iterations). For the news-syndication clusters with diameter ~2-3, this converges in 5-10 iterations.
-    In MapReduce: each iteration is a single shuffle. Total: 10 iterations * 1.6B directed edges * 16
-    bytes/edge = 25.6 GB shuffle per iteration = 256 GB total network I/O. Within each component: rank
-    documents by a quality score and keep the top-1.'
+  realistic_solution: 'This is a connected components problem on a graph with 5B nodes and 800M edges. Build the similarity graph (document = node, near-duplicate pair = edge), find connected components, and within each component keep only the highest-quality representative. Distributed connected components at this scale: use the Hash-to-Min algorithm (or the more efficient Alternating algorithm): (1) Initialize each node''s component label as its own ID. (2) Each node sends its current minimum label to all neighbors. (3) Each node updates its label to the minimum received. (4) Repeat until convergence (~log(diameter) iterations). For the news-syndication clusters with diameter ~2-3, this converges in 5-10 iterations. In MapReduce: each iteration is a single shuffle. Total: 10 iterations * 1.6B directed edges * 16 bytes/edge = 25.6 GB shuffle per iteration = 256 GB total network I/O. Within each component: rank documents by a quality score and keep the top-1.'
   common_mistake: |
     **The Pitfall:** Proposing to run the pairwise dedup iteratively until no more duplicates are found.
     **The Rationale:** Candidates fail to recognize that iterative pairwise dedup is O(k) iterations (k=max cluster size), requiring full comparisons each time.
     **The Consequence:** An astronomical 64B pair comparisons, wasting massive compute resources instead of using efficient connected components.
   napkin_math: |
-    1. **Assumptions & Constraints:** 5B nodes, 800M edges, Hash-to-Min connected components algorithm (~8 iterations), 500 nodes at 3 GB/s.
-    2. **Calculations:** Per iteration shuffle = 1.6B directed edges * 16 bytes = 25.6 GB. Total shuffle (8 iters) = 205 GB. Network time = 205 GB / 1,500 GB/s = ~0.14s pure network time (+ overhead ~10 mins).
-    3. **Conclusion & Interpretation:** **Result: Network-I/O Bound (Shuffle). Resolving 53M clusters removes 742M duplicates vs 200M with pairwise.**
+    **Assumptions & Constraints:**
+    - 5B nodes, 800M edges, Hash-to-Min connected components algorithm (~8 iterations), 500 nodes at 3 GB/s
+
+    **Calculations:**
+    - Per iteration shuffle = 1.6B directed edges * 16 bytes = 25.6 GB
+    - Total shuffle (8 iters) = 205 GB
+    - Network time = 205 GB / 1,500 GB/s = ~0.14s pure network time (+ overhead ~10 mins)
+
+    **Conclusion & Interpretation:**
+    - **Result: 742M duplicates removed (Network-I/O-Bound)**. Shuffle. Resolving 53M clusters removes 742M duplicates vs 200M with pairwise.
 status: published
 provenance: imported
 requires_explanation: true

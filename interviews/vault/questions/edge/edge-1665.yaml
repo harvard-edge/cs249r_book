@@ -11,18 +11,26 @@ title: LLM Inference Sizing for Cloud AI 100
 scenario: You are designing an on-premise document summarization appliance using a single Qualcomm Cloud AI 100 accelerator. The hardware features 32 GB of LPDDR4x memory, 400 TOPS of INT8 compute, and a strict 75W TDP. The product requirements dictate serving a 14B parameter LLM with a maximum context length of 2048 tokens and supporting 16 concurrent user requests.
 question: What quantization and memory-management plan makes a 14B LLM with 2048-token contexts and 16 users feasible on one 32 GB Cloud AI 100?
 details:
-  realistic_solution: A viable architecture requires aggressive co-design of quantization and memory management. The weights must be quantized to 4-bit (e.g., AWQ/GPTQ) to drastically reduce static footprint. To leverage the AI 100's INT8 compute engine (400 TOPS), activations are quantized to INT8 dynamically. Furthermore, the KV cache must be quantized to 8-bit to prevent out-of-memory (OOM) errors with 16 concurrent users at full context length.
+  realistic_solution: 'A viable architecture requires aggressive co-design of quantization and memory management. The weights must be quantized to 4-bit (e.g., AWQ/GPTQ) to drastically reduce static footprint. To leverage the AI 100''s INT8 compute engine (400 TOPS), activations are quantized to INT8 dynamically. Furthermore, the KV cache must be quantized to 8-bit to prevent out-of-memory (OOM) errors with 16 concurrent users at full context length.'
   common_mistake: |
     **The Pitfall:** Calculating parameter memory footprint while completely neglecting the KV cache.
     **The Rationale:** Engineers often assume that fitting the static model weights into VRAM means the model will serve successfully.
     **The Consequence:** The dynamic memory required for the KV cache across 16 concurrent requests leads to immediate out-of-memory (OOM) failures in production.
   napkin_math: |
-    1. Model Weights: 14B params at 4-bit = 14B * 0.5 bytes = 7 GB.
-    2. KV Cache sizing (FP16 baseline): Assume 40 layers, hidden size 5120. Per token = 2 (K,V) * 40 * 5120 * 2 bytes = 819,200 bytes = 800 KB/token.
-    3. Total Context: 16 requests * 2048 tokens = 32,768 tokens.
-    4. FP16 KV Cache Total: 32,768 * 800 KB = 26.2 GB. (7GB weights + 26.2GB KV = 33.2 GB -> OOM on 32GB hardware).
-    5. Architecture Fix: Apply INT8 KV cache quantization. New KV size = 13.1 GB.
-    6. **Final Memory: 7 GB (Weights) + 13.1 GB (KV) = 20.1 GB, leaving ~11.9 GB safely for execution buffers and OS overhead.**
+    **Assumptions & Constraints:**
+    - 14B params at 4-bit weights = 7 GB.
+    - FP16 KV Cache is 800 KB/token.
+    - Total Context is 16 requests * 2048 tokens = 32,768 tokens.
+    - AI 100 Memory limit is 32 GB LPDDR4x.
+
+    **Calculations:**
+    - FP16 KV Cache Total is 32,768 * 800 KB = 26.2 GB.
+    - Total FP16 Memory is 7 GB + 26.2 GB = 33.2 GB (OOM).
+    - Applying INT8 KV cache quantization halves KV size to 13.1 GB.
+    - Final Memory is 7 GB (Weights) + 13.1 GB (KV) = 20.1 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 20.1 GB (Memory-Bound)**. INT8 KV cache quantization prevents OOM errors, leaving ~11.9 GB safely for execution buffers and OS overhead.
 status: published
 provenance: imported
 requires_explanation: true
