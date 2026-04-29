@@ -42,20 +42,82 @@ def fast_tier(loaded: list[LoadedQuestion], vault_dir: Path) -> list[InvariantFa
         if n > 1:
             failures.append(_fail("fast", "unique-id", qid=qid, message=f"ID appears {n} times"))
 
-    # Check #4: path components lowercase. v1.0: only the track dir is
-    # meaningful in the path; the filename itself carries the id.
+    # Check #4: path components lowercase + path mirrors body metadata.
+    # Hierarchical layout: <track>/<competency_area>/<id>.yaml.
+    # The path is a *derived* index over body fields — the body is the source
+    # of truth, the path must mirror it. This invariant prevents drift like
+    # "track field rewritten during audit but file not moved" silently breaking
+    # the directory structure.
     root = vault_questions_root(vault_dir)
     for lq in loaded:
         rel = lq.path.relative_to(root)
-        track_component = rel.parts[0] if rel.parts else ""
-        if not is_lowercase(track_component):
+        parts = rel.parts
+
+        # Lowercase check on path components (excluding filename)
+        for component in parts[:-1]:
+            if not is_lowercase(component):
+                failures.append(
+                    _fail(
+                        "fast",
+                        "path-lowercase",
+                        qid=lq.id,
+                        path=lq.path,
+                        message=f"path component {component!r} is not lowercase",
+                    )
+                )
+
+        # Hierarchical layout check: <track>/<area>/<file>
+        if len(parts) != 3:
             failures.append(
                 _fail(
                     "fast",
-                    "path-lowercase",
+                    "path-hierarchy-shape",
                     qid=lq.id,
                     path=lq.path,
-                    message=f"track directory {track_component!r} is not lowercase",
+                    message=(
+                        f"path has {len(parts)} segments under questions/; "
+                        "expected 3 (<track>/<competency_area>/<filename>)"
+                    ),
+                )
+            )
+            continue
+
+        path_track, path_area, path_filename = parts
+        if path_track != lq.question.track:
+            failures.append(
+                _fail(
+                    "fast",
+                    "path-track-match",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=(
+                        f"path track segment {path_track!r} != body track "
+                        f"{lq.question.track!r}"
+                    ),
+                )
+            )
+        if path_area != lq.question.competency_area:
+            failures.append(
+                _fail(
+                    "fast",
+                    "path-area-match",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=(
+                        f"path area segment {path_area!r} != body competency_area "
+                        f"{lq.question.competency_area!r}"
+                    ),
+                )
+            )
+        expected_filename = f"{lq.question.id}.yaml"
+        if path_filename != expected_filename:
+            failures.append(
+                _fail(
+                    "fast",
+                    "path-id-match",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=f"filename {path_filename!r} != <id>.yaml ({expected_filename!r})",
                 )
             )
 
