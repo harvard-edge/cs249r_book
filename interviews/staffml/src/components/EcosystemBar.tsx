@@ -297,7 +297,14 @@ export default function EcosystemBar() {
 
   return (
     <div ref={barRef} style={{
-      position: 'sticky' as const, top: 0, zIndex: 60,
+      position: 'sticky' as const, top: 0,
+      // z-index 1100: the StaffML internal Nav (`Nav.tsx`) sticks at
+      // `z-50` directly below this bar. With our previous z-60, dropdowns
+      // *should* have painted above Nav (60 > 50), but WebKit's stacking
+      // for sticky+overflow:clip parents was occasionally rendering them
+      // behind. Bumping well above any in-page sticky element (Nav z-50,
+      // Bootstrap dropdown-menu z-1000) makes it unambiguous.
+      zIndex: 1100,
       backgroundColor: bgColor,
       // Quarto navbars have no bottom border in light mode — the seam is
       // provided by the bg-color contrast against the white page body.
@@ -322,6 +329,12 @@ export default function EcosystemBar() {
       // support: Safari 16+, Chrome 90+, Firefox 81+; older browsers fall
       // back to `visible` (no regression vs current behavior).
       overflowX: 'clip' as const,
+      // Pin overflow-y explicitly visible so WebKit cannot reinterpret it
+      // as `auto` when overflow-x is `clip` (the spec exempts `clip` from
+      // the visible→auto coercion, but Safari has historically been
+      // inconsistent). Without this, the dropdowns that extend below the
+      // navbar can be clipped or render behind sibling sticky containers.
+      overflowY: 'visible' as const,
     }}>
       <div style={{ ...S.nav, position: 'relative' as const, borderBottom: 'none' }}>
         {/* Brand */}
