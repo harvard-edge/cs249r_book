@@ -85,7 +85,9 @@ This milestone shows you WHY training is essential - the model won't work withou
 import sys
 import os
 import numpy as np
-rng = np.random.default_rng(7)
+# Unseeded RNG: each run draws different cluster points so the demo lives up
+# to the on-screen "No random seed - each run will be different!" promise.
+rng = np.random.default_rng()
 import argparse
 
 # Add project root to path for correct tinytorch imports
