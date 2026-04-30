@@ -65,7 +65,7 @@ one good diagram earns its keep across dozens of questions.
        chars. Describe what the diagram SHOWS, not why it matters.
      caption: "Short caption rendered below the figure. ≤120 chars. Optional."
    ```
-4. **Build** — `vault build --legacy-json`. This copies the SVG to
+4. **Build** — `vault build --local-json`. This copies the SVG to
    `interviews/staffml/public/question-visuals/<track>/` and surfaces
    the `visual` metadata in the corpus bundle.
 5. **Preview** at `/practice?q=<id>` on the dev server.
@@ -110,6 +110,6 @@ for the total AllReduce time. Solution walks through the
 
 The directory `interviews/staffml/public/question-visuals/` is a
 build output (written by `copy_visual_assets` during `vault build
---legacy-json`). Source files live under `interviews/vault/visuals/`.
+--local-json`). Source files live under `interviews/vault/visuals/`.
 Do not edit the build output directly — changes will be overwritten
 on the next build.

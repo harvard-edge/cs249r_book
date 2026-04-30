@@ -121,7 +121,7 @@ def main() -> int:
 
     print(f"\n{'Would promote' if args.dry_run else 'Promoted'}: {promoted}")
     if not args.dry_run and promoted:
-        print("Next: run `vault build --legacy-json` to rebuild the corpus bundle "
+        print("Next: run `vault build --local-json` to rebuild the corpus bundle "
               "and mirror visual assets to the practice site.")
     return 0
 
