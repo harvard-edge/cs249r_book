@@ -16,6 +16,7 @@ import NapkinCalc from "@/components/NapkinCalc";
 // 4,754 cohort-tagged IDs that were renamed to the clean form.
 import idRedirects from "@/data/id-redirects.json";
 import AskInterviewer from "@/components/AskInterviewer";
+import MarkdownText from "@/components/MarkdownText";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
@@ -1065,16 +1066,24 @@ function PracticePage() {
                         </div>
                       )}
 
+                      {/* Scenario prose */}
+                      <div className="prose max-w-none mt-6">
+                        {current.scenario ? (
+                          <p className="text-textSecondary leading-relaxed text-base">
+                            {cleanScenario(current.scenario)}
+                          </p>
+                        ) : (
+                          <ScenarioSkeleton />
+                        )}
+                      </div>
+
                       {/*
                         STICKY Your-task callout. Pins to the top of the
                         scroll container so the question stays visible
-                        while the user scrolls to read more scenario or
-                        compare their answer with the model. Negative
-                        horizontal margins + re-added padding make the
-                        sticky bar span the full left-column width so the
-                        background covers scrolling text cleanly.
+                        while the user scrolls. Moved below Scenario
+                        to provide context before the ask.
                       */}
-                      <div className="sticky top-0 z-20 -mx-8 lg:-mx-12 px-8 lg:px-12 py-3 bg-background border-b border-border">
+                      <div className="sticky top-0 z-20 -mx-8 lg:-mx-12 px-8 lg:px-12 py-3 bg-background border-b border-border mt-8">
                         {current.question && !scenarioAlreadyContainsQuestion(current.scenario, current.question) ? (
                           <div className="p-4 rounded-lg border-l-4 border-accentBlue bg-accentBlue/5">
                             <div className="flex items-center gap-2 mb-1.5">
@@ -1082,7 +1091,7 @@ function PracticePage() {
                               <span className="text-[10px] font-mono text-accentBlue uppercase tracking-widest">Your task</span>
                             </div>
                             <p className="text-textPrimary leading-relaxed text-base font-medium">
-                              {current.question}
+                              <MarkdownText text={current.question} />
                             </p>
                           </div>
                         ) : !current.question && current.scenario && !current.scenario.trim().endsWith("?") ? (
@@ -1101,19 +1110,8 @@ function PracticePage() {
                           /* Scenario ends with ?; no callout needed but reserve minimal spacing */
                           <div className="flex items-center gap-2 text-[10px] font-mono text-textTertiary uppercase tracking-widest">
                             <Target className="w-3.5 h-3.5" />
-                            Your task — see scenario below
+                            Your task — see scenario above
                           </div>
-                        )}
-                      </div>
-
-                      {/* Scenario prose */}
-                      <div className="prose max-w-none mt-6">
-                        {current.scenario ? (
-                          <p className="text-textSecondary leading-relaxed text-base">
-                            {cleanScenario(current.scenario)}
-                          </p>
-                        ) : (
-                          <ScenarioSkeleton />
                         )}
                       </div>
 
@@ -1233,7 +1231,9 @@ function PracticePage() {
                               <span className="text-[10px] font-mono text-accentRed uppercase mb-1 flex items-center gap-1">
                                 <XCircle className="w-3 h-3" /> Common Mistake
                               </span>
-                              <p className="text-sm text-textSecondary leading-relaxed">{current.details.common_mistake}</p>
+                              <div className="text-sm text-textSecondary leading-relaxed whitespace-pre-wrap">
+                                <MarkdownText text={current.details.common_mistake} />
+                              </div>
                             </div>
                           )}
 
@@ -1241,7 +1241,9 @@ function PracticePage() {
                             <span className="text-[10px] font-mono text-accentGreen uppercase mb-1 flex items-center gap-1">
                               <CheckCircle2 className="w-3 h-3" /> Model Answer
                             </span>
-                            <p className="text-sm text-textPrimary leading-relaxed">{current.details.realistic_solution}</p>
+                            <div className="text-sm text-textPrimary leading-relaxed whitespace-pre-wrap">
+                              <MarkdownText text={current.details.realistic_solution} />
+                            </div>
                           </div>
 
                           {current.details.napkin_math && (

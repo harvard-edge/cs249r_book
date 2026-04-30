@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3708
+track: cloud
+level: L4
+zone: realization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: 'HBM3 vs L2 Cache Access Patterns for Transformer Weights on H100'
+scenario: 'A GPU has 80MB L2 cache and 3.35 TB/s HBM3 memory bandwidth. During LLM inference at batch_size=1, the attention QKV projection for a layer with d_model=8192 requires loading weights of shape [8192, 3x8192] = 3x8192²x2 bytes = 402MB.'
+question: 'Will the 402MB QKV weight matrix fit in L2 cache during batch-1 decode, and what per-token latency does HBM streaming imply?'
+details:
+  realistic_solution: 'QKV weight matrix: 402MB >> 80MB L2. Cache miss rate near 100% for weight access. Each token decode must stream 402MB from HBM. Full layer (add MLP) ≈ 1.47GB per layer. For 80-layer model: 118GB per token decode. Key insight: model weights must be kept in HBM for large models; increasing batch size amortizes weight loading cost.'
+  common_mistake: |
+    **The Pitfall:** Assuming model weights stay warm in the L2 cache between consecutive token generation steps.
+    **The Rationale:** In standard CPU programming, frequently accessed variables stay in L1/L2 cache.
+    **The Consequence:** Engineers underestimate memory traffic by orders of magnitude, failing to realize the entire model must be re-streamed from HBM for every single token generated.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 80MB L2 cache, 3.35 TB/s HBM3.
+    - QKV projection: [8192, 3x8192] = 402MB.
+    - 80-layer model.
+
+    **Calculations:**
+    - L2 cache constraint: 402MB QKV > 80MB L2. Must stream from HBM.
+    - QKV stream time: 402MB / 3.35 TB/s = 0.12ms.
+    - Full layer weights: QKV (402MB) + MLP (2 * 8192 * 32768 * 2B = 1.07GB) ≈ 1.47GB per layer.
+    - Full model transfer: 80 * 1.47GB = 118GB streamed per token.
+    - Token latency: 118GB / 3.35 TB/s = ~35ms/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~28 tokens/second (Memory-Bound)**. The system is heavily memory-bound due to weights eviction from L2 cache.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

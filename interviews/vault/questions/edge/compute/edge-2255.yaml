@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: edge-2255
+track: edge
+level: L5
+zone: realization
+topic: chiplet-architecture
+competency_area: compute
+bloom_level: apply
+phase: inference
+title: NUMA-Aware Runtime Scheduling on Embedded Chiplet
+scenario: An embedded chiplet with 2 CPU clusters (A76 x4 on die-0, A55 x4 on die-1) connected via proprietary die-to-die link shows 25% higher ML inference latency than expected when the OS scheduler migrates threads between dies mid-inference.
+question: How would you fix the 25% ML inference latency penalty caused by OS thread migrations between the two CPU dies?
+details:
+  realistic_solution: 'Multi-layered fix: (1) CPU affinity: set pthread_setaffinity_np to A76 cluster CPUs (cores 0-3) for inference threads; (2) Memory affinity: use mbind() with MPOL_BIND to bind inference tensor allocations to die-0 NUMA node; (3) Disable NUMA balancing: echo 0 > /proc/sys/kernel/numa_balancing during inference to prevent automatic page migration; (4) Use isolcpus kernel parameter for the A76 cores to prevent any scheduling on those CPUs from non-inference tasks; (5) Pin inference worker threads with SCHED_FIFO priority to prevent preemption by lower-priority tasks that could cause cache thrashing.'
+  common_mistake: |
+    **The Pitfall:** Setting CPU affinity at the process level and assuming it prevents all migrations.
+    **The Rationale:** Candidates assume process-level affinity binds everything, ignoring that Linux CFS can still migrate tasks within an affinity mask, and memory pages don't auto-migrate.
+    **The Consequence:** Cross-die memory accesses persist even with affinity set, leaving the latency penalty largely unresolved.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Die-to-die latency: 400ns per cache line vs 10ns local.
+       - Model tensor: 2MB.
+       - Cache line size: 64B.
+    2. **Calculations:**
+       - Total cache lines = 2MB / 64B = 32,768 lines.
+       - Expected 30% cross-die penalty = 0.3 * 32,768 * (400ns - 10ns) = 3.83ms.
+       - With proper affinity, cross-die drops to <1% (<0.3ms).
+    3. **Conclusion & Interpretation:**
+       - **Result: 3.83ms extra latency removed.** Setting NUMA and CPU affinity reduces the inference time from ~18.8ms back to ~15.3ms, removing the **Interconnect-Bound** bottleneck.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

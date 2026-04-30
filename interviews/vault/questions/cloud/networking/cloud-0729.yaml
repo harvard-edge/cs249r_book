@@ -1,0 +1,32 @@
+schema_version: '1.0'
+id: cloud-0729
+track: cloud
+level: L4
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: The Cross-Rack Stall
+scenario: 'We tried to scale our 70B model training by spreading Tensor Parallelism (TP) across two server racks connected by 100 Gbps Ethernet. Training speed immediately dropped to zero.'
+question: 'What did we misunderstand about network topology and Tensor Parallelism?'
+details:
+  realistic_solution: 'You failed the "Jeff Dean Test." Tensor Parallelism requires an AllReduce operation on the activations of *every single layer* during the forward and backward pass. This requires the massive bandwidth of intra-node interconnects like NVLink (900 GB/s). Standard Ethernet/InfiniBand between racks (~12.5 GB/s for 100 GbE) will instantly bottleneck the GPUs. For cross-rack scaling, you must use Pipeline or Data parallelism.'
+  common_mistake: |
+    **The Pitfall:** Assuming "100 Gbps is enough bandwidth" and confusing inter-node bandwidth with intra-node bandwidth.
+    **The Rationale:** Candidates don't realize Tensor Parallelism requires high-frequency, massive AllReduce operations on every single layer during forward and backward passes.
+    **The Consequence:** Deploying TP across low-bandwidth links completely bottlenecks the GPUs, halting training progress.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model Tensor Parallelism across two racks.
+    - Intra-node NVLink: 900 GB/s. Inter-node Ethernet: 100 Gbps (12.5 GB/s).
+
+    **Calculations:**
+    - Tensor Parallelism requires O(hundreds of MB) AllReduce per layer, multiple times per step.
+    - 80 layers * 200 MB = 16 GB per pass.
+    - NVLink Transfer: 16 GB / 900 GB/s = ~17ms.
+    - Ethernet Transfer: 16 GB / 12.5 GB/s = ~1.28 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bound Topology Error.** Distributing Tensor Parallelism across slow inter-rack Ethernet turns a microsecond-level synchronization into a multi-second stall per step.
+status: published

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: mobile-0418
+track: mobile
+level: L3
+zone: diagnosis
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: The Futile Shard
+scenario: A junior engineer with a cloud background implements on-device fine-tuning for a 50M parameter model. To save memory, they wrap the model in a Fully Sharded Data Parallelism (FSDP) variant. Testing reveals training is 10x slower with increased peak memory usage.
+question: Why does applying FSDP to on-device fine-tuning on a single mobile SoC make training slower instead of saving memory?
+details:
+  realistic_solution: |
+    FSDP is an architectural paradigm engineered strictly for distributed, multi-accelerator environments connected by hyper-bandwidth fabrics (e.g., NVLink). It shatters tensors across isolated RAM pools. A mobile SoC operates on a unified, single-pool memory architecture. Consequently, FSDP's 'sharding' mechanism degenerates into redundant, blocking synchronous memory copies (All-Gather operations) traversing the primary LPDDR bus. This massive communication overhead competes directly with computational pipelines, utterly collapsing throughput without reducing the holistic memory footprint.
+  common_mistake: |
+    **The Pitfall:** Misapplying multi-GPU architectural patterns (like FSDP) to single-accelerator systems.
+    **The Rationale:** Engineers accustomed to cloud environments assume parallelism techniques are universal solutions.
+    **The Consequence:** FSDP's communication overhead becomes a series of blocking memory copies on the unified memory bus, dominating compute time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 50M parameters (INT8 = 50 MB).
+    - Hardware: Single SoC with unified memory.
+    - Architecture: FSDP applied to N=1 accelerators.
+
+    **Calculations:**
+    - FSDP overhead requires full memcpy of parameters per layer per pass.
+    - 20 layers * 2.5 MB/layer * 2 passes (forward/backward) = 100 MB of purely blocking memory copies.
+    - Bandwidth cost: 100 MB copies actively halt the compute pipeline.
+    - Time penalty: Serial copies expand base latency from ~10ms to >100ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 100 MB penalty (Memory Bus Contention)**. Applying multi-node paradigms to unified memory generates devastating All-Gather memcpy overhead. The logic bottleneck is the blocking synchronization on a single bus, completely nullifying any theoretical parallelism.
+  options:
+  - The junior engineer is right; this is likely a bug in the ANE drivers that causes poor performance with sharded tensors.
+  - The SoC is insufficient for training a 50M parameter model, and FSDP is exposing this compute bottleneck.
+  - The model is too small; FSDP's overhead is only amortized for models with billions of parameters.
+  - FSDP is the wrong architectural pattern; its communication overhead, implemented as blocking memory copies on a single SoC, is dominating the actual compute time.
+  correct_index: 3
+status: deleted
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+deletion_reason: 'Physics violation: 3d-parallelism has no substrate on mobile'
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

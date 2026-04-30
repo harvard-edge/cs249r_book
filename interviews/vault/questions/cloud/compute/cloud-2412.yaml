@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-2412
+track: cloud
+level: L5
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: Batch Size vs Quantization Pareto Shift
+scenario: A cloud inference service migrates from a batch size of 1 to dynamic continuous batching (up to batch size 128) for an 8B model on A100. At batch size 1, the W4A16 quantized model was 3x faster than the FP16 model. However, at batch size 128, the W4A16 model is unexpectedly 20% SLOWER than the FP16 model in total throughput (QPS).
+question: What causes this inversion in the performance Pareto curve?
+details:
+  realistic_solution: The cause is the fundamental shift from a memory-bandwidth bound regime to a compute-bound regime as batch size increases. At batch size 1, the arithmetic intensity is very low; the bottleneck is strictly loading the weights from HBM, so INT4 (which reduces weight bytes by 4x) yields massive speedups. At batch size 128, the arithmetic intensity increases by 128x. The bottleneck is now the math (compute FLOPs). Because A100 Tensor Cores natively support FP16 but do not natively support INT4 * FP16 mixed operations, the W4A16 model must spend ALU cycles dequantizing INT4 to FP16 before feeding it to the Tensor Cores. This dequantization compute overhead starves the Tensor Cores, making W4A16 slower than pure FP16 (which feeds directly into the Tensor Cores). The solution for high batch sizes is to switch to FP8 (which has native Tensor Core support) or W8A8, or revert to FP16.
+  common_mistake: |
+    **The Pitfall:** Assuming the KV cache memory size exceeded VRAM capacity at batch size 128, causing spilling to CPU memory.
+    **The Rationale:** Engineers mistakenly attribute all batch-related slowdowns to memory capacity limits, ignoring compute bottlenecks.
+    **The Consequence:** The team wastes time optimizing memory allocators when the actual problem is the lack of native INT4 hardware support on A100 Tensor Cores.
+  napkin_math: |
+    - Arithmetic Intensity (AI) = FLOPs / Bytes.
+    - For weights W, Batch B: FLOPs = 2*B*W. Bytes = W. AI = 2*B.
+    - At B=1, AI = 2.
+    - At B=128, AI = 256.
+    - A100 FP16 Compute/Bandwidth ratio = 312 TFLOPs / 2 TB/s = 156 FLOPs/Byte.
+    - **Since AI (256) > Machine Balance (156), the operation is strictly compute bound, so INT4->FP16 conversion overhead degrades performance.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- batching
+- throughput
+- compute-bound

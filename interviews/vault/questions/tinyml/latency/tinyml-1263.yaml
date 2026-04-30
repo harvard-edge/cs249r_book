@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: tinyml-1263
+track: tinyml
+level: L5
+zone: realization
+topic: real-time-deadlines
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Keyword Spotting Deadlines on ESP32-S3
+scenario: We are deploying a continuous keyword spotting (KWS) model on a dual-core MCU. The system captures audio at 16kHz and we must run inference every 20ms to meet our UX latency budget. The KWS model is quantized to INT8, requires 2.5 million MACs per inference, and has 350 KB of weights. The MCU has 512 KB of internal SRAM and 8 MB of external PSRAM. The system also runs a BLE stack requiring 100 KB of SRAM and frequent high-priority interrupts.
+question: How do you partition the memory and schedule the inference to guarantee the 20ms deadline without dropping audio frames or breaking the BLE connection?
+details:
+  realistic_solution: To guarantee real-time execution, strictly pin the BLE stack to Core 0 and the KWS inference to Core 1, isolating the neural network from unpredictable interrupt latencies. Because PSRAM access incurs massive cache-miss penalties, the 350KB INT8 weights must be forcefully locked into the 512KB internal SRAM alongside the 100KB BLE stack and the audio DMA buffers. Non-critical OS tasks must be relegated to PSRAM to guarantee deterministic SRAM bounds.
+  common_mistake: |
+    **The Pitfall:** Placing the model in spacious PSRAM and failing to isolate OS interrupts across cores.
+    **The Rationale:** Engineers assume PSRAM behaves identically to SRAM and allow symmetric multiprocessing to handle interrupts.
+    **The Consequence:** Cache miss storms from PSRAM combined with BLE interrupt preemptions shatter the 20ms Worst-Case Execution Time (WCET) budget, systematically dropping audio frames.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - MCU: 240 MHz. Budget: 20 ms. Workload: 2.5M MACs.
+    - PSRAM cache miss penalty: ~40 cycles.
+
+    **Calculations:**
+    - SRAM Execution (1 cycle/MAC): 2.5M / 240 MHz = 10.4 ms (Fits 20 ms).
+    - PSRAM Execution (Assuming 20% miss rate): Average cycles/MAC = 1 + (0.2 * 40) = 9 cycles.
+    - PSRAM Latency: (2.5M * 9) / 240 MHz = 93.75 ms (Violates 20 ms).
+
+    **Conclusion & Interpretation:**
+    - **Result: 93.75 ms (Memory-Access Bound)**. Executing from PSRAM guarantees the 20ms deadline fails by ~4x.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,34 @@
+schema_version: '1.0'
+id: cloud-2689
+track: cloud
+level: L5
+zone: evaluation
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Scaling Strategy Under Physical Constraints
+scenario: 'Training a 175B model. Your facility supports 2,000 GPUs (power ceiling). Current approach: pure data parallelism with batch size 4M tokens, hitting critical batch size. MFU is 35% due to communication overhead. Option A: switch to 3D parallelism (tensor + pipeline + data). Option B: use gradient compression (8x). Option C: build a second facility with 2,000 more GPUs connected via WAN.'
+question: Which scaling strategy maximizes time-to-train reduction under the physical facility constraints?
+details:
+  realistic_solution: 'Option A (3D parallelism) is the correct approach. At 175B parameters and 2,000 GPUs: Option A reduces data-parallel degree by using tensor parallelism (8-way within a node) and pipeline parallelism (8 stages). Data parallel degree drops from 2,000 to 2000/(8*8)=31. Gradient AllReduce now operates on 31 nodes instead of 2,000, and only for the parameters within each pipeline stage (~22B). This dramatically reduces communication: AllReduce message size drops 8x (pipeline stages) and node count drops 64x. Expected MFU improvement: 35% -> 50-55%. Option B (gradient compression 8x) reduces AllReduce time by 8x but adds compression/decompression overhead and may hurt convergence for large models. Expected MFU: 35% -> 45%. Option C is impractical — WAN latency (1-10ms) between facilities makes synchronous gradient exchange impossible for every training step. Asynchronous methods could work but degrade convergence. Option A is the standard approach used by Meta (LLaMA), Google (PaLM), and others for 100B+ models.'
+  common_mistake: |
+    **The Pitfall:** Trying to scale with pure data parallelism beyond the critical batch size.
+    **The Rationale:** Engineers assume data parallelism is the simplest and most scalable method.
+    **The Consequence:** They hit severe communication bottlenecks, dragging MFU down, when 3D parallelism is actually a strict requirement for models above ~10B parameters.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B model, 2,000 GPU power ceiling.
+    - Current pure DP has 35% MFU.
+
+    **Calculations:**
+    - Option A (3D Parallelism): Reduces data parallel degree from 2000 to 2000 / (8 * 8) = 31. AllReduce message size drops 8x, node count drops 64x. Expected MFU -> 55%.
+    - Option B (Gradient Compression): 8x reduction adds overhead, risks convergence. Expected MFU -> 45%.
+    - Option C (WAN): 1-10ms latency makes synchronous training infeasible.
+
+    **Conclusion & Interpretation:**
+    - **Result: Option A (Communication-Bound)**. Option A (3D parallelism) is the correct approach to maximize MFU and reduce training time.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: tinyml-0729
+track: tinyml
+level: L5
+zone: diagnosis
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: The SRAM Fragmentation Crash
+scenario: 'Your smart doorbell on a Cortex-M7 runs three models: (1) person detection (200 KB arena), (2) face recognition (300 KB arena), (3) gesture recognition (150 KB arena). Only one model runs at a time. After 48 hours of continuous operation with frequent model switching, AllocateTensors() fails for the face recognition model even though 300 KB should be available. Total SRAM used by firmware: 400 KB. Free SRAM: 600 KB.'
+question: Why does AllocateTensors() fail to allocate a 300 KB arena when there is 600 KB of free SRAM?
+details:
+  realistic_solution: "The problem is heap fragmentation in the system allocator. Over time, interleaving large arena allocations and small OS allocations scatters small used blocks across the heap. When the 300 KB arena is requested, even if 600 KB is technically free, there is no single contiguous 300 KB block available."
+  common_mistake: |
+    **The Pitfall:** Assuming 600 KB free > 300 KB needed means allocation must succeed.
+    **The Rationale:** Blaming TFLite Micro's arena allocator for failing on large allocations, ignoring the system-level memory management.
+    **The Consequence:** Wasting time debugging the ML framework instead of addressing the underlying heap fragmentation caused by the RTOS.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total SRAM: 1 MB. Firmware: 400 KB. Available: 600 KB.
+    - Model Arenas: 200 KB, 300 KB, 150 KB.
+    - Runtime: 48 hours (~2,880 switches).
+
+    **Calculations:**
+    - Small allocations (~50 KB total) scatter across the heap during model switches.
+    - Average Fragment Size: 600 KB / 50 fragments = 12 KB average.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound (Heap fragmentation prevents contiguous 300 KB allocation).**
+  options:
+  - 'If 600 KB is free and 300 KB is needed, the allocation should succeed. This must be a bug in TFLite Micro''s arena allocator that fails on large allocations.'
+  - 'Heap fragmentation from frequent model switching. Over 2,880 switches (48 hours), small allocations (BLE buffers, DMA descriptors, sensor logs) scatter across the heap. After 48 hours: 600 KB total free but no single contiguous 300 KB block. Fix: reserve a static 300 KB arena at boot (never freed), or use a pool allocator for small objects to prevent heap fragmentation.'
+  - 'The RTOS is consuming additional SRAM through stack growth in background threads, reducing the actual free memory from 600 KB to below 300 KB over 48 hours.'
+  - 'A memory leak in the model switching code allocates 200 bytes per switch without freeing, consuming 200 x 2,880 = 576 KB over 48 hours, leaving only 24 KB free.'
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2423
+track: cloud
+level: L5
+zone: design
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: create
+phase: both
+title: Long-Context INT4 KV Cache Degradation
+scenario: 'Serving a 7B LLM with a 128k context window. At FP16, the KV cache heavily limits concurrency. You implement INT4 per-channel KV cache quantization. Throughput jumps from 5 QPS to 18 QPS, but "needle in a haystack" retrieval accuracy drops from 99% to 45%.'
+question: 'Why did INT4 KV cache quantization hurt needle-in-haystack accuracy, and how would you preserve long-context retrieval?'
+details:
+  realistic_solution: 'Per-channel INT4 quantization of the KV cache destroys attention precision because it cannot capture outlier activations critical for "needle" tokens. INT4 limits representation to 16 discrete values, causing dot-product blur across the sequence. The solution is Grouped-Query Attention (GQA) with grouped-quantization (e.g., block size 64-128) to preserve local variance, or employing mixed-precision KV caching (e.g., keeping attention sinks and recent tokens in FP16 while compressing the remainder).'
+  common_mistake: |
+    **The Pitfall:** Increasing calibration dataset size to fix the accuracy drop.
+    **The Rationale:** Engineers assume poor quantization accuracy is just an artifact of bad calibration data during the post-training quantization phase.
+    **The Consequence:** They fail to address the fundamental representational limit of 4 bits for capturing the highly precise outlier key/value pairs needed for long-sequence dot products.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B model with 128K context, 32 layers, 32 heads, 128 dim.
+    - Grouped quantization (group size 128) needs 4 bytes metadata (scale+zero) per group.
+
+    **Calculations:**
+    - FP16 KV cache: 2 * 32 * 32 * 128 * 128,000 * 2 bytes = 67.1 GB.
+    - INT4 base cache: 67.1 GB * 0.25 = 16.8 GB.
+    - Group metadata: 128,000 / 128 = 1,000 groups. 2 * 32 * 32 * 128 * 1,000 * 4 bytes = 1.05 GB.
+    - Effective memory: 16.8 + 1.05 = 17.85 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 17.85 GB (Memory-Capacity-Bound)**. Grouped quantization preserves accuracy while still yielding ~73% memory savings over FP16.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- kv-cache
+- int4
+- long-context

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2698
+track: cloud
+level: L5
+zone: evaluation
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Storage Architecture for Large-Scale Training
+scenario: 'Training a foundation model on a 100TB dataset. Option A: NFS over 100 Gbps Ethernet shared storage, prefetch to local SSD. Option B: GPUDirect Storage with 8 local NVMe SSDs per node (8TB per node, subset of data). Option C: Object storage (S3-compatible) with intelligent caching. Your cluster has 64 GPU nodes.'
+question: Which storage architecture provides the best throughput for large-scale training, and why do the others fail?
+details:
+  realistic_solution: 'Option B is preferred for training throughput, but requires data sharding. 64 nodes × 8TB = 512TB local capacity, easily holds 100TB (each node stores a shard + overlap). GPUDirect from 8 NVMe gives 8 × 5.5 GB/s = 44 GB/s per node to GPU, far exceeding the ~24 GB/s aggregate GPU demand (8 GPUs × 3 GB/s). Option A (NFS over 100GbE): 100 Gbps = 12.5 GB/s shared across 64 nodes = 195 MB/s per node. With 8 GPUs needing 24 GB/s per node, this is 123x bottlenecked. Prefetching to local SSD helps, but NFS is still the bottleneck for random access patterns. Option C (object storage): High latency (10-50ms per request), optimized for sequential reads. Works for streaming datasets but random access patterns (shuffled training) suffer. Caching helps but is complex to manage. Option B wins for throughput-critical training. The trade-off: data must be pre-sharded and shuffling across nodes requires periodic re-distribution.'
+  common_mistake: |
+    **The Pitfall:** Using shared network storage for training workloads.
+    **The Rationale:** The per-node bandwidth from NFS/CIFS collapses at scale. Local NVMe with GPUDirect is the only architecture that scales I/O linearly with node count.
+    **The Consequence:** Severe I/O bottlenecks that starve GPUs during training.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64 node cluster, 8 GPUs per node.
+    - GPU demand: 8 GPUs * 3 GB/s = 24 GB/s per node.
+    - Option A (NFS): 100 Gbps (12.5 GB/s) shared across 64 nodes.
+    - Option B (GPUDirect NVMe): 8 local SSDs * 5.5 GB/s per node.
+
+    **Calculations:**
+    - Option A per-node bandwidth: 12.5 GB/s / 64 = ~195 MB/s.
+    - Option A bottleneck factor: 24 GB/s / 0.195 GB/s ≈ 123x.
+    - Option B per-node bandwidth: 8 * 5.5 GB/s = 44 GB/s.
+    - Option B headroom: 44 GB/s > 24 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 44 GB/s (I/O-Bound)**. Shared NFS completely collapses under concurrent node load. Only local NVMe via GPUDirect provides the isolated bandwidth required to keep the GPUs fed.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-516
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

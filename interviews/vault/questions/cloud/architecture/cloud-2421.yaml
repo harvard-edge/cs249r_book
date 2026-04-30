@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2421
+track: cloud
+level: L5
+zone: specification
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: H100 FP8 Migration Throughput Cliff
+scenario: You migrate a 70B parameter LLM serving stack from 4x A100s (INT8 W8A8) to 2x H100s (FP8 W8A8). Theoretical TOPS suggest a >2.5x throughput gain, but your actual QPS only increases from 12 QPS to 14 QPS at batch size 64. Profiling shows high SM idle time despite FP8 Tensor Cores.
+question: Why does moving from 4x A100 INT8 to 2x H100 FP8 barely increase QPS, and what must change in the KV cache path?
+details:
+  realistic_solution: 'The issue is KV cache memory bandwidth bottlenecking the FP8 compute. H100''s FP8 Tensor Cores are incredibly fast, but if the KV cache remains in FP16, the memory bandwidth required to fetch it for batch size 64 starves the compute units. The solution requires transitioning to FP8 KV caching and fusing scaling factors.'
+  common_mistake: |
+    **The Pitfall:** Assuming the H100 clock speed is throttling and attempting to increase batch size further.
+    **The Rationale:** High SM idle time can mistakenly look like a lack of concurrent work.
+    **The Consequence:** Increasing batch size leads to an immediate Out-Of-Memory (OOM) crash without resolving the underlying memory bandwidth bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model size: 70B params (70 GB in FP8).
+    - Batch size: 64.
+    - Sequence length: 2048.
+    - KV cache in FP16 (GQA 1024 dim): ~42.9 GB.
+    - 2x H100 Bandwidth: 6.7 TB/s.
+
+    **Calculations:**
+    - Total memory read per token: 70 GB (weights) + 42.9 GB (KV) = 112.9 GB.
+    - Fetching 112.9 GB at 6.7 TB/s takes ~17 ms.
+    - FP8 compute for BS 64 takes < 2 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: >17ms KV Fetch (Memory-Bandwidth Bound)**. Because the KV cache remained in FP16, fetching it starves the immensely fast FP8 compute units.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

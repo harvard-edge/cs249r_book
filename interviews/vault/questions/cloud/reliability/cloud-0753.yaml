@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0753
+track: cloud
+level: L4
+zone: analyze
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: The Checkpoint Storage Bottleneck
+scenario: You're training a 175B parameter model on 512 H100 GPUs using 3D parallelism. The cluster's estimated MTBF requires a checkpoint every 20 minutes. Each checkpoint must be written to persistent storage.
+question: What's the checkpoint size, how long does the write take, and what's the impact on training throughput?
+details:
+  realistic_solution: 'A full checkpoint includes FP16 weights (350 GB), FP32 master weights (700 GB), Adam moments (1,400 GB), and gradient buffers (350 GB) = **2.8 TB total**. With FSDP, each GPU writes its shard: 2.8 TB / 512 = 5.47 GB per GPU. The bottleneck is aggregate storage bandwidth. A high-end parallel filesystem (Lustre/GPFS) might provide 200 GB/s aggregate write bandwidth. 2.8 TB / 200 GB/s = **14 seconds** write time. But 512 GPUs issuing concurrent writes create metadata storms and I/O contention, realistically 2-3× slower: **30-42 seconds**. At 20-minute intervals, that''s 2.5-3.5% overhead — acceptable. The real solution: write to local NVMe first (each GPU has ~3.5 GB/s write), then async-flush to persistent storage.'
+  common_mistake: |
+    **The Pitfall:** Assuming the checkpoint size is just the 16-bit weights (350 GB).
+    **The Rationale:** Engineers equate model size directly with file size, forgetting training state.
+    **The Consequence:** Under-provisioning storage bandwidth by 8x, leading to massive metadata storms and I/O contention that paralyzes the cluster during checkpointing.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 175B parameters.
+       - Precision sizes: FP16 weights (2B), FP32 master (4B), Adam moments (8B), Gradients (2B).
+       - GPU Count: 512.
+       - Lustre bandwidth: 200 GB/s aggregate.
+       - Checkpoint interval: 20 minutes (1200s).
+    2. **Calculations:**
+       - Checkpoint per parameter: 2 + 4 + 8 + 2 = 16 bytes.
+       - Total Checkpoint Size: 175B * 16 bytes = 2,800 GB = 2.8 TB.
+       - Ideal Write Time: 2,800 GB / 200 GB/s = 14 seconds.
+       - Realistic Contention Delay (3x penalty): 14s * 3 = 42 seconds.
+       - Checkpoint Overhead: 42s / 1200s = 3.5%.
+    3. **Conclusion & Interpretation:** **~3.5% overhead (Storage I/O-Bound).**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

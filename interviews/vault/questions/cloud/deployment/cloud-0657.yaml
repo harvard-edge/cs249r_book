@@ -1,0 +1,38 @@
+schema_version: '1.0'
+id: cloud-0657
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Tokenizer Overhead Spikes
+scenario: Your LLM inference server is utilizing a 70B model on an H100. P99 latency suddenly spikes. You look at the GPU utilization metrics, and the GPU is sitting at 0% for 50 milliseconds before every generation request.
+question: What CPU-bound process is blocking the GPU from doing its job?
+details:
+  realistic_solution: 'You are hitting the **Tokenizer CPU Bottleneck**. A slow Python BPE tokenizer might process 100,000 tokens per second. A 5,000-token prompt takes 50ms to tokenize. However, the H100 prefilling that same prompt for a 70B model takes ~1.4 seconds, so the 50ms tokenizer overhead is small relative to prefill. The real issue is that tokenization is **synchronous and blocking**: the GPU sits completely idle while the CPU tokenizes. The fix is to use a fast Rust-based tokenizer and run tokenization asynchronously.'
+  common_mistake: |
+    **The Pitfall:** Blaming the delay on PCIe bus transfer times.
+    **The Rationale:** Candidates know that moving data between CPU and GPU takes time and often overestimate the latency of small transfers.
+    **The Consequence:** Focusing on optimizing PCIe transfers while ignoring the massive synchronous blocking caused by the CPU tokenizer.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - CPU Tokenizer speed: 100,000 tokens/sec. Prompt: 5,000 tokens.
+    - Prefill Compute: 70B model, 5,000 tokens. H100 at 989 TFLOPS (50% utilization).
+
+    **Calculations:**
+    - Tokenizer Latency = 5,000 / 100,000 = 50 ms.
+    - Prefill Compute Required = 2 * 70B * 5,000 = 700 TFLOPs.
+    - Prefill Time = 700 TFLOPs / (989 TFLOPS * 0.5) ≈ 1.4 seconds (1,400 ms).
+    - Tokenizer Overhead = 50 ms, completely blocking the GPU.
+    - Idle Time at 1,000 req/min = 1,000 * 50 ms = 50 seconds per minute (83% stall).
+
+    **Conclusion & Interpretation:**
+    - **Result: 83% Stall (CPU-Bound)**. The GPU is stalled 83% of the time due to synchronous CPU tokenization, necessitating an asynchronous Rust-based tokenizer.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+math_verified: true

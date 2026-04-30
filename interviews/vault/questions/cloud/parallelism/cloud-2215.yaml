@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-2215
+track: cloud
+level: L4
+zone: analyze
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Data-Parallel Replica Count vs Wall-Clock Tradeoff
+scenario: A 13B model is being trained data-parallel on a 256-GPU cluster connected by IB NDR. The team can choose any DP world size N from {32, 64, 128, 256}. Per-step compute = 600 ms / N up to N=256. Per-step DP gradient AllReduce on a flat ring = 2*(N-1)/N * 26 GB / 25 GB/s.
+question: "For 13B DP training on 32-256 GPUs with 600 ms / N compute and a 26 GB BF16 gradient on a 25 GB/s ring, which N minimizes per-step wall clock?"
+details:
+  realistic_solution: 'The smallest world size, N=32, minimizes the per-step wall clock. This is counterintuitive, but the communication overhead completely dominates the compute time. The compute time scales as 1/N, but since it is only 600 ms at N=1, at N=32 it is already a negligible ~19 ms. The Ring AllReduce time scales as (N-1)/N, which actually increases slightly as N grows because the ring transfers more of the total data volume. Since the communication time is ~2000 ms, adding more GPUs provides virtually zero compute benefit but increases the communication penalty. Therefore, spreading this model across more GPUs slows down each step.'
+  common_mistake: |
+    **The Pitfall:** Assuming that adding more GPUs always decreases or maintains step time.
+    **The Rationale:** Engineers focus on the 1/N scaling of compute and ignore that Ring AllReduce communication scales as (N-1)/N, which asymptotically increases.
+    **The Consequence:** Wasting massive amounts of compute resources (and money) to run a job slower than it would run on a smaller subset of the cluster.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Compute = 600 ms / N.
+       - AllReduce Time = 2 × (N-1)/N × 26 GB / 25 GB/s.
+    2. **Calculations:**
+       - Base AllReduce coefficient: 2 × 26 / 25 = 2.08 seconds = 2080 ms.
+       - N=32: Compute = 600/32 = 18.75 ms. Comm = 2080 × (31/32) = 2015 ms. Total = 2033.75 ms.
+       - N=256: Compute = 600/256 = 2.34 ms. Comm = 2080 × (255/256) = 2071.88 ms. Total = 2074.22 ms.
+    3. **Conclusion & Interpretation:** **N=32 minimizes per-step wall clock (2034 ms) because massive communication overhead dwarfs any compute savings at larger scales. Result: Network-Bound.**
+status: archived
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

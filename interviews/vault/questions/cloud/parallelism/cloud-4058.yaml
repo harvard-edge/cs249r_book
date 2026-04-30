@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-4058
+track: cloud
+level: L4
+zone: optimization
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: AllReduce on Non-Power-of-Two GPU Counts
+scenario: Due to failures, your cluster now has 497 working GPUs. The recursive halving-doubling algorithm requires power-of-two participant counts, so NCCL falls back to ring AllReduce. Ring performance at 497 GPUs has significant latency.
+question: What AllReduce strategy should you use for 497 GPUs, and why might ring still beat a non-power-of-two recursive scheme?
+details:
+  realistic_solution: 'Use the Rabenseifner algorithm variant for non-power-of-two: (1) Round down to nearest power of 2: P'' = 256. (2) The extra 497 - 256 = 241 GPUs each pair with one of the first 241 GPUs in the power-of-two group. (3) Pre-reduction: the 241 extra GPUs send their gradients to their partners. Cost on 1 rail (50GB/s): 2GB/50GB/s = 40ms. On 8 rails (400GB/s): 5ms. (4) Recursive halving-doubling among 256 GPUs (which now hold reduced gradients from 2 GPUs each) using 8 rails: 2 × log₂(256) × 10µs + 2 × 255/256 × 2GB/400GB/s = 160µs + 10ms = 10.16ms. (5) Post-broadcast: 40ms (1 rail) or 5ms (8 rails). Total with 8 rails: 5 + 10.16 + 5 = 20.16ms. Compare to ring with 497 using 8 rails: 2 × 496 × 5µs + 2 × 496/497 × 2GB/400GB/s = 4.96ms + 9.98ms = 14.94ms. Ring is actually faster here because the multi-phase overhead of the non-power-of-two algorithm exceeds the ring latency penalty.'
+  common_mistake: |
+    **The Pitfall:** Over-engineering non-power-of-two reductions without profiling.
+    **The Rationale:** Engineers assume massive ring latency is always fatal compared to tree-based schemes.
+    **The Consequence:** Implementing a complex multi-phase reduction that adds more latency through stage overheads than it saves, degrading total performance compared to a simple ring.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 497 GPUs, 2GB gradient. Network: 8-rail 400 GB/s (50 GB/s per rail).
+
+    **Calculations:**
+    - Ring latency: 2 × 496 × 5µs + 2 × (496/497) × (2GB / 400GB/s) = 4.96ms + 9.98ms = 14.94ms.
+    - Non-power-of-two (e.g. Rabenseifner): 5ms (pre-reduce) + 10.16ms (halving-doubling) + 5ms (post-broadcast) = 20.16ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bandwidth-Bound.** At 2GB sizes, bandwidth dominates. Ring's simplicity and lower phase overhead ultimately beats complex non-power-of-two algorithms.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1237
+track: edge
+level: L3
+zone: analyze
+topic: model-format-conversion
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: TensorRT DLA Fallback Overhead on Jetson Orin
+scenario: You are deploying a transformer-based vision model on an NVIDIA Jetson Orin (32 GB LPDDR5, Ampere GPU + DLA accelerator, 60W TDP). You compile the ONNX model to a TensorRT INT8 engine to leverage the 275 TOPS performance, delegating the dense layers to the DLA while unsupported operators like LayerNorm fall back to the Ampere GPU.
+question: Why does TensorRT INT8 partial DLA delegation increase Jetson Orin latency from 20ms to 25ms versus all-FP16 GPU execution?
+details:
+  realistic_solution: 'The performance drop is driven by the operator coverage gap in the DLA, which forces format conversion and synchronization between the DLA and the Ampere GPU. When TensorRT encounters the unsupported LayerNorm, it must halt the DLA pipeline, reformat the intermediate tensor from the DLA''s proprietary blocked memory layout to a standard layout, and transfer execution context to the GPU. Fusing or substituting unsupported operators is necessary to achieve a single complete DLA subgraph.'
+  common_mistake: Assuming that mapping any sub-graph to a dedicated INT8 accelerator will strictly reduce latency because of high theoretical TOPS, failing to account for catastrophic synchronization penalties and memory reformatting costs during fallback.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 24 layers, 2 fallbacks per layer (48 total context switches)
+    - 0.5 MB activation tensor size (Batch 1, Seq 512, Hidden 1024)
+    - ~200 GB/s memory bandwidth
+    - ~0.1 ms sync penalty per crossing
+
+    **Calculations:**
+    - Data moved = 48 crossings * 0.5 MB * 2 (read/write) = 48 MB
+    - Raw transfer time = 48 MB / 200,000 MB/s = 0.24 ms
+    - Sync overhead = 48 crossings * 0.1 ms = 4.8 ms
+    - Total overhead = 4.8 ms + 0.24 ms = 5.04 ms
+
+    **Conclusion & Interpretation:**
+    - **Result: ~5 ms overhead (Synchronization-Bound)**. The context switching and layout conversion penalties completely outweigh the compute benefits of DLA delegation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- reasoning_competency and reasoning_mode are not specified.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

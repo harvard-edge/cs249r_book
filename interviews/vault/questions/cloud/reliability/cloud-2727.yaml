@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2727
+track: cloud
+level: L3
+zone: fluency
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: apply
+phase: training
+title: 'Checkpoint Storm I/O Bottleneck'
+scenario: 'A 512-GPU job trains a 70B parameter model with FSDP (each GPU holds a ~280MB shard). The shared Lustre filesystem provides 200 GB/s aggregate write bandwidth.'
+question: 'For a 512-GPU FSDP checkpoint with 280MB shards and 200 GB/s Lustre, what write time do you expect with and without staggered writes?'
+details:
+  realistic_solution: 'Total checkpoint size: 512 × 280MB = 140GB. At 200 GB/s bandwidth: 140GB / 200GB/s = 0.7 seconds ideal. But with 512 simultaneous file creates, metadata operations dominate: each file create takes ~50ms under contention, and the metadata server handles ~100 ops/sec under load. So 512 creates take ~5 seconds for metadata alone. With I/O contention and TCP incast, actual bandwidth drops to ~50 GB/s, so writes take 140/50 = 2.8 seconds. Total: ~8 seconds. Staggered (8 groups of 64): each group writes 64 × 280MB = 17.5GB. At close to full bandwidth (~180GB/s with less contention): 0.1s per group. With 2s gaps: 8 × 2s = 16s total. Paradoxically slower in wall time but much less disruptive to other filesystem users. Actual benefit: avoids filesystem brownout that affects other jobs.'
+  common_mistake: |
+    **The Pitfall:** Calculating write time based purely on raw bandwidth and ignoring metadata operations.
+    **The Rationale:** Candidates often divide the total size by the aggregate bandwidth (140GB / 200GB/s = 0.7s) and assume that's the total time, completely missing the overhead of 512 simultaneous file create operations.
+    **The Consequence:** Checkpoints take significantly longer than planned, causing training job stalls and potentially inducing a filesystem brownout that affects other users sharing the storage.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Ideal Checkpoint Write: 140GB / 200 GB/s = 0.7s.
+    - 512 concurrent file creates cause metadata lock contention.
+    
+    **Calculations:**
+    - Simultaneous Writes: Contention drops bandwidth to 50 GB/s. Total time: ~8 seconds (plus filesystem brownout).
+    - Staggered Writes (8 groups of 64, 2s gap): Each group writes 17.5GB in ~0.1s.
+    - Wall Time: 8 groups * 2s gaps = ~16 seconds.
+    
+    **Conclusion & Interpretation:**
+    - **Result: ~16 seconds (I/O-Bound)**. Staggering writes increases absolute wall time but avoids destructive metadata bottlenecks across the Lustre cluster.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-524
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: cloud-0115
+track: cloud
+level: L3
+zone: diagnosis
+topic: batching-strategies
+competency_area: latency
+bloom_level: apply
+phase: inference
+title: The 60% Utilization Mystery
+scenario: 'Your team has successfully migrated an LLM inference service from static batching to a modern continuous batching framework. Under heavy, sustained load, you see a 2.5x increase in throughput. However, when you check `nvidia-smi`, you''re puzzled to find that GPU utilization never exceeds ~60-70%, even though the request queue is full.'
+question: 'What is the most likely reason for this phenomenon?'
+details:
+  realistic_solution: "The system is bottlenecked by the CPU-bound scheduling logic of the continuous batching engine itself. GPU utilization measures the percentage of time a kernel is active. In a continuous batching loop, there are two phases: 1) The GPU executes a forward pass on the current batch of requests. 2) The CPU-bound scheduler runs to check for finished sequences, free their KV cache blocks, check the queue for new requests, and allocate blocks for them before launching the next GPU kernel. If this scheduling phase on the CPU takes a non-trivial amount of time relative to the GPU execution phase, the GPU will sit idle during that period, leading to an average utilization below 100%."
+  common_mistake: |
+    **The Pitfall:** Assuming the GPU is bottlenecked by a hardware limitation like memory bandwidth or PCIe transfer speeds.
+    **The Rationale:** Engineers fail to realize that the CPU-bound scheduling logic of continuous batching can stall the GPU between kernel launches.
+    **The Consequence:** Wasting time tuning kernel hyperparameters when the actual fix is optimizing CPU scheduling overhead.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Continuous batching framework under heavy load.
+    - GPU execution time per batch: 15ms.
+    - CPU-bound scheduling overhead (KV cache, tokenization): 10ms.
+
+    **Calculations:**
+    - Total cycle time = 15ms (GPU) + 10ms (CPU) = 25ms.
+    - GPU active time fraction = 15ms / 25ms = 60%.
+
+    **Conclusion & Interpretation:**
+    - **Result: CPU-Bound Scheduling.** The GPU is active for only 60% of the time, capping utilization despite a full request queue.
+  options:
+  - 'The GPU is memory-bandwidth bound, so compute cores are idle waiting for HBM. (Trap: assumes HBM limits utilization metric, but nvidia-smi util is time-based, not bandwidth-based)'
+  - 'The Python GIL in the server is preventing the scheduler from running in parallel with GPU execution. (Trap: GIL affects threading, but continuous batching runs mostly in C++ backend)'
+  - 'The request arrival rate is not high enough to fully saturate the server''s capacity. (Trap: contradicts "queue is full" in scenario)'
+  - 'The GPU is frequently idle, waiting for the CPU-bound scheduler to manage requests and memory between batches.'
+  correct_index: 3
+status: published

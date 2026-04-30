@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0885
+track: cloud
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: KV Cache Memory Bandwidth Bottleneck
+scenario: You are deploying a 70B parameter standard transformer model on a single node with 4x A100 80GB GPUs. During profiling of the autoregressive generation phase, you observe that GPU compute utilization is under 5%, but HBM memory bandwidth utilization is pegged at 98%. As you increase the batch size from 8 to 64 with a sequence length of 2048, the latency per generated token increases linearly, and overall throughput plateaus.
+question: What is causing memory bandwidth saturation during 70B autoregressive decoding, and which component should you redesign?
+details:
+  realistic_solution: 'The root cause is the autoregressive KV cache. During decoding, for every generated token, the entire KV cache for all previous tokens in all active sequences must be read from HBM to SRAM to compute attention. At large batch sizes and sequence lengths, the KV cache data transfer vastly exceeds the model weights transfer and completely saturates memory bandwidth, leaving compute units starved. GQA reduces KV heads by 8x, shrinking the cache from ~10.24GB to ~1.25GB per sequence, enabling batch sizes of ~144 instead of ~18.'
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is model weight loading or self-attention compute.
+    **The Rationale:** Candidates overlook that generation latency is heavily dominated by repeatedly fetching the growing KV cache from memory.
+    **The Consequence:** Attempting to optimize compute kernels rather than shrinking the cache via GQA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - MHA KV Cache/Token: 2 (K,V) * 2 bytes * 8192 * 80 = 2.5 MB.
+    - Context Size: 4096 tokens.
+    - Available VRAM: 320 GB - 140 GB = 180 GB.
+
+    **Calculations:**
+    - MHA Cache per seq: 2.5 MB * 4096 = 10 GB.
+    - Max MHA Batch Size: 180 GB / 10 GB = 18.
+    - GQA (8x reduction) Cache per seq: 1.25 GB.
+    - Max GQA Batch Size: 180 GB / 1.25 GB = 144.
+
+    **Conclusion & Interpretation:**
+    - **Result: Batch Size 144 (Memory-Bandwidth-Bound)**. GQA reduces the KV cache by 8x, drastically increasing maximum batch size without OOM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-015
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

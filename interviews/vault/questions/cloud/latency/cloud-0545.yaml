@@ -1,0 +1,32 @@
+schema_version: '1.0'
+id: cloud-0545
+track: cloud
+level: L5
+zone: specification
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: both
+title: The Multi-Tenant Priority Inversion
+scenario: 'Your platform serves two customer tiers from a single H100 cluster: "Premium" customers running latency-sensitive dialogue agents (P99 TTFT < 200ms) and "Standard" customers running large, asynchronous document analysis jobs. The system uses a single global FIFO queue. During a product launch, Premium-tier customers report catastrophic timeouts exceeding 30 seconds. The on-call playbook suggests adding more GPUs to handle the load.'
+question: 'Why is adding GPUs the wrong fix for Premium timeouts behind Standard jobs, and what architecture would prevent this priority inversion?'
+details:
+  realistic_solution: 'The playbook is wrong because this is a scheduling problem, not a capacity problem. The FIFO queue causes Head-of-Line blocking: Premium requests (200ms) queue behind Standard jobs (30s each). With 50 queued Standard jobs and 8 GPUs, Premium waits 187.5 seconds (937x SLA). Adding GPUs reduces transient wait but doesn''t fix the priority inversion - Premium still queues behind Standard in FIFO order. The fix: multi-level priority queue where Premium always preempts Standard, achieving sub-200ms wait with zero additional hardware.'
+  common_mistake: |
+    **The Pitfall:** Following the playbook and horizontally scaling (adding GPUs) to fix priority inversion.
+    **The Rationale:** Adding GPUs increases total throughput but does not change the FIFO queue ordering. The high-priority requests are still stuck behind long-running low-priority jobs.
+    **The Consequence:** Premium SLA timeouts persist despite doubling infrastructure costs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 8 GPUs, FIFO queue.
+    - Premium SLA: <200ms wait. Standard jobs: 30s execution.
+    - Queue state: 50 Standard jobs ahead of Premium.
+
+    **Calculations:**
+    - Current wait: (50 jobs / 8 GPUs) * 30s = 187.5s.
+    - Add 8 GPUs (16 total): (50 / 16) * 30s = 93.75s.
+    - Priority queue wait: 0 Standard jobs ahead = ~200ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Scheduling-Bound, Not Capacity-Bound.** Adding GPUs cannot solve head-of-line blocking; a priority queue achieves the 200ms SLA with zero extra hardware.
+status: published

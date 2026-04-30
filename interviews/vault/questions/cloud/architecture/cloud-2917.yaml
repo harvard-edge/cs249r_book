@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2917
+track: cloud
+level: L4
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: create
+phase: both
+title: 'Specification: define latency-accuracy SLA for efficient CNN cloud API'
+scenario: You are writing the technical specification for a cloud vision API that must serve 50K QPS. The SLA requires p50 < 10ms, p99 < 50ms, accuracy > 80% top-1 on ImageNet.
+question: What hardware, model, batching, and failure-mode spec would you choose to serve 50K QPS under the p50, p99, and >80% ImageNet SLA?
+details:
+  realistic_solution: 'Hardware: 2× H100 nodes (16 GPUs). Model: EfficientNet-B2 (9.1M params, 1.0 GFLOPs, 80.1% top-1) or MobileNetV3-Large with TRT INT8. Batching: dynamic batching with 5ms window, max batch=128. SLA spec: (1) p50 < 10ms = batching_wait(5ms) + inference(3ms) + overhead(2ms); (2) p99 < 50ms = max batching_wait(20ms) + inference(3ms) + 2× overhead; (3) accuracy: shadow eval on 1K held-out images hourly, alert if top-1 < 79%; (4) failure modes: model OOM → fallback to smaller model, preprocessing timeout → return error 504.'
+  common_mistake: |
+    **The Pitfall:** Specifying only average latency targets without defining accuracy failures or accounting for head-of-line blocking.
+    **The Rationale:** Engineers often focus on raw compute throughput and ignore the statistical realities of queuing and data drift.
+    **The Consequence:** The system hits 50K QPS but fails SLA during burst traffic or silently serves degraded predictions due to distribution shifts.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - SLA: p50 < 10ms, p99 < 50ms, 50K QPS.
+       - H100 effective compute: 494 TFLOPS (50% util).
+       - EfficientNet-B2: 1.0 GFLOPs per image.
+    2. **Calculations:**
+       - Hardware Distribution: 50K QPS across 16 H100 GPUs = 3,125 QPS/GPU.
+       - Dynamic Batching: 5ms window × 3,125 QPS = 15.6 images/window → Batch size 16.
+       - Compute Requirement: 16 images × 1.0 GFLOPs = 16 GFLOPs.
+       - Latency Check: 16 GFLOPs / 494 TFLOPS = 0.032 ms compute. Total latency = 5ms wait + 0.032ms compute + ~2ms overhead ≈ 7ms (Under 10ms p50).
+       - Resource Over-provisioning: 3,125 QPS × 1.0 GFLOPs = 3.125 TFLOPS needed per GPU.
+    3. **Conclusion & Interpretation:**
+       - **Result: Over-provisioned. The original 32 GPU design had 0.3% utilization. Even 16 GPUs (2 nodes) is highly over-provisioned, easily meeting the SLA.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

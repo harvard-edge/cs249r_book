@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-4142
+track: cloud
+level: L5
+zone: specification
+topic: container-orchestration
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: RDMA and Host Networking for ML Training Pods
+scenario: Your Kubernetes training pods use standard pod networking (Calico CNI) and achieve only 15 GB/s between nodes for NCCL AllReduce, despite having 400 Gbps InfiniBand NICs. The theoretical maximum is 50 GB/s.
+question: "What is the Kubernetes networking bottleneck limiting NCCL to 15 GB/s, and how would you configure K8s for full InfiniBand bandwidth?"
+details:
+  realistic_solution: 'The bottleneck: NCCL over TCP/IP adds kernel network stack overhead. Data goes: GPU -> PCIe -> CPU memory -> kernel TCP/IP stack -> Ethernet NIC -> switch -> Ethernet NIC -> kernel -> CPU memory -> PCIe -> GPU. Each copy adds latency and CPU overhead. Fix: enable GPUDirect RDMA (GDR) + RDMA-capable CNI. Configuration: (1) Install Multus CNI. (2) Install RDMA/IB CNI. (3) Create NetworkAttachmentDefinition. (4) Pod spec: annotations for Multus. (5) Enable hostNetwork: true as a simpler alternative. (6) Set NCCL environment variables: NCCL_IB_HCA=mlx5, NCCL_IB_DISABLE=0, NCCL_NET_GDR_LEVEL=5. With GPUDirect RDMA: data flows GPU -> NVLink -> IB NIC -> switch -> IB NIC -> GPU. No CPU memory copies. Throughput: ~45 GB/s (90% of 50 GB/s theoretical).'
+  common_mistake: |
+    **The Pitfall:** Assuming Kubernetes pod networking automatically uses InfiniBand hardware efficiently.
+    **The Rationale:** Candidates do not realize that standard CNIs only support TCP/IP over Ethernet and bypass RDMA entirely.
+    **The Consequence:** NCCL traffic is forced through the kernel TCP stack, capping throughput and burning CPU cycles.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Network: 400 Gbps (50 GB/s) InfiniBand.
+       - TCP throughput = 15 GB/s. RDMA throughput = 45 GB/s.
+       - 128-GPU Ring AllReduce transferring ~4 GB per node.
+    2. **Calculations:**
+       - TCP transfer time: 4 GB / 15 GB/s = 266 ms.
+       - RDMA transfer time: 4 GB / 45 GB/s = 89 ms.
+       - Time saved per step: 266 ms - 89 ms = 177 ms.
+    3. **Conclusion & Interpretation:** **Enabling GPUDirect RDMA bypasses the CPU kernel stack, saving 177 ms per step and hitting 45 GB/s. Result: I/O-Kernel-Bound.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-0919
+track: edge
+level: L4
+zone: optimization
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: create
+phase: training
+title: 'Operator Fusion for Arithmetic Intensity'
+scenario: An edge TPU runs a custom Transformer encoder for anomaly detection. SLA requires 500 inferences/sec (QPS). The NPU has 2 TOPS compute and 4 GB/s memory bandwidth. The model requires 4 GOPS per inference. Currently, the system maxes out at 200 QPS. Profiling shows unfused MatMul, LayerNorm, and GELU operations are causing 20MB of intermediate activation read/writes to DRAM per inference.
+question: What optimization would let the Transformer encoder meet the 500 QPS SLA on the 2 TOPS, 4 GB/s NPU?
+details:
+  realistic_solution: |
+    The low QPS is a classic symptom of a memory-bound workload on the Roofline model. Un-fused operations force the accelerator to write intermediate activations back to DRAM and read them again for the next layer, destroying Arithmetic Intensity. By fusing the MatMul, LayerNorm, and GELU into a single kernel, the intermediate results stay in the NPU's SRAM (scratchpad). This drastically reduces DRAM traffic, shifting the workload to the right on the Roofline plot towards the compute-bound regime.
+  common_mistake: |
+    **The Pitfall:** Attempting to prune the MatMul weights to reduce the 4 GOPS compute load.
+    **The Rationale:** Misdiagnosing the bottleneck as compute-bound because 4 GOPS seems high for a 2 TOPS NPU.
+    **The Consequence:** Model accuracy is degraded unnecessarily while throughput remains stuck at 200 QPS due to the unchanged memory bandwidth limit.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - NPU Compute: 2 TOPS.
+    - Memory Bandwidth: 4 GB/s.
+    - Model Compute: 4 GOPS/inference.
+    - Current Memory Traffic: 20 MB/inference.
+
+    **Calculations:**
+    - Current Memory Time: 20 MB / 4 GB/s = 5 ms (Max 200 QPS).
+    - Compute Time: 4 GOPS / 2 TOPS = 2 ms.
+    - Target Memory Traffic for 500 QPS (2 ms): 2 ms * 4 GB/s = 8 MB.
+    - Fused Optimization Traffic: 5 MB (1.25 ms memory time).
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound (Arithmetic Intensity)**. Operator fusion removes intermediate DRAM reads/writes, reducing memory traffic to 5 MB and shifting the workload to be compute-bound at 2 ms, achieving 500 QPS.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

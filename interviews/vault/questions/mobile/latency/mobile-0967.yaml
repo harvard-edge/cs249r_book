@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: mobile-0967
+track: mobile
+level: L4
+zone: optimization
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: 'Latency Decomposition: Optimize Wake-Word Detection Latency on Tensor G3'
+scenario: A wake-word detection model runs continuously on a mobile SoC. Current latency from audio capture to detection trigger is 180ms P99. The target is < 80ms. The audio pipeline comprises mic capture (20ms buffer), CPU-based MFCC feature extraction, inference, and decision logic.
+question: How would you cut wake-word P99 latency from 180 ms to under 80 ms for a 1M-param INT8 model?
+details:
+  realistic_solution: |
+    Audio buffer latency of 20ms is the irreducible floor for stable capture. CPU-bound MFCC extraction takes ~5ms. Inference takes ~0.007ms (0.05G / 7.5T), plus ~2ms dispatch overhead. Total per-window processing: 20+5+2+1 = 28ms. A P99 of 180ms implies massive queuing delays in the audio pipeline. Fix: offload MFCC feature extraction to the low-power DSP to guarantee deterministic execution (~1ms), reduce the audio buffer to 10ms with a 50% overlap (5ms stride), and optimize thread scheduling to prevent CPU preemption. New P99 converges to ~60ms.
+  common_mistake: |
+    **The Pitfall:** Trying to optimize inference compute latency.
+    **The Rationale:** Candidates assume the NPU model is the slowest component of the pipeline.
+    **The Consequence:** They miss that the true bottleneck is the 20ms audio buffer and the MFCC feature extraction running on the CPU.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target P99 latency: < 80ms.
+    - Inference compute: 0.05 GOPs.
+    - Audio buffer: 10ms (160 samples at 16kHz) with 50% overlap.
+    - Pipeline delay: 2-3 smoothing windows.
+
+    **Calculations:**
+    - Stride: 5ms.
+    - DSP MFCC: 1ms.
+    - Inference time: 0.05 GOPs / 7.5 TOPS = 6.67 \u00b5s. Dispatch overhead: 2ms. Decision: 1ms.
+    - Processing time per window: 5 (stride) + 1 (DSP) + 2 (dispatch) + 1 (decision) = 9ms.
+    - Total P99 latency (3 smoothing windows): 3 * 9ms = 27ms, plus initial 10ms buffer = 37ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 37 ms (I/O & Scheduling-Bound)**. By migrating MFCC to the DSP and tuning the buffer overlap, the queuing delay collapses, comfortably hitting the <80ms SLA.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

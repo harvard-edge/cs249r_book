@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3602
+track: cloud
+level: L4
+zone: design
+topic: queueing-theory
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Token Bucket vs Leaky Bucket Rate Limiting for H100 Serving
+scenario: 'An inference cluster handles 600 req/s sustainably. Clients send bursty traffic: 1000 req/s for 100ms followed by 100ms of silence (effective average 500/s).'
+question: How do token bucket and leaky bucket rate limiting compare for 1000 req/s 100 ms bursts on a 600 req/s cluster?
+details:
+  realistic_solution: 'Token bucket: allows burst up to bucket size B. If B=100, client can burst up to B=100 requests beyond the refill rate. During a 100ms burst at 1000 req/s: 100 requests arrive, 60 tokens replenish → net 40 tokens drained. Burst is absorbed if B ≥ 40. Cluster sees 1000/s briefly — if it has headroom (e.g., operating at 400/s average), burst is absorbed. Leaky bucket: enforces constant 600 req/s output regardless of burst — adds unnecessary latency to early burst requests. For H100 inference, token bucket is preferred because GPU utilization benefits from batching bursts. Set bucket B=50-100, refill at 550/s.'
+  common_mistake: |
+    **The Pitfall:** Recommending leaky bucket because it 'smooths' traffic.
+    **The Rationale:** Smoothing adds unnecessary queuing delay during burst phases that the underlying hardware could actually absorb through batching.
+    **The Consequence:** Artificially inflating latency for bursty clients when the GPU actually benefits from higher batch sizes.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Capacity: 600 req/s. Average load: 500 req/s.
+       - Burst: 1000 req/s for 100ms (100 total requests).
+       - Token bucket refill rate: 600 req/s.
+    2. **Calculations:**
+       - In 100ms burst window, bucket replenishes 60 tokens (0.1s × 600 req/s).
+       - Net bucket drain = 100 arriving - 60 replenishing = 40 tokens.
+       - Leaky bucket strictly queues the excess 40 requests.
+       - Leaky bucket max delay = 40 requests / 600 req/s = 0.067s (67ms).
+    3. **Conclusion & Interpretation:** **Leaky bucket adds 67ms latency; Token bucket absorbs burst instantly. Queue-Logic-Bound.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- A burst of 1000 req/s for 100ms equals 100 total requests. A 600 req/s token bucket
+  replenish rate adds 60 tokens in 100ms, not 100. A leaky bucket queues 40 requests,
+  not 400, adding 0.067s delay, not 0.67s.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2010
+track: cloud
+level: L3
+zone: fluency
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: Tensor Contiguity Memory Overhead
+scenario: You are profiling a custom Transformer attention mechanism running on a GPU. The code prepares a query tensor via a `.transpose(1, 2)` operation, followed immediately by a `.contiguous()` call to feed it into a legacy CUDA kernel.
+question: Calculate the exact High Bandwidth Memory (HBM) traffic (in MiB) generated strictly by this `.contiguous()` operation.
+details:
+  realistic_solution: The `.transpose()` operation merely creates a non-contiguous view by modifying tensor strides in O(1) time. However, calling `.contiguous()` on this strided view forces a physical deep copy in GPU HBM to enforce a sequential memory layout. This operation requires reading the entire fragmented tensor and writing it to a newly allocated buffer. The total traffic is 1x Read + 1x Write of the tensor's size. Modern kernels (like FlashAttention-2) support strided memory layouts natively, avoiding this massive overhead.
+  common_mistake: |
+    **The Pitfall:** Assuming `.contiguous()` only updates metadata or calculating only the memory read.
+    **The Rationale:** Candidates confuse `.contiguous()` with `.view()` or forget that creating a new physical memory layout requires both reading the old tensor and writing the new one.
+    **The Consequence:** Underestimating the memory traffic by 100% or more, missing a major source of latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Tensor Shape: [batch=64, seq_len=1024, num_heads=16, head_dim=128].
+    - Precision: FP16 (2 bytes/element).
+
+    **Calculations:**
+    - Element Count: 64 × 1024 × 16 × 128 = 134,217,728 elements.
+    - Size in Bytes: 134,217,728 × 2 = 268,435,456 bytes.
+    - Size in MiB: 268,435,456 / (1024^2) = 256 MiB.
+    - Total Traffic: `.contiguous()` requires 1 Read + 1 Write = 256 MiB + 256 MiB = 512 MiB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth-Bound**. The `.contiguous()` call creates a physical copy, generating 512 MiB of unnecessary HBM traffic.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-414
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:42:40.904527'

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2434
+track: cloud
+level: L5
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: The CSR Sparsity Performance Collapse
+scenario: You deploy a pruned BERT-Large model on a modern GPU (e.g. 312 TFLOPS Tensor Core, 19 TFLOPS CUDA Core). The weights are pruned to 70% unstructured sparsity. To 'skip the zeros', a junior engineer replaces cuBLAS dense matrix multiplications with a Sparse Matrix-Vector (SpMM) kernel using Compressed Sparse Row (CSR) format. Instead of a speedup, latency increases by 5x compared to the dense model.
+question: Why did replacing dense GEMMs with CSR SpMM make the 70%-sparse BERT-Large 5x slower?
+details:
+  realistic_solution: "Two catastrophic roofline shifts occur. First, dense matrix multiplications on A100 utilize highly optimized Tensor Cores (312 TFLOPS). CSR SpMM kernels map poorly to Tensor Cores and typically fall back to standard CUDA cores, dropping the theoretical compute ceiling to ~19 TFLOPS. Second, CSR introduces irregular memory access patterns (fetching row pointers and column indices), drastically lowering Arithmetic Intensity. The workload shifts from a compute-bound operation on a high ceiling (Tensor Cores) to a memory-bound operation on a low ceiling (CUDA cores with irregular gathers)."
+  common_mistake: |
+    **The Pitfall:** Assuming that doing 70% fewer FLOPs automatically translates to faster execution.
+    **The Rationale:** Ignoring the specific execution units (Tensor Cores vs CUDA cores) and the penalties of irregular memory access patterns.
+    **The Consequence:** Worsening performance by shifting a compute-bound operation off the highly optimized Tensor Cores onto the slower CUDA cores, while simultaneously wrecking memory bandwidth efficiency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dense Baseline: BERT layer (4k x 4k, batch=4000).
+    - Tensor Core Compute: 312 TFLOPS. CUDA Core Fallback: 19 TFLOPS.
+    - Sparsity: 70% unstructured (30% remaining).
+
+    **Calculations:**
+    - Dense FLOPs: ~128 GFLOPs. Dense time = 128G / 312T = 410 \mu s.
+    - Sparse FLOPs: 128 GFLOPs \times 0.30 = 38.4 GFLOPs.
+    - Sparse Time (CUDA Cores): 38.4 GFLOPs / 19 TFLOPS = 2021 \mu s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2021 \mu s (~5x slower) (Compute-Bound)**. Unstructured SpMM falls back to slow CUDA cores, resulting in 2021 \mu s (~5x slower) execution despite fewer FLOPs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- sparsity
+- cuda
+- model-compression

@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-1021
+track: edge
+level: L3
+zone: fluency
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: understand
+phase: both
+title: Explaining Agentic Tool-Use Constraints on Jetson Orin
+scenario: 'A developer asks why their agentic system — which works fine on a cloud server — runs into problems on Jetson Orin. The agent calls external tools (sensor APIs, local database queries) between LLM reasoning steps. The cloud version does 8 tool calls per task; on Orin the same agent takes 47 seconds vs 4 seconds in the cloud. Explain the fundamental constraints that make multi-hop agentic execution expensive on edge hardware.'
+question: Why does the 8-tool-call agent slow from 4 seconds in the cloud to 47 seconds on the edge?
+details:
+  realistic_solution: 'The bottleneck is memory bandwidth for KV cache reads during generation. After 4 tool calls, context is 4096 tokens. Each generation step must read the full KV cache: 2 (K,V) * num_layers * num_kv_heads * head_dim * 2 bytes. For a 7B model with GQA (32 layers, 8 KV heads, 128 dim), that is 128 KB/token, or 512 MB for 4096 tokens. At LPDDR5''s 68.3 GB/s, reading 512 MB takes 7.5ms per token. Generating 50 tokens spends 375ms just re-reading the cache. Across 8 hops, this memory-bound decode speed (along with context prefill) balloons the latency to ~47s. You must reduce hop count via tool result summarization or use a model with fewer KV heads.'
+  common_mistake: |
+    **The Pitfall:** Attributing the 47-second slowdown entirely to the LLM having fewer FLOPs.
+    **The Rationale:** Candidates focus solely on compute speed (Tokens/sec) and recommend a smaller model, completely missing the KV cache architecture implications of tool-use.
+    **The Consequence:** Deploying a smaller, dumber model that still suffers massive latency spikes because the root memory bandwidth bottleneck during prefill/context switching was never addressed.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - KV Cache size per token: 128 KB (7B model, GQA).
+    - Accumulated context: 4096 tokens.
+    - Edge memory bandwidth (LPDDR5): 68.3 GB/s.
+
+    **Calculations:**
+    - Total KV cache to read per generation step: 4096 tokens * 128 KB = 512 MB.
+    - Memory read time per generated token: 512 MB / 68.3 GB/s = 7.5 ms.
+    - Memory bound time for 50 tokens: 50 * 7.5 ms = 375 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth Bound**. Generating text after a tool-call context switch requires reading the massive KV cache over a constrained LPDDR5 bus, compounding latency with every additional hop.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

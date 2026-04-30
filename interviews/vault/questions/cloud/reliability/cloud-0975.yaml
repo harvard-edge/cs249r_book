@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: cloud-0975
+track: cloud
+level: L4
+zone: diagnosis
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: Diagnosing Cold Restart Read Storms
+scenario: 'Your team is training a 175B parameter LLM on a cluster of 1,024 GPUs using Megatron-LM. Whenever a hardware fault occurs, the orchestration system triggers a cold restart—terminating all remaining PyTorch processes, rescheduling the pods, and having every rank reload the 2.8TB model and optimizer checkpoint from an S3 object store. Telemetry shows cold restarts are taking over 45 minutes to reach the first forward pass, and the S3 metrics show a massive spike in HTTP 503 Slow Down responses.'
+question: What is the bottleneck causing the 45-minute cold-restart delay and S3 503s, and what checkpoint-loading architecture fixes it?
+details:
+  realistic_solution: 'Diagnose the issue as an S3 prefix throttling event caused by 1024 ranks simultaneously requesting the 2.8TB checkpoint. Fix this by implementing a tiered checkpoint load: a single rank (or one rank per node) downloads the 2.8TB checkpoint at 12.5 GB/s in ~224 seconds, then broadcasts the data over 400 Gbps InfiniBand in ~56 seconds. Total I/O time drops from 45+ minutes (with S3 throttling and 503 backoffs) to under 5 minutes.'
+  common_mistake: |
+    **The Pitfall:** Blaming Kubernetes pod scheduling latency, Docker image pull times, or NCCL ring initialization timeouts.
+    **The Rationale:** These are common sources of distributed training overhead, masking the true massive data I/O issue.
+    **The Consequence:** Wasting engineering effort optimizing container startup times while ignoring the catastrophic S3 prefix throttling caused by the thundering herd.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Cluster: 1,024 GPUs.
+    - Checkpoint size: 2.8 TB.
+    - S3 Prefix throttling limit: ~100 Gbps (12.5 GB/s).
+    - InfiniBand network bandwidth: 400 Gbps (50 GB/s per node).
+
+    **Calculations:**
+    - Thundering herd S3 demand: 1,024 ranks * 2.8 TB = ~2.8 PB of simultaneous read pressure.
+    - Thundering herd theoretical download time: 2.8 PB / 12.5 GB/s = ~62 hours (leads to 503s).
+    - Tiered approach step 1 (1 rank downloads from S3): 2.8 TB / 12.5 GB/s = 224 seconds.
+    - Tiered approach step 2 (IB Broadcast): 2.8 TB / 50 GB/s = 56 seconds.
+    - Total Tiered Time: 224 + 56 = 280 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: 280 seconds (I/O-Bound)**. A thundering herd of 1,024 ranks crushes the S3 prefix, causing massive timeouts. Funneling the download through a single rank and leveraging the 400 Gbps backend IB network bypasses the cloud storage bottleneck entirely.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+chains:
+- id: cloud-chain-044
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:19:20.871310'

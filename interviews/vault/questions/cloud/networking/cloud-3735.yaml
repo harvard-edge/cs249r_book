@@ -1,0 +1,38 @@
+schema_version: '1.0'
+id: cloud-3735
+track: cloud
+level: L4
+zone: optimization
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: NCCL vs MPI AllReduce Performance for Mixed-Precision Training on H100
+scenario: 'A team trains a 26B model on 64 H100s (8 nodes × 8 GPUs) and chooses between NCCL-based AllReduce vs tree-based MPI reduction. Gradient size is 52GB (FP16).'
+question: 'How long should NCCL hierarchical AllReduce and tree-based MPI reduction take for 52GB gradients on the 64-H100 cluster?'
+details:
+  realistic_solution: 'Two-level hierarchical AllReduce (NCCL strategy) leverages fast NVLink intra-node and IB inter-node. MPI tree reduction is bottlenecked by root node 25 GB/s link. NCCL is significantly faster due to parallel ring algorithms.'
+  common_mistake: |
+    **The Pitfall:** Treating the 64-GPU AllReduce as operating on a single flat network topology.
+    **The Rationale:** Candidates incorrectly calculate communication time by applying standard ring or tree formulas directly against the slowest link, ignoring the massive bandwidth disparities between NVLink and InfiniBand.
+    **The Consequence:** Predictions of training step latency will be wildly inaccurate, leading to poor decisions on cluster scaling and gradient compression.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: 64 H100s (8 nodes).
+    - NVLink: 450 GB/s. IB: 25 GB/s.
+    - Gradient size: 52GB (FP16).
+
+    **Calculations:**
+    - NCCL Level 1 (Intra-node Ring): 2 * (7/8) * 52GB / 450 GB/s = 0.202s.
+    - NCCL Level 2 (Inter-node Ring): 2 * (7/8) * 52GB / 25 GB/s = 3.64s.
+    - Total NCCL Time = 0.202s + 3.64s = 3.84s.
+    - MPI Tree (6 hops): (52GB / 25 GB/s) * 6 = 12.48s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3.84s NCCL (Communication-Bound)**. NCCL is ~3.3x faster than a naive MPI tree due to topology-aware parallel ring algorithms.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+math_verified: true

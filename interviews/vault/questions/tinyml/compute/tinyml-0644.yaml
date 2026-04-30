@@ -1,0 +1,93 @@
+schema_version: '1.0'
+id: tinyml-0644
+track: tinyml
+level: L6+
+zone: mastery
+topic: mcu-compute-constraints
+competency_area: compute
+bloom_level: create
+phase: inference
+title: The SIMD Lane Starvation
+scenario: You are optimizing an audio neural network for an ARM Cortex-M55. You replace
+  a standard loop with explicit CMSIS-NN SIMD instructions, anticipating a 4x speedup
+  from processing four 8-bit integers per clock cycle. However, the profiler reveals
+  only a 1.6x speedup.
+question: Why do Cortex-M55 Helium SIMD instructions yield only a 1.6x speedup when
+  memory is accessed via byte-by-byte loads?
+details:
+  realistic_solution: The vector pipeline is experiencing severe SIMD lane starvation
+    due to scalar memory loads. While the Cortex-M55 can natively multiply-accumulate
+    four INT8 values in a single cycle, it must first stage those values into registers.
+    Using byte-wise `LDRB` loads burns four independent clock cycles just fetching
+    data. The architecture must enforce 32-bit aligned memory accesses, loading four
+    packed bytes in a single cycle to feed the SIMD unit.
+  common_mistake: '**The Pitfall:** Assuming vector arithmetic guarantees vector memory
+    bandwidth.
+
+    **The Rationale:** Candidates believe invoking a SIMD intrinsic automatically
+    accelerates the underlying memory fetching mechanics, completely ignoring load/store
+    semantics.
+
+    **The Consequence:** The ultra-fast vector compute unit is starved by slow scalar
+    `LDRB` fetches, crippling the expected hardware acceleration.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
+    - Cortex-M55 Helium processes 4 INT8 per cycle.
+
+    - `LDRB` (byte load) = 1 cycle. Aligned 32-bit load = 1 cycle.
+
+
+    **Calculations:**
+
+    - Scalar baseline: 4 loads (4 cyc) + 4 multiplies (4 cyc) = 8 cycles.
+
+    - Naive SIMD (`LDRB`): 4 loads (4 cyc) + 1 SIMD multiply (1 cyc) = 5 cycles. (Speedup:
+    8/5 = 1.6x).
+
+    - Aligned SIMD: 1 word load (1 cyc) + 1 SIMD multiply (1 cyc) = 2 cycles. (Speedup:
+    8/2 = 4x).
+
+
+    **Conclusion & Interpretation:**
+
+    - **Result: Memory-Bound Starvation**. Relying on scalar loads restricts the speedup
+    to 1.6x; executing 32-bit aligned loads feeds the vector pipeline correctly and
+    achieves the full 4x throughput.
+
+    '
+  options:
+  - The Cortex-M55's Helium unit has a 4-cycle latency for vector multiply-accumulate
+    instructions, so processing 4 elements takes 4 cycles — only marginally better
+    than scalar's 4 cycles.
+  - 'The SIMD execution unit was starved by scalar memory loads. The CPU can multiply
+    4 INT8 values in 1 cycle, but loading them byte-by-byte (LDRB) takes 4 cycles.
+    Fix: cast 8-bit pointers to 32-bit aligned pointers for single-cycle word loads,
+    then feed the SIMD unit. Proper aligned loads achieve the full 4x speedup; scalar
+    loads limit it to 1.6x.'
+  - The Cortex-M55 compiler auto-vectorizes the scalar loop identically to the SIMD
+    intrinsics, so there is no performance difference between the two implementations.
+  - The 1.6x speedup is correct and expected — SIMD on Cortex-M only helps with floating-point
+    operations, not 8-bit integer arithmetic.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+chains:
+- id: tinyml-chain-026
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

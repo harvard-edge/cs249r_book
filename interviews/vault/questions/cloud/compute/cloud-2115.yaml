@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2115
+track: cloud
+level: L3
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: apply
+phase: both
+title: The LayerNorm Bandwidth Tax
+scenario: A profiler trace of your transformer training shows that LayerNorm operations consume only 0.1% of total FLOPs but account for 8% of wall-clock time.
+question: Why does LayerNorm take 8% of wall time despite only 0.1% of FLOPs, and why is kernel fusion critical?
+details:
+  realistic_solution: 'LayerNorm computes mean and variance (reductions), then normalizes and scales (element-wise). For a [B, S, H] tensor, it performs ~5H FLOPs per element but must read the entire tensor from HBM, compute statistics, write back, then read again for normalization. Arithmetic intensity: ~5 FLOPs / (2 * 2 bytes read + 2 bytes write) = ~0.8 FLOPs/byte. At ridge point ~156 FLOPs/byte on modern hardware, this is ~200x below compute-bound. Without fusion, each sub-operation (mean, variance, normalize, scale) is a separate kernel launch with its own HBM round trip: 4 reads + 4 writes. Fusing into one kernel: 1 read + 1 write. Fusion reduces memory traffic by ~4x, which directly translates to ~4x speedup for this operation.'
+  common_mistake: |
+    **The Pitfall:** Judging an operation's cost based purely on its FLOP count.
+    **The Rationale:** Candidates ignore the arithmetic intensity of the operation; LayerNorm has extremely low AI and is entirely memory-bandwidth-bound.
+    **The Consequence:** Leaving massive performance gains on the table by failing to fuse memory-bound element-wise and reduction kernels.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Unfused LayerNorm: 4 HBM round trips (mean, variance, normalize, scale).
+    - Fused LayerNorm: 1 HBM round trip.
+    - Tensor shape [B=32, S=2048, H=4096] in FP16 = 512 MB.
+
+    **Calculations:**
+    - Unfused memory read: 4 * 512 MB = 2 GB.
+    - Fused memory read: 1 * 512 MB = 0.5 GB.
+    - Time at 2 TB/s: Unfused takes ~1 ms vs Fused takes ~0.25 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth Bound.** Fusion reduces memory traffic by ~4x, yielding a ~4x speedup.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

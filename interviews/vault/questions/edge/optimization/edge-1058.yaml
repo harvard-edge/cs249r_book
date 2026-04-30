@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-1058
+track: edge
+level: L4
+zone: evaluation
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: 'Kernel Fusion: Evaluate Depthwise Convolution Fusion Strategies on Jetson Orin'
+scenario: 'For MobileNetV2 on Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W), compare three fusion strategies: (A) no fusion, (B) DWConv+BN+ReLU6 fusion only, (C) full inverted residual block fusion (PW expand + DWConv + BN + ReLU6 + PW project). Evaluate memory bandwidth and latency for the inverted residual block with input 56x56x32, expansion 6.'
+question: 'For the 56x56x32 MobileNetV2 inverted residual block, which fusion strategy is viable and what memory and latency savings should you expect?'
+details:
+  realistic_solution: 'Strategy C (full block fusion) saves intermediate tensor writes but must buffer the input for the residual add. At 56x56x32 * 1B int8 = 100KB input, this fits in L2 cache — viable.'
+  common_mistake: |
+    **The Pitfall:** Ignoring the inverted residual connection when attempting full block fusion.
+    **The Rationale:** Candidates assume all intermediate activations can be discarded, forgetting that the original block input must be kept in SRAM for the final element-wise addition.
+    **The Consequence:** The compiler fails to fuse the operators, or the system crashes because the required input tensor was overwritten.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Inverted residual block input: 56x56x32 * 1B = ~100 KB.
+    - Intermediate expansion: 56x56x192 * 1B = ~602 KB.
+    - Memory Bandwidth: 68 GB/s.
+
+    **Calculations:**
+    - (A) No fusion: Write 602 + 602 + 602 + 100 + 100 = 2006 KB. Total traffic (read+write) = 4012 KB (~4 MB). At 68 GB/s: ~0.059ms.
+    - (B) DWConv+BN+ReLU6: Saves 2 intermediate writes/reads. Traffic = ~2.8 MB. Time = 0.041ms.
+    - (C) Full fusion: Keeps 100 KB input in L2. Reads weights (~14 KB) and input. Writes 100 KB output. Traffic = ~220 KB. At 68 GB/s: ~0.003ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~19.7x Speedup (Memory Bandwidth-Bound)**. Full block fusion is highly viable as the 100 KB input easily fits in L2 cache, yielding a theoretical ~19.7x speedup over no fusion.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

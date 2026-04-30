@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-0426
+track: cloud
+level: L3
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: apply
+phase: both
+title: The Batch Size Sweet Spot
+scenario: 'You are serving a 7B LLM on a single H100. At batch=1, you measure 35 tokens/sec. At batch=64, you measure 1,800 tokens/sec. You must determine the cause of this 51x throughput increase with only 64x more work and identify the batch size where diminishing returns begin.'
+question: Why does throughput increase 51x with a 64x batch size increase, and at what batch size do diminishing returns begin?
+details:
+  realistic_solution: 'At batch=1, LLM decode is deeply memory-bound (arithmetic intensity ≈ 1 Op/Byte). The GPU reads all 14 GB of weights from HBM for each token but does minimal compute per byte moved. Throughput is limited by HBM bandwidth: 3.35 TB/s / 14 GB = 239 tokens/sec theoretical (35 actual due to kernel launch overhead and memory access patterns). Increasing batch size reuses the same weight reads across multiple requests, increasing arithmetic intensity linearly (at BS=B, intensity ≈ B Ops/Byte). Once intensity exceeds the ridge point (295 Ops/Byte on H100), the workload becomes compute-bound and throughput saturates. Diminishing returns start around BS≈295, but you hit the VRAM capacity wall first: KV cache per request at 2K context ≈ 0.5 GB. At BS=128: 64 GB KV cache + 14 GB weights = 78 GB — barely fits in 80 GB. Practical max batch ≈ 128, yielding ~3,400 tokens/sec.'
+  common_mistake: |
+    **The Pitfall:** Assuming throughput should scale linearly with batch size indefinitely.
+    **The Rationale:** Candidates know that larger batches are more efficient but fail to distinguish between the memory-bound regime (where linear scaling occurs) and the compute-bound regime (where throughput saturates).
+    **The Consequence:** Over-provisioning batch size beyond the ridge point, leading to OOM errors or unacceptable latency without meaningful throughput gains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B model at FP16 = 14 GB weights.
+    - H100 hardware: 3.35 TB/s memory bandwidth, 989 TFLOPS compute.
+    - KV cache at 2K context ≈ 0.5 GB per request.
+    - Total VRAM: 80 GB.
+
+    **Calculations:**
+    - Batch=1 Arithmetic Intensity: (2 * 7B FLOPs) / 14 GB = 1 FLOP/Byte (Memory-bound).
+    - Batch=B Arithmetic Intensity: B FLOPs/Byte.
+    - Hardware Ridge Point: 989 TFLOPS / 3.35 TB/s ≈ 295 FLOPs/Byte.
+    - VRAM capacity limit at Batch 128: 14 GB (weights) + (128 * 0.5 GB KV Cache) = 78 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Ridge Point at B=295 (Memory-Bound to Compute-Bound)**. Throughput scales linearly as weight reads are amortized across the batch, but practical scaling stops at ~128 due to the strict KV-cache VRAM capacity wall long before hitting the compute roofline.
+  options:
+  - Throughput increases because memory bandwidth scales linearly with batch size. Diminishing returns start at batch 64.
+  - Throughput increases because the GPU caches the weights in SRAM. Diminishing returns start at batch 1024 when SRAM is full.
+  - Throughput increases because the workload shifts from compute-bound to memory-bound. Diminishing returns start at batch 128 due to KV-cache limits.
+  - Throughput increases by reusing weight reads from HBM, increasing arithmetic intensity. Diminishing returns start at the ridge point (~batch 295), but VRAM limits the max batch to ~128.
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

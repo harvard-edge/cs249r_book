@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-4270
+track: cloud
+level: L5
+zone: design
+topic: chiplet-architecture
+competency_area: compute
+bloom_level: create
+phase: both
+title: Model Parallelism Partitioning for XCD Locality
+scenario: You are deploying a 70B parameter model on a single MI300X containing 8 independent XCD dies (192 GB total).
+question: How would you partition the 70B model across the 8 XCDs to maximize local memory access?
+details:
+  realistic_solution: 'Partition by layer groups: assign consecutive transformer layers (e.g., layers 0-9) to XCDs 0-1, layers 10-19 to XCDs 2-3, etc. Within each layer group, keep both weight matrices and activation buffers on the same XCD pair. Use pipeline parallelism between XCD groups rather than FSDP/ZeRO-3 across all 8. Cross-XCD traffic is then only activation tensors at pipeline stage boundaries (much smaller than weights).'
+  common_mistake: |
+    **The Pitfall:** Round-robin distributing weight shards across all XCDs (e.g., using FSDP indiscriminately).
+    **The Rationale:** Maximizing memory capacity utilization without considering the severe penalty of cross-XCD fabric bandwidth.
+    **The Consequence:** Every forward pass requires massive cross-XCD data movement, bottlenecking the unified package.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B params FP16: 140 GB.
+    - Hardware: 8 XCD dies (24 GB each, 192 GB total).
+
+    **Calculations:**
+    - Per XCD requirement: 140 GB / 8 = 17.5 GB.
+    - FSDP traffic per layer: Gather the remaining 122.5 GB across the internal fabric.
+    - Pipeline traffic: Only the activation tensor (~2 GB) at pipeline boundaries.
+
+    **Conclusion & Interpretation:**
+    - **Result: Fabric-Bandwidth Bound.** FSDP bottlenecks the chiplet fabric; pipeline parallelism isolates weights locally and cuts cross-die traffic by orders of magnitude.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

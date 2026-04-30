@@ -49,7 +49,7 @@ def survey() -> tuple[dict[str, list[tuple[str, int, Path, str, str]]],
     """
     chains: dict[str, list[tuple[str, int, Path, str, str]]] = defaultdict(list)
     published_chains: dict[str, int] = defaultdict(int)
-    for p in QUESTIONS_DIR.glob("*/*.yaml"):
+    for p in QUESTIONS_DIR.rglob('*.yaml'):
         try:
             d = yaml.safe_load(p.read_text(encoding="utf-8"))
         except Exception:

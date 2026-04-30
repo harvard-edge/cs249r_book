@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-2273
+track: cloud
+level: L5
+zone: evaluation
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: The Library vs Custom Kernel Decision
+scenario: Your inference serving team runs a 70B MoE model. Profiling shows that the top-K expert routing + scatter/gather operations account for 22% of per-token latency. A kernel engineer proposes writing a custom Triton kernel, but the library vendor promises optimized MoE primitives in 6 months.
+question: How do you evaluate the build-vs-wait decision for writing a custom Triton kernel versus waiting for vendor library support?
+details:
+  realistic_solution: "Evaluate across four axes: (1) Performance gap: 22% of latency in routing means a custom kernel could save 3.5ms per token on a 23ms budget \u2014 significant for SLA and fleet cost (saving 35 GPUs). (2) Maintenance cost: Triton kernels are ~10\times easier to maintain than raw CUDA, but still require updates per GPU generation. (3) Correctness risk: MoE routing has complex data-dependent control flow; bugs cause silent accuracy loss. (4) Time value: 6 months of serving at 22% overhead costs real money. Decision framework: if the operation is on the critical path AND vendor coverage is >3 months away AND the operation's data access pattern is non-standard (irregular scatter/gather, not dense GEMM), write the custom kernel. Dense matmul \rightarrow always use cuBLAS. Custom attention variants \rightarrow use FlashAttention or Triton. Non-standard data movement patterns (MoE routing, speculative decoding verification) \rightarrow custom kernel territory."
+  common_mistake: |
+    **The Pitfall:** Defaulting strictly to "always use vendor libraries" or "always write custom kernels."
+    **The Rationale:** Relying on dogma rather than evaluating the specific economic and performance tradeoff of the current bottleneck.
+    **The Consequence:** Leaving massive amounts of performance and money on the table by waiting 6 months for a vendor library that could have been solved with a 2-week Triton kernel.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Current Latency: 23ms/token. Routing takes 5ms (22%).
+    - Projected Custom Kernel Routing Time: 1.5ms.
+    - Fleet load: 10,000 QPS. GPU Cost: $2/hr.
+
+    **Calculations:**
+    - Latency Savings: 5ms - 1.5ms = 3.5ms per token.
+    - Total New Latency: 19.5ms (15% speedup).
+    - Fleet Compute Savings: 10,000 QPS \times 3.5ms = 35 GPU-seconds/second = 35 fewer GPUs required.
+    - Financial Savings: 35 GPUs \times $2/hr \times 24 \times 365 = ~$613K/year.
+
+    **Conclusion & Interpretation:**
+    - **Result: $613K/year in ROI (Economics-Bound)**. A 2-week Triton engineering investment yields $613K/year in ROI, making the build decision overwhelmingly favorable.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

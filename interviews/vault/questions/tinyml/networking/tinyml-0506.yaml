@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: tinyml-0506
+track: tinyml
+level: L3
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: apply
+phase: inference
+title: The Federated Simulator Stall
+scenario: You are a TinyML systems engineer designing a keyword-spotting application. To accelerate research, your team is simulating a federated learning workload on a single cloud server with 8 H100 GPUs. The server simulates 100,000 devices, each producing a 50 KB gradient update per round. The simulation is unexpectedly slow, with `htop` showing the CPU pegged at 100% and `nvidia-smi` showing GPU utilization near 0%. A profiler reveals the bottleneck is the host CPU transferring the 100,000 tiny gradient packets to the 8 GPUs for aggregation over a standard PCIe Gen5 bus.
+question: What bottleneck makes the federated simulator slow despite low GPU utilization on the H100 server?
+details:
+  realistic_solution: 'The primary bottleneck is the PCIe transaction layer latency (dispatch tax), not bandwidth. The CPU is spending all its time initiating tens of thousands of tiny, individual data transfers. Each transfer, no matter how small, incurs a fixed latency penalty (~1,000 ns for PCIe Gen5). When multiplied by 100,000 transfers, this latency overhead cripples the pipeline. The correct solution is for the CPU to batch all the small gradients destined for a single GPU into one large, contiguous buffer and perform a single, large DMA transfer. This amortizes the high latency cost over a large amount of data, allowing the system to become bandwidth-bound again, which is much more efficient.'
+  common_mistake: |
+    **The Pitfall:** Focusing exclusively on the PCIe bus's peak throughput bandwidth.
+    **The Rationale:** Engineers assume that since 64 GB/s is incredibly fast, any transfer that fits well within that boundary will execute instantaneously.
+    **The Consequence:** They fail to account for the fixed latency "dispatch tax" for small transfers, resulting in CPU bottlenecking and idle GPUs while the bus essentially waits for context switching.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Workload: 100,000 updates, 50 KB each (5 GB total).
+    - PCIe Gen5 x16 Bandwidth: 64 GB/s. Unbatched Latency: ~1 µs/transfer.
+
+    **Calculations:**
+    - Bulk theoretical time: 5 GB / 64 GB/s = 78 ms.
+    - Unbatched latency penalty: (12,500 transfers/GPU × 1 µs) + (5 µs CPU setup × 12.5K) = 75 ms per chunk overhead.
+    - Batched transfer: 1 massive transfer of 625 MB @ 64 GB/s = 9.8 ms.
+    - Speedup via batching: 75 / 9.8 = ~7.7x faster.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~7.7x faster (Latency-Bound)**. Batching amortizes the massive dispatch tax, accelerating the pipeline by ~7.7x and unblocking the GPUs.
+  options:
+  - 'The 5 GB of total gradients exceeds the aggregate memory capacity of the H100 cluster.'
+  - 'The H100 GPUs do not support enough concurrent CUDA streams to process 12,500 simultaneous gradients.'
+  - 'The high number of small transfers creates a latency bottleneck on the PCIe bus, overwhelming the CPU with dispatch overhead.'
+  - 'The PCIe Gen5 bus caps at 32 GB/s, taking a minimum of 156 ms which strictly bounds the simulation.'
+  correct_index: 2
+status: deleted
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

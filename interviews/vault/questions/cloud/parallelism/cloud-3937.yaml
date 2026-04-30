@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3937
+track: cloud
+level: L4
+zone: optimization
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: FSDP Prefetch Policy Tuning for Communication-Compute Overlap
+scenario: 'You use PyTorch FSDP to train a 30B model across 32 GPUs. FSDP has three prefetch policies: BACKWARD_PRE, BACKWARD_POST, and NO_PREFETCH. With BACKWARD_PRE, memory spikes cause OOM. With NO_PREFETCH, training is 40% slower.'
+question: "Which FSDP prefetch policy should you use when BACKWARD_PRE OOMs but NO_PREFETCH is 40% slower, and why?"
+details:
+  realistic_solution: 'BACKWARD_PRE: fetches next FSDP unit''s params during current backward. Doubles per-layer memory. BACKWARD_POST: fetches after current backward finishes but before waiting for result. Less aggressive, lower memory. NO_PREFETCH: waits until params are actually needed. For 30B model with 32 GPUs: per-GPU params in FSDP = 30B/32 = 937.5M. Each FSDP unit (1 layer, ~750M params) = 1.5GB BF16. BACKWARD_PRE: 2 x 1.5GB = 3GB extra. At 80GB memory with 70GB occupied, 3GB causes OOM. Solution: use BACKWARD_POST (prefetch with lower memory), or use BACKWARD_PRE with limit_all_gathers=True (limits concurrent AllGathers to 2).'
+  common_mistake: |
+    **The Pitfall:** Blindly using the most aggressive prefetch policy (BACKWARD_PRE) for large models.
+    **The Rationale:** Candidates often assume maximum communication overlap is always best without calculating the transient memory overhead required to hold multiple layers simultaneously.
+    **The Consequence:** Unnecessary Out-Of-Memory (OOM) errors that prevent the model from training at all.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - FSDP overlap: AllGather takes ~3ms, backward compute takes ~8ms per layer.
+    - Memory overhead for BACKWARD_POST is 1.5GB (1 extra layer).
+    - Memory overhead for BACKWARD_PRE is 3.0GB (2 extra layers).
+
+    **Calculations:**
+    - Overlap hides 3ms / 8ms = 37.5% of communication time.
+    - This reduces total training time by ~25% vs NO_PREFETCH.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound Tradeoff**. BACKWARD_POST provides the best tradeoff, giving a 25% speedup at only 1.5GB memory cost without triggering OOM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

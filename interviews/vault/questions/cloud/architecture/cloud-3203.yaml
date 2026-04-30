@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3203
+track: cloud
+level: L5
+zone: realization
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: MoE Checkpointing Overhead at Scale
+scenario: Your 671B-parameter MoE model trains on 2048 H100 GPUs with expert parallelism. You need to checkpoint every 15 minutes for fault tolerance (Young-Daly optimal).
+question: What checkpoint size, write time, and nonblocking strategy are needed to checkpoint the 671B MoE every 15 minutes?
+details:
+  realistic_solution: 'Checkpoint size: 671B params * (2B weights + 12B optimizer) = 671B * 14B = 9.4 TB total, distributed across 2048 GPUs (~4.6 GB per GPU shard). Writing to parallel filesystem: At 100 GB/s aggregate write BW (typical GPFS/Lustre), full checkpoint: 9.4 TB / 100 GB/s = 94 seconds — far too long for a 15-minute interval (10.4% overhead). Strategy: (1) Asynchronous checkpointing: copy GPU memory to pinned CPU memory (PCIe Gen5: 4.6 GB / 64 GB/s = 72ms per GPU, negligible). Then write from CPU to storage in the background while training continues. (2) Only checkpoint changed experts: with routing, many experts may not have been updated recently — use dirty-bit tracking. (3) Use NCCL-based collective checkpoint: each node writes its local shards to NVMe first (6.4 GB/s per NVMe * 8 = 51.2 GB/s per node), then async upload to parallel FS. Local NVMe write: 4.6 GB * 256 GPUs/node_count / 51.2 GB/s ≈ 23 seconds per node.'
+  common_mistake: |
+    **The Pitfall:** Computing checkpoint size using only the model weights.
+    **The Rationale:** Engineers often forget that the optimizer state (like Adam) requires significantly more memory than the weights themselves.
+    **The Consequence:** Underestimating the checkpoint payload by ~6x, leading to saturated network links and devastating training stalls.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 671B params. Checkpoint includes weights (2 bytes) and Adam optimizer (12 bytes).
+       - Hardware: 2048 H100 GPUs. Node NVMe write at 51.2 GB/s per node.
+       - PCIe Gen5 transfer: 64 GB/s.
+    2. **Calculations:**
+       - Weights memory = 671e9 * 2 bytes = ~1.34 TB.
+       - Optimizer memory = 671e9 * 12 bytes = ~8.05 TB.
+       - Total Checkpoint = 1.34 TB + 8.05 TB = ~9.4 TB.
+       - Shard per GPU = 9.4 TB / 2048 = 4.59 GB.
+       - GPU to CPU memory copy time = 4.59 GB / 64 GB/s = ~72 ms.
+       - CPU to Local NVMe write time = 4.59 GB / 6.4 GB/s = ~0.72 s.
+    3. **Conclusion & Interpretation:** **By utilizing asynchronous memory copies, the blocking training stall is constrained to a negligible ~72ms, completely avoiding the network IO bottleneck.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

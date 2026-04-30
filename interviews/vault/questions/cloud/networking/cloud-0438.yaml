@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0438
+track: cloud
+level: L3
+zone: fluency
+topic: collective-communication
+competency_area: networking
+bloom_level: apply
+phase: both
+title: The Tensor Parallelism Choke Point
+scenario: 'You are diagnosing a performance issue in a large-scale LLM training job using 8-way tensor parallelism. The job runs across two servers, each with four H100 GPUs. Profiling shows that an All-Reduce operation on a 4 GB tensor is a major bottleneck. Your servers use NVLink 4.0 for intra-node GPU communication and InfiniBand NDR for inter-node communication.'
+question: 'How long should the 4GB all-reduce take with all 8 GPUs on NVLink versus split across two servers, and what bottleneck does this reveal?'
+details:
+  realistic_solution: 'Analyze the bandwidth disparity between NVLink and InfiniBand. Intra-node communication happens over the ultra-high-bandwidth NVLink fabric (900 GB/s), while inter-node is strictly bottlenecked by the NIC (50 GB/s). Splitting a TP domain across nodes forces the latency-critical All-Reduce to operate at the speed of the slowest link.'
+  common_mistake: |
+    **The Pitfall:** Underestimating the bandwidth gap between on-node and off-node interconnects.
+    **The Rationale:** Engineers assume standard high-speed network cards are "fast enough" or incorrectly blame software overhead (e.g., NCCL).
+    **The Consequence:** Designing distributed clusters that split Tensor Parallelism domains across physical nodes, completely crippling Model Flops Utilization (MFU).
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Tensor Size: 4 GB. TP domain = 8 GPUs.
+       - NVLink 4.0: 900 GB/s bidirectional.
+       - InfiniBand NDR: 400 Gbps (50 GB/s unidirectional).
+    2. **Calculations:**
+       - Ring All-Reduce Transfer (N=8): 2 × (7/8) × 4 GB = 7 GB per link.
+       - Intra-node (NVLink): 7 GB / 900 GB/s = ~7.8 ms.
+       - Inter-node (IB NDR): 7 GB / 50 GB/s = 140 ms.
+       - Slowdown: 140 ms / 7.8 ms = ~18×.
+    3. **Conclusion & Interpretation:**
+       - **Result: Interconnect-Bandwidth-Bound. Crossing the server boundary introduces an ~18× slowdown, making the inter-node InfiniBand connection the severe bottleneck.**
+  options:
+  - The bottleneck is PCIe Gen5 bandwidth, as the data must cross the PCIe bus taking ~220ms (calculating 7GB / 32GB/s).
+  - Software overhead in the NCCL communication library is the primary issue; the hardware difference between NVLink and InfiniBand is mathematically negligible.
+  - The bottleneck is the InfiniBand NDR link, which has ~18x less bandwidth (50 GB/s vs 900 GB/s). The inter-node transfer takes ~140ms vs ~7.8ms for the all-NVLink case.
+  - The bottleneck is HBM memory access latency; reading the 4 GB tensor from HBM on each GPU at 3.35TB/s is slower than the network transfer itself.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4076
+track: cloud
+level: L5
+zone: evaluation
+topic: rdma-transport
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: iWARP vs RoCE v2 for ML Training
+scenario: 'A cloud provider considers deploying iWARP (RDMA over TCP) instead of RoCE v2 (RDMA over UDP) for their multi-tenant ML training infrastructure. iWARP doesn''t need PFC since TCP handles retransmission, eliminating the PFC deadlock risk.'
+question: 'How suitable is iWARP versus RoCE v2 for large-scale ML training, considering latency, throughput, CPU overhead, and operations?'
+details:
+  realistic_solution: 'iWARP drawbacks for ML: (1) Latency: iWARP adds TCP processing overhead even with hardware offload. Measured latency: 3-5μs vs RoCE''s 1.5-2.5μs. For AllReduce with 2048 steps at N=1024: extra latency = 2048 × 2μs = 4ms per iteration. (2) Throughput: TCP segmentation and reassembly limits throughput to ~350Gbps on current hardware (vs 400Gbps for RoCE). 12.5% throughput penalty. (3) CPU overhead: while iWARP offloads TCP to hardware (TOE), the TCP state machine is inherently more complex than UDP. Connection setup: TCP 3-way handshake = 3 RTTs vs RoCE QP setup = 1 RTT. (4) Scalability: TCP maintains per-connection state (buffers, sequence numbers, congestion windows). For 1024 GPUs × 1023 connections × 8 rails = 8.4M TCP connections, each needing ~2KB state = 16.8GB of TOE memory — exceeding HCA capacity. (5) Advantage: no PFC needed, works over any Ethernet fabric, handles lossy networks gracefully. Verdict: iWARP is suitable for small clusters (<64 GPUs) or lossy WAN-connected training (cross-datacenter DiLoCo). RoCE v2 remains necessary for large-scale training where latency and throughput matter.'
+  common_mistake: |
+    **The Pitfall:** Favoring iWARP purely because it eliminates the need for Priority Flow Control (PFC).
+    **The Rationale:** PFC deadlock is a known operational headache, so candidates jump to TCP-based RDMA to avoid it.
+    **The Consequence:** Overlooking iWARP's massive per-connection TCP state overhead and higher latency, which cripple high-performance AllReduce at scale.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1024 GPUs, 8 rails, 1023 connections per GPU.
+    - RoCE latency overhead: 2μs. iWARP latency overhead: 4μs.
+    - iWARP connection state requires 2KB memory per connection.
+    - RoCE QP state is 256MB.
+
+    **Calculations:**
+    - AllReduce latency overhead with RoCE: 2 * 1023 * 2μs = 4.1ms.
+    - iWARP latency overhead: 2 * 1023 * 4μs = 8.2ms.
+    - Extra time per iteration: 4.1ms. At 3600 iter/hour = 14.8 seconds/hour wasted.
+    - iWARP TCP state memory: 8.4M connections * 2KB = 16.8GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: TCP State Bottleneck** (16.8GB is 65x more state than RoCE QP state (256MB), making it infeasible on current HCAs).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

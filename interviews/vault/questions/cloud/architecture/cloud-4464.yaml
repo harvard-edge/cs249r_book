@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-4464
+track: cloud
+level: L4
+zone: design
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Embedding Table Sharding Strategy for 10TB Feature Space
+scenario: A production recommendation system has 50 embedding tables totaling 10TB. The largest table has 2B rows x 64-dim float32 (512GB). You have 128 GPUs each with 80GB HBM.
+question: "How would you shard 50 embedding tables totaling 10TB across 128 GPUs, including the 512GB largest table?"
+details:
+  realistic_solution: 'Hybrid sharding strategy: (1) Table-wise sharding: each table assigned to a GPU group. Large table (512GB) assigned to 8 GPUs (10% overhead). Row-wise shard: split 2B rows into 8 shards of 250M rows each. (2) Column-wise sharding: for tables that are tall but narrow. (3) Hot row replication: identify top-1K hot rows via access logs and replicate. (4) Column-parallel for dense tables.'
+  common_mistake: |
+    **The Pitfall:** Sharding all tables uniformly across all GPUs.
+    **The Rationale:** Candidates treat embedding tables as uniform memory blocks, ignoring power-law access distributions where the top 0.1% of rows receive 10% of lookups.
+    **The Consequence:** Creating immense all-to-all network traffic and massive compute load imbalances because hot rows are arbitrarily scattered across the cluster.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 512GB table across 8 GPUs.
+    - DLRM lookup batch of 4K samples, avg 100 lookups per sample.
+    - InfiniBand = 400 Gbps (50 GB/s).
+
+    **Calculations:**
+    - 512GB table / 8 GPUs = 64GB per GPU.
+    - All-to-all traffic per batch = 4K * 100 = 400K lookups.
+    - Per shard = 400K / 8 = 50K lookups.
+    - Lookup size = 64 * 4B = 256 bytes.
+    - Total embedding output = 400K * 256B = 100MB per batch.
+    - All-to-all reduce = 100MB * (8-1)/8 = 87.5MB per batch.
+    - Network time = 87.5MB / 50GB/s = 1.75 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.75 ms (Compute-Bound)**. Network time (1.75 ms) is well within a typical 10ms batch step budget.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

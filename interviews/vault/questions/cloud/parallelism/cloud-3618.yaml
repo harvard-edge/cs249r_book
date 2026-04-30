@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3618
+track: cloud
+level: L4
+zone: optimization
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: Gradient Synchronization Overlap with Computation on H100
+scenario: 'A DDP training job on 8 GPUs has a backward pass taking 800ms and gradient AllReduce taking 400ms (sequential). A senior engineer proposes overlapping AllReduce with backward computation using gradient bucketing.'
+question: 'How does gradient bucketing overlap the 400 ms AllReduce with the 800 ms backward pass, and what speedup is possible?'
+details:
+  realistic_solution: 'Gradient bucketing groups gradients into buckets (e.g., 25MB each). When a bucket fills (computed in backward pass), AllReduce starts immediately on that bucket while backward continues computing remaining layers. Overlap fraction ≈ (N-1)/N where N = number of buckets. With 28GB gradients / 25MB bucket = 1120 buckets, overlap ≈ 99.9%. Theoretical: backward=800ms, AllReduce=400ms, overlapped total ≈ max(800,400)+1 bucket latency ≈ 805ms vs 1200ms sequential. Speedup: 1200/805=1.49×. Real-world achieves 30-40% improvement due to CUDA stream contention.'
+  common_mistake: |
+    **The Pitfall:** Assuming 100% overlap is achievable and that speedup = AllReduce_time.
+    **The Rationale:** Candidates often forget bucket synchronization overhead, CUDA stream contention, and the fact that the last gradient bucket cannot be overlapped with the backward pass.
+    **The Consequence:** Overestimating the performance gains of gradient bucketing in real-world scenarios.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequential step time: 800ms (backward) + 400ms (AllReduce) = 1200ms.
+    - 1 bucket tail latency: ~5ms.
+    - CUDA stream overhead: 30%.
+
+    **Calculations:**
+    - Overlapped critical path: max(800ms, 400ms) = 800ms.
+    - Total ideal overlapped time: 800ms + 5ms = 805ms.
+    - Effective overlap with 30% overhead: 800ms + (400ms * 0.3) = 920ms.
+    - Actual speedup: 1200 / 920 = 1.30x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.30x Speedup** (Overhead prevents theoretical 1.49x speedup; compute-bound).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

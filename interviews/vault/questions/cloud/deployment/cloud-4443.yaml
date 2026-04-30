@@ -1,0 +1,32 @@
+schema_version: '1.0'
+id: cloud-4443
+track: cloud
+level: L6+
+zone: mastery
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: Prefill-Decode Ratio Optimization for LLM Serving Fleet
+scenario: 'A disaggregated serving fleet runs a 70B model. Traffic analysis shows average prompt length is 256 tokens and average output length is 512 tokens.'
+question: 'What optimal prefill-to-decode GPU ratio would you choose to maximize GPU utilization for a 70B model with 256-token prompts and 512-token outputs?'
+details:
+  realistic_solution: 'Prefill compute (TTFT phase): FLOP for 256-token prompt on 70B = 2 * 256 * 70B = 35.8T FLOP. Prefill is compute-bound on H100 (arithmetic intensity > 295 FLOP/byte). Prefill throughput: 35.8T / 989T = 36ms per request. Decode compute per token: 2 * 70B = 140B FLOP per token. Decode is memory-bound (arithmetic intensity ~2 FLOP/byte at batch=1). Decode throughput per token: 70B * 2B / 3.35TB/s = 41.8ms. For 512 output tokens: 512 * 41.8ms = 21.4 seconds total decode time (single stream). In continuous batching at batch=64: decode throughput scales: 64 requests share 41.8ms per token step = 64 tok/step / 41.8ms = 1531 tok/sec per H100. Per request at 512 tokens: 512/1531 = 0.33 seconds. Ratio: prefill 36ms vs decode 334ms per request = 1:9.3. Prefill:decode ratio should be approximately 1:9 (1 prefill GPU per 9 decode GPUs). In practice: 1:4 to 1:8 due to variable traffic and batching efficiency.'
+  common_mistake: |
+    **The Pitfall:** Setting the ratio purely based on prompt-to-output token counts (256:512 = 1:2).
+    **The Rationale:** Prefill compute scales as O(seq_len^2) due to attention, while decode is O(1) per token and memory-bound. The compute imbalance requires roofline analysis.
+    **The Consequence:** A severely bottlenecked system where decode GPUs idle waiting for prefill GPUs to finish.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model, 256-token prompt, 512-token output.
+    - H100 GPU (989 TFLOPS, 3.35 TB/s bandwidth). Decode batch size 64.
+
+    **Calculations:**
+    - Prefill Capacity: ~36ms/req = ~27.8 req/sec.
+    - Decode Time (batch 64): 512 tokens * 41.8ms = 21.4 sec for 64 reqs.
+    - Decode Throughput: 64 / 21.4 sec ≈ 3 req/sec serial → 194 req/sec per decode H100 with continuous pipelining.
+    - Ratio calculation: 194 req/sec / 27.8 req/sec ≈ 7.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute Imbalance.** The optimal capacity ratio is 1 prefill H100 to 7 decode H100s (or 1:8 practically), driven by the compute-heavy prefill phase.
+status: published

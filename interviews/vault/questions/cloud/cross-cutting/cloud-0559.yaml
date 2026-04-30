@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-0559
+track: cloud
+level: L6+
+zone: mastery
+topic: differential-privacy
+competency_area: cross-cutting
+bloom_level: create
+phase: both
+title: The Privacy Throughput Cliff
+scenario: A security audit reveals our medical LLM is vulnerable to membership inference attacks. The privacy team mandates Differentially Private SGD (DP-SGD) with ε=1, but the infrastructure team warns this will increase training time by 10x and require 3x more GPU memory.
+question: Why does adding privacy guarantees have such a devastating systems cost, and how do you bring it down to something feasible?
+details:
+  realistic_solution: 'Standard SGD computes one gradient for the entire batch (efficient — one backward pass). DP-SGD requires *per-example* gradients because you must clip each example''s gradient independently before aggregating. On an H100 with batch size 64, this means 64 separate backward passes instead of 1 — a 64× compute increase for the backward pass. The memory cost comes from storing 64 separate gradient tensors simultaneously. For a 7B model: standard gradient = 14 GB (FP16). Per-example gradients for batch 64 = 14 GB × 64 = 896 GB — doesn''t fit on any single GPU. Fixes: (1) use JAX''s `vmap` for efficient per-example gradients (2-3× overhead instead of 64×), (2) gradient accumulation with micro-batches of 1, (3) DP-LoRA (apply DP only to low-rank adapter weights, reducing the gradient tensor from 7B to ~10M parameters).'
+  common_mistake: |
+    **The Pitfall:** Assuming DP-SGD simply adds noise to gradients, which should be nearly computationally free.
+    **The Rationale:** Standard differential privacy math focuses on the noise addition step, masking the engineering reality of how gradients are calculated.
+    **The Consequence:** Massive, unexpected memory and compute blowups because DP-SGD fundamentally requires per-example gradients, breaking standard batch efficiency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B model, FP16 parameters, batch size 64.
+    - Standard gradient = 14 GB.
+
+    **Calculations:**
+    - Naive DP-SGD (per-example gradients): 64 passes × 14 GB = 896 GB (OOM on any single GPU).
+    - DP-SGD with JAX `vmap`: 1 pass × 14 GB × ~3x overhead = 42 GB (Fits on 80 GB GPU).
+    - DP-LoRA (rank 16): Gradient footprint drops to ~20 MB per example. 64 × 20 MB = 1.3 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound.** DP-SGD fundamentally breaks batch efficiency. DP-LoRA cuts required GPU-hours massively and solves the memory bottleneck.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: cloud-chain-356
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

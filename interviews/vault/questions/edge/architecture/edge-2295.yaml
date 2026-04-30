@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-2295
+track: edge
+level: L6+
+zone: design
+topic: kv-cache-management
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Paged KV Cache Allocation for Edge LLM
+scenario: Serving Llama-2-7B on a Jetson AGX Orin. Llama-2-7B has 32 layers, 32 KV heads, head_dim=128, FP16. Memory fragmentation on the long-tail of session lengths is forcing premature OOM evictions.
+question: Design a paged KV manager that diagnoses why on-device LLM serving on Orin diverges from H100 PagedAttention assumptions, and compute the maximum concurrent 1024-token sessions given 4 GB of KV-dedicated memory and 16-token page blocks.
+visual:
+  kind: svg
+  path: edge-2295.svg
+  alt: Bar chart comparing continuous memory allocation vs fragmented page blocks layout.
+  caption: Paged Allocation Blocks
+details:
+  realistic_solution: 'Per token (Llama-2-7B): 2 (K+V) * 32 layers * 32 KV heads * 128 dim * 2 B = 512 KB. 16-token page = 8 MB. Total pages in 4 GB = 512. A 1024-token session needs 64 pages, so 8 concurrent sessions fit. Architectural diagnosis: on Orin, paged KV does NOT need host/HBM swapping (unlike H100/vLLM) since memory is unified, but it still pays internal-fragmentation cost (avg 8 MB wasted per session in the partial last page) and TLB pressure on the iGPU MMU which has smaller TLBs than discrete GPUs - keep page size at 16 tokens, not 4, to avoid TLB thrashing.'
+  common_mistake: |
+    **The Pitfall:** Using H100/vLLM assumptions directly on Orin.
+    **The Rationale:** Candidates assume that standard cloud serving strategies (like a host-side swap pool and tiny 4-token pages) apply universally.
+    **The Consequence:** TLB thrashing on the unified-memory MMU and designing irrelevant swap mechanisms, leading to poor serving performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: Llama-2-7B (32 layers, 32 KV heads, 128 dim, FP16).
+    - KV-dedicated memory: 4 GB.
+    - Page block size: 16 tokens.
+
+    **Calculations:**
+    - KV per token = 2 (K+V) * 32 * 32 * 128 * 2 bytes = 512 KB.
+    - Page size = 16 tokens * 512 KB = 8 MB.
+    - Total pages available = 4096 MB / 8 MB = 512 pages.
+    - Pages per 1024-token session = 1024 / 16 = 64 pages.
+
+    **Conclusion & Interpretation:**
+    - **Result: System can host 8 concurrent sessions (512 / 64).** A 16-token page size balances fragmentation and TLB pressure on unified memory.
+status: draft
+provenance: llm-draft
+expected_time_minutes: 10
+requires_explanation: true
+validated: false
+math_verified: false
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-diagnosis-L6+
+created_at: '2026-04-25'

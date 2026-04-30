@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-0768
+track: cloud
+level: L3
+zone: fluency
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: The DDP Bucket Straggler
+scenario: You are using PyTorch DistributedDataParallel (DDP) across 4 GPUs. GPU 3 is slightly slower than the others due to thermal throttling. You notice that GPU 0, 1, and 2 are sitting idle for 200ms at the end of every backward pass. You know DDP overlaps communication with computation.
+question: Why isn't the DDP communication overlap hiding the 200ms delay of throttled GPU 3?
+details:
+  realistic_solution: |
+    DDP overlaps AllReduce with backward computation by splitting gradients into buckets. As each bucket fills during backprop, its AllReduce begins immediately. This works well when all GPUs progress at the same rate. But GPU 3 is 200ms slower due to thermal throttling, so it reaches the final gradient bucket 200ms late. All other GPUs have finished their backward pass and final AllReduce, but the collective requires all participants. GPUs 0-2 sit idle waiting for GPU 3's final bucket. The overlap only hides communication latency, not compute imbalance. The fix: identify and fix the thermal issue, or use asynchronous gradient methods.
+  common_mistake: |
+    **The Pitfall:** Believing DDP waits until the entire backward pass is finished before communicating.
+    **The Rationale:** DDP actually uses gradient bucketing to overlap AllReduce with compute. However, the overlap only hides communication latency, not compute imbalance.
+    **The Consequence:** Engineers incorrectly try to tune NCCL parameters instead of fixing the hardware thermal issue.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 3 GPUs finish in 800ms, 1 throttled GPU in 1000ms.
+    - Hardware cost: $3/hr.
+
+    **Calculations:**
+    - Waste Per Step: 3 GPUs × 200ms = 600ms wasted.
+    - Over 2 million steps: 1.2M GPU-seconds = 333 GPU-hours.
+    - Cost Impact: 333 hrs × $3/hr ≈ $1,000.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Skew-Bound**. The overlap hides network latency, but 200ms compute skew wastes $1,000.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

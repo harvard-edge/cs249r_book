@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4064
+track: cloud
+level: L3
+zone: fluency
+topic: rdma-transport
+competency_area: networking
+bloom_level: remember
+phase: both
+title: RDMA Write vs RDMA Send for AllReduce
+scenario: 'RDMA supports two one-sided operations: RDMA Write (sender writes directly to remote memory) and RDMA Read (sender reads from remote memory), plus two-sided Send/Receive. NCCL primarily uses RDMA Write for AllReduce data transfer.'
+question: Why does NCCL prefer RDMA Write over Send/Receive for a 256MB gradient transfer, and how much overhead does it avoid?
+details:
+  realistic_solution: |
+    RDMA Write allows zero-copy transfer directly into remote memory buffers without involving the target CPU. Send/Receive requires the receiver's CPU to synchronously pre-post buffers and poll for completion. For large collective operations broken into many chunks, the CPU polling overhead of Send/Receive dominates the latency.
+  common_mistake: |
+    **The Pitfall:** Thinking RDMA Write and Send/Receive are equivalent for bulk network transfers.
+    **The Rationale:** Candidates assume that because both use the RDMA fabric, their performance is identical, failing to realize Send requires synchronous receiver CPU involvement.
+    **The Consequence:** Using Send/Receive blocks the sender if the receiver is late, destroying asynchronous pipelining and bottlenecking the distributed training loop.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Transfer size: 256 MB.
+    - Network Bandwidth: 400 Gbps (50 GB/s).
+    - CPU overhead per Send/Recv: ~300ns (post_recv + completion).
+    - Total Messages: 65,536 (assuming 4KB MTU/chunking).
+
+    **Calculations:**
+    - Transfer Time: 256 MB / 50 GB/s = 5.12 ms.
+    - Send/Recv Overhead: 65,536 messages * 300ns = 19.66 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: CPU-Overhead-Bound.** The 19.7 ms of polling overhead required by Send/Recv is almost 4x larger than the 5.12 ms transfer time itself. RDMA Write bypasses this CPU involvement entirely, maximizing throughput.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

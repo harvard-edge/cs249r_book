@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2407
+track: cloud
+level: L5
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: FP8 MoE Routing Collapse
+scenario: You are pre-training an 8x7B Sparse Mixture of Experts (MoE) model on a cluster of H100s using FP8 mixed precision. At step 15,000, training loss abruptly spikes, and telemetry reveals a routing collapse where 99% of tokens are being sent to Expert 3. You verify the load balancing loss coefficient is correct. The forward pass uses FP8 for all linear layers.
+question: "What is the cause of this sudden routing degeneration, and how do you fix the precision configuration?"
+details:
+  realistic_solution: 'The cause is dynamic range mismatch in the FP8 formats. H100 supports E4M3 (max ~448) and E5M2 (max ~57344). If E4M3 is used for router logits, the values easily overflow or underflow, causing softmax probabilities to degenerate into NaNs or one-hot vectors. Fix: Cast the MoE router logits to FP32 or BF16. The router is a tiny fraction of total compute, so this doesn''t impact performance, while the heavy expert GEMMs can safely remain in E4M3.'
+  common_mistake: |
+    **The Pitfall:** Increasing the capacity factor or load balancing loss weight.
+    **The Rationale:** Candidates recognize a routing imbalance and attempt to fix it using standard algorithmic hyperparameter tuning.
+    **The Consequence:** The routing remains completely broken because the underlying issue is hardware-level numerical overflow inside the FP8 representation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Format: FP8 E4M3. Max value: 448.
+    - Router operation: Softmax probability calculation (e^x).
+
+    **Calculations:**
+    - Overflow threshold: ln(448) ≈ 6.1.
+    - If a router logit exceeds 6.1, e^x overflows the E4M3 limits, yielding NaN or Infinity.
+    - If negative, it rapidly underflows to 0.0.
+    - Softmax denominator collapses, locking probability into a 1.0 peak for a single expert.
+
+    **Conclusion & Interpretation:**
+    - **Result: e^x overflow > 6.1 (Precision-Bound)**. Softmax inside E4M3 overflows. Cast the router logits to FP32 or BF16 to prevent routing collapse.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- training
+- moe
+- fp8

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4407
+track: cloud
+level: L5
+zone: diagnosis
+topic: rdma-transport
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: RDMA Queue Pair Limits and Scalability in Large H100 Pods
+scenario: You are scaling a distributed training cluster from 128 to 1,024 nodes, each with one 400 Gbps InfiniBand HCA. Each NCCL AllReduce creates one RDMA Queue Pair (QP) per participating GPU pair. Your HCA supports a maximum of 32,768 QPs. After scaling to 512 nodes, training initialization hangs for 10 minutes.
+question: At 512-1,024 nodes, why does NCCL initialization hang from RDMA QP exhaustion, and what scaling limits and architectural fixes would you propose?
+details:
+  realistic_solution: 'NCCL default: for N GPUs in a single communicator, each GPU opens QPs to all other GPUs it communicates with in the ring or tree. In ring-AllReduce, each rank connects to 2 neighbors = 2N QPs total across the ring. But NCCL also creates point-to-point QPs for send/recv operations: O(N) per GPU, O(N²) total. At 512 nodes × 8 GPUs = 4,096 GPUs: QPs per GPU = min(N-1, max_peers) ≈ 4,095. Total QPs per HCA: 4,096 (for all rank communications). But with multiple communicators (data parallel + tensor parallel + pipeline parallel), multiply by communicator count. At 4,096 GPUs × 3D parallelism = 3 communicators, per-GPU QPs = 3 × (DP_size - 1 + TP_size - 1) + PP_size - 1. Fix: enable NCCL_IB_QPS_PER_CONNECTION=1 (already default), use SHARP for reduction offload, or use hierarchical AllReduce to limit QP fan-out per node.'
+  common_mistake: |
+    **The Pitfall:** Assuming NCCL's QP count scales linearly with N nodes.
+    **The Rationale:** Engineers overlook that NCCL creates a QP for each participating rank-to-rank pair, leading to O(N²) scaling for fully-connected collectives.
+    **The Consequence:** Catastrophic QP exhaustion and job hangs at scale.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - HCA limit = 32,768 QPs.
+    - 1 HCA/node, 8 GPUs/node.
+
+    **Calculations:**
+    - 512 nodes * 8 GPUs = 4,096 GPUs.
+    - QPs per GPU = 4,095. Total QPs per HCA = 4,095 * 8 = 32,760 QPs.
+    - At 1,024 nodes = 8,192 GPUs. Total QPs per HCA = 8,191 * 8 = 65,528 QPs.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1,024 nodes require ~65K QPs, exceeding the 32K limit by 2x (RDMA QP Exhaustion)**. Bottleneck: RDMA QP Exhaustion.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Text is truncated at the end
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

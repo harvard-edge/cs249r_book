@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: edge-1760
+track: edge
+level: L5
+zone: realization
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Optimizing ViT Attention Dataflow on Jetson Orin DLA
+scenario: You are deploying a Vision Transformer (ViT) model on an NVIDIA Jetson AGX Orin. The model's latency is severely bottlenecked during the self-attention phase when running on the Deep Learning Accelerator (DLA), which uses a fixed systolic array architecture.
+question: Should QxK^T use weight-stationary or output-stationary dataflow, and how would you tile it to minimize memory access on Orin?
+details:
+  realistic_solution: For the QxK^T operation, an output-stationary dataflow is optimal to accumulate the partial sums of the attention scores locally within the systolic array's accumulators, minimizing expensive write-backs to memory. Tiling the sequence length dimension ensures the active blocks of Q, K, and the partial output fit entirely within the DLA's local SRAM buffer. Utilizing INT8 precision allows leveraging the full compute capability and significantly reduces the SRAM footprint.
+  common_mistake: |
+    **The Pitfall:** Blindly applying weight-stationary dataflows, assuming one of the operands can always be pinned to the systolic array.
+    **The Rationale:** Candidates forget that in self-attention (QxK^T), both operands are dynamically generated activations, not static weights.
+    **The Consequence:** A purely weight-stationary approach leads to massive systolic array thrashing, skyrocketing memory accesses, and completely blowing the power budget.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence (N) = 1024, Dim (D) = 768.
+    - Compute capability: 275 TOPS.
+    - Memory bandwidth: 204 GB/s.
+    - Precision: INT8 (1 byte).
+
+    **Calculations:**
+    - QxK^T MACs: 1024 * 1024 * 768 = 805M MACs (~1.61 GOPS).
+    - Q and K size: 2 * 1024 * 768 bytes = ~1.5 MB (fits in SRAM).
+    - Output size: 1024 * 1024 = 1 MB.
+    - Compute time: 1.61 GOPS / 275,000 GOPS = ~5.8 µs.
+    - Memory fetch time (1.5 MB): 1.5 MB / 204 GB/s = ~7.3 µs.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~7.3 µs (Memory-Bound)**. Output-stationary dataflow prevents writing the 1 MB partial sums back to memory, saving ~5 µs of memory latency per head and drastically reducing power consumption.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

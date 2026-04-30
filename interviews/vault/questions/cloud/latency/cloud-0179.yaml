@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: cloud-0179
+track: cloud
+level: L6+
+zone: mastery
+topic: latency-decomposition
+competency_area: latency
+bloom_level: create
+phase: both
+title: The Continuous Batching Stall
+scenario: You implement continuous batching for an LLM endpoint to improve throughput. Under low load, Time To First Token (TTFT) is 100ms. Under high load, throughput triples, but TTFT spikes to over 4 seconds, even though token generation speed remains fast.
+question: What scheduling flaw in continuous batching causes severe TTFT spikes under high load, and why?
+details:
+  realistic_solution: 'You starved the prefill phase. In LLM serving, a request has two phases: Prefill and Decode. With continuous batching, an incoming request is injected into the very next iteration of the running batch. However, the prefill phase requires a massive matrix multiplication that consumes almost all the GPU compute. If you inject a new prompt into a running batch, the GPU must pause decoding for everyone else to crunch that prefill. To prevent this, schedulers must chunk large prefills.'
+  common_mistake: |
+    **The Pitfall:** Assuming continuous batching natively guarantees low latency for all incoming requests.
+    **The Rationale:** Engineers know continuous batching improves VRAM utilization and aggregate throughput, but overlook the compute disparity between prefill and decode phases.
+    **The Consequence:** Incoming prompts wait in a starved queue or stall active generations, destroying the responsiveness of the endpoint.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model on A100 (peak ~312 TFLOPS FP16).
+    - Incoming prompt is 2000 tokens.
+
+    **Calculations:**
+    - Prefill compute: 2 * 70B * 2000 = 280 TFLOPs.
+    - Prefill time: 280 TFLOPs / ~312 TFLOPS ≈ 0.9 seconds of dedicated compute.
+    - If 4 users send prompts simultaneously, processing them sequentially adds immense queueing delay.
+    - The 4th user waits: 3 * 0.9s = ~2.7 seconds before prefill begins.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2.7s Delay (Compute-Bound)**. Starving the prefill phase or failing to chunk large prefills causes multi-second TTFT delays during continuous batching.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+math_verified: true

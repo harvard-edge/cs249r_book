@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: edge-0887
+track: edge
+level: L6+
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: 'Asymmetric Offload PCIe Bottleneck'
+scenario: 'On an AI PC, you map the compute-heavy Prefill phase to the discrete NPU (45 TOPS) and the memory-bound Decode phase to the CPU (100 GB/s RAM). End-to-end latency for a 2048-token prompt and 128-token generation is 16.5 seconds. Running purely on the CPU takes only 2.0 seconds.'
+question: 'Why is splitting prefill onto the NPU and decode onto the CPU 16.5s, while pure CPU takes only 2.0s?'
+details:
+  realistic_solution: 'The root cause is the massive communication overhead of migrating the KV cache between discrete memory spaces. When prefill runs on the NPU, it generates the KV cache for the 2048-token prompt in the NPU''s local memory. To perform decoding on the CPU, this KV cache must either be copied to system RAM in bulk, or accessed by the CPU over the PCIe bus during every single decode step. If the software stack doesn''t explicitly migrate the KV cache, the CPU reads the 1GB tensor over the PCIe bus 128 times (once per generated token). This turns a high-bandwidth local memory read into a high-latency, low-bandwidth cross-device read, completely destroying any compute time saved during prefill. The solution is to either keep both phases on the same device, or perform a single, explicit bulk DMA transfer of the KV cache from NPU to CPU RAM immediately after prefill.'
+  common_mistake: |
+    **The Pitfall:** Assuming the NPU is simply too slow at prefill compared to the CPU's vector extensions.
+    **The Rationale:** Candidates focus on compute FLOPs and ignore the massive data transfer bottleneck that occurs when splitting pipeline phases across discrete memory spaces without bulk DMA.
+    **The Consequence:** Misdiagnosing a PCIe interconnect bandwidth problem as an NPU compute deficiency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - KV cache size (2048 tokens) = 2048 * 32 layers * 32 heads * 128 dim * 2 bytes * 2 (K+V) = ~1 GB.
+    - PCIe Gen4 x4 effective bandwidth = ~8 GB/s.
+
+    **Calculations:**
+    - Reading 1GB once takes 125ms.
+    - If accessed token-by-token during CPU decode: 128 tokens * 125ms = 16 seconds.
+    - If CPU decode is local (pure CPU run): 1GB at 100GB/s = 10ms per token -> 1.28s total decode.
+
+    **Conclusion & Interpretation:**
+    - **Result: 16 seconds (Memory-Bandwidth Bound)**. The PCIe interconnect bottleneck causes massive latency.
+  options:
+  - 'Assuming the NPU is simply too slow at prefill compared to the CPU''s vector extensions.'
+  - 'The root cause is the massive communication overhead of migrating the KV cache between discrete memory spaces. When prefill runs on the NPU, it generates the KV cache for the 2048-token prompt in the NPU''s local memory.'
+  - 'The low utilization is due to kernel launch overhead on the NPU; fusing all layers into a single kernel will achieve near-peak throughput.'
+  - 'Batch size should be increased to improve throughput, which will proportionally reduce per-frame latency.'
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

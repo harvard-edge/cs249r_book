@@ -62,7 +62,7 @@ VISUAL_ARCHETYPES: dict[str, dict[str, Any]] = {
 
 def load_questions() -> list[dict[str, Any]]:
     questions = []
-    for path in QUESTIONS_DIR.glob("*/*.yaml"):
+    for path in QUESTIONS_DIR.rglob('*.yaml'):
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         data["_path"] = str(path.relative_to(ROOT_DIR))
         questions.append(data)

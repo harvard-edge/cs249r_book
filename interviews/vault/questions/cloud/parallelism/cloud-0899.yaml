@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-0899
+track: cloud
+level: L5
+zone: evaluation
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Evaluating Parallelism Mapping Across the Bandwidth Taper
+scenario: 'You are architecting the training topology for a 175B model on H100 nodes. The cluster has a severe bandwidth taper: 900 GB/s intra-node and 50 GB/s inter-node. An engineer proposes spanning Tensor Parallelism (TP) across multiple nodes to pool memory, while keeping Pipeline Parallelism (PP) intra-node to reduce pipeline bubbles.'
+question: Should tensor parallelism span multiple H100 nodes here, or how should TP, PP, and DP be mapped across the cluster?
+details:
+  realistic_solution: Reject the proposal. TP requires blocking All-Reduce operations for every layer, which will bottleneck on the 50 GB/s InfiniBand. The optimal topology maps TP strictly within the node to leverage the 900 GB/s NVLink, and maps PP and Data Parallelism (DP) across nodes.
+  common_mistake: |
+    **The Pitfall:** Spanning Tensor Parallelism across nodes to maximize memory pools.
+    **The Rationale:** Engineers prioritize reducing pipeline bubbles and pooling memory, fundamentally misunderstanding the communication volume of Tensor Parallelism.
+    **The Consequence:** Forcing the highest-volume, blocking All-Reduce operations over the slowest interconnect (InfiniBand), destroying training utilization.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Interconnects: NVLink = 450 GB/s (unidirectional), InfiniBand = 50 GB/s.
+       - Bandwidth taper: 9x.
+       - TP AllReduce volume: ~400 MB per layer.
+    2. **Calculations:**
+       - NVLink Latency = 400 MB / 450 GB/s ≈ 0.89 ms per layer.
+       - InfiniBand Latency = 400 MB / 50 GB/s = 8 ms per layer.
+       - Total overhead across 96 layers = 96 * 8 ms = 0.768 seconds of blocking wait per step.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound.** TP must be mapped strictly intra-node to leverage NVLink, while PP should span across nodes because it only requires boundary activation transfers.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:02:34.615108'

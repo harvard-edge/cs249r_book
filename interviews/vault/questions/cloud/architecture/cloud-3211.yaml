@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3211
+track: cloud
+level: L5
+zone: design
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: create
+phase: both
+title: MoE Dynamic Expert Loading from SSD
+scenario: You want to serve a 1024-expert MoE model where each expert is 1B parameters (2 GB BF16). Total model size is 2 TB. Your single server has 8 GPUs (640 GB HBM total) and 8 NVMe SSDs (7 GB/s each, 56 GB/s aggregate).
+question: How would you design a tiered caching system for 1024 two-GB experts across GPU HBM, CPU DRAM, and NVMe SSDs?
+details:
+  realistic_solution: 'Three-tier caching: Tier 1 (GPU HBM): Keep the top-64 hottest experts in HBM (64 × 2 GB = 128 GB, leaving 512 GB for shared layers + KV-cache). Tier 2 (CPU DRAM): Keep the next 256 experts in pinned CPU memory (512 GB). Transfer to GPU via PCIe Gen5 at 64 GB/s: 2 GB / 64 GB/s = 31ms. Tier 3 (NVMe SSD): Remaining 704 experts on SSD. Transfer: 2 GB / 7 GB/s = 286ms per expert (too slow for real-time). Pipeline: (1) Router predicts top-8 experts. (2) If expert is in Tier 1: immediate compute (~0ms load). (3) If in Tier 2: PCIe transfer (31ms) — overlap with computation of Tier 1 experts. (4) If in Tier 3: initiate async NVMe→CPU→GPU transfer and queue the request. Prefetching: use the router output from layer L to prefetch experts for layer L+1 (speculative). With 90% Tier 1 hit rate and 9% Tier 2: average load latency = 0.9×0 + 0.09×31 + 0.01×286 = 5.7ms per layer.'
+  common_mistake: |
+    **The Pitfall:** Treating expert loading as a simple LRU cache without considering data transfer paths.
+    **The Rationale:** Candidates forget that NVMe-to-GPU transfer must route through CPU memory and PCIe, adding significant latency.
+    **The Consequence:** Ignoring the necessity of speculative prefetching, resulting in the GPU stalling for 286ms every time a Tier 3 expert is selected.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Tier 1 (HBM): Top-64 experts (128 GB), ~90% hit rate, 0 ms latency.
+    - Tier 2 (CPU DRAM): Next 256 experts (512 GB), ~9% hit rate, PCIe Gen5 (64 GB/s).
+    - Tier 3 (NVMe SSD): Remaining 704 experts (1.41 TB), ~1% hit rate, NVMe (7 GB/s).
+
+    **Calculations:**
+    - Tier 2 PCIe transfer: 2 GB / 64 GB/s = 31 ms.
+    - Tier 3 NVMe transfer: 2 GB / 7 GB/s = 286 ms.
+    - Average load latency: (0.9 * 0) + (0.09 * 31 ms) + (0.01 * 286 ms) = 5.65 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: PCIe-Bandwidth Bound.** Careful speculative prefetching masks PCIe and NVMe transfers, enabling ~5.7ms average latency.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

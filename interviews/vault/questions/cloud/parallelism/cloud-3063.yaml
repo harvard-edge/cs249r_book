@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3063
+track: cloud
+level: L5
+zone: specification
+topic: pipeline-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: 'Pipeline Parallelism Specification: Design for <10% Bubble with Memory Constraint'
+scenario: You must specify a pipeline parallelism configuration for a 175B GPT-3 scale model on 80GB GPUs that achieves a bubble overhead below 10% while keeping per-GPU peak memory under 70GB. The training uses BF16 weights with ZeRO-2 optimizer sharding.
+question: "What TP, PP, DP, and micro-batch settings keep a 175B GPT-style model under 70GB per GPU with pipeline bubble below 10%?"
+details:
+  realistic_solution: '175B params, BF16 = 350GB model weight. With TP=8 (NVLink within node) and PP=8 stages: effective params/device = 175B/(8*8) = 2.73B. Weights: 5.5GB. ZeRO-2 shards gradients (not weights/optimizer): gradients = 5.5GB / DP replicas. With DP=8: grad shard = 0.69GB. Optimizer (FP32 Adam, ZeRO-3): 175B*12/512 = 4.1GB. Activations (checkpointed): ~3GB. Total: ~13.3GB — well under 70GB. Bubble with m=72: (8-1)/(72+7) = 8.9% < 10%. Spec: p=8, TP=8, DP=8, m=72.'
+  common_mistake: |
+    **The Pitfall:** Failing to account for ZeRO-2 optimizer state distribution across data parallel ranks.
+    **The Rationale:** Candidates often assume that all optimizer states must fit entirely on each GPU without sharding, leading to impossible memory constraints.
+    **The Consequence:** Over-provisioning hardware or unnecessarily increasing tensor parallelism, leading to degraded training throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B params, BF16 (2 bytes). Target Bubble < 10%. Target Memory < 70GB.
+    - Test config: PP=8, TP=8, DP=8, microbatches (m) = 72.
+
+    **Calculations:**
+    - Total weights: 175B * 2 bytes = 350GB.
+    - Weights per device (TP=8, PP=8): 350GB / 64 = 5.47GB.
+    - Gradients (ZeRO-2 over DP=8): 5.47GB / 8 = 0.68GB.
+    - Optimizer (ZeRO-3 over 512 GPUs): 175B * 12 bytes / 512 = 4.1GB.
+    - Activations (checkpointed): ~3.0GB.
+    - Peak Memory = 5.47 + 0.68 + 4.1 + 3.0 = 13.25GB.
+    - Pipeline Bubble (m=72): (8 - 1) / (72 + 8 - 1) = 8.8%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-and-Bubble-Optimized**. The config PP=8, TP=8, DP=8, m=72 fits comfortably in memory with an 8.8% bubble.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2017
+track: cloud
+level: L5
+zone: evaluation
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Evaluating TP Topology Across Network Boundaries
+scenario: 'You are serving a 175B parameter LLM (FP16, ~350GB weights) on a cluster of 8-GPU nodes connected via 200 Gbps (25 GB/s) InfiniBand. To fit the model and an active KV cache, you must distribute the deployment across 16 GPUs (2 nodes). You must evaluate two serving strategies: Tensor Parallelism of 16 (TP=16) spanning both nodes, or Tensor Parallelism of 8 (TP=8) within each node combined with Pipeline Parallelism of 2 (PP=2) across the nodes.'
+question: Should you serve the 175B model with TP=16 across nodes or TP=8 within each node plus PP=2 across nodes, and why?
+details:
+  realistic_solution: 'Choose TP=8 and PP=2. Tensor Parallelism must be confined within a single node to leverage the ultra-high bandwidth NVLink, as it requires blocking All-Reduce operations inside every transformer layer. Pipeline Parallelism perfectly matches the lower-bandwidth InfiniBand link.'
+  common_mistake: |
+    **The Pitfall:** Choosing TP=16 to maximize aggregate memory bandwidth and minimize per-device compute.
+    **The Rationale:** Candidates prioritize lowering the per-GPU FLOPs and memory footprint without evaluating network topology.
+    **The Consequence:** They ignore the severe latency penalty of executing high-frequency All-Reduce operations over the slow 25 GB/s inter-node network.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Activation Tensor: 64 * 12288 * 2 bytes =~ 1.5 MB.
+    - Inter-node IB Bandwidth: 25 GB/s.
+    - Model: 96 layers. TP requires 2 All-Reduces per layer.
+
+    **Calculations:**
+    - TP=16 requires 192 All-Reduces across nodes.
+    - Ring All-Reduce volume: 2*(N-1)/N * data =~ 1.875 * 1.5 MB = 2.81 MB.
+    - Transfer size over network: 192 * 2.81 MB = 540 MB per step.
+    - Network Latency for TP=16: 540 MB / 25 GB/s = 21.6ms per token.
+    - PP=2 transfers the 1.5 MB activation once between nodes: 1.5 MB / 25 GB/s = <0.1ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: PP=2 (<0.1ms) vastly outperforms TP=16 (21.6ms) for inter-node communication (Inter-Node-Network-Bound)**. 
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-417
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:44:45.086803'

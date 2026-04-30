@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3286
+track: cloud
+level: L6+
+zone: realization
+topic: dma-data-movement
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Optimizing Data Movement for Large Models on NVIDIA H100
+scenario: 'You are tasked with fine-tuning a 100B parameter language model on an NVIDIA H100 GPU (80 GB HBM3, 3.35 TB/s memory bandwidth). Due to the model''s size and the extensive training dataset, some intermediary data (e.g., optimizer states, very large embedding tables) frequently needs to be moved between the host CPU memory and the H100''s device memory.'
+question: How would you minimize host-device transfer overhead on an H100 when fine-tuning a 100B model with large optimizer states or embeddings offloaded to CPU memory?
+details:
+  realistic_solution: |
+    The optimal solution involves using pinned (page-locked) host memory for all buffers participating in host-to-device and device-to-host transfers. This enables the GPU's DMA engine to transfer data asynchronously from host memory to device memory without CPU intervention, overlapping communication with computation. Implement double-buffering or triple-buffering using CUDA streams to ensure that while one data batch is being processed by the GPU, the next batch is asynchronously transferred from the host. Zero-copy memory (mapped host memory) can be considered for smaller, read-only data structures that are frequently accessed by both host and device, but its overhead for writes or larger transfers must be carefully profiled. Prioritize asynchronous DMA with pinned memory for large, performance-critical transfers.
+  common_mistake: |
+    **The Pitfall:** Performing synchronous cudaMemcpy operations for data transfers.
+    
+    **The Rationale:** Developers might neglect using pinned host memory or incorrectly assume zero-copy memory is always a performance win, without considering its latency implications for large non-contiguous data.
+    
+    **The Consequence:** The GPU stalls while waiting for the CPU and PCIe bus, severely limiting the throughput of the expensive accelerator.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - PCIe Gen5 x16 bandwidth: ~64 GB/s.
+    - Data Transfer: 50 GB optimizer state.
+
+    **Calculations:**
+    - Synchronous Time: 50 GB / 64 GB/s = 0.78 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0.78s Stall (PCIe-Bound)**. Using synchronous copy stalls the GPU for 0.78s per step, while asynchronous DMA with pinned memory hides this cost via computation overlap.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

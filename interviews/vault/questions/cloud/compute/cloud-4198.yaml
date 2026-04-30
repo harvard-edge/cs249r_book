@@ -1,0 +1,29 @@
+schema_version: '1.0'
+id: cloud-4198
+track: cloud
+level: L6+
+zone: realization
+topic: gpu-compute-architecture
+competency_area: compute
+bloom_level: create
+phase: both
+title: Persistent Kernels for Continuous Batching
+scenario: Traditional CUDA kernels launch, execute, and exit for each batch. For continuous batching inference on MI300X, you want a persistent kernel that stays resident on all 304 CUs, processing new requests as they arrive without kernel launch overhead.
+question: How would you design a persistent MI300X kernel for continuous batching, handling work queues and variable batch sizes?
+details:
+  realistic_solution: Launch one persistent kernel entering an infinite loop, polling a work queue in pinned host memory via unified memory. It eliminates 5-10µs kernel launch overheads per layer, saving ~4.8ms per pass. However, polling burns massive memory bandwidth and should be monitored tightly.
+  common_mistake: |
+    **The Pitfall:** Implementing a persistent kernel with a spin-loop on a global memory flag.
+    **The Rationale:** It is the simplest way to implement polling, but engineers fail to account for the memory bandwidth saturation and cache contention this causes across 300+ CUs.
+    **The Consequence:** The spin-loop consumes massive power and memory bandwidth, ironically degrading the inference performance it was designed to improve.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Kernel launch: 5-10µs * 6 kernels/block * 80 blocks = 2.4-4.8ms.
+       - Baseline decode: 80ms/token.
+       - Polling cost: 200ns per poll.
+    2. **Calculations:**
+       - Overhead eliminated = 4.8ms/token.
+       - Throughput Improvement = 4.8ms / 80ms = ~6%.
+       - Wait Overhead at 1MHz = 200ms per second (20%).
+    3. **Conclusion & Interpretation:**
+       - **Result: ~6% throughput improvement, highly sensitive to queue emptiness.** (Launch-Bound)

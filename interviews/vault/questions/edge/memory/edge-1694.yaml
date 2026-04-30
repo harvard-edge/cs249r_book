@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-1694
+track: edge
+level: L4
+zone: optimization
+topic: dma-data-movement
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Hailo-8 Zero-Copy Stream Optimization
+scenario: We are deploying a 4-camera traffic monitoring pipeline on an edge gateway equipped with a Hailo-8 accelerator. The pipeline processes 1080p frames but is bottlenecked at 40 FPS. Profiling reveals the Hailo-8 is idle 85% of the time while the host ARM CPU is pegged at 100% performing user-space to kernel-space buffer copies.
+question: What host-device data movement bottleneck stalls the pipeline, and how would zero-copy DMA fix it?
+details:
+  realistic_solution: The host CPU is choking on massive `memcpy` operations required to shift the uncompressed 1080p tensors from the V4L2 capture buffers into the HailoRT execution buffers. To resolve this, implement a zero-copy DMA pipeline using the Linux `dma_buf` framework. By allocating contiguous, page-locked (pinned) memory, the capture driver and the Hailo-8 PCIe DMA controller can share the exact same physical memory addresses. This completely bypasses the CPU data path, offloading the transfer to the DMA controller and unlocking the NPU's true compute capacity.
+  common_mistake: |
+    **The Pitfall:** Attempting to solve low NPU utilization by increasing batch sizes or heavily compressing the input images.
+    **The Rationale:** Candidates incorrectly assume the NPU is inefficiently scheduled, failing to recognize that the pipeline is hard-locked by the host CPU's memory bandwidth limits.
+    **The Consequence:** Adding batching increases latency, and adding compression burns even more CPU cycles, causing the framerate to drop even further.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Frame size: 1080p INT8 (6.22 MB).
+    - Edge CPU Memory Bandwidth: ~2 GB/s.
+    - Hailo-8 target compute: ~0.38 ms per frame.
+
+    **Calculations:**
+    - CPU read+write copy time = (6.22 MB * 2) / 2000 MB/s = ~6.2 ms per frame.
+    - Current theoretical max FPS (CPU bound) = 1000 ms / 6.2 ms = 161 FPS (split across 4 cameras = ~40 FPS).
+    - Zero-copy DMA time = Overhead drops to PCIe latency only (bypass CPU).
+
+    **Conclusion & Interpretation:**
+    - **Result: 0 ms Copy Overhead (Compute-Bound)**. Eliminating the 6.2 ms CPU copy overhead transitions the pipeline from severely Host-CPU-Bound to NPU-Compute-Bound.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

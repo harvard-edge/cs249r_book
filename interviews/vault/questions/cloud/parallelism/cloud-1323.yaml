@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-1323
+track: cloud
+level: L5
+zone: evaluation
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Evaluating Sync vs Async Gradient Strategies
+scenario: Your team is training a 7B parameter LLM on 128x A100 GPUs connected by legacy 100 Gbps Ethernet. Synchronous Ring-AllReduce is creating a severe bottleneck, taking over 5.5 seconds per step. The infrastructure lead proposes switching to Asynchronous Parameter Servers to completely hide the network latency.
+question: Should you switch the 7B LLM training job to Async Parameter Servers or keep Synchronous AllReduce with 8-bit compression, and why?
+details:
+  realistic_solution: |
+    Reject Asynchronous SGD to maintain mathematically consistent global model states. Instead, apply INT8 gradient compression or 1-bit algorithms (like 1-bit Adam) under strict Synchronous AllReduce via NCCL. This preserves identical weight update consistency while dramatically lowering the communication payload to fit within the legacy Ethernet limits.
+  common_mistake: |
+    **The Pitfall:** Focusing purely on hardware throughput and assuming Async SGD will yield a massive overall speedup.
+    **The Rationale:** Candidates see that async updates completely hide network latency, ignoring the catastrophic statistical penalty (staleness) imposed on complex optimizers like Adam.
+    **The Consequence:** The model suffers massive gradient staleness, destroying variance tracking and leading to outright model divergence or requiring 4x more steps to converge.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 7B parameters (28 GB in FP32).
+    - Network: 100 Gbps Ethernet (~10 GB/s effective).
+    - Sync strategy: Ring-AllReduce.
+
+    **Calculations:**
+    - Baseline Sync Transfer: Ring-AllReduce transmits ~2x payload = 56 GB.
+    - Network Bottleneck: 56 GB / 10 GB/s = 5.6 seconds per step.
+    - INT8 Compression Solution: Payload drops to 7 GB. Ring transfer drops to 14 GB.
+    - New Sync Time: 14 GB / 10 GB/s = 1.4 seconds per step.
+
+    **Conclusion & Interpretation:**
+    - **Result: Communication-Bound.** While Async SGD drops network wait to 0s, the resulting gradient staleness requires 3-4x more steps to converge. INT8 compression under Sync SGD is mathematically superior, preserving optimization efficiency while slashing latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-168
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:35:45.488479'

@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3933
+track: cloud
+level: L4
+zone: implement
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: CUDA Stream Priority for Communication vs Computation Scheduling
+scenario: 'You have a training loop with three CUDA streams: compute (default), AllReduce (communication), and data prefetch (H2D transfer). All three contend for GPU resources. You observe that AllReduce sometimes delays compute kernels.'
+question: 'How do you prioritize CUDA streams to prevent communication from blocking computation?'
+details:
+  realistic_solution: 'CUDA stream priorities: (1) Compute stream: highest priority (cudaStreamCreateWithPriority, priority 0 = highest on NVIDIA GPUs). Compute is always on the critical path. (2) Communication stream: medium priority. NCCL kernels need GPU resources (for data packing/unpacking and reduction) but should yield to compute. (3) H2D transfer stream: lowest priority. DMA engine handles most of the transfer; GPU involvement is minimal. Set with: cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, priority). On H100, only 2 priority levels are hardware-supported, so effectively: {high: compute, low: communication + prefetch}. This ensures compute kernels are never preempted by NCCL reduction kernels.'
+  common_mistake: |
+    **The Pitfall:** Setting all streams to the same priority and relying on the default GPU scheduler's round-robin mechanism.
+    **The Rationale:** Engineers assume that concurrent stream execution automatically perfectly overlaps without realizing that background communication kernels can preempt critical-path compute blocks.
+    **The Consequence:** The compute kernels—which gate the entire forward/backward pass progress—are stalled waiting for SMs occupied by communication, completely breaking the communication-computation overlap and lowering TFLOPS utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: NVIDIA H100 with 132 SMs.
+    - NCCL AllReduce kernel requirement: 8–16 SMs.
+    - Two hardware-supported CUDA stream priority levels: High (0) and Low (non-zero).
+
+    **Calculations:**
+    - Without Priority: NCCL steals ~12% of SMs (16/132) from the compute kernel, causing a 12% execution slowdown.
+    - With Priority: Compute stream (High) guarantees 100% of the 132 SMs. Communication stream (Low) only executes on SMs left idle by the compute kernel.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Path Preemption (Scheduling-Bound)**. Enforcing strict CUDA stream priorities prevents NCCL from stealing SMs, achieving true zero-cost communication overlap and a 5–12% net speedup in training throughput.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

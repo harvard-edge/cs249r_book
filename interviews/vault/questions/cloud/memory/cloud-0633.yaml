@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-0633
+track: cloud
+level: L5
+zone: design
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: create
+phase: both
+title: The Phantom Update
+scenario: You are developing a high-performance, multi-threaded C++ training loop for a small MLP on a single server with multiple CPU cores. In your custom gradient aggregation step, each thread computes its local gradients and writes them to distinct, non-overlapping elements of a shared global gradient array. Despite each thread writing to its own designated memory region, you observe significant performance degradation.
+question: What is the most likely underlying hardware-level issue causing the degradation, and how would you mitigate it?
+details:
+  realistic_solution: "This is a classic case of **false sharing**. Modern CPUs use cache lines (typically 64 bytes) as the smallest unit of data transfer between main memory and CPU caches. When multiple threads access different variables that happen to reside within the *same cache line*, even if those variables are logically distinct and accessed without explicit contention, the cache coherence protocol (e.g., MESI) will cause the cache line to \"ping-pong\" between the CPU cores.\n  Specifically:\n  1.  Thread A writes to `global_gradients[X]`. The cache line containing `global_gradients[X]` (and neighboring elements) is marked `Modified` in Thread A's cache.\n  2.  Thread B (on a different core) then writes to `global_gradients[Y]`, where `Y` is distinct from `X` but falls within the *same cache line* as `X`.\n  3.  Before Thread B can write, its cache must obtain the latest copy of that cache line. This invalidates Thread A's cache line and forces Thread B to fetch it from memory or Thread A's cache.\n  4.  This constant invalidation and re-fetching of the shared cache line (even though the threads are operating on logically independent data) incurs significant latency, leading to performance degradation."
+  common_mistake: |
+    **The Pitfall:** Assuming race conditions and adding locks.
+    **The Rationale:** Candidates see multi-threading performance issues and immediately jump to software-level concurrency bugs rather than hardware cache coherence mechanics.
+    **The Consequence:** Adding locks or atomics exacerbates the performance issue without addressing the underlying false sharing bottleneck.
+  napkin_math: |
+    *   **Cache Line Size:** 64 bytes.
+    *   **Float Size:** 4 bytes.
+    *   **Elements per Cache Line:** 16 floats.
+    *   **The Issue:** If thread A writes to `gradients[0]` and thread B writes to `gradients[1]`, they share a cache line.
+    *   **Cost:** Each write triggers an invalidation and fetch for the other core, costing ~100-200 cycles per write instead of a few cycles for a cache hit.
+    *   **Result:** A few-cycle operation turns into a **hundreds-of-cycles stall** due to cache line ping-ponging.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

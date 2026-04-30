@@ -1,0 +1,38 @@
+schema_version: '1.0'
+id: cloud-3220
+track: cloud
+level: L4
+zone: diagnosis
+topic: kv-cache-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: KV-Cache Memory as Throughput Bottleneck
+scenario: 'Your Llama 3 8B serving instance on a single H100 shows only 40% GPU compute utilization despite a queue of 200+ pending requests. The GPU has 64 GB free after loading weights (16 GB). Nvidia-smi shows 79 GB/80 GB memory used.'
+question: 'Why is the Llama 3 8B H100 instance limited to 40% compute utilization despite 200 queued requests and nearly full memory?'
+details:
+  realistic_solution: 'The bottleneck is KV-cache memory capacity, not compute. Every additional request needs KV-cache memory. Fixes: (1) Quantize KV-cache to INT8. (2) Use PagedAttention to eliminate internal fragmentation. (3) Enable KV-cache swap to CPU memory for preempted requests.'
+  common_mistake: |
+    **The Pitfall:** Assuming low GPU utilization means a compute scheduling or framework problem.
+    **The Rationale:** Candidates see spare FLOPs and assume the scheduler is inefficient, failing to recognize that KV-cache memory capacity physically caps the batch size.
+    **The Consequence:** Engineering effort is wasted optimizing the compute pipeline or rewriting kernels, when the system physically cannot admit more requests due to OOM limits.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: H100 (80 GB).
+    - Weights: 16 GB. Free memory: 64 GB.
+    - Context size: 2K tokens.
+    - Llama 3 8B: 4 KV heads, 128 dim, 32 layers.
+
+    **Calculations:**
+    - KV Cache per Token = 2 * 4 * 128 * 2 bytes * 32 = 65.5 KB.
+    - KV Cache per Request (2K ctx) = 2,048 * 65.5 KB = 134 MB.
+    - Max Theoretical Batch Size = 64 GB / 134 MB = ~488 requests.
+
+    **Conclusion & Interpretation:**
+    - **Result: 488 Requests Max (Memory-Capacity-Bound)**. With 79/80 GB used, active requests consume all KV space, preventing new requests and locking arithmetic intensity.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+math_verified: true

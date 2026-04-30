@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-0442
+track: cloud
+level: L3
+zone: fluency
+topic: flash-attention
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: The Long-Context OOM Failure
+scenario: You are fine-tuning a 70B parameter LLM on an H100 GPU. The training runs fine with a sequence length of 2048. However, when you increase the sequence length to 8192 to handle longer documents, you immediately get a CUDA Out-of-Memory (OOM) error during the first forward pass.
+question: Given that the model parameters (140GB in FP16, distributed via Tensor Parallelism) and optimizer states fit in memory, what is the most likely cause of this sudden OOM error?
+details:
+  realistic_solution: The standard attention mechanism materializes the full (N, N) attention score matrix in HBM for each layer and head. The memory required for this matrix scales quadratically with the sequence length (N). While manageable at N=2048, at N=8192 this single matrix becomes enormous and causes the OOM. The solution is to use an optimized attention implementation like FlashAttention, which computes attention in tiles. It avoids materializing the full matrix in HBM by using fast on-chip SRAM for intermediate calculations, changing the memory complexity from O(N²) to O(N).
+  common_mistake: |
+    **The Pitfall:** Blaming the KV-cache for the Out-Of-Memory error during a training forward pass.
+    **The Rationale:** The KV-cache is famously memory-hungry during autoregressive *inference*, leading engineers to assume it applies universally.
+    **The Consequence:** Time is wasted attempting to implement inference-specific KV-cache optimizations (like PagedAttention) that do absolutely nothing to solve the quadratic attention bottleneck in training.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Attention matrix size = Batch * num_heads * N^2 * 2 bytes.
+    - B=1, 64 heads, 70B model (~80 layers).
+
+    **Calculations:**
+    - N=8192: 1 * 64 * (8192^2) * 2 bytes = 8.58 GB per layer.
+    - Total for 80 layers: 80 * 8.58 GB = 687 GB of activation memory.
+    - N=2048: 8.58 GB / 16 = ~42.9 GB total.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory Capacity Bound**. 687 GB vastly exceeds the 80 GB limit of the H100, causing an immediate OOM on the forward pass.
+  options:
+  - The Adam optimizer states have doubled in size due to the longer sequence.
+  - The full (N, N) attention score matrix is being materialized in HBM, which scales quadratically.
+  - The KV-cache for the 8192-length context is too large to fit in memory.
+  - The gradient checkpointing buffer is overflowing with the larger activation sizes.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-155
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

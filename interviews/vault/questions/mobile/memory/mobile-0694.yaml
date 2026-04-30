@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-0694
+track: mobile
+level: L5
+zone: evaluation
+topic: real-time-deadlines
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: The JNI Object Pinning Death
+scenario: You are passing camera frames (byte arrays) from Android Java to a C++ inference engine via JNI using `GetByteArrayElements`. The ML model takes 15ms. The system runs perfectly at 30 FPS for a minute. Suddenly, the entire Android UI stutters massively, dropping to 2 FPS for several seconds, before recovering.
+question: Why does JNI GetByteArrayElements make Android UI drop to 2 FPS after pinning 3 MB camera frames at 30 FPS?
+details:
+  realistic_solution: 'GetByteArrayElements pins the Java array in memory, preventing the GC from moving
+    it during compaction. Pinning 3 MB frames 30 times/sec creates massive heap fragmentation. After ~60
+    seconds, the heap is so fragmented that the GC triggers a Stop-The-World compaction, pausing all threads
+    for 200-500ms — destroying the 33ms frame deadline. Fix: use GetDirectBufferAddress with a pre-allocated
+    DirectByteBuffer that lives outside the Java heap entirely. The GC never sees it, eliminating both
+    copying and pinning. Alternatively, use Android''s HardwareBuffer for zero-copy camera-to-native pipelines.'
+  common_mistake: |
+    **The Pitfall:** Assuming the C++ code has a memory leak.
+    **The Rationale:** Candidates see degrading performance and assume native code is leaking memory.
+    **The Consequence:** C++ memory leaks crash the app eventually; they don't cause periodic, recovering stutters. The candidate wastes time debugging native code instead of fixing the JNI interface.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Frame Size: 1080p NV21 (~3 MB).
+       - Frame Rate: 30 FPS.
+       - JNI Mechanism: GetByteArrayElements (pins memory).
+    2. **Calculations:**
+       - Pinning rate = 3 MB * 30 times/sec = 90 MB/sec of fragmented, unmovable memory blocks.
+       - Time to severe fragmentation = ~60 seconds.
+       - Stop-The-World (STW) GC pause on fragmented 512 MB heap = 200ms to 500ms.
+    3. **Conclusion & Interpretation:**
+       **Result: GC Pause-Bound. Pinning 3 MB arrays 30 times a second fractures the heap space, eventually forcing the Garbage Collector into a 500ms Stop-The-World compaction that entirely destroys the 33ms frame deadline.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

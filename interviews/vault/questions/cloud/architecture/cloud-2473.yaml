@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2473
+track: cloud
+level: L4
+zone: optimization
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: The NPU Fallback Ping-Pong
+scenario: >-
+  Your cloud pipeline compiles two models for an Edge NPU (rated at 4 TOPS). Model A (ResNet-50,
+  4 GFLOPs) runs at 8ms latency. Model B (EfficientNet, 4 GFLOPs) takes 85ms on the exact same NPU. Profiling
+  shows the NPU is idle 80% of the time during Model B's execution. Both models are INT8 quantized.
+question: >-
+  Why does the structurally similar Model B perform 10x worse?
+details:
+  realistic_solution: 'The issue is compiler-driven operator fallback across heterogeneous compute. Model B uses the Swish activation function (or SiLU), which the specific NPU hardware block does not natively support (it only supports ReLU). The edge compiler automatically partitions the graph: it runs convolutions on the NPU, copies the activation tensor back to the host CPU to compute Swish, and copies it back to the NPU for the next layer. This completely bottlenecks the system on PCIe/AXI bus bandwidth and CPU context switching, destroying the throughput.'
+  common_mistake: |
+    **The Pitfall:** Assuming depthwise convolutions are heavily compute-bound on NPUs.
+    **The Rationale:** Candidates miss that NPUs have rigid operator support. Unsupported activations (like Swish) force the compiler to partition the graph, causing massive CPU-NPU data transfers.
+    **The Consequence:** Deploying modern architectures on edge devices that perform worse than decade-old models due to silent I/O bottlenecks.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 16 layers use Swish activation, requiring CPU fallback.
+    - Memory transfer per layer is 4 MB (2 MB out + 2 MB in).
+    - Edge SoC bus bandwidth is 1 GB/s.
+
+    **Calculations:**
+    - Total bus transfer = 16 × 4 MB = 64 MB.
+    - Bus latency = 64 MB / 1 GB/s = 64 ms.
+    - Total Latency = 64 ms bus + 10 ms CPU compute + 11 ms NPU compute = 85 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 85 ms total (I/O-Bound)**. Unsupported activations force CPU fallback, bottlenecking the system on PCIe/AXI bus bandwidth.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

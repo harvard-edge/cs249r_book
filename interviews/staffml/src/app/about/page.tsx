@@ -169,7 +169,7 @@ export default function AboutPage() {
                 <span className="text-[10px] font-mono text-textMuted">{sampleQ.track}</span>
               </div>
               <p className="text-[14px] font-bold text-textPrimary mb-2">{sampleQ.title}</p>
-              <p className="text-[13px] text-textSecondary leading-relaxed mb-3">{sampleQ.scenario.slice(0, 250)}{sampleQ.scenario.length > 250 ? '...' : ''}</p>
+              <p className="text-[13px] text-textSecondary leading-relaxed mb-3">{(() => { const t = sampleQ.question ?? sampleQ.scenario; return t.length > 250 ? `${t.slice(0, 250)}…` : t; })()}</p>
               <Link
                 href={`/practice?q=${sampleQ.id}`}
                 className="inline-flex items-center gap-1.5 text-sm font-bold text-accentBlue hover:underline"

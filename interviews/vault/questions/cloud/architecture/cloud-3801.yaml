@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3801
+track: cloud
+level: L4
+zone: analyze
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: 'Capacity Factor Tuning: Quality vs Throughput'
+scenario: Your MoE model with 8 experts uses capacity factor C=1.5 during training. Each expert can process C × (tokens × top_k / num_experts) tokens. With a batch of 512 tokens and top-2 routing, each expert's capacity is 1.5 × 128 = 192 tokens. Your training is slow because experts average only 90 tokens (47% capacity utilization).
+question: Should you reduce the MoE capacity factor from 1.5 to 1.0, and what are the utilization-versus-token-drop tradeoffs?
+details:
+  realistic_solution: 'At C=1.5: each expert has capacity 192. Average load 90 (47% of capacity). Wasted compute: the expert''s compute kernel runs on 192-slot buffers regardless of actual fill — zero-padded slots still incur matrix multiply overhead (unless using variable-length batching). Memory: 8 experts × 192 × hidden_dim × 2B = significant padding. At C=1.0: capacity = 128. Average load 90, but max load (with natural variance) might reach 150-160 tokens. Tokens exceeding 128 are dropped: ~10-15% token drop rate. This hurts training quality — those tokens only get contribution from their second expert (or none if both overflow). Optimal: C=1.1-1.2 balances waste vs drops. Better approach: use auxiliary load-balancing loss to enforce near-uniform routing, then you can safely reduce C. Switch-Transformer recommends C=1.25 with load balancing. GShard uses C=2.0 for training stability. The newer approach (Megablocks): variable-length expert computation with no padding, eliminating the capacity factor entirely.'
+  common_mistake: |
+    **The Pitfall:** Setting capacity factor to exactly 1.0 and assuming no tokens are dropped.
+    **The Rationale:** Candidates fail to account for natural variance in token distributions across experts.
+    **The Consequence:** Even slight imbalances cause token overflow, hurting model training quality.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Average load: 90 tokens.
+
+    **Calculations:**
+    - C=1.5: Capacity 192, Avg fill 90 = 47% utilization, 0% drops.
+    - C=1.0: Capacity 128, Avg fill 90 = 100% ideal, but ~12% drops due to variance.
+    - C=1.2: Capacity 154 = 58% utilization, <2% drops.
+
+    **Conclusion & Interpretation:**
+    - **Result: 58% Utilization (Capacity-Variance-Bound)**. Balancing compute waste versus token drops is critical unless using variable-length computation architectures.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

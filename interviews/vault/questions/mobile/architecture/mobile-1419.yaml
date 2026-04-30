@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-1419
+track: mobile
+level: L4
+zone: optimization
+topic: model-size-estimation
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: A17 Pro Unified Memory LLM Bottleneck
+scenario: Your team is deploying a 3-billion parameter language model for an on-device assistant. The OS and active background tasks strictly limit your ML application to a 2.5 GB memory budget out of the shared unified memory pool.
+question: What is the primary memory bottleneck for inference, why does an FP16 deployment fail, and what optimization is required?
+details:
+  realistic_solution: |
+    The primary bottleneck is the dynamic memory required for the KV Cache during auto-regressive generation. A naive FP16 deployment of a 3B model consumes 6 GB strictly for static parameters, immediately triggering an OS Out-Of-Memory (OOM) eviction. To hit the 2.5 GB budget, the model must utilize 4-bit weight-only quantization (W4A16), compressing the parameters to 1.5 GB. This leaves exactly 1.0 GB. You must strictly pre-allocate this remainder for intermediate activations and a ring-buffer KV Cache to support conversational context lengths without runtime fragmentation.
+  common_mistake: |
+    **The Pitfall:** Only calculating the static weight size and forgetting the KV cache.
+    **The Rationale:** Candidates often focus purely on parameter counts and precision.
+    **The Consequence:** They fail to account for the dynamic memory footprint required during sequence generation, leading to immediate OOM errors.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory budget: 2.5 GB.
+    - Model: 3B parameters (FP16 = 2 bytes/param, INT4 = 0.5 bytes/param).
+    - KV Cache config: 32 layers, hidden_dim 3072, FP16 (2 bytes).
+
+    **Calculations:**
+    - FP16 Weights: 3B * 2 bytes = 6.0 GB (Fails > 2.5 GB).
+    - INT4 Weights: 3B * 0.5 bytes = 1.5 GB.
+    - Remaining RAM: 2.5 GB - 1.5 GB = 1.0 GB.
+    - KV size per token: 2 (K,V) * 32 layers * 3072 dim * 2 bytes = 393,216 bytes (384 KiB).
+    - Max Context Length (reserving 200 MB for activations): 800 MB / 384 KiB = ~2083 tokens.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2083 tokens (Memory Capacity-Bound)**. Without W4A16 quantization, the model physically cannot load. Even with INT4, the KV cache footprint is so massive that context length must be strictly capped at ~2K tokens to avoid OOM evictions.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

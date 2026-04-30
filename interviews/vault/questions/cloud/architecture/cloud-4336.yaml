@@ -1,0 +1,38 @@
+schema_version: '1.0'
+id: cloud-4336
+track: cloud
+level: L5
+zone: specification
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: DLRM Training on TPU v5e Pod
+scenario: 'Your team proposes training DLRM on a TPU v5e pod (256 chips). The embedding tables total 500 GB; the dense MLP is 5B params.'
+question: 'Which DLRM components map well to a TPU v5e pod, which do not, and what architectural change makes the model TPU-trainable?'
+details:
+  realistic_solution: 'MLP components are dense matrix operations and fit perfectly on TPU systolic arrays. Embedding lookups are sparse, random-access reads from large tables which bottleneck TPU HBM controllers. Offload embedding lookups from TPU to CPU/host memory and use TPUs only for dense operations.'
+  common_mistake: |
+    **The Pitfall:** Assuming embedding lookup performance is determined solely by dividing the full 500 GB table size by total memory bandwidth.
+    **The Rationale:** Candidates fail to consider that TPUs struggle with the random memory access patterns and the all-to-all communication required to route sparse lookups across the interconnect.
+    **The Consequence:** The model will experience severe bottlenecks during embedding lookups, destroying overall training throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: TPU v5e pod (256 chips, 197 TFLOPS/chip).
+    - Dense MLP: 5B params, batch=262k.
+    - Embedding tables: 100 tables, 256 bytes.
+
+    **Calculations:**
+    - Pod Compute Capacity = 256 * 197 TFLOPS = 50.4 PFLOPS BF16.
+    - Dense MLP FLOPs = 2 * 5e9 * 262,144 = 2.62 PFLOPS per step.
+    - Dense Compute Time (50% MFU) = 2.62 / (50.4 * 0.5) = 104 ms/step.
+    - Embedding Lookup Volume = 262,144 * 100 * 256 bytes = 6.7 GB per step.
+
+    **Conclusion & Interpretation:**
+    - **Result: 6.7 GB Sparse Volume (Bandwidth-Bound)**. The unfused overhead and all-to-all ICI communication for random scatter-gather dominates step time, exceeding the dense MLP time.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+math_verified: true

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0555
+track: cloud
+level: L6+
+zone: design
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: The Context Parallelism for Long Sequences
+scenario: You need to train a model with a 1M token context window. With a hidden dimension of 8192 and FP16 precision, standard self-attention requires O(n^2) memory, meaning a single attention head's score matrix for 1M tokens would be 2 TB, far exceeding a single GPU's memory.
+question: How do you distribute the sequence across GPUs, and what's the communication pattern?
+details:
+  realistic_solution: 'Use Ring Attention (context parallelism). Split the 1M sequence into P chunks across P GPUs. Each GPU holds queries for its chunk and iteratively receives key-value blocks from other GPUs in a ring pattern. The computation of attention on the current KV block overlaps with communication of the next KV block.'
+  common_mistake: |
+    **The Pitfall:** Assuming FlashAttention alone solves the infinite context problem.
+    **The Rationale:** Candidates know FlashAttention reduces activation memory to O(n) and mistakenly think it scales infinitely.
+    **The Consequence:** They fail to realize the computation is still O(n^2) and the KV cache across all heads still exceeds VRAM, causing an OOM error at 1M tokens.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Context window: 1M tokens.
+    - Model dimensions: 128 heads, head_dim=64.
+    - Precision: FP16 (2 bytes).
+    - Ring size (GPUs): P=32.
+    - Hardware: H100 (989 TFLOPS), NVLink (900 GB/s), InfiniBand (50 GB/s).
+
+    **Calculations:**
+    - Total KV Cache: 1M * 64 * 128 * 2 (K+V) * 2 bytes \u2248 32.7 GB.
+    - Local KV per GPU (chunk size): 32.7 GB / 32 \u2248 1.02 GB.
+    - Inter-node transfer time (chunk): 1.02 GB / 50 GB/s = 20.4 ms.
+    - FLOPs per block: 4 * (1M/32) * (1M/32) * 64 * 128 \u2248 32.7 TFLOPs.
+    - Compute time: 32.7 TFLOPs / 989 TFLOPS = 33.1 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 33.1 ms (Compute-Bound Bottleneck)**. Compute time (33.1 ms) completely hides inter-node communication time (20.4 ms).
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

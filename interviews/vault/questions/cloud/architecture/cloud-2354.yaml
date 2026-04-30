@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-2354
+track: cloud
+level: L5
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: Diagnosing PCIe NUMA Mismatch
+scenario: You deploy a ResNet-50 training job on a dual-socket server with 8 GPUs. GPUs 0-3 achieve 1500 images/s each, but GPUs 4-7 consistently drop to 700 images/s, limiting total throughput to 8800 img/s instead of the expected 12000 img/s. GPU utilization on 4-7 fluctuates wildly between 40-60%. The PyTorch dataloader uses 64 CPU workers configured with default settings.
+question: "Why do GPUs 4-7 train at 700 images/s while GPUs 0-3 hit 1500 images/s, and how should the PyTorch dataloader be pinned?"
+details:
+  realistic_solution: 'The root cause is a NUMA (Non-Uniform Memory Access) topology mismatch. By default, the OS may spawn all 64 dataloader CPU workers on NUMA node 0. GPUs 0-3 are attached to CPU 0''s PCIe root complex, enjoying direct PCIe Gen4 x16 bandwidth. However, GPUs 4-7 are attached to CPU 1. Data fetched by workers on CPU 0 must traverse the inter-socket UPI (Ultra Path Interconnect) link to reach CPU 1 before going to GPUs 4-7. The UPI link is bottlenecked by the heavy cross-traffic. The solution is to use `numactl` or PyTorch''s `DataLoader` affinity settings to pin workers 0-31 to NUMA node 0 for GPUs 0-3, and workers 32-63 to NUMA node 1 for GPUs 4-7.'
+  common_mistake: |
+    **The Pitfall:** Assuming GPUs 4-7 are thermally throttling or defective.
+    **The Rationale:** Intermittent drops in throughput are frequently associated with hardware degradation or cooling issues.
+    **The Consequence:** Initiating a useless hardware RMA instead of fixing the process affinity.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1500 img/s per GPU at 3MB/img.
+    - 4 GPUs per CPU socket.
+    - UPI link ~20 GB/s real-world throughput.
+
+    **Calculations:**
+    - Throughput = 1500 img/s * 3MB/img = 4.5 GB/s per GPU.
+    - Group Bandwidth = 4 GPUs = 18 GB/s.
+    - Saturated Transfer: Pulling 18 GB/s across the UPI link saturates it, and contention drops effective host-device transfer for GPUs 4-7 to ~8.4 GB/s.
+    - 8.4 GB/s / 3 MB/img = ~700 img/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 700 img/s (Bandwidth-Bound)**. The UPI link acts as a severe bandwidth bottleneck, matching the observed drop.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4408
+track: cloud
+level: L5
+zone: realization
+topic: rdma-transport
+competency_area: networking
+bloom_level: apply
+phase: both
+title: RDMA Memory Registration Overhead in Dynamic Batch LLM Training
+scenario: Your training framework uses dynamic tensor allocation. After migrating to a 128-node InfiniBand RDMA cluster, each training step takes 850ms instead of 420ms. Profiling shows RDMA memory registration (ibv_reg_mr) consuming 310ms per step.
+question: Why does dynamic tensor allocation add 310ms of ibv_reg_mr overhead per training step, and how would you redesign RDMA memory management?
+details:
+  realistic_solution: 'RDMA memory registration cost: approximately 1-5 µs per page (4KB) for HCA MTT updates, plus TLB shootdown across CPUs for page pinning. For a 7B model gradient buffer: 7B params × 4 bytes (FP32) = 28GB. Registration: 28GB / 4KB × 2 µs = 7,000,000 × 2 µs = 14,000,000 µs = 14 seconds per registration—impossible. But if PyTorch uses per-tensor registration (not full gradient): a typical microbatch gradient chunk = 100MB. 100MB / 4KB × 2 µs = 51,200 µs = 51ms per tensor × 6 pipeline stages = 307ms. Close to observed 310ms. Fix: implement a RDMA buffer pool. Pre-register a fixed memory region at startup (all gradient memory in one ibv_reg_mr call), reuse across steps. Registration becomes a one-time cost at initialization.'
+  common_mistake: |
+    **The Pitfall:** Assuming RDMA memory registration is functionally free or negligible.
+    **The Rationale:** Engineers equate RDMA overhead with standard local memory allocations, ignoring the cost of page pinning.
+    **The Consequence:** Dynamic allocation forces the OS to pin/unpin pages and the hardware to update MTT tables on every step, completely stalling the training loop.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 28GB gradient buffer (FP32). 4KB pages.
+    - ibv_reg_mr cost: ~2µs per page.
+
+    **Calculations:**
+    - Gradient chunks (e.g. 128 chunks): 218MB per chunk = 55,808 pages.
+    - Registration per chunk: 55,808 × 2µs = 111.6ms.
+    - 2-3 chunks in flight = ~310ms overhead per step.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Registration-Bound.** Dynamic allocation forces the OS to pin/unpin pages on every step. Pre-registering a static RDMA buffer pool reduces the cost to a one-time startup initialization.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

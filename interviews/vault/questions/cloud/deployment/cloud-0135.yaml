@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-0135
+track: cloud
+level: L3
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: The Translation Service Traffic Jam
+scenario: You are the ML Systems Engineer for a new real-time translation API that uses a 13B parameter LLM hosted on H100 GPUs. Users are complaining about unpredictable freezes, where the service feels responsive one moment and hangs the next. Your dashboard shows that average Time To First Token (TTFT) is acceptable at ~110ms, but the P99 TTFT is spiking to over 500ms during peak traffic. The service uses static batching with a fixed timeout of 100ms to collect requests. GPU utilization is consistently high (90%+).
+question: What is the most likely cause of the P99 TTFT spikes above 500ms with a 100ms static batching timeout and 90% GPU utilization?
+details:
+  realistic_solution: |
+    The core conflict is head-of-line blocking imposed by static batching. To achieve high SM utilization, the system must wait for a large batch to assemble, but this waiting time directly contributes to TTFT, violating the SLO.
+    The architectural solution is to implement Continuous Batching (in-flight batching) via an engine like vLLM. This decouples the arrival of requests from the batch dispatch schedule, dynamically injecting new requests at the iteration level, maximizing SM utilization without exploding queue latency.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing this as a raw throughput problem and attempting to solve it by adding more hardware or arbitrarily shrinking the batch size.
+    **The Rationale:** High GPU utilization combined with latency spikes logically points inexperienced engineers toward a lack of compute resources, masking the underlying scheduling architecture flaw.
+    **The Consequence:** Shrinking the batch size destroys overall throughput, resulting in longer queues and worsening the P99 latency, while adding hardware is a vastly expensive band-aid over a solvable software issue.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GPU Utilization: >90%.
+    - Batching Strategy: Static batching with 100ms timeout.
+    - Latency Issue: P99 TTFT spiking > 500ms.
+
+    **Calculations:**
+    - Worst-Case Arrival: A request arrives just after a batch dispatches, waiting 99ms for the next window.
+    - Execution Wait: Because utilization is >90%, the GPU is actively processing previous batches (e.g., 400ms token generation).
+    - Total Queue Delay: 99ms window + 400ms execution block = 499ms queue wait.
+
+    **Conclusion & Interpretation:**
+    - **Result: Queue-Bound.** The static 100ms batching architecture inherently forces new requests to block behind executing batches. Transitioning to continuous (in-flight) batching enables dynamic token insertion, eliminating head-of-line blocking.
+  options:
+  - "The 13B model exceeds the H100's SRAM cache, forcing 500ms roundtrips to HBM."
+  - "The static batching timeout is causing head-of-line blocking. Switch to continuous batching."
+  - "The 90% utilization proves the GPU is compute-bound. Downsize the model to 7B."
+  - "The 100ms timeout is too short to assemble optimal batches. Increase it to 500ms."
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

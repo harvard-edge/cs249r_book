@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3084
+track: cloud
+level: L5
+zone: design
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: create
+phase: both
+title: 'Systolic Array Design: Weight-Stationary vs Output-Stationary Tradeoff'
+scenario: 'Design the dataflow strategy for a custom 256x256 systolic array processing a transformer attention layer (Q,K,V matmul: hidden=4096, seq=2048, batch=32) on a TPU. Choose between weight-stationary and output-stationary dataflow, and justify with memory reuse analysis.'
+question: For the 2048-token attention layer Q*K^T on a 256x256 systolic array, should you use weight-stationary or output-stationary dataflow, and why?
+details:
+  realistic_solution: 'Attention Q*K^T: input Q (seq*head_dim), input K (seq*head_dim), output (seq*seq). Both inputs stream, output accumulates. Output-stationary (OS): each PE accumulates partial sums of one output element — requires reading Q row and K column repeatedly. Weight-stationary (WS): ''weights'' K are stationary, Q streams — saves K bandwidth. For seq=2048, head_dim=64: K size = 2048*64*2 bytes = 256KB. WS keeps K in array registers, Q streams: saves 2048 reads of K (only 1 load). Bandwidth savings: 2047/2048 reduction in K memory reads = 99.95%. Use WS for attention.'
+  common_mistake: |
+    **The Pitfall:** Misapplying output-stationary dataflow to attention computation.
+    **The Rationale:** Candidates treat attention weights (Q*K^T) like standard fully connected layers, failing to recognize that they are recomputed from inputs and benefit massively from caching K in registers.
+    **The Consequence:** Generating 99.9% unnecessary memory reads, destroying memory bandwidth and throttling the systolic array.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Attention head (head_dim=64, seq=2048): Q shape = (2048,64), K shape = (2048,64).
+    - Output-Stationary (OS): Q and K stream per output row.
+    - Weight-Stationary (WS): K loaded once (256 KB), Q streams (256 KB).
+
+    **Calculations:**
+    - OS K reads: 2048 times = 256 KB * 2048 = 512 MB.
+    - WS BW: 512 KB + output (8 MB) = 8.5 MB per head.
+    - WS saves 511.75 MB K reads.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth Bound.** Weight-stationary dataflow prevents 99.9% of unnecessary memory reads, saving 38 ms per forward pass.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

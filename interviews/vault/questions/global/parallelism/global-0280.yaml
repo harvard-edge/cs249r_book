@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: global-0280
+track: global
+level: L6+
+zone: mastery
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Resilient 1024-GPU Training System
+scenario: You are designing a fault-tolerant training system for a 175B model on 1024 GPUs where individual GPU failures occur every 2-4 hours. Requirements include continuous training despite single GPU failures, maximum 5% throughput overhead, and checkpoint recovery under 10 minutes.
+question: "How would you design a fault-tolerant training system for a 175B model on 1024 GPUs where individual GPU failures occur every 2-4 hours?"
+details:
+  realistic_solution: 'Multi-layer resilience design: (1) Hot spare pool: keep 32 spare GPUs (3.1% overhead). When a GPU fails, remap its work to a spare within 30 seconds. The failed GPU''s data-parallel rank is replaced; its gradient contribution comes from the spare running the same model shard. (2) Elastic data parallelism: DP dimension can shrink/grow without stopping training. If a spare is unavailable, reduce DP from 128 to 127 — throughput drops 0.8% until replacement. Training continues without restart. (3) Asynchronous checkpointing: checkpoint to NVMe SSDs local to each node (3.2 TB/s aggregate for 128 nodes), then async copy to shared storage. Checkpoint takes 700 GB / 3.2 TB/s = 0.22 seconds for the local write (training stall), plus background network copy. (4) In-memory redundancy: replicate optimizer states across DP ranks (already inherent in ZeRO Stage 1). A failed GPU''s optimizer shard is reconstructed from its DP peer in <1 second. (5) Monitoring: heartbeat every 500ms, failure detected in 1s, spare activated in 30s. Total throughput overhead: 3.1% (spares) + 0.5% (async checkpoint) + 0.3% (heartbeat) ≈ 3.9% < 5% budget.'
+  common_mistake: |
+    **The Pitfall:** Relying solely on checkpoint-restart for every failure.
+    **The Rationale:** Checkpoint-restart is the default, easy-to-implement strategy on smaller clusters.
+    **The Consequence:** At 1024 GPUs with frequent failures, restarting the entire job wastes 30-50% of training time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1024 GPUs, MTBF per GPU ~20,000h. System MTBF = 19.5h (correlated to 2-4h).
+    - 32 spare GPUs.
+    - 700 GB checkpoint size, local NVMe write at 3.2 TB/s aggregate.
+    
+    **Calculations:**
+    - Spare overhead = 32 / 1024 = 3.1%.
+    - Async checkpoint write stall = 700 GB / 3.2 TB/s = 0.22s every 2h (~0.003% overhead).
+    
+    **Conclusion & Interpretation:**
+    - **Result: Overhead Budget Maintained (Latency Bound)**. Total overhead is well under the 5% budget, ensuring high resilience without sacrificing training throughput.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

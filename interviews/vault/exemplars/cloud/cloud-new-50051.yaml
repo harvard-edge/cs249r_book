@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-new-50051
+title: Gradient Bucket Size Tuning for Optimal Communication Overlap
+topic: communication-computation-overlap
+status: published
+provenance: human
+scenario: Your DDP training of a 1.3B parameter model across 32 H100 GPUs has 40% communication overhead despite gradient bucketing. The current bucket size is 25MB (PyTorch default). Network is 400 Gbps InfiniBand. Profiling shows many small AllReduce calls with high startup latency.
+question: How do you optimize the bucket configuration to minimize communication overhead?
+details:
+  realistic_solution: 'Optimal bucket size depends on the tradeoff between AllReduce startup latency and overlap opportunity. (1) Current: 25MB buckets = 1.3B × 4 / 25M = 208 buckets. Each AllReduce has ~50μs startup latency: 208 × 50μs = 10.4ms wasted on startup. (2) Increase to 100MB buckets: 52 buckets, 2.6ms startup. But fewer, larger AllReduces start later, reducing overlap. (3) Optimal: profile and find the knee. Typically 50-100MB for InfiniBand. Also try NCCL tree AllReduce (lower latency for large messages) and set NCCL_MIN_NCHANNELS=4 for better bandwidth utilization. (4) Use torch.nn.parallel.DistributedDataParallel(bucket_cap_mb=100) and measure throughput.'
+  common_mistake: |
+    **The Pitfall:** Making buckets arbitrarily large (e.g., 1GB) to minimize the total number of AllReduce calls.
+    **The Rationale:** Assuming fewer network calls strictly reduces latency without considering the pipeline stall.
+    **The Consequence:** Larger buckets delay the start of communication, preventing communication-computation overlap and leaving network bandwidth unutilized.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1.3B parameters = 5.2 GB gradients (FP32).
+    - Network: 400 Gbps (50 GB/s) InfiniBand. AllReduce startup latency ~50 μs.
+    - Backward pass time: ~200 ms.
+
+    **Calculations:**
+    - Current (25MB): 208 buckets. Startup overhead = 208 * 50 μs = 10.4 ms.
+    - Total transfer time = 5.2 GB / 50 GB/s = 104 ms.
+    - perfectly overlapped step time = max(200, 104) = 200 ms.
+    - Actual time = 280 ms (40% overhead).
+
+    **Conclusion & Interpretation:**
+    - **Result: 50-100MB (Startup-Latency-Bound)**. Tuning the bucket size to ~50-100MB reduces startup latency while maintaining overlap, dropping step time.
+last_modified: '2026-04-02'

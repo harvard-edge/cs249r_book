@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: tinyml-0100
+track: tinyml
+level: L4
+zone: diagnosis
+topic: real-time-deadlines
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Watchdog Timer Integration with Inference
+scenario: Your Cortex-M33 (nRF5340, 128 MHz) runs a 12-layer anomaly detection model. Inference takes 85 ms. The system's Independent Watchdog Timer (IWDG) is set to 100 ms because the safety spec requires a response within 100 ms. Your test engineer reports that the watchdog fires randomly during normal inference — about 1 in 50 runs. The model isn't hanging.
+question: Why does an 85 ms nRF5340 inference randomly trip a 100 ms watchdog, and where should the watchdog be kicked?
+details:
+  realistic_solution: 'Average inference (85ms) leaves only 15ms margin to the 100ms watchdog. Worst-case adds: BLE interrupt servicing (+5ms), flash wait states on cache miss (+16ms), and I-cache cold-start after context switch (+0.78ms) = 107ms, exceeding the 100ms deadline 2% of the time (1 in 50). Fix: insert a watchdog kick at layer 6 (midpoint). Each half takes ~42.5ms average, 53.5ms worst case — well under 100ms. The single register write costs 23 nanoseconds. This preserves the safety deadline while eliminating false watchdog resets. Never increase the watchdog timeout to accommodate software — that violates the safety specification.'
+  common_mistake: |
+    **The Pitfall:** Increasing the watchdog timeout to 200 ms to "give the software more room."
+    **The Rationale:** Engineers treat the watchdog as an arbitrary software annoyance rather than a hard constraint dictated by external safety requirements.
+    **The Consequence:** This directly violates the safety specification; if the monitored system experiences a true anomaly, it could cause damage if it goes undetected for longer than the strictly mandated 100 ms.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Average inference: 85 ms.
+    - Watchdog Timeout: 100 ms.
+    - Worst-case add-ons: BLE (+5 ms), flash wait (+16 ms), I-cache (+0.78 ms).
+
+    **Calculations:**
+    - Worst-case latency: 85 + 5 + 16 + 0.78 = 106.78 ms.
+    - Mid-kick at layer 6: Each half takes ~42.5 ms avg, 53.5 ms worst case.
+    - Margin per kick: 100 ms - 53.5 ms = 46.5 ms.
+    - Overhead of mid-kick: 1 WDT register write = 3 cycles = 23 ns.
+
+    **Conclusion & Interpretation:**
+    - **Result: 106.78 ms (Latency-Bound)**. The worst-case latency triggers the WDT, but splitting it via a 23 ns mid-kick completely eliminates false resets.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: tinyml-chain-079
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

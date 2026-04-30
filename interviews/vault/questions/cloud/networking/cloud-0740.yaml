@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-0740
+track: cloud
+level: L5
+zone: optimization
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: The Gradient Synchronization Overlap
+scenario: 'Your profiler shows that for a 7B model on 64 GPUs with DDP, the backward pass takes 800 ms and the AllReduce takes 600 ms, giving a step time of 1400 ms. A colleague claims you should be able to fully overlap them and get close to an 800 ms step time.'
+question: 'Under what conditions is this true, and when does the overlap break down?'
+details:
+  realistic_solution: 'PyTorch DDP partitions gradients into buckets and fires AllReduce as soon as all gradients in that bucket are computed. Overlap works when the backward pass produces gradients steadily and the network can drain each bucket''s AllReduce before the next arrives. Overlap breaks down when the model has massive layers (e.g., embeddings) at the start of the network (computed at the end of backward), or the network is too slow, exposing the final AllReduce because there''s no more computation to hide behind.'
+  common_mistake: |
+    **The Pitfall:** Assuming AllReduce always perfectly overlaps with the backward pass.
+    **The Rationale:** Candidates see that PyTorch DDP supports overlapping and assume it is a free, completely hidden operation.
+    **The Consequence:** They miss the fundamental constraint that a gradient bucket can only be reduced *after* its corresponding backward computation finishes, leading to unrealistic performance expectations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B params (14 GB), 25 MB/bucket = 560 buckets.
+    - Backward time: 800 ms. AllReduce time: 600 ms (1.07 ms/bucket).
+
+    **Calculations:**
+    - Sequential AllReduce: 560 * ~1.07 ms ≈ 600 ms.
+    - Backward pass rate: 560 buckets / 800 ms = 0.7 buckets/ms.
+    - The last bucket completes backward at t=800ms. Its AllReduce takes 1.07ms.
+    - A cluster of large embeddings computed last will expose dozens of buckets with no compute to hide behind.
+
+    **Conclusion & Interpretation:**
+    - **Result: Exposed tail latency (Network-Bound)**. Network-Bound tail latency. Overlap is strictly limited by the causal dependency of the final backward pass computations.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

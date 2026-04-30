@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: mobile-1948
+track: mobile
+level: L2
+zone: fluency
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: understand
+phase: both
+title: KV Cache Tier Penalty Per Token
+scenario: A mobile Llama-3-3B INT8 implementation stores its KV cache in LPDDR5 main memory. The full cache for a 2k-token context is ~96 MB, far larger than the NPU's ~8 MB on-chip TCM. The team is debating whether to add a sliding-window L2 caching scheme that keeps the most-recent N tokens of KV in TCM and pages the rest from LPDDR5 on demand.
+question: Explain the architectural penalty of fully LPDDR5-resident KV cache versus a sliding-window TCM tier in terms of energy per token decode, and identify the per-token attention bandwidth constraint.
+details:
+  realistic_solution: 'Each decode step reads the full KV cache once for the attention reduction. Per-token KV size = 96 MB / 2048 tokens ~= 48 KB. 96 MB at 120 pJ/byte = 11.5 mJ per token in LPDDR5 - a 30 token/s decode then burns 345 mW just on KV reads. From TCM the same 96 MB would cost 0.144 mJ per token (80x less), but the cache does not fit. Sliding-window TCM at 8 MB holds ~170 tokens - only ~8% of the 2048 context. Energy per token = 0.92 * 11.5 + 0.08 * 0.144 = 10.6 mJ - a modest 8% saving. Bandwidth: LPDDR5 50 GB/s caps decode at 520 tokens/s theoretical. Conclusion: sliding-window TCM tiering helps but the win is marginal; the bigger lever is quantising K/V to INT4 to cut the LPDDR5 traffic in half.'
+  common_mistake: |
+    **The Pitfall:** Treating "store the KV cache in NPU SRAM" as a feasible placement on mobile.
+    **The Rationale:** Candidates divide 8 MB by a few bytes, assuming TCM holds tens of thousands of tokens, forgetting that per-token KV is tens of kilobytes.
+    **The Consequence:** The sliding window design fails in practice because it only fits ~170 tokens, doing almost nothing to fix the LPDDR5 bottleneck.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Context: 2048 tokens, 96 MB KV Cache total (~48 KB/token).
+       - TCM: 8 MB capacity (1.5 pJ/byte, 400 GB/s).
+       - LPDDR5: 120 pJ/byte, 50 GB/s.
+    2. **Calculations:**
+       - TCM Token Capacity: 8 MB / 48 KB ≈ 170 tokens (~8.3% of 2K context).
+       - LPDDR5 Energy: 96 MB * 120 pJ/byte = 11.5 mJ/token.
+       - TCM Energy (for 96MB): 96 MB * 1.5 pJ/byte = 0.144 mJ/token.
+       - Blended Energy: (0.917 * 11.5 mJ) + (0.083 * 0.144 mJ) ≈ 10.56 mJ/token.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound. An 8% TCM hit rate yields marginal (~8%) energy savings. INT4 K/V quantization is far more effective.**
+status: archived
+provenance: llm-draft
+expected_time_minutes: 5
+requires_explanation: true
+validated: false
+math_verified: false
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-design-L2
+created_at: '2026-04-25'
+deletion_reason: 'Archived after 3 independent fix-agent passes (Phase C, F.2, F.4) failed to satisfy the judge. Final verdict: NEEDS_FIX. The (track, topic, zone, level) cell may be structurally awkward for this question''s framing; preserving the item for audit but removing from the bundle.'

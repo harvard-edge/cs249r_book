@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-1399
+track: cloud
+level: L3
+zone: fluency
+topic: vram-budgeting
+competency_area: memory
+bloom_level: apply
+phase: both
+title: im2col Memory Expansion Overhead
+scenario: You are profiling a CNN inference workload on a 16GB NVIDIA T4 GPU. A custom ML framework you are using naively applies the `im2col` transformation to map convolutions to highly optimized cuBLAS dense matrix multiplications. You are examining a specific convolution layer that receives an FP8 (1 byte per element) activation tensor of shape (Batch=64, Channels=256, Height=256, Width=256) and applies a 3x3 kernel with stride 1 and padding 1.
+question: What im2col intermediate memory footprint does this FP8 3x3 convolution create, and why can it OOM a 16GB T4?
+details:
+  realistic_solution: |
+    The `im2col` transformation flattens each C x K x K receptive field into a matrix column. For a stride of 1, each pixel is duplicated approximately K^2 times in the intermediate representation. The input per sample is 256 x 256 x 256 = 16.77 MB. The `im2col` matrix per sample is (256 x 3 x 3) x (256 x 256) ≈ 151 MB. Across a batch of 64, this intermediate tensor alone consumes 151 MB x 64 ≈ 9.66 GB. On a 16GB T4 GPU, this massive 9x memory expansion for a single layer's intermediate state leaves very little VRAM for weights, inputs, or workspace memory, easily leading to an OOM.
+  common_mistake: |
+    **The Pitfall:** Assuming the `im2col` intermediate matrix is the same size as the input tensor.
+    **The Rationale:** Most framework profiling abstracts away the intermediate matrix generation, making it an invisible step.
+    **The Consequence:** Engineers miss the K^2 memory expansion factor for stride-1 convolutions and spend days debugging OOMs by pruning weights instead of fixing the inefficient convolution algorithm.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Activation tensor: Batch=64, C=256, H=256, W=256, FP8 (1 byte).
+       - Kernel: 3x3, stride 1, padding 1.
+    2. **Calculations:**
+       - Input Memory per Sample: 256 * 256 * 256 * 1 byte = 16,777,216 bytes (~16.77 MB).
+       - im2col Matrix per Sample: (256 * 3 * 3) * (256 * 256) = 2,304 * 65,536 = 150,994,944 bytes (~151 MB).
+       - Expansion Factor: 151 / 16.77 = 9x expansion (K^2).
+       - Total Memory for Batch 64: 151 MB * 64 = 9,664 MB = 9.66 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound (OOM).** A 9.66 GB intermediate tensor leaves almost no VRAM for weights or workspace on a 16GB T4.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-194
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:51:41.040068'

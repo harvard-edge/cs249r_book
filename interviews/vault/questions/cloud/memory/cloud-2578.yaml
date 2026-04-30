@@ -1,0 +1,31 @@
+schema_version: '1.0'
+id: cloud-2578
+track: cloud
+level: L5
+zone: evaluation
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: Cloud Deepspeed Zero L5 0
+scenario: 'For a 30B model on 64 GPUs across 8 nodes (NVLink intra-node, 100 Gbps inter-node), you must select a parallelism strategy.'
+question: 'Which is more communication-efficient for the 30B model: flat ZeRO-3 across 64 GPUs or hierarchical ZeRO, and why?'
+details:
+  realistic_solution: 'Option A (flat ZeRO-3): every layer requires all-gather across all 64 GPUs. Total param traffic: 60 GB x 3 (fwd gather + bwd gather + gradient reduce-scatter) = 180 GB per step. Inter-node time: 180 x (7/8) / 12.5 = 12.6s. Option B (hierarchical): ZeRO-2 within each 8-GPU node - params replicated intra-node (60 GB per GPU, fits in 80 GB). Gradient reduce-scatter within node at NVLink speed (fast). ZeRO-1 across nodes - only optimizer states sharded cross-node. Cross-node traffic: gradient AllReduce = 2 x (7/8) x 60 GB = 105 GB. Inter-node time = 105 / 12.5 GB/s = 8.4s. Option B cuts cross-node traffic by 33% and keeps parameter all-gathers strictly on fast NVLink.'
+  common_mistake: |
+    **The Pitfall:** Applying ZeRO-3 uniformly across all nodes without considering network topology.
+    **The Rationale:** Engineers fail to realize that inter-node Ethernet/InfiniBand is an order of magnitude slower than intra-node NVLink.
+    **The Consequence:** Massive network bottlenecks during the forward/backward passes as parameters are fetched across slow inter-node links.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 30B model (60GB at FP16).
+    - 64 GPUs across 8 nodes.
+    - Network: NVLink intra-node, 100 Gbps (12.5 GB/s) inter-node.
+
+    **Calculations:**
+    - Flat ZeRO-3 (Option A): Cross-node parameter traffic = 60GB * 3 ops * (7/8 cross-node factor) = 157.5 GB. Time = 157.5 / 12.5 = 12.6s.
+    - Hierarchical ZeRO (Option B): Only gradients sync cross-node = 60GB * 2 * (7/8) = 105 GB. Time = 105 / 12.5 = 8.4s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bound by Inter-Node Links.** Hierarchical ZeRO saves >4s per step by keeping high-bandwidth parameter gathers on NVLink.
+status: published

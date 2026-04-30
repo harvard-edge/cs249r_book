@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-2314
+track: cloud
+level: L5
+zone: optimization
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Evaluating MLIR Fusion for Bandwidth
+scenario: 'Optimizing a custom Transformer on A100 GPUs. Profiling reveals a bottleneck in a custom gating network: Out = Tanh(X) * Sigmoid(Y). X and Y are large activations, each 400M FP16 elements (800MB each). The current ML compiler lowers this to 3 sequential kernels (Tanh, Sigmoid, Multiply), taking ~2.8ms total.'
+question: You propose an MLIR lowering pass to fuse these element-wise operations. What is the expected speedup?
+details:
+  realistic_solution: 'The bottleneck is not compute, but memory bandwidth due to materializing intermediate tensors to HBM. By introducing a custom fusion pass at the MLIR linalg/tensor level, the compiler can lower the entire block into a single GPU kernel. This fused kernel loading X and Y directly into SRAM/registers, performs the Tanh, Sigmoid, and Multiply operations on-chip, and writes Out back to HBM. This eliminates the reading and writing of the intermediate Tanh(X) and Sigmoid(Y) tensors, drastically reducing total memory traffic and directly cutting latency.'
+  common_mistake: |
+    **The Pitfall:** Assuming compute is the bottleneck and attempting to optimize the FP16 math instructions.
+    **The Rationale:** Candidates fail to profile the system and realize that element-wise operations are entirely bottlenecked by intermediate HBM reads/writes.
+    **The Consequence:** Wasting time on lower-level PTX/SASS instruction tuning when the architecture desperately needs memory fusion.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 400M FP16 elements (800MB each)
+    - Unfused = 3 kernels. Fused = 1 kernel. Effective BW = 2.0 TB/s
+
+    **Calculations:**
+    - Unfused Traffic = Tanh (Read 800MB, Write 800MB) + Sigmoid (Read 800MB, Write 800MB) + Multiply (Read 2x800MB, Write 800MB) = 5.6GB
+    - Fused Traffic = Read X, Read Y, Write Out = 2.4GB
+    - Speedup = 5.6GB / 2.4GB = ~2.33x
+
+    **Conclusion & Interpretation:**
+    - **Result: ~2.33x (Memory-Bandwidth-Bound)**. Fusing the MLIR tensor operations drops memory traffic by 3.2GB, slashing latency by ~57%.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

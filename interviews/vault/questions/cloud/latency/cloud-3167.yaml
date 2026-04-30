@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3167
+track: cloud
+level: L5
+zone: evaluation
+topic: speculative-decoding
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Tree-Structured Speculation vs Linear Speculation
+scenario: A team is comparing linear speculation (K=5 sequential draft tokens) with tree-structured speculation (branching factor 2, depth 3, total 7 draft tokens) for a 70B target on 4x H100. Draft acceptance rate alpha=0.75.
+question: Which produces more accepted tokens per verification round, and what is the verification cost difference?
+details:
+  realistic_solution: 'Linear (K=5, alpha=0.75): E[accepted] = (1-0.75^6)/0.25 = 3.29 tokens. For a 70B model (140GB) on 4x H100 (13.4 TB/s aggregate), batch=1 verification is memory-bandwidth bound, taking ~10.5ms (140GB / 13.4 TB/s) regardless of whether K=5 or K=7. Tree (depth=3, branch=2, 7 nodes): explores 2 branches at each level, empirically yielding E~3.8 tokens vs linear 3.29, a 16% improvement. However, tree attention requires a sparse causal mask with a tree structure. FlashAttention-2 must handle this non-contiguous mask, reducing memory read efficiency and adding ~10% overhead (~11.6ms total verify time). Net throughput ignoring draft time: Tree yields 3.8 tokens / 11.6ms = 327.6 tok/s. Linear yields 3.29 tokens / 10.5ms = 313.3 tok/s. Tree speculation wins by amortizing the massive memory-bound verification cost over more accepted tokens, despite the mask overhead.'
+  common_mistake: |
+    **The Pitfall:** Assuming tree speculation automatically and unequivocally wins without understanding the FlashAttention overhead.
+    **The Rationale:** Candidates look at the higher token yield but forget that the tree attention requires a complex, non-contiguous causal mask that reduces FlashAttention efficiency.
+    **The Consequence:** Inaccurate architectural planning that ignores the software-hardware co-design realities of sparse attention masking.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B target (140GB) on 4x H100 (13.4 TB/s aggregate).
+    - Linear K=5, p=0.75.
+    - Tree depth=3, branch=2 (7 nodes). Empirical p yield ~3.8 tokens.
+    - Tree mask overhead: ~10%.
+
+    **Calculations:**
+    - Linear Accepted Tokens: (1 - 0.75^6) / 0.25 = 3.29 tokens.
+    - Linear Verify Time: 140GB / 13.4 TB/s = ~10.5ms.
+    - Tree Verify Time: 10.5ms * 1.10 = ~11.6ms.
+    - Linear Throughput: 3.29 tokens / 10.5ms = 313.3 tok/s.
+    - Tree Throughput: 3.8 tokens / 11.6ms = 327.6 tok/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 327.6 tok/s (Memory Bandwidth-Bound).** Tree speculation yields higher throughput (327.6 tok/s vs 313.3 tok/s) because memory bandwidth bottlenecks verification, making the extra draft tokens highly effective despite mask overhead.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

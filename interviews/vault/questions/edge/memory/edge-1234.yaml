@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-1234
+track: edge
+level: L3
+zone: analyze
+topic: memory-pressure-management
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: 'Jetson Orin OOM During Batch Fine-Tuning'
+scenario: 'A robotics team is deploying a continuous learning pipeline on an NVIDIA Jetson Orin (32 GB LPDDR5, 60W TDP, Ampere GPU + DLA accelerator). The model parameters consume 14 GB, the optimizer states consume 8 GB, and OS overhead is 2 GB. When using gradient accumulation with a micro-batch size of 1 for 16 steps, training runs smoothly. However, when they switch to a standard batch size of 16 to leverage the 275 TOPS INT8 compute, the system triggers the Linux OOM killer during the first forward pass. Assume each sample''s activations require 750 MB.'
+question: 'Why does batch size 16 trigger OOM on the 32 GB Jetson Orin while 16-step gradient accumulation with micro-batch 1 fits?'
+details:
+  realistic_solution: 'In standard training with a batch size of 16, the system must keep all intermediate activations in memory until the backward pass computes the gradients. With gradient accumulation, activations are only stored for 1 sample at a time. The OOM happens because the unified LPDDR5 memory is exhausted by the activations of 16 samples stored simultaneously, leading to OS-level eviction.'
+  common_mistake: |
+    **The Pitfall:** Only accounting for weights, optimizer states, and gradients in the memory budget.
+    **The Rationale:** Candidates completely miss the massive memory spike caused by saving intermediate activations during the forward pass for use in backpropagation.
+    **The Consequence:** The training script is deployed but immediately crashes the Orin device due to Linux OOM killer invocation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Jetson Orin Total Memory = 32 GB.
+    - Fixed Memory = 14 GB (Weights) + 8 GB (Optimizer) + 2 GB (OS) = 24 GB.
+    - Activation size per sample = 0.75 GB.
+
+    **Calculations:**
+    - Available memory = 32 GB - 24 GB = 8 GB.
+    - Scenario 1 (Micro-batch 1): Peak memory = 24 GB + 0.75 GB (Activations) = 24.75 GB (Fits).
+    - Scenario 2 (Batch 16): Peak memory = 24 GB + (0.75 GB * 16) = 36 GB (OOM).
+
+    **Conclusion & Interpretation:**
+    - **Result: 36 GB Peak (Memory-Capacity-Bound)**. 36 GB heavily exceeds the 32 GB limit, triggering the OOM killer.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+  - 'reasoning_competency and reasoning_mode are not specified.'
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: tinyml-1204
+track: tinyml
+level: L6+
+zone: mastery
+topic: roofline-analysis
+competency_area: compute
+bloom_level: create
+phase: inference
+title: Corstone-300 Roofline Optimization for Micro-Transformers
+scenario: You are architecting a micro-Vision Transformer (mViT) for a smart camera application on an ARM Cortex-M7 + Ethos-U55 (Corstone-300) platform running at 480 MHz with 512 KB of shared SRAM. The Ethos-U55 is configured for 256 MACs/cycle. Profiling reveals that the self-attention mechanism is severely underutilizing the NPU.
+question: How should Corstone-300 fuse micro-transformer attention to move from memory-bound to compute-bound execution within 512 KB?
+details:
+  realistic_solution: 'A strong candidate will calculate the ridge point of the Corstone-300''s roofline and identify that standard QK^T attention falls into the memory-bound region. They will design a FlashAttention-2 style fusion architecture specifically tailored for the U55''s command stream, computing blocks of the attention matrix and multiplying by V immediately. This keeps the NxN intermediate scores entirely within the U55''s internal buffers and raises the arithmetic intensity above the ridge point.'
+  common_mistake: |
+    **The Pitfall:** Proposing naive batching or larger tile sizes to improve utilization without verifying the SRAM budget.
+    **The Rationale:** Standard GPU-centric optimizations rely on increasing batch sizes, assuming memory is plentiful.
+    **The Consequence:** The larger tile immediately overflows the 512 KB shared SRAM, causing a catastrophic fallback to slower external flash memory, massively increasing latency rather than reducing it.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Corstone-300 Compute: 480 MHz × 256 MACs/cycle × 2 OPs/MAC = 245.76 GOPS.
+    - 64-bit SRAM bandwidth at 480 MHz: 3.84 GB/s.
+
+    **Calculations:**
+    - Roofline ridge point: 245.76 GOPS / 3.84 GB/s = 64 OPs/byte.
+    - Unfused QK^T (N=64, d=32, int8): 262,144 OPs. Q, K reads (4 KB), Score write (4 KB) = 8,192 Bytes.
+    - Unfused AI: 262,144 OPs / 8,192 Bytes = 32 OPs/byte (Memory-bound).
+    - Fused FlashAttention (QK^T * V): Compute doubles to 524,288 OPs. Memory traffic is Q, K, V reads (6 KB) + Output write (2 KB) = 8,192 Bytes.
+    - Fused AI: 524,288 OPs / 8,192 Bytes = 64 OPs/byte.
+
+    **Conclusion & Interpretation:**
+    - **Result: 64 OPs/byte (Compute-Bound)**. Fusing softmax and V-multiplication eliminates the 4 KB score memory traffic, pushing the workload exactly to the 64 OPs/byte ridge point.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,34 @@
+schema_version: '1.0'
+id: global-0440
+track: global
+level: L6+
+zone: specification
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: create
+phase: both
+title: Multi-Tenant LoRA Serving Architecture on MI300X
+scenario: You are hosting 1,000 different LoRA adapters for a 30B parameter base model on a fleet of MI300X GPUs. Strict latency SLAs mandate p99 < 50ms.
+question: How do you manage memory and request batching to serve all adapters without reloading the base model?
+details:
+  realistic_solution: 'Create an architecture using PagedAttention and S-LoRA/Punica: load the 60GB base model once into HBM. Store all LoRA adapters in a pinned host memory pool. When requests arrive, JIT-transfer the specific adapter weights over PCIe 5.0 (64 GB/s). Use continuous batching to fuse the base model matrix multiplications across requests, while applying the specific LoRA low-rank updates individually using custom Triton kernels.'
+  common_mistake: |
+    **The Pitfall:** Replicating the full 30B base model for each adapter in memory.
+    **The Rationale:** Treating each fine-tuned model as a completely separate artifact.
+    **The Consequence:** Immediate Out-of-Memory errors and inability to scale past 2-3 adapters per GPU.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Base model: 30B parameters.
+    - Precision: FP16 (2 bytes/param).
+    - Hardware: MI300X (192GB HBM3 total).
+    - JIT Transfer speed: 64 GB/s PCIe 5.0.
+    - Target SLA: p99 < 50ms.
+    
+    **Calculations:**
+    - Base model: 30B parameters x 2 bytes (FP16) = 60 GB.
+    - Available memory: 192 GB (total) - 60 GB (base) = 132 GB for PagedAttention KV cache and JIT LoRAs.
+    - JIT Transfer: 100 MB adapter / 64 GB/s PCIe 5.0 = ~1.5ms.
+    
+    **Conclusion & Interpretation:**
+    - **Result: ~1.5ms (Bandwidth-Bound)**. ~1.5ms easily meets the 50ms SLA.
+status: published

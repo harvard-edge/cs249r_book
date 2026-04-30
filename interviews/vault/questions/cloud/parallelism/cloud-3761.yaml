@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3761
+track: cloud
+level: L4
+zone: diagnosis
+topic: pipeline-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Pipeline Stalls from Unbalanced Stage Partitioning
+scenario: Your 30B GPT model is split across 4 TPU v5e hosts using pipeline parallelism. Stage 0 has the embedding layer + 20 transformer blocks, while stages 1-3 have 10, 10, and 10 blocks plus the final LM head. Profiling shows stage 0 takes 1.8× longer than other stages per micro-batch.
+question: What is the throughput impact of stage 0 being 1.8× slower, and how would you rebalance the pipeline?
+details:
+  realistic_solution: 'Pipeline throughput is limited by the slowest stage. If stage 0 takes 1.8× longer, all other stages idle for 44% of the time (1 - 1/1.8). Effective throughput = (theoretical throughput) / 1.8 = 56% efficiency, on top of the pipeline bubble overhead. Fix: rebalance layers so all stages have equal compute time. Move 5 transformer blocks from stage 0 to stage 1, giving [15+emb, 15, 10, 10+head]. Profile again — the embedding layer is cheap (lookup, no GEMM), so 15+emb ≈ 15 blocks of compute. The LM head involves a large GEMM (hidden → vocab_size), so 10+head ≈ 12 blocks equivalent. Better balance: [15+emb, 14, 11, 10+head] with empirical tuning. Megatron-LM provides profiling-based auto-partitioning for this reason.'
+  common_mistake: |
+    **The Pitfall:** Balancing stages solely by layer count.
+    **The Rationale:** Ignoring that embedding layers and LM heads have vastly different compute profiles than standard transformer blocks (memory-bound lookup vs compute-heavy GEMM).
+    **The Consequence:** A severely unbalanced pipeline that idles resources and halves theoretical throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 4 stages with M=16 micro-batches (bubble efficiency ≈ 84.2%).
+    - Stage 0 is 1.8x slower than the rest.
+
+    **Calculations:**
+    - Pipeline utilization (imbalanced) = 1 / 1.8 = 55.6%.
+    - Combined efficiency (imbalanced) = 55.6% × 84.2% = 46.8%.
+    - Balanced efficiency = 100% × 84.2% = 84.2%.
+    - Improvement multiplier = 84.2 / 46.8 ≈ 1.8x.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~1.8x Throughput Improvement (Compute-Bound)**. Pipeline throughput is bottlenecked by the slowest stage; moving layers to achieve compute parity immediately unlocks nearly double the throughput.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3201
+track: cloud
+level: L5
+zone: design
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Prefill vs Decode Phase Routing Differences
+scenario: Your MoE serving system disaggregates prefill and decode onto separate GPU pools. During prefill, batches of 512 tokens hit all experts evenly. During decode, batches of 128 requests generate 1 token each, and only 4 of 8 experts see significant traffic.
+question: What parallelism layouts should you use for MoE prefill and decode, and why should they differ?
+details:
+  realistic_solution: 'Prefill pool: Use EP=8 (1 expert per GPU). With 512 tokens and uniform routing, each expert processes ~128 tokens — large enough for efficient matmuls. All-to-all communication is amortized over the large batch. Compute-bound: H100 Tensor Core utilization >70%. Decode pool: EP=8 wastes 4 GPUs that receive near-zero traffic. Instead, use EP=4 (2 experts per GPU), consolidating the 4 hot experts across 4 GPUs. This halves the GPU count while maintaining throughput for decode (which is memory-BW-bound anyway — fewer GPUs means less aggregate BW, but each GPU has enough BW for 1-token matmuls). Alternatively, replicate hot experts and use EP=4 with selective expert placement. The key insight: MoE decode is memory-bandwidth-bound (loading expert weights for single-token matmuls), so consolidating experts on fewer GPUs with higher utilization is better than spreading across many underutilized GPUs.'
+  common_mistake: |
+    **The Pitfall:** Using the exact same expert parallelism (EP) layout for both prefill and decode phases.
+    **The Rationale:** It's architecturally simpler to maintain a homogeneous deployment topology.
+    **The Consequence:** Severely underutilizing GPUs during decode, wasting expensive memory bandwidth on cold experts while hot experts bottleneck.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - MoE model with 8 experts, Top-2 routing.
+       - Prefill batch: 512 tokens.
+       - Decode batch: 128 tokens.
+    2. **Calculations:**
+       - Prefill uniform load: 512 * 2 / 8 = 128 tokens/expert (Compute-efficient GEMM).
+       - Decode average load: 128 * 2 / 8 = 32 tokens/expert.
+       - Decode skewed load: 4 hot experts get ~48 tokens, 4 cold experts get ~8 tokens.
+    3. **Conclusion & Interpretation:** **Severe decoding skew (Memory Bandwidth-Bound on hot experts).**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4468
+track: cloud
+level: L5
+zone: realization
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Social Graph Embedding Update Frequency for Friend-Aware Rec
+scenario: 'A social recommendation system incorporates friend activity into item scores: items liked by friends score higher. The social graph has 1B users with avg 200 friends each. Friend-aware scoring at request time requires loading friend activity lists.'
+question: How would you incorporate friend activity for 1B users at 10K QPS while keeping P99 latency under 50ms?
+details:
+  realistic_solution: 'Pre-aggregated social signals: (1) Offline aggregation job (hourly): for each user U, compute a compact social signal vector: weighted sum of friend item embeddings clicked in last 24h. Result: one 128-dim vector per user (social_embedding). Size: 1B users * 128 * 4B = 512GB. Store in distributed key-value store (RocksDB or Redis cluster). (2) At serving time: single lookup for user''s social_embedding (1 Redis GET, 1ms). Use social_embedding as an additional input feature to the ranking model — no per-friend lookup needed. (3) Real-time social signal (for high-recency): maintain a streaming counter of friend activity in last 1 hour. Flink job aggregates Kafka events per user. Serves ''recent_friend_activity_count'' as a scalar feature. Lookup: 1ms. (4) Total social feature latency: 2ms for pre-aggregated embedding + recency count. Fits within 50ms budget. Trade-off: social embedding is hourly stale. For friend-based freshness: use real-time recency signal to boost content where recent_friend_activity_count > 0.'
+  common_mistake: |
+    **The Pitfall:** Loading full friend activity lists at request time from a graph database.
+    **The Rationale:** It represents the most accurate, real-time state of the social graph.
+    **The Consequence:** For a user with 200 friends, this requires 200 graph traversals. At 1ms per traversal, sequential takes 200ms, and parallel takes 10ms+ with massive fan-out overhead, violating the 50ms P99 budget.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Social Embedding Storage: 1B users * 128 dim * 4B = 512 GB.
+    - Redis Cluster: At 16GB per node, requires 32 nodes. Handles 100K+ GET/sec per node, P99 Latency = 1ms.
+
+    **Calculations:**
+    - Hourly Aggregation Job: 1B users * 200 friends * 1 event/hour = 200B events/hour.
+    - Flink Processing: At 10M events/sec, 200B events takes 5.6 hours.
+    - Optimization: Parallelize to 100 Flink workers to drop processing time to ~3.4 minutes.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~3.4 minutes (Compute-Bound)**. A single Flink worker is too slow for an hourly refresh; parallelizing to 100 workers easily meets the target.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

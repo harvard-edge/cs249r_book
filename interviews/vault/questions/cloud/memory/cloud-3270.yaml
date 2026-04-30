@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3270
+track: cloud
+level: L3
+zone: analyze
+topic: kv-cache-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: A100 KV-Cache Management for Long Context LLMs
+scenario: 'You are deploying a large language model (LLM) with 32 layers, 32 attention heads, and a head dimension of 128 for inference on an NVIDIA A100 GPU (80 GB HBM2e memory, 2.0 TB/s bandwidth). The model needs to support a maximum context length of 32,768 tokens, and all weights are loaded in FP16. You''re observing frequent Out-Of-Memory (OOM) errors when trying to serve concurrent requests.'
+question: 'Where is the memory pressure for 32k-context LLM inference on an 80 GB A100, and how would you prevent OOMs while maximizing throughput?'
+details:
+  realistic_solution: 'A realistic solution involves: \n1.  **Quantifying KV-Cache Needs**: Calculate the memory required for the KV-cache per sequence. \n2.  **Implementing Paged Attention**: Adopt paged attention mechanisms (like those in vLLM or HuggingFace TGI) which allow for non-contiguous memory allocation and sharing of KV-cache pages across requests, significantly improving memory utilization.\n3.  **Dynamic Batching**: Use dynamic batching with an adaptive scheduler that monitors GPU memory usage and adjusts the number of concurrent sequences based on available memory and their varying context lengths.\n4.  **Eviction Policies**: Implement (or leverage existing) KV-cache eviction policies (e.g., Least Recently Used) for paged attention, although this is more relevant when physical memory is truly exhausted and older cache entries need to be dropped to make room for new tokens.\n5.  **Offloading/Tiering**: For extremely long contexts that exceed even optimized GPU memory, consider offloading less critical or older KV-cache pages to CPU memory, though this impacts latency due to PCIe bandwidth (2.0 TB/s on A100 refers to HBM2e, PCIe is significantly slower).'
+  common_mistake: |
+    **The Pitfall:** Focusing only on model weights or batch size, while overlooking the KV-cache scaling.
+    **The Rationale:** Engineers accustomed to CNNs or short-context NLP models often underestimate the memory footprint of the attention mechanism.
+    **The Consequence:** Scaling sequence length quadratically increases the KV-cache, leading to severe fragmentation and instant OOM errors without paged attention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - KV-cache per token, per layer: 2 (K,V) * 32 heads * 128 dim * 2 bytes = 16 KB.
+    - 32 layers total.
+    - 80GB A100 has ~60 GB available for KV-cache.
+
+    **Calculations:**
+    - Total KV-cache size per token across all 32 layers = 512 KB/token.
+    - For a single 32,768-token sequence: 512 KB/token * 32,768 tokens ≈ 16.7 GB.
+    - Without paged attention: 60 GB / 16.7 GB/sequence ≈ 3 concurrent sequences.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3 Concurrent Sequences (VRAM Exhaustion)**. Without paged attention, massive fragmentation occurs, motivating the critical need for paged attention and dynamic batching.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

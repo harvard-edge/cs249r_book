@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: mobile-0537
+track: mobile
+level: L3
+zone: fluency
+topic: roofline-analysis
+competency_area: compute
+bloom_level: apply
+phase: inference
+title: The Mobile Video Battery Drain
+scenario: You are a mobile ML engineer diagnosing severe battery drain in a real-time video filter app on an Apple A17 Pro. The profiler explicitly points to a single 3x3 depthwise convolution layer on a 112x112x256 INT8 feature map.
+question: Why does a 3x3 depthwise convolution on a 112x112x256 INT8 tensor drain battery on A17 Pro?
+details:
+  realistic_solution: Execute a Roofline analysis. The workload is catastrophically memory-bound. Calculating the layer's arithmetic intensity (Ops/Byte) proves it resides far left of the hardware's ridge point. The Apple Neural Engine (ANE) cores finish their math instantly and idle wait on the LPDDR5 bus, bleeding massive static power without advancing execution.
+  common_mistake: |
+    **The Pitfall:** Assuming that high peak TOPS means system slowdowns must fundamentally be compute-bound.
+    **The Rationale:** Neglecting to mathematically calculate the arithmetic intensity of parameter-light layers like depthwise convolutions.
+    **The Consequence:** Recommending useless hardware upgrades or logic optimizations when the true solution lies exclusively in minimizing data movement.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A17 Pro Peak Compute: 35 TOPS. Bandwidth: 51.2 GB/s.
+    - Layer: 3x3 Depthwise Conv, 112x112 spatial, 256 channels, INT8 (1 byte/element).
+
+    **Calculations:**
+    - Total Compute: 2 (MAC ops) * 3 * 3 * 112 * 112 * 256 = 57,802,752 Ops (~57.8 M-Ops).
+    - Memory Read (Input + Weights): (112 * 112 * 256 * 1 byte) + (3 * 3 * 256 * 1 byte) = 3.21 MB + 2.3 KB ≈ 3.21 MB.
+    - Memory Write (Output): 112 * 112 * 256 * 1 byte = 3.21 MB.
+    - Total Memory Traffic: 3.21 MB + 3.21 MB = 6.42 MB.
+    - Arithmetic Intensity: 57.8 M-Ops / 6.42 MB = ~9.0 Ops/Byte.
+    - Hardware Ridge Point: 35,000 G-Ops / 51.2 GB/s = ~683 Ops/Byte.
+
+    **Conclusion & Interpretation:**
+    - **Result: 9 Ops/Byte (Memory-Bound)**. At 9 Ops/Byte, the layer is vastly beneath the 683 Ops/Byte hardware ridge point, stalling the NPU while waiting on memory and burning static power.
+  options:
+  - 'The layer is compute-bound; the 3x3 kernel requires too many FLOPs for the NPU to sustain 60 FPS.'
+  - 'The layer is memory-bound; its arithmetic intensity (9 Ops/Byte) is far below the A17''s ridge point, stalling the NPU.'
+  - 'Thermal throttling is artificially reducing the ridge point to 10 Ops/Byte, matching the layer''s intensity.'
+  - 'The INT8 data type induces a 4x penalty on memory bus transfers compared to native FP16 execution.'
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

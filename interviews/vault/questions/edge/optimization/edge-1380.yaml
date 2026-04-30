@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: edge-1380
+track: edge
+level: L3
+zone: implement
+topic: graph-compilation
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: Compiler Graph Break Latency Overhead
+scenario: You are compiling a semantic segmentation model for the Hailo-8, a 2.5W dataflow accelerator that achieves 26 TOPS INT8 but has no local DRAM, meaning it must stream all data directly from host memory. During operator lowering, the framework compiler encounters an unsupported custom activation layer, forcing a graph break. The first compiled subgraph must write its intermediate 1024x1024x64 INT8 feature map back to host memory, and the second subgraph must subsequently read it back.
+question: If the effective host bandwidth for streaming is 2.0 GB/s in each direction, what is the total latency overhead added purely by this failure to fuse operators?
+details:
+  realistic_solution: This mandates a complete I/O round trip calculation. The dataflow architecture requires the entire intermediate tensor payload to be forcefully flushed over the PCIe bus to host DRAM and re-ingested immediately after.
+  common_mistake: |
+    **The Pitfall:** Forgetting the full round-trip required for a graph break.
+    **The Rationale:** Candidates often calculate a single memory transfer or forget that INT8 values are 1 byte each, failing to realize a graph break on a DRAM-less accelerator requires both a write to host and a read back.
+    **The Consequence:** Underestimating compilation inefficiency penalties by 50%.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Feature Map Shape: 1024 x 1024 x 64 elements.
+    - Data Type: INT8 (1 Byte per element).
+    - Effective Host Bandwidth: 2.0 GB/s (2000 MB/s) bidirectional.
+    - Operation: Full graph break round-trip (Write to Host -> Read from Host).
+
+    **Calculations:**
+    - Total Elements = 1024 * 1024 * 64 = 67,108,864 elements.
+    - Tensor Size = 67,108,864 Bytes = 64 MiB.
+    - Write Latency (TPU -> Host) = 64 MiB / 2000 MB/s = 32.768 ms.
+    - Read Latency (Host -> TPU) = 64 MiB / 2000 MB/s = 32.768 ms.
+    - Total Transfer Penalty = 32.768 ms + 32.768 ms = 65.536 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~65.5 ms Overhead (PCIe-Bandwidth-Bound)**. The framework context switch incurs massive DMA latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The question is missing `reasoning_competency` and `reasoning_mode` classifications.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

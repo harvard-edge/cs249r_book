@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4085
+track: cloud
+level: L4
+zone: implement
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: TP Communication Volume for Transformer Block
+scenario: A Llama-70B transformer block has hidden_dim=8192 and runs with TP=8 on MI300X GPUs. Each transformer block requires 2 AllReduce operations in the forward pass (one for attention, one for MLP).
+question: For hidden=8192, TP=8, and batch=2048 on MI300X, what is the per-block AllReduce volume and time for the two forward collectives?
+details:
+  realistic_solution: Each AllReduce sends a tensor of shape [2048, 8192] in BF16 = 2048 × 8192 × 2 = 33.6 MB. Two AllReduces per block = 67.2 MB message volume. Using ring AllReduce, actual bytes per GPU = 2 × (7/8) × 33.6 MB = 58.8 MB per AllReduce. With 8×MI300X connected via Infinity Fabric at ~400 GB/s bisection bandwidth, each AllReduce takes ~58.8 MB / 400 GB/s ≈ 0.15 ms. Two AllReduces ≈ 0.3 ms per block. With 80 layers, total TP communication ≈ 24 ms per forward pass. This is small relative to compute, confirming TP is communication-efficient within a node.
+  common_mistake: |
+    **The Pitfall:** Forgetting that AllReduce = ReduceScatter + AllGather.
+    **The Rationale:** Candidates often assume the data sent over the wire is exactly equal to the message size.
+    **The Consequence:** They underestimate network traffic by ~2x, and sometimes erroneously use HBM bandwidth instead of interconnect bandwidth (NVLink/Infinity Fabric) for calculations.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Batch=2048, Hidden=8192, TP=8, BF16.
+       - Infinity Fabric Bandwidth: 400 GB/s.
+    2. **Calculations:**
+       - Tensor Size: 2048 (batch) × 8192 (hidden) × 2 bytes (BF16) = 33.55 MB ≈ 33.6 MB.
+       - Ring AllReduce Cost: 2 × ((N - 1) / N) × Message Size.
+       - Volume per GPU: 2 × (7 / 8) × 33.6 MB = 58.8 MB per AllReduce.
+       - Time per AllReduce: 58.8 MB / 400 GB/s (Infinity Fabric) ≈ 0.15 ms.
+       - Total time per block: 2 AllReduces × 0.15 ms = 0.30 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound. The total time per block is 0.30 ms, confirming TP is communication-efficient within a node.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

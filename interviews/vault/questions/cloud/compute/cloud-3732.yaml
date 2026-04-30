@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3732
+track: cloud
+level: L4
+zone: analyze
+topic: roofline-analysis
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: Roofline Model for Transformer Encoder vs Decoder on TPU v5e
+scenario: 'TPU v5e runs BERT-large encoder and GPT-2-large decoder. TPU v5e specs: 197 TFLOPS BF16, 819 GB/s HBM.'
+question: 'What are the arithmetic intensities and roofline bottlenecks for BERT-large encoder batches and GPT-2-large single-token decoding on TPU v5e?'
+details:
+  realistic_solution: 'BERT encoder (batch=64, seq=512): total FLOPs = 64 × 344G = 22,016G = 22.0 TFLOPs. Memory: 336M × 2B = 672MB weights + 64 × 512 × 1024 × 2B × 4 = 268MB activations = ~940MB. AI = 22,016G / 940MB = 23,421 FLOPs/byte. TPU v5e ridge: 197T / 819G = 240 FLOPs/byte. Encoder AI (23421) >> ridge (240) → strictly compute-bound. GPT-2-large decoder (batch=1, 1 token): FLOPs = 2.3G. Memory: 774M × 2B = 1.548GB loaded per token. AI = 2.3G / 1.548G = 1.49 FLOPs/byte — deeply memory-bound. Encoder throughput ceiling: 197 TFLOPS (hardware peak). Decoder ceiling: 819 GB/s × 1.49 = 1.22 TFLOPS effective. Ridge-to-ridge comparison: encoder ~100% of peak compute, decoder 0.6% efficiency.'
+  common_mistake: |
+    **The Pitfall:** Treating encoder batch processing and decoder single-token generation as having similar arithmetic intensity profiles.
+    **The Rationale:** Engineers lump all Transformer operations together, failing to distinguish between the massive matrix-multiplication dominance of batch prefilling vs. the brutal vector-matrix constraints of auto-regressive decoding.
+    **The Consequence:** Hardware is fundamentally mis-allocated, expecting the decoder to hit high TFLOPS utilization, resulting in massively over-provisioned compute that sits 99% idle waiting on memory.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - TPU v5e: 197 TFLOPS peak, 819 GB/s HBM.
+    - BERT encoder: Batch=64, Seq=512. Total FLOPs = 22.0 TFLOPs. Memory = ~940 MB.
+    - GPT-2 decoder: Batch=1, Seq=1. Total FLOPs = 2.3 GFLOPs. Memory = 1.548 GB loaded.
+
+    **Calculations:**
+    - Hardware Ridge Point = 197,000 GFLOPs / 819 GB/s = 240 FLOPs/Byte.
+    - Encoder AI = 22,016 GFLOPs / 0.940 GB = 23,421 FLOPs/Byte.
+    - Decoder AI = 2.3 GFLOPs / 1.548 GB = 1.49 FLOPs/Byte.
+    - Decoder theoretical ceiling = 819 GB/s × 1.49 FLOPs/Byte = 1.22 TFLOPS (0.6% of peak).
+
+    **Conclusion & Interpretation:**
+    - **Result: Divergent Bottlenecks (Compute vs Memory-Bound)**. The Encoder is strictly **Compute-Bound** (operating near 100% of peak TFLOPS), whereas the single-batch Decoder is violently **Memory-Bandwidth Bound** (capped at a dismal 0.6% of peak TFLOPS).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'BERT-large encoder FLOPs per sequence was wildly underestimated (1.2 GFLOPs instead of 344 GFLOPs), leading to the incorrect conclusion that it was memory-bound. It is actually strictly compute-bound.'

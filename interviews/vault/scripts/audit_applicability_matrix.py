@@ -58,7 +58,7 @@ def load_taxonomy() -> tuple[dict[str, dict[str, Any]], set[tuple[str, str]]]:
 def load_observed_pairs() -> tuple[Counter[tuple[str, str]], dict[tuple[str, str], list[str]]]:
     counts: Counter[tuple[str, str]] = Counter()
     examples: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for path in QUESTIONS_DIR.glob("*/*.yaml"):
+    for path in QUESTIONS_DIR.rglob('*.yaml'):
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         pair = (data.get("topic", ""), data.get("track", ""))
         counts[pair] += 1

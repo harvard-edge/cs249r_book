@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-1016
+track: cloud
+level: L3
+zone: fluency
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: apply
+phase: training
+title: Calculating Wasted FLOPs from Unfolded Constants
+scenario: 'You are deploying a custom transformer model on AWS CPUs using ONNX Runtime. The computational graph dynamically computes a fixed causal mask: mask = tril(ones(1024, 1024)) * (1.0 / sqrt(64)). It also contains an unfused static projection where a frozen weight matrix W_1 (2048x1024) is multiplied by another frozen weight matrix W_2 (1024x512) before being applied to the dynamic input sequence.'
+question: How many FLOPs are wasted per inference by computing the fixed causal mask and frozen W_1 @ W_2 at runtime instead of constant folding them?
+details:
+  realistic_solution: 'Execute a constant folding graph optimization pass ahead of time. The compiler statically evaluates the mask generation and multiplication, replacing the entire subgraph with precomputed Initializer tensors.'
+  common_mistake: |
+    **The Pitfall:** Assuming standard PyTorch-to-ONNX export automatically folds all static matrix multiplications.
+    **The Rationale:** Candidates overestimate the default optimization level of dynamic computational graphs in modern deep learning frameworks.
+    **The Consequence:** The compiled model redundantly computes heavy fixed operations per request, destroying CPU serving throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Mask shape: 1024x1024.
+    - W_1 shape: 2048x1024, W_2 shape: 1024x512.
+
+    **Calculations:**
+    - Mask Generation FLOPs = 1024 * 1024 = 1.05 MFLOPs.
+    - MatMul(W_1, W_2) FLOPs = 2 * M * N * K = 2 * 2048 * 512 * 1024 = 2.147 GFLOPs.
+    - Total wasted compute = 2.147 GFLOPs + 1.05 MFLOPs = ~2.15 GFLOPs.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Bound.** Failing to constant fold wastes 2.15 GFLOPs per request, translating to 215 GFLOPs/sec of pure wasted overhead at 100 QPS.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-059
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:29:22.498417'

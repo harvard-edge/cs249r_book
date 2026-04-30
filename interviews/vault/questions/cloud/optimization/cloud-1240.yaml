@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-1240
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Diagnosing H2D Transfer Serialization on A100 GPUs
+scenario: You are profiling a PyTorch training loop on an NVIDIA A100 GPU. The dataloader yields 256MB batches that are correctly pinned in host memory. Inside the loop, the code calls `batch = batch.to(device, non_blocking=True)` and immediately feeds it into the model. An Nsight Systems trace reveals that Host-to-Device (H2D) memory transfers and compute kernels are completely serialized on the default CUDA stream, yielding 0% overlap. You need to explain why this serialization occurs despite the use of pinned memory and non-blocking calls, and determine how to orchestrate the streams to fix it.
+question: Why is H2D transfer serialized with compute despite using pinned memory and `non_blocking=True`, and how do you fix it?
+details:
+  realistic_solution: Implement a double-buffered prefetcher using an explicit `torch.cuda.Stream()`. Transfer batch N+1 on the dedicated transfer stream while computing batch N on the default stream. Use `current_stream().wait_stream()` before consuming batch N+1, and call `record_stream()` to prevent the caching allocator from prematurely freeing the memory.
+  common_mistake: |
+    **The Pitfall:** Assuming `non_blocking=True` automatically pipelines future transfers.
+    **The Rationale:** Misunderstanding how CUDA streams' implicit synchronization works when the default stream consumes a transferring tensor.
+    **The Consequence:** The default compute stream immediately blocks until the background transfer finishes, fully serializing execution and wasting GPU idle time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch size: 256 MB. PCIe Gen4 x16 bandwidth: ~25 GB/s.
+    - Compute step time: 25 ms.
+
+    **Calculations:**
+    - H2D Transfer time: 256 MB / 25 GB/s = ~10 ms.
+    - Serialized step time: 10 ms (transfer) + 25 ms (compute) = 35 ms.
+    - Pipelined step time: max(10 ms, 25 ms) = 25 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Bound**. Proper stream pipelining entirely hides the H2D transfer behind compute, yielding a 1.4x throughput increase (35ms vs 25ms).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:17:19.449037'

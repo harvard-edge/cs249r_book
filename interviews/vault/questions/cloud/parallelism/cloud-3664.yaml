@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3664
+track: cloud
+level: L5
+zone: evaluation
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: 'Tensor Parallelism Communication Bottleneck on Multi-Node Cluster'
+scenario: 'A 175B model is trained with TP=16 on MI300X nodes (8 GPUs/node). With TP=16, tensor parallelism spans 2 nodes connected by InfiniBand HDR (200Gbps = 25GB/s). Training MFU is 22% vs expected 45%. Profiling shows 60% of step time is in all-reduce operations.'
+question: 'How would you change the TP=16 training setup to remove cross-node tensor-parallel all-reduces and recover MFU?'
+details:
+  realistic_solution: 'Reduce TP degree to 8 (within a single node, NVLink only) and compensate with pipeline parallelism (PP) across nodes. TP=8 within node uses NVLink 900GB/s; PP across nodes uses InfiniBand but only sends activations (not weight gradients), reducing inter-node communication. Reconfigure as TP=8, PP=2 (2 pipeline stages, 1 node each). Expected MFU improvement: 22% → ~45%.'
+  common_mistake: |
+    **The Pitfall:** Increasing batch size to 'amortize' communication overhead.
+    **The Rationale:** Batch size increases generally improve utilization in data parallel setups.
+    **The Consequence:** Fails because all-reduce latency in tensor parallelism is on the critical path and does not scale with batch size — it occurs once per layer per forward/backward pass regardless of batch dimension.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Setup: TP=16 spanning 2 nodes (25 GB/s inter-node link).
+    - Tensor [B, seq, hidden] BF16: B=1, seq=2048, hidden=12288 (48 MB).
+    - Compute time per step: ~200 ms.
+
+    **Calculations:**
+    - Cross-node all-reduce volume per GPU: 2 * 15/16 * 48 MB = 90 MB.
+    - Time per all-reduce: 90 MB / 25 GB/s = 3.6 ms.
+    - Total comm time per step (96 layers * 2 passes): 3.6 ms * 192 = 691 ms.
+    - Comm overhead: 691 / (691 + 200) = 77.5%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Communication-Bound**. TP=16 places high-frequency all-reduces across the slow 25 GB/s InfiniBand link. Switching to TP=8 (node-local NVLink) + Pipeline Parallelism (PP=2) recovers MFU back to ~45%.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

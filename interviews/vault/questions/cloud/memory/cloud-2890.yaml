@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2890
+track: cloud
+level: L4
+zone: specification
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: Specifying Gradient Checkpointing Requirements in a Model Training SLA
+scenario: 'You are writing the training infrastructure specification for a new 30B production model. The training SLA requires (1) memory utilization <= 90% of HBM capacity, (2) training throughput >= 350 tokens/sec/GPU, and (3) training must complete 500B tokens within 60 days on 256 GPUs.'
+question: 'What checkpointing and sharding configuration satisfies the 90% HBM, 350 tokens/sec/GPU, and 500B-token-in-60-days constraints?'
+details:
+  realistic_solution: 'A combination of ZeRO-3 and selective gradient checkpointing is required. ZeRO-2 leaves insufficient HBM for activations. ZeRO-3 shards parameters and optimizer states, reducing per-GPU memory to ~1.6 GB. Checkpointing every 2 layers keeps activation memory at ~11.5 GB, safely under the 72 GB budget. The resulting 33% recompute overhead yields ~390 tokens/sec/GPU, satisfying the 350 tok/s SLA and completing 518B tokens within the 60-day window.'
+  common_mistake: |
+    **The Pitfall:** Specifying checkpointing granularity without verifying the resulting recompute overhead.
+    **The Rationale:** Candidates over-checkpoint (e.g., every layer) to maximize memory headroom, failing to check the math against the throughput SLA.
+    **The Consequence:** The memory constraint is passed, but throughput drops below 350 tokens/sec, causing the 60-day deadline to be missed.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 90% of 80GB HBM = 72 GB budget.
+    - 30B model in FP16 = 60 GB. Optimizer = 360 GB. 256 GPUs.
+
+    **Calculations:**
+    - ZeRO-3 param memory: 60 GB / 256 = 0.23 GB. Optimizer: 360 / 256 = 1.4 GB.
+    - Checkpoint every 2 layers: 48 layers * 168 MB = 8.1 GB + 3.4 GB active = 11.5 GB.
+    - Throughput: 520 tok/s * (1 - 0.25 overhead) = 390 tok/s.
+    - Total tokens: 256 GPUs * 390 tok/s * 60 days * 86400 s = 518B tokens.
+
+    **Conclusion & Interpretation:**
+    - **Result: 518B > 500B. All constraints satisfied (Compute-Bound).**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

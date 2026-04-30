@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-4178
+track: cloud
+level: L5
+zone: optimization
+topic: interconnect-topology
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: Topology-Aware AllReduce Algorithm Selection
+scenario: Your 128-GPU cluster has a 2-level topology 8 GPUs per node connected by NVLink (900 GB/s), 16 nodes connected by InfiniBand NDR (50 GB/s). You must synchronize a 2 GB gradient buffer.
+question: "Compare ring AllReduce, hierarchical AllReduce, and NCCL's tree AllReduce; which algorithm minimizes total AllReduce time?"
+details:
+  realistic_solution: Flat ring AllReduce bottlenecks on InfiniBand at 50 GB/s, wasting NVLink. Hierarchical AllReduce executes intra-node reduce-scatter on NVLink, inter-node AllReduce on IB, and intra-node all-gather on NVLink, utilizing the full 900 GB/s local bandwidth. Hierarchical is optimal for 2-level topology.
+  common_mistake: |
+    **The Pitfall:** Choosing a flat ring AllReduce that ignores the physical 2-level network topology.
+    **The Rationale:** Engineers default to the mathematically simplest algorithm without realizing that a flat ring forces intra-node data to travel over the slow inter-node links.
+    **The Consequence:** The blazing fast 900 GB/s NVLink is completely bypassed, and the entire cluster bottlenecks on the 50 GB/s InfiniBand switches.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Cluster: 128 GPUs, 16 nodes, 8 GPUs/node.
+       - NVLink bandwidth: 900 GB/s.
+       - InfiniBand bandwidth: 50 GB/s.
+       - Data payload: 2 GB.
+    2. **Calculations:**
+       - Flat Ring Time: 2 * 2 GB * (127/128) / 50 GB/s = ~80 ms.
+       - Hierarchical Intra-Node Reduce-Scatter: 2 GB * (7/8) / 900 GB/s = 1.94 ms. (Yields 250 MB chunk per GPU).
+       - Hierarchical Inter-Node AllReduce: 2 * 250 MB * (15/16) / 50 GB/s = 9.38 ms.
+       - Hierarchical Intra-Node All-Gather: 2 GB * (7/8) / 900 GB/s = 1.94 ms.
+       - Total Hierarchical Time: 1.94 ms + 9.38 ms + 1.94 ms = 13.26 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound Topology.** Hierarchical AllReduce is ~6x faster (13.26 ms vs 80 ms) because it minimizes traffic over the slower inter-node InfiniBand links.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

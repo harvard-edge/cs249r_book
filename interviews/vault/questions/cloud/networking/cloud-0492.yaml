@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-0492
+track: cloud
+level: L3
+zone: diagnosis
+topic: interconnect-topology
+competency_area: networking
+bloom_level: apply
+phase: both
+title: The Distributed Training Stall
+scenario: You are diagnosing a training job for a 175B parameter LLM using FP16. The setup uses 8-way tensor parallelism within each node and data parallelism across nodes. You observe that scaling from 1 to 2 nodes yields an excellent 1.8x speedup, but scaling further to 4 nodes only provides a ~1.66x additional speedup. Your profiler indicates that the `AllReduce` collective is taking up the vast majority of step time at the 4-node scale. The nodes are connected with a single 400 Gbps InfiniBand link each.
+question: What bottleneck explains the 4-node AllReduce slowdown for the 175B FP16 job on 400 Gbps InfiniBand?
+details:
+  realistic_solution: The correct diagnosis is that the cross-node InfiniBand network is completely saturated by the NCCL `AllReduce` operation. For data parallelism, the gradients for all 175B parameters must be synchronized across all nodes at every training step. The sheer size of these gradients overwhelms the GPUDirect RDMA network bandwidth, causing the scaling efficiency to plummet as more nodes are added.
+  common_mistake: |
+    **The Pitfall:** Misattributing the bottleneck to the on-node interconnect or CPU.
+    **The Rationale:** Candidates often confuse network bandwidth units (Gbps vs GB/s) or underestimate the sheer volume of data synchronized during an AllReduce for a 175B model.
+    **The Consequence:** Proposing expensive node-level hardware upgrades when the actual limit is the cross-node fabric bandwidth.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 175B parameters in FP16 (2 bytes/param) = 350 GB gradients.
+    - Nodes: 4. Interconnect: 400 Gbps (50 GB/s) InfiniBand per node.
+    - AllReduce Volume per node: 2 × ((N-1)/N) × Size.
+
+    **Calculations:**
+    - Data transferred per node (N=4): 2 × (3/4) × 350 GB = 525 GB.
+    - Transfer Time: 525 GB / 50 GB/s = 10.5 seconds per step.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bandwidth-Bound**. Synchronizing 350GB of gradients across a 50 GB/s network takes 10.5 seconds per step, dominating compute.
+  options:
+  - 'The PCIe Gen5 bus is saturated transferring data between the host CPU memory and the GPUs.'
+  - 'The on-node NVLink 4.0 interconnect is the bottleneck, as 8-way tensor parallelism is too communication-intensive.'
+  - 'The 400 Gbps InfiniBand interconnect is saturated by the 350 GB gradient synchronization during the AllReduce operation.'
+  - 'The training is CPU-bound, as the CPUs on each node cannot schedule the NCCL kernels for the AllReduce operation fast enough.'
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+chains:
+- id: cloud-chain-279
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

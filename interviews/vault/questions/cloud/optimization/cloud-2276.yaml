@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2276
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: The Autograd Overhead in Serving
+scenario: A production inference service running a 7B model in PyTorch shows that `torch.cuda.memory_allocated()` reports 28GB, but the model weights are only 14GB in FP16. The serving code uses a simple `model(input)` call. No optimizer or gradient accumulation is present.
+question: Where is the extra 14GB coming from, and how do you reclaim it?
+details:
+  realistic_solution: |
+    The extra 14GB is autograd's activation stash. PyTorch's define-by-run autograd defaults to recording intermediate tensors for the backward pass. Fix: wrap the inference execution in `torch.inference_mode()` (preferred over `torch.no_grad()` as it also skips version counting and view tracking). This eliminates the activation stash entirely. Also ensure `model.eval()` is set to disable Dropout/BatchNorm train behaviors.
+  common_mistake: |
+    **The Pitfall:** Assuming PyTorch automatically skips gradient tracking during forward-only inference without explicit context managers.
+    **The Rationale:** Candidates forget that PyTorch dynamically builds the computational graph unless explicitly told otherwise via `inference_mode`.
+    **The Consequence:** The server wastes 50% of its HBM storing intermediate activations for a backward pass that will never happen, halving the maximum potential batch size.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 7B parameters.
+    - Precision: FP16 (2 bytes/param).
+    - Serving environment: PyTorch without explicit inference optimization.
+
+    **Calculations:**
+    - Weight Memory: 7B * 2 bytes = 14 GB.
+    - Autograd Overhead (without `inference_mode`): PyTorch stores ~1 activation tensor per layer to build the computation graph. For a typical 32-layer 7B model, this activation stash equals approximately the size of the weights (14 GB).
+    - Total Memory: 14 GB (weights) + 14 GB (activations) = 28 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory Capacity-Bound by Autograd.** Wrapping the forward pass in `torch.inference_mode()` reclaims 14 GB of HBM (a 50% reduction) and eliminates CPU graph-building overhead, drastically increasing serving capacity.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

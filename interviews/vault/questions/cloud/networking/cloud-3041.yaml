@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3041
+track: cloud
+level: L5
+zone: design
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: create
+phase: both
+title: 'Network Bandwidth Bottlenecks: Design NVLink vs. PCIe Topology for 8xH100 Training'
+scenario: An 8xH100 DGX node is used for training a 13B model with data-parallel + tensor-parallel (TP-2, DP-4).
+question: For TP-2 and DP-4 training on an 8xH100 DGX, which traffic uses NVLink versus PCIe, and how much bandwidth does each consume?
+details:
+  realistic_solution: 'Configure TP-2 pairs and DP-4 groups to exclusively utilize the 900GB/s NVLink domain for all inter-GPU communications (both activation AllReduce and gradient AllReduce). PCIe should remain completely off the critical path, used only for initial data loading from NVMe storage with robust prefetching.'
+  common_mistake: |
+    **The Pitfall:** Assuming all GPU-GPU communication uses NVLink.
+    **The Rationale:** Candidates overlook how models are sharded across different network domains.
+    **The Consequence:** They fail to realize that gradient AllReduce in data-parallel training may cross PCIe to CPU/InfiniBand when GPUs are in different NVLink domains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - TP-2 all-reduce: 2 operations per layer, hidden_dim=5120, seq_len=2048, batch=4. 40 layers.
+    - FP16 precision (2 bytes). DP-4 grad sync: 13B params / 2 (sharded) = 6.5B * 2 bytes = 13GB.
+    - NVLink bandwidth: 900 GB/s.
+
+    **Calculations:**
+    - TP-2 AllReduce data per layer: 4 * 2048 * 5120 * 2 bytes = 83.8 MB per op.
+    - TP-2 Total data per step: 83.8 MB * 2 ops/layer * 40 layers = 6.7 GB.
+    - TP-2 Time: 6.7 GB / 900 GB/s = 7.4 ms.
+    - DP-4 Grad Sync Time: 13 GB / 900 GB/s = 14.4 ms.
+    - Total NVLink comm time: 7.4 + 14.4 = 21.8 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~22ms total communication time per step (NVLink-Bound)**. Heavily bottlenecked for inter-GPU communication.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

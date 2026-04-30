@@ -1,0 +1,41 @@
+schema_version: '1.0'
+id: cloud-3946
+track: cloud
+level: L4
+zone: fluency
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: understand
+phase: both
+title: TPU v5e ICI Ring Topology and Communication Overlap Opportunities
+scenario: TPU v5e pods use ICI (Inter-Chip Interconnect) in a 2D torus topology with 1.6 Tbps bandwidth per link. Unlike NVIDIA's NVSwitch (all-to-all), the torus requires multi-hop communication for non-adjacent chips.
+question: How does a 2D torus ICI topology change communication-computation overlap strategy for data-parallel training versus NVSwitch?
+details:
+  realistic_solution: 'On TPU''s 2D torus: (1) AllReduce is implemented as ReduceScatter + AllGather over the torus dimensions. Each dimension does a separate ring reduce. (2) For a 4x4 torus (16 TPUs): AllReduce in the X dimension (4 chips), then Y dimension (4 chips). Total latency proportional to chip_count_per_dim, not total chips. (3) XLA''s SPMD partitioner automatically maps AllReduce to torus dimensions. (4) Overlap opportunity: XLA can overlap the Y-dimension AllReduce with computation if the next operation only needs the X-dimension reduction first. This is XLA''s ''latency hiding'' optimization. (5) Unlike GPU, TPUs handle communication overlap at the compiler level (XLA), not runtime level (CUDA streams). The programmer''s job is to provide static graphs that XLA can analyze.'
+  common_mistake: |
+    **The Pitfall:** Applying GPU-optimized overlap strategies (flat AllReduce + bucketing) directly to TPU without considering the torus topology.
+    **The Rationale:** Multi-hop AllReduce on a torus has different latency characteristics than NVSwitch. TPUs handle communication overlap at the compiler level (XLA), not runtime level (CUDA streams).
+    **The Consequence:** Suboptimal scaling and failure to hide communication latency behind compute.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - TPU v5e ICI link bandwidth: 1.6 Tbps = 200 GB/s.
+       - Topology: 4x4 torus (16 TPUs). Payload: M = 1 GB.
+    2. **Calculations:**
+       - 2D Torus AllReduce time (X then Y): 2 × (3/4) × (1 GB) / 200 GB/s = 7.5 ms.
+       - Flat Ring over 16 chips: 2 × (15/16) × (1 GB) / 200 GB/s = 9.375 ms.
+    3. **Conclusion & Interpretation:** **2D torus reduction is ~20% faster than flat ring (7.5ms vs 9.375ms). Topology-Bound.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

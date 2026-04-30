@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2433
+track: cloud
+level: L5
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: The GQA Prefill Illusion
+scenario: A cloud provider serves a 70B LLM. To improve throughput, they switch from Multi-Head Attention (MHA) to Grouped-Query Attention (GQA), reducing KV heads by 8x. They observe a 3x throughput increase in the decoding phase. However, for a prominent enterprise customer who sends massive 50k-token prompts and only generates 10 tokens per request, the end-to-end latency drops by a mere 2%.
+question: "Why does GQA improve decoding throughput 3x but reduce end-to-end latency by only 2% for 50k-token prompts and 10 outputs?"
+details:
+  realistic_solution: Decoding is heavily memory-bandwidth bound because the model must read the entire KV cache from HBM for every single generated token. GQA reduces this memory payload by 8x, directly speeding up decoding. Prefill (prompt processing), however, is compute-bound. It performs a dense matrix multiplication of Q x K^T. Even though the K matrix is smaller in GQA, the number of FLOPs required to compute the attention scores (N x N) remains dominated by the sequence length N and is bounded by the GPU's compute ceiling. Reducing memory traffic yields negligible latency benefits when the operation is bottlenecked by the MXUs.
+  common_mistake: |
+    **The Pitfall:** Assuming GQA uniformly accelerates all attention operations.
+    **The Rationale:** Failing to distinguish between memory-bound decoding (where GQA shines) and compute-bound prefill.
+    **The Consequence:** Promising massive latency reductions for long-context applications that mathematically cannot materialize.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Sequence (N): 50,000 tokens. Dim (d): 4096. Output: 10 tokens.
+       - Hardware: 989 TFLOPS FP16, 3.35 TB/s Bandwidth.
+    2. **Calculations:**
+       - Prefill Compute (N x N) = 2 * 50k * 50k * 4096 = ~20.4 TFLOPs.
+       - Compute Time = 20.4 TFLOPs / 989 TFLOPS = ~20.6 ms.
+       - MHA KV Read = 50k * 4096 * 2 * 2 = ~800 MB -> ~0.24 ms transfer.
+       - GQA KV Read = ~100 MB -> ~0.03 ms transfer.
+       - Savings = 0.21 ms out of 20.6 ms total.
+    3. **Conclusion & Interpretation:**
+       - **Result: 1% Speedup (Compute-Bound).** Prefill is entirely dominated by the N^2 matrix multiplication FLOPs, rendering memory bandwidth optimizations like GQA irrelevant for long-context TTFT.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- llm
+- attention
+- throughput

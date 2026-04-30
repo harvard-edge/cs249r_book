@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4368
+track: cloud
+level: L4
+zone: analyze
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: both
+title: ROCm vs CUDA Ecosystem Overhead for MI300X Deployment
+scenario: 'A team evaluating MI300X for production serving finds that vLLM on ROCm achieves 85% of the throughput of vLLM on H100 despite the MI300X having 58% more memory bandwidth. A CUDA kernel profiler shows the H100 run uses FlashAttention-2, while the ROCm run falls back to a naive attention implementation.'
+question: 'How much of the 85% MI300X vLLM throughput is a ROCm kernel gap versus hardware capability, and what is expected with FlashAttention on ROCm?'
+details:
+  realistic_solution: 'FlashAttention-2 impact: naive attention is O(N²) memory I/O (materializes full N×N attention matrix per head). FlashAttention-2 is O(N) memory I/O via tiled SRAM-based computation. For N=2048 with 64 heads, naive attention writes/reads N²×num_heads×2bytes = 2048²×64×2 = 536.8 MB per layer per forward pass. FlashAttention-2: tiles fit in SRAM, reduces to ~67 MB per layer. Bandwidth savings: ~8×. If H100 uses FlashAttention-2 and MI300X falls back to naive: H100 effective attention BW use: 67 MB per layer. MI300X: 536.8 MB per layer. On H100: 67 MB / 3,350 GB/s = 0.02ms/layer. On MI300X: 536.8 MB / 5,300 GB/s = 0.10ms/layer. MI300X is ~5× slower on attention despite superior bandwidth — this largely explains the 85% throughput gap. With proper FlashAttention on ROCm: expected MI300X throughput = 1.58× H100.'
+  common_mistake: |
+    **The Pitfall:** Attributing performance gaps to hardware differences rather than software ecosystems.
+    **The Rationale:** Candidates assume benchmarking frameworks always utilize optimal hardware paths out-of-the-box.
+    **The Consequence:** Incorrectly dismissing superior hardware due to a temporary missing optimized kernel.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - N = 2048, 64 heads.
+    - H100 Bandwidth: 3,350 GB/s.
+    - MI300X Bandwidth: 5,300 GB/s.
+
+    **Calculations:**
+    - Naive attention memory: N^2 * num_heads * 2 bytes = 2048^2 * 64 * 2 = 536.8 MB per layer.
+    - FlashAttention memory: O(N) tile-based I/O ≈ 2 * N * d_head * num_heads * 2 bytes = 2 * 2048 * 128 * 64 * 2 = 67.1 MB per layer.
+    - H100 FA time per layer: 67.1 MB / 3,350 GB/s = 0.02 ms.
+    - MI300X naive time per layer: 536.8 MB / 5,300 GB/s = 0.10 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: MI300X is bottlenecked by the 5x slower naive attention kernel (Software-Bound)**.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

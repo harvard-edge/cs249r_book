@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: edge-0868
+track: edge
+level: L5
+zone: specification
+topic: extreme-quantization
+competency_area: deployment
+bloom_level: evaluate
+phase: both
+title: 'The Real-Time Compression Stack Design'
+scenario: 'You must deploy a 7B parameter language model on a Jetson AGX Orin (64 GB unified memory, 275 TOPS INT8) for a robotics application with a hard real-time constraint: 50ms per inference call (single token generation during decode). The model in FP16 is 14 GB and decode latency is 180ms.'
+question: 'What ordered compression pipeline, target ratios, and accuracy tradeoffs would meet the 50ms/token budget on the Jetson AGX Orin?'
+details:
+  realistic_solution: 'Start from the bottleneck analysis. At decode (batch=1, single token), the operation is memory-bandwidth-bound: the GPU must stream all weights from memory once per token. On the Orin, unified memory bandwidth is ~205 GB/s. Decode latency $\approx$ model_size / bandwidth. At FP16 (14 GB): 14/205 = 68ms \u2014 already over budget even at theoretical peak (real throughput ~70% \u2192 98ms, close to the observed 180ms with overhead). Target: 50ms \u2192 need model_size < 205 \u00d7 0.05 \u00d7 0.7 = ~7.2 GB after compression.
+
+Pipeline design (ordered):
+1. **Structured pruning** (20% of attention heads, 15% of FFN): reduces effective params from 7B to ~5.6B. Fine-tune on 5B tokens. FP16 size: 11.2 GB.
+2. **Knowledge distillation** (optional): use original 7B as teacher to recover accuracy lost from pruning during fine-tune.
+3. **INT4 weight-only quantization** (GPTQ or AWQ): 5.6B \u00d7 0.5 bytes = 2.8 GB weights + ~0.5 GB activations in FP16 = 3.3 GB total.
+4. Decode latency estimate: 3.3 GB / (205 \u00d7 0.7) = 23ms \u2014 well within 50ms budget, leaving headroom for kernel overhead.
+
+Accuracy impact: structured pruning ~0.3-0.5 perplexity increase (recoverable with distillation fine-tune), INT4 quantization ~0.2-0.4 perplexity increase. Total: ~0.5-0.8 perplexity degradation from baseline \u2014 acceptable for robotics NLU.'
+  common_mistake: |
+    **The Pitfall:** Applying a single compression technique or multiple techniques in arbitrary order.
+    **The Rationale:** Candidates assume that applying standard INT4 quantization will magically hit the target, without calculating the exact bandwidth requirements or considering the composition of pruning and quantization.
+    **The Consequence:** Failing to hit the strict real-time 50ms deadline, or destroying model perplexity beyond usable bounds.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Baseline: 7B params * 2 bytes = 14 GB.
+    - Bandwidth: 205 GB/s * 70% = 143 GB/s effective.
+
+    **Calculations:**
+    - Decode latency: 14 GB / 143 GB/s = 98ms (exceeds budget).
+    - Target model size for 50ms: < 205 * 0.05 * 0.7 = ~7.2 GB.
+    - After pruning (5.6B) + INT4 (0.5 B/param): 2.8 GB weights.
+    - New Decode Latency: 2.8 GB / 143 GB/s = 19.6ms.
+    - With activation memory + overhead: ~30ms, leaving a 20ms (40%) headroom.
+
+    **Conclusion & Interpretation:**
+    - **Result: 20ms headroom (Memory-Bandwidth Bound)**. The structured pruning and INT4 quantization meet the latency budget.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

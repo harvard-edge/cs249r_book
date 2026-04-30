@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-2145
+track: mobile
+level: L3
+zone: diagnosis
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: 'Mobile mmap: Loading Models from Flash Storage'
+scenario: You deploy a 1B parameter model (2 GB in INT8) for on-device inference on a mobile phone with 8 GB RAM and UFS 3.1 storage. Users report the first inference after app launch takes 4 seconds, but subsequent inferences are instant. Your loading code uses mmap.
+question: 'Why does a 2GB INT8 mmap model take 4s on first inference from UFS 3.1, and how should it be warmed?'
+details:
+  realistic_solution: 'When mmap() is called, the OS creates virtual address mappings but loads no data. During the first forward pass, each weight access triggers a page fault (4 KB pages). The OS loads pages from UFS storage on demand. For 2 GB: 2 GB / 4 KB = 512K page faults. Even with readahead (128 KB chunks), that is ~16K faults × 250 µs each = ~4 seconds. Subsequent runs are fast because pages remain in the page cache. Fixes: (1) madvise(MADV_WILLNEED) immediately after mmap to trigger background readahead — starts loading before first inference. (2) madvise(MADV_SEQUENTIAL) for sequential readahead optimization. (3) On Android, use MAP_POPULATE if available (not all kernels support it). (4) Spawn a background thread that touches every page (memcpy to /dev/null) immediately after mmap to warm the cache while the UI loads. This converts random faults to sequential I/O: 2 GB / 2.1 GB/s = ~1 second.'
+  common_mistake: |
+    **The Pitfall:** Blaming the model size alone instead of understanding demand paging.
+    **The Rationale:** Candidates assume `mmap()` loads the file immediately, unaware that it merely maps virtual memory and actual loading happens via page faults upon access.
+    **The Consequence:** Failing to fix the cold start issue because the proposed solutions don't address the page fault bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model size 2 GB. 4 KB pages.
+    - UFS 3.1 sequential read ~2.1 GB/s.
+    - Page fault overhead ~8 µs.
+
+    **Calculations:**
+    - Page Faults: 2 GB / 4 KB = 512K pages.
+    - Cold Start Time: 512K * 8 µs = ~4.1 seconds.
+    - Sequential Read Limit: 2 GB / 2.1 GB/s = ~0.95 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~1s cold start (I/O-Bound)**. Sequential reading threads reduce the cold start from 4s to ~1s.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

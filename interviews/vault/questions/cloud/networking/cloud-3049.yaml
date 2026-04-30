@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3049
+track: cloud
+level: L3
+zone: realization
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: apply
+phase: both
+title: 'Network Bandwidth Bottlenecks: Realize PCIe Bandwidth Impact on Model Checkpointing'
+scenario: You need to concretely size the PCIe bandwidth impact on checkpointing a 70B FP16 model from 8 GPUs to NVMe SSDs via CPU.
+question: How long does checkpointing a 70B FP16 model from 8 GPUs through PCIe 5.0 to NVMe take, and can it be hidden during training?
+details:
+  realistic_solution: "70B FP16: 140GB total across 8 GPUs (17.5GB each). PCIe 5.0 per GPU: 32GB/s (one direction). Time for 17.5GB: 0.55s per GPU. With 8 GPUs parallel: CPU must absorb 8\times 32=256GB/s \rightarrow CPU DDR5 BW: 100GB/s (bottleneck). Time: 140GB/100GB/s=1.4s to CPU. Then to NVMe (3.5 GB/s): 140/3.5=40s. Checkpoint every 1000 steps (100ms each): 100s of training. Checkpoint overhead: 40s/100s=40%. Solution: async checkpoint \u2014 write to /dev/shm first, then background NVMe write overlapped with next training steps."
+  common_mistake: |
+    **The Pitfall:** Assuming checkpointing is embarrassingly parallel across the PCIe links.
+    **The Rationale:** Multiplying 8 GPUs by 64GB/s and assuming a massive 512GB/s transfer rate, completely forgetting the CPU memory bandwidth bottleneck.
+    **The Consequence:** Vastly underestimating checkpoint latency and failing to implement asynchronous checkpointing, leading to massive training stalls.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Size: 70B FP16 = 140GB total (17.5GB per GPU across 8 GPUs).
+    - 8 GPUs simultaneously push data to CPU DDR5 RAM. CPU DDR5 bandwidth is the bottleneck at 100GB/s.
+    - NVMe write speed is ~3.5GB/s. Checkpointing every 1000 steps (100ms each = 100s of training).
+
+    **Calculations:**
+    - Transfer Time to CPU: 140GB / 100GB/s = 1.4s.
+    - CPU to NVMe: 140GB / 3.5GB/s = 40s.
+    - Overhead: 40s checkpoint / 100s training = 40% overhead.
+    - Async Solution: 8 shards to 8 NVMe SSDs in parallel = 8 \times 3.5 = 28GB/s. Checkpoint time drops to 140GB / 28GB/s = 5s (5% overhead).
+
+    **Conclusion & Interpretation:**
+    - **Result: 5s (5% overhead) (I/O-Bound)**. A single NVMe limits to 40s (40% overhead). Sharding across 8 NVMe drops it to 5s (5% overhead).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

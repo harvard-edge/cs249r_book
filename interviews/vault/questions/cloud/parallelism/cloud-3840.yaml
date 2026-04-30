@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3840
+track: cloud
+level: L3
+zone: analyze
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Ring-AllReduce Cross-Node Bottleneck
+scenario: You are training a large language model with 80 GB of gradients per iteration. On a single node with 8 GPUs connected via NVLink (900 GB/s), gradient synchronization using Ring-AllReduce takes ~0.155 seconds. When scaling to 16 GPUs across two nodes connected by InfiniBand (50 GB/s), the synchronization time spikes to 3.0 seconds.
+question: "Why does Ring-AllReduce jump from 0.155 s on 8 GPUs to 3.0 s on 16 GPUs across two nodes?"
+details:
+  realistic_solution: The degradation occurs because a flat Ring-AllReduce topology forces the logical ring to traverse the much slower inter-node InfiniBand links on every step. Since the ring operates synchronously, the entire operation is bottlenecked by the slowest segment. The effective bandwidth collapses from 900 GB/s (NVLink) to 50 GB/s (InfiniBand). To fix this, implement Hierarchical All-Reduce, which performs high-speed local syncs before exchanging smaller payloads across the inter-node boundary.
+  common_mistake: |
+    **The Pitfall:** Assuming AllReduce time increases purely due to the linear addition of more GPUs (data volume).
+    **The Rationale:** Engineers think "more GPUs = more data to sync," failing to realize that Ring-AllReduce transfers roughly `2x` the gradient size regardless of node count, making bandwidth the true variable.
+    **The Consequence:** Wasting time profiling kernel launch overheads or modifying batch sizes instead of switching to a Hierarchical All-Reduce network topology.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Gradient Size (S): 80 GB.
+       - N=8 (1 node): 900 GB/s bandwidth.
+       - N=16 (2 nodes): 50 GB/s bandwidth (slowest link).
+       - Ring-AllReduce data transferred: 2 * ((N-1)/N) * S.
+    2. **Calculations:**
+       - 1 Node Data: 2 * (7/8) * 80 GB = 140 GB.
+       - 1 Node Time: 140 GB / 900 GB/s = 0.155 seconds.
+       - 2 Node Data: 2 * (15/16) * 80 GB = 150 GB (Virtually the same data volume).
+       - 2 Node Time: 150 GB / 50 GB/s = 3.0 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: 3.0 Seconds (20x slower).** The operation is strictly **Network-Bandwidth-Bound** by the InfiniBand link, proving the necessity of hierarchical topologies.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

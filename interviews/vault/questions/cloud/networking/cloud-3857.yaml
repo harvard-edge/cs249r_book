@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3857
+track: cloud
+level: L5
+zone: design
+topic: network-bandwidth-bottlenecks
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: 'MoE Network Placement and Parallelism Strategy'
+scenario: 'You are architecting the parallelism strategy for training a 1.2 Trillion parameter Mixture-of-Experts (MoE) model. The cluster consists of nodes with 8x H100 GPUs (80GB HBM3). Intra-node communication uses NVLink 4.0 (900 GB/s per GPU), and inter-node communication uses InfiniBand NDR (50 GB/s per GPU).'
+question: 'How would you place TP, PP, DP, and EP for the 1.2T MoE model to keep token all-to-all off the slow InfiniBand fabric?'
+details:
+  realistic_solution: 'The optimal design confines Expert Parallelism (EP) and Tensor Parallelism (TP) to the intra-node domain (e.g., EP=8 or EP=4/TP=2) to leverage the massive 900 GB/s NVLink bandwidth for all-to-all routing and all-reduce operations. Inter-node bandwidth (50 GB/s) is strictly reserved for Data Parallelism (gradient synchronization) and Pipeline Parallelism (point-to-point activations), which are less bandwidth-intensive and easier to overlap with computation.'
+  common_mistake: |
+    **The Pitfall:** Proposing distributing experts across multiple nodes (Expert Parallelism > 8).
+    **The Rationale:** Candidates want to increase the total number of experts and assume spreading them out is standard scaling.
+    **The Consequence:** Forcing the heavily bandwidth-bound all-to-all token routing to cross the slower InfiniBand network, severely degrading the communication-computation ratio and stalling the GPUs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hidden dimension H=8192 (16KB/token in FP16), 4096 tokens per GPU.
+    - Expert compute takes ~0.55 ms.
+    - NVLink 4.0 at 900 GB/s; IB at 50 GB/s.
+
+    **Calculations:**
+    - Payload per GPU per MoE layer: 4096 * 16KB = 65.5 MB.
+    - Inter-node Routing (IB): Sending 32.7 MB takes ~0.65 ms.
+    - Intra-node Routing (NVLink): Sending 65.5 MB takes ~0.07 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0.07 ms (Compute-Bound)**. NVLink transfer easily overlaps with the 0.55 ms compute, preventing a network bottleneck that would occur if routed over InfiniBand.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

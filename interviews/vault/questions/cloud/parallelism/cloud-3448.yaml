@@ -1,0 +1,61 @@
+schema_version: '1.0'
+id: cloud-3448
+track: cloud
+level: L4
+zone: optimization
+topic: scheduling-resource-management
+competency_area: parallelism
+bloom_level: analyze
+phase: inference
+title: H100 Multi-Tenant p99 Spike — MIG vs MPS Choice
+scenario: >-
+  A shared H100 (80 GB HBM3, 989 TFLOPS FP16, 3.35 TB/s HBM) hosts two co-located
+  workloads: a latency-critical LLM inference service (steady 60 GB/s HBM read traffic
+  for KV cache, 280 GB/s during prefill bursts), and a noisy-neighbor batch job that
+  issues bursty 200 GB/s streamed I/O of training shards. Profiler traces show: inference
+  p50 = 220 ms, inference p99 = 460 ms when the batch job is active, dropping to p99
+  = 250 ms when the batch job is paused. The 240 ms p99 tail decomposes into 150 ms
+  attributable to HBM bandwidth contention (inference attention reads stalled by batch
+  streamer) and 50 ms from kernel-launch serialization under the default CUDA context.
+question: >-
+  Given a 240 ms p99 tail with 150 ms HBM-contention + 50 ms launch-serialization,
+  which of MIG slicing or MPS yields the cleaner fix, and what is the resulting p99?
+details:
+  realistic_solution: 'The most realistic solution involves a two-pronged approach: diagnosis and targeted intervention. For diagnosis, leverage `nvidia-smi` with `--query-gpu=utilization.gpu,utilization.memory,pstate,memory.used,memory.total --format=csv` to monitor overall GPU health. Utilize CUDA profiling tools like Nsight Systems and Nsight Compute to gather fine-grained per-kernel performance metrics, identifying specific kernels (e.g., attention, MLP) that are compute-bound or memory-bound. System-level monitoring (e.g., Prometheus/Grafana) should track per-tenant GPU utilization, memory bandwidth, and inference request queues. Once bottlenecks are identified, implement NVIDIA MIG (Multi-Instance GPU) to partition the H100 into dedicated 1/7 or 1/3 slices, ensuring guaranteed compute and memory resources (e.g., a 1/7 slice provides ~11.4GB HBM3 and ~478 GB/s bandwidth) for latency-sensitive LLMs. For interdependent inference requests from a single tenant, employ gang scheduling to ensure all necessary processes run concurrently, minimizing context switching overhead and ensuring fairness. For less critical workloads, utilize MPS (Multi-Process Service) for shared GPU access with better resource management than traditional CUDA multi-process execution.'
+  common_mistake: |
+    **The Pitfall:** Immediately scaling out the cluster without identifying the root cause.
+    **The Rationale:** Candidates assume overall GPU saturation rather than specific memory bandwidth contention and kernel serialization.
+    **The Consequence:** Increasing operational costs without solving the noisy neighbor tail latency problem.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Baseline p99 tail includes 150ms of HBM contention and 50ms of launch serialization.
+    - MIG provides dedicated hardware partitioning (memory bandwidth guarantees).
+    - MPS provides software-level multi-process service without memory bandwidth isolation.
+
+    **Calculations:**
+    - MIG isolation eliminates the 150ms contention delay.
+    - Dedicated MIG slice (e.g., 1/7) bypasses default CUDA context serialization (50ms overhead).
+    - Total reduction = 150ms + 50ms = 200ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 200ms Reduction (Latency-Bound)**. MIG directly addresses both memory bandwidth contention and kernel serialization, effectively eliminating the noisy neighbor tail latency.
+status: archived
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+deletion_reason: Archived after G.H cleanup rewrite still failed Phase D's strict
+  judge bar (G.L re-judge). Pre-Phase-D legacy item that doesn't meet today's parallelism
+  prompt standards.

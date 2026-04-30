@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-0150
+track: cloud
+level: L4
+zone: evaluation
+topic: batching-strategies
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: The Priority Queue Impasse
+scenario: 'You''re running a multi-tenant LLM service on H100s, using a continuous batching inference server. You have two user classes: ''interactive'' users who need low Time-To-First-Token (TTFT) for a chatbot, and ''batch'' users who submit long document summarization jobs and care about overall Time-Per-Output-Token (TPOT). Interactive users complain of multi-second wait times, even though `nvidia-smi` shows 100% GPU utilization.'
+question: Why do interactive users see multi-second TTFT in a FIFO continuous batcher at 100% GPU utilization, and what scheduling fix would you use?
+details:
+  realistic_solution: |
+    The problem is the FIFO queueing discipline interacting with workloads of vastly different lengths. The continuous batching server is maximizing throughput, but it isn't prioritizing latency-sensitive work. A long batch job (e.g., summarizing a 50k token document) can occupy the GPU for seconds. While it's running, incoming interactive requests (which might only need to generate 50 tokens) are queued up, waiting. The GPU is busy (high TPOT for the batch job), but TTFT for new requests is terrible because their wait time is dominated by the completion of the long job ahead of them. The correct solution is to implement request preemption or a priority-based scheduling policy within the inference server. High-priority interactive requests must be able to interrupt (preempt) and pause a low-priority batch job, get serviced, and then allow the batch job to resume. This ensures low TTFT for interactive users while still using idle cycles to process long batch jobs.
+  common_mistake: |
+    **The Pitfall:** Blaming the hardware ("the H100 is too slow") or suggesting static partitioning of GPUs.
+    
+    **The Rationale:** Candidates miss the core issue that the hardware is fully utilized, but for the wrong priority of work at the wrong time, due to the FIFO queue design.
+    
+    **The Consequence:** Suboptimal resource utilization and continued terrible interactive latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model Size: 70B parameters = 140 GB.
+    - Hardware Compute: H100 provides 989 TFLOPS.
+    - 50k token batch job.
+
+    **Calculations:**
+    - Prefill Compute: 2 * 70B * 50,000 tokens = 7 PFLOPs.
+    - Prefill Time: 7,000 TFLOPs / 989 TFLOPS = 7.07 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: 7.07 seconds (Compute-Bound)**. An interactive request waiting in a FIFO queue behind a 50k token batch job experiences >7 seconds of wait time.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

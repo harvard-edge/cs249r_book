@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-0660
+track: edge
+level: L4
+zone: diagnosis
+topic: real-time-deadlines
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: The DMA Contention Blind Spot
+scenario: 'Your edge AI system runs on a Raspberry Pi CM4 (BCM2711, 4× Cortex-A72, LPDDR4 at 3.2 GB/s shared bandwidth). You attach a Coral USB TPU for inference and a USB3 camera for input. In isolation, the camera captures at 30 FPS and the TPU infers in 8ms. When both run simultaneously, camera frames drop to 18 FPS and TPU inference spikes to 10ms. Neither device is individually saturating the bus.'
+question: 'What physical limitation is causing the simultaneous frame drop and inference latency spike when neither device saturates the bus?'
+details:
+  realistic_solution: 'The bottleneck isn''t USB bandwidth — it''s **DMA controller contention on the shared LPDDR4 bus**. Both the USB3 host controller (VL805 on Pi CM4) and the CPU use DMA to access main memory. The camera''s DMA writes 6 MB frames into a ring buffer in DRAM. The CPU''s DMA reads those frames, preprocesses them, and writes the result to a USB3 output buffer for the TPU. The TPU''s DMA reads input tensors and writes output tensors. All four DMA streams compete for the same 3.2 GB/s LPDDR4 bus. The BCM2711''s memory controller uses round-robin arbitration with no QoS priority. When the camera DMA fires a burst write (6 MB at 3.2 GB/s = 1.9ms bus hold), it blocks the TPU''s DMA read for that entire burst, adding up to 1.9ms of stall to inference. The fix: (1) reduce camera resolution to 720p (2.7 MB frames → 0.8ms bursts), (2) use the Pi''s VideoCore GPU for preprocessing (separate DMA path), (3) pin TPU transfers to a dedicated USB controller if available.'
+  common_mistake: |
+    **The Pitfall:** Assuming the USB 3.0 bus is saturated.
+    **The Rationale:** USB3 provides 5 Gbps. The camera and TPU together use only ~200 MB/s, well under the limit. Candidates fail to look deeper into the shared memory controller.
+    **The Consequence:** Attempting to fix the issue by compressing USB data or changing ports, which does nothing to resolve the actual LPDDR4 memory controller contention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - LPDDR4 bus capacity: 3.2 GB/s.
+    - Camera DMA burst: 6 MB write at 3.2 GB/s = 1.9ms bus hold per frame.
+    - TPU inference time (compute): 8ms.
+
+    **Calculations:**
+    - TPU stalls: During the 1.9ms burst, the TPU DMA cannot read from memory, stalling inference.
+    - Total TPU latency: 8ms compute + ~2ms DMA stall = 10ms.
+    - Fix (720p resolution): 2.7 MB frames result in 0.8ms bursts.
+    - New latency: 8ms compute + <1ms stall = ~8.5ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: New latency is ~8.5ms (Memory-Bandwidth-Bound)**.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: edge-chain-008
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

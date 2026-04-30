@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-1187
+track: edge
+level: L4
+zone: analyze
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: apply
+phase: both
+title: 'Edge Transformer Cost Realization: FLOPs per Token for Small Transformers'
+scenario: A team is deploying Phi-3-Mini (3.8B params, 32 layers, hidden=2048, FFN=8192, heads=32) for batch=1 decode on a Jetson Orin. The sequence length is 512.
+question: What are the exact decode FLOPs per token for Phi-3-Mini, how do they compare to the 2N approximation, and is the Jetson Orin compute- or bandwidth-bound?
+details:
+  realistic_solution: |
+    The decode step is heavily memory-bandwidth bound. To calculate the exact FLOPs:
+    1. QKV Projections: 3 * (2 * 1 * 2048^2) = 25.17M FLOPs
+    2. Attention (Q*K and Scores*V for seq=512): 2 * (2 * 32 * 512 * 64) = 4.19M FLOPs
+    3. Output Projection: 2 * 1 * 2048^2 = 8.39M FLOPs
+    4. FFN: 2 * (2 * 1 * 2048 * 8192) = 67.11M FLOPs
+    Total per layer: ~104.86M FLOPs. For 32 layers: ~3.36G FLOPs.
+    The 2N approximation (2 * 3.8B = 7.6G FLOPs) is a ~2.3x overestimate for batch=1 decode because it assumes all parameters are utilized equally, whereas KV cache and attention FLOPs depend on sequence length.
+    Loading the 3.8GB INT8 weights at 102.4 GB/s takes 37.1ms, while 3.36G FLOPs at 275 TOPS takes 0.012ms. The device is overwhelmingly bandwidth-bound.
+  common_mistake: |
+    **The Pitfall:** Using the 2N approximation for decode FLOPs and assuming the system is compute-bound.
+    **The Rationale:** Candidates often memorize 2N from training/prefill calculations but forget that decode is fundamentally a memory-bound operation where batch size is 1 and weights must be fully loaded for a single token.
+    **The Consequence:** Proposing compute optimizations (like sparsity) that will not improve latency, while ignoring memory bandwidth bottlenecks.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Architecture: 32 layers, hidden=2048, FFN=8192, heads=32. Sequence=512.
+    - Compute: 275 TOPS INT8.
+    - Bandwidth: 102.4 GB/s.
+
+    **Calculations:**
+    - QKV Projections: 3 * (2 * 2048^2) = 25.17M FLOPs.
+    - Attention: 2 * (2 * 32 * 512 * 64) = 4.19M FLOPs.
+    - Output Projection: 2 * 2048^2 = 8.39M FLOPs.
+    - FFN: 2 * (2 * 2048 * 8192) = 67.11M FLOPs.
+    - Total Compute: 32 * 104.86M = 3.36G FLOPs.
+    - Compute Time: 3.36G FLOPs / 275 TOPS = 0.012 ms.
+    - Memory Bandwidth Time: 3.8 GB / 102.4 GB/s = 37.1 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 37.1ms memory time vs 0.012ms compute time (Memory Bandwidth-Bound).** 2N approx (7.6G) is a 2.3x overestimate.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true

@@ -412,35 +412,50 @@ export default function ExplorePage() {
                     />
                   ) : (
                     segments.map((segment) => {
-                      const start = cursor / total * TAU;
+                      const start = (cursor / total) * TAU;
                       cursor += segment.count;
-                      const end = cursor / total * TAU;
-                      const labelPoint = midpoint(142, 262, start, end);
-                      const showLabel = end - start > 0.16;
+                      const end = (cursor / total) * TAU;
                       const hovered = hoveredId === segment.id;
+                      const labelPoint = midpoint(hovered ? 128 : 142, hovered ? 278 : 262, start, end);
+                      const showLabel = end - start > 0.16;
                       return (
                         <g key={segment.id}>
                           <path
-                            d={ringPath(132, 268, start, end)}
+                            d={ringPath(hovered ? 128 : 132, hovered ? 278 : 268, start, end)}
                             fill={segment.color}
-                            opacity={hovered ? 0.9 : 0.72}
+                            opacity={hovered ? 1 : 0.72}
                             stroke="var(--background)"
                             strokeWidth="3"
                             filter={hovered ? "url(#segmentGlow)" : undefined}
-                            className="cursor-pointer transition-opacity"
+                            className="cursor-pointer transition-all duration-300 ease-out"
                             onMouseEnter={() => setHoveredId(segment.id)}
                             onMouseLeave={() => setHoveredId(null)}
                             onClick={() => goToFocus(segment.focus)}
                           />
                           {showLabel && (
-                            <>
-                              <text x={labelPoint.x} y={labelPoint.y - 3} textAnchor="middle" className="fill-white text-[10px] font-bold pointer-events-none">
-                                {segment.label.length > 18 ? `${segment.label.slice(0, 17)}...` : segment.label}
+                            <g className="pointer-events-none transition-transform duration-300 ease-out">
+                              <text
+                                x={labelPoint.x}
+                                y={labelPoint.y - 3}
+                                textAnchor="middle"
+                                className={clsx(
+                                  "fill-white text-[10px] font-bold transition-all",
+                                  hovered ? "text-[11px]" : "text-[10px]"
+                                )}
+                              >
+                                {segment.label.length > 18
+                                  ? `${segment.label.slice(0, 17)}...`
+                                  : segment.label}
                               </text>
-                              <text x={labelPoint.x} y={labelPoint.y + 12} textAnchor="middle" className="fill-white/80 text-[9px] font-mono pointer-events-none">
+                              <text
+                                x={labelPoint.x}
+                                y={labelPoint.y + 12}
+                                textAnchor="middle"
+                                className="fill-white/80 text-[9px] font-mono"
+                              >
                                 {segment.count}
                               </text>
-                            </>
+                            </g>
                           )}
                         </g>
                       );
@@ -520,32 +535,51 @@ function LevelRing({
   color: string;
   onPick: (question: Question) => void;
 }) {
+  const [hoveredLevel, setHoveredLevel] = useState<string | null>(null);
   const total = Math.max(1, buckets.reduce((sum, bucket) => sum + bucket.count, 0));
   let cursor = 0;
   return (
     <>
       {buckets.map((bucket) => {
-        const start = cursor / total * TAU;
+        const start = (cursor / total) * TAU;
         cursor += bucket.count;
-        const end = cursor / total * TAU;
-        const point = midpoint(132, 268, start, end);
+        const end = (cursor / total) * TAU;
+        const hovered = hoveredLevel === bucket.level;
+        const point = midpoint(hovered ? 128 : 132, hovered ? 278 : 268, start, end);
         return (
           <g key={bucket.level}>
             <path
-              d={ringPath(132, 268, start, end)}
+              d={ringPath(hovered ? 128 : 132, hovered ? 278 : 268, start, end)}
               fill={color}
-              opacity={0.45 + Math.min(0.35, bucket.count / total)}
+              opacity={hovered ? 1 : 0.45 + Math.min(0.35, bucket.count / total)}
               stroke="var(--background)"
               strokeWidth="3"
-              className="cursor-pointer"
+              className="cursor-pointer transition-all duration-300 ease-out"
+              onMouseEnter={() => setHoveredLevel(bucket.level)}
+              onMouseLeave={() => setHoveredLevel(null)}
               onClick={() => onPick(bucket.questions[0])}
             />
-            <text x={point.x} y={point.y - 3} textAnchor="middle" className="fill-white text-[12px] font-bold pointer-events-none">
-              {bucket.level}
-            </text>
-            <text x={point.x} y={point.y + 13} textAnchor="middle" className="fill-white/80 text-[9px] font-mono pointer-events-none">
-              {bucket.count}
-            </text>
+            <g className="pointer-events-none transition-all duration-300">
+              <text
+                x={point.x}
+                y={point.y - 3}
+                textAnchor="middle"
+                className={clsx(
+                  "fill-white text-[12px] font-bold transition-all",
+                  hovered ? "text-[13px]" : "text-[12px]"
+                )}
+              >
+                {bucket.level}
+              </text>
+              <text
+                x={point.x}
+                y={point.y + 13}
+                textAnchor="middle"
+                className="fill-white/80 text-[9px] font-mono"
+              >
+                {bucket.count}
+              </text>
+            </g>
           </g>
         );
       })}

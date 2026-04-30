@@ -1,0 +1,43 @@
+schema_version: '1.0'
+id: edge-1752
+track: edge
+level: L5
+zone: realization
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: 'Multi-Model Serving Strategy on Hailo-8 Accelerator'
+scenario: 'You are designing a multi-model serving infrastructure on an edge gateway equipped with a single Hailo-8 accelerator (26 TOPS INT8, 2.5W). The pipeline must process a 30 FPS video stream, running a 15MB object detector followed by a 10MB feature extractor for up to 3 detected objects per frame. Since the Hailo-8 is a dataflow architecture with no local DRAM that streams weights and activations directly from host memory, you must evaluate how to schedule and serve these models.'
+question: 'Should the Hailo-8 detector and feature extractor be temporally multiplexed or co-compiled into one spatial context, and why?'
+details:
+  realistic_solution: 'The optimal serving design avoids per-frame context switching by co-compiling the detector and feature extractor into a single multi-network Hailo executable (spatial multiplexing) so both graphs reside on-chip simultaneously. If the combined models exceed the chip''s internal SRAM/control resources, the fallback strategy must be temporal multiplexing with large micro-batches (e.g., batching 30 frames at a time) to amortize the PCIe network load time, utilizing host memory as a buffer.'
+  common_mistake: 'Candidates often only calculate compute requirements against the 26 TOPS rating and assume sequential execution is trivial. They treat the Hailo-8 like a traditional GPU with local VRAM, ignoring that swapping dataflow configurations from host memory over PCIe for every single frame creates a massive I/O bottleneck that breaks real-time latency.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Detector (10 GOPS) + 3x Extractor (5 GOPS) = 25 GOPS/frame.
+    - 30 FPS requires 0.75 TOPS (under 26 TOPS limit).
+    - Network config reload: 15MB + 10MB = 25MB.
+    - PCIe Gen3 x2 link: ~1.5 GB/s practical bandwidth.
+
+    **Calculations:**
+    - Frame budget at 30 FPS: 33.3ms.
+    - Reloading 25MB: 25MB / 1.5 GB/s = ~16.6ms.
+    - Switching contexts twice per frame: ~33.2ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~33.2ms overhead (I/O Bound)**. I/O overhead consumes 99% of the latency budget before any inference occurs, necessitating spatial multiplexing.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed

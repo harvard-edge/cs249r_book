@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-4450
+track: cloud
+level: L6+
+zone: mastery
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: 'Speculative Decoding in Disaggregated Architecture: Draft Pool Design'
+scenario: You are designing a speculative decoding architecture integrated into a disaggregated serving system. The draft model is 7B, the target model is 70B. Both have separate GPU pools.
+question: How would you design the request flow, acceptance sampling, and resource sizing for 7B-draft/70B-target speculative decoding?
+details:
+  realistic_solution: 'Disaggregated speculative decoding flow: (1) Request arrives at gateway: routed to draft pool for token generation. (2) Draft pool generates K=4 draft tokens (7B model, ~5ms per step). (3) Draft tokens + original KV cache sent to target pool in a single batch. (4) Target pool verifies K draft tokens in parallel (70B prefill-like operation on K tokens): 2*K*70B FLOP = 2*4*70B = 560B FLOP. At 989 TFLOPS: 0.57ms. (5) Acceptance sampling: expected accept rate ~75-80% for same-domain drafts. Expected accepted tokens per target call = K * alpha^avg where alpha = acceptance rate. At K=4, alpha=0.8: E[accepted] = (1 - 0.8^5)/(1-0.8) = 3.36 tokens. (6) Target returns accepted tokens + 1 bonus token. Draft continues with corrected KV state. Network overhead: 4 draft tokens per round trip to target = 4 * 2B = 8 bytes — negligible. KV delta: only the new KV for K tokens must be synchronized. Resource sizing: 1 target GPU (70B) supports ~10 draft GPUs (7B) given 10x compute ratio. 7B draft: 10 tok/sec single stream. 70B target verifies 3.36 accepted tokens per call at ~20ms: 3.36/(20ms) = 168 tok/sec effective.'
+  common_mistake: |
+    **The Pitfall:** Running draft and target models on the identical shared GPU pool sequentially.
+    **The Rationale:** Engineers treat speculative decoding as a simple drop-in runtime optimization instead of a systemic architectural change.
+    **The Consequence:** The synchronization overhead and context switching between draft and target completely negates the speedup, especially when compounded by network round-trips.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B decode without spec = 41.8ms/token.
+    - Spec decoding K=4, acceptance rate alpha=0.8.
+    - Target verifies in 5.57ms.
+    - Draft takes 20ms for 4 tokens.
+
+    **Calculations:**
+    - Expected accepted tokens per target call = (1 - 0.8^5)/(1-0.8) = 3.36 tokens.
+    - Total round time = 20ms (draft) + 5.57ms (verify) = 25.57ms.
+    - Time per token = 25.57ms / 3.36 tokens = 7.6ms/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: Speedup is 5.5x per token (41.8ms / 7.6ms) (Target Memory Bandwidth mitigated by Speculation)**. Bottleneck: Target Memory Bandwidth mitigated by Speculation.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

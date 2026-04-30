@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0704
+track: cloud
+level: L3
+zone: fluency
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: The Distributed Training Choke Point
+scenario: You are an ML Systems Engineer scaling a 70B parameter model training job from a single 8x GPU server to two servers (16 GPUs total). In the single-node setup, GPUs are connected via NVLink and achieve 95% utilization. When you scale to two nodes, connected via a 400 Gbps InfiniBand switch, you observe that per-GPU throughput drops by nearly 50%, and profiler tools show a massive spike in time spent on `AllReduce` communication operations.
+question: What primary bottleneck causes the 50% per-GPU throughput drop when scaling the 70B job from one 8x GPU node to two nodes?
+details:
+  realistic_solution: The bottleneck is the switch from the on-node NVLink fabric to the off-node InfiniBand network. NVLink is a proprietary, extremely high-bandwidth, low-latency GPU-to-GPU interconnect. InfiniBand is a high-performance networking standard, but it is orders of magnitude slower than NVLink. For the `AllReduce` operation, gradients and weights must now traverse the much slower PCIe bus to the InfiniBand NIC, travel over the wire to the other node, and back again. This introduces significant latency and bandwidth constraints that were absent in the single-node NVLink mesh, causing the GPUs to spend most of their time waiting for data from other nodes.
+  common_mistake: |
+    **The Pitfall:** Blaming network drivers, NCCL config, or model architecture.
+    **The Rationale:** Engineers underestimate the staggering physical performance gap between tightly coupled on-node NVLink and off-node networking fabrics.
+    **The Consequence:** Wasting days debugging software stacks when the bottleneck is simply the fundamental speed-of-light limits of crossing the server boundary via InfiniBand.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 70B FP16 Gradients: 140 GB.
+       - Single Node NVLink Bandwidth: ~450 GB/s.
+       - Two Node InfiniBand Bandwidth: 400 Gbps = 50 GB/s.
+    2. **Calculations:**
+       - Single Node Transfer: 2 * (7/8) * 140 = 245 GB. Time: 245 / 450 ≈ 0.54s.
+       - Two Node Transfer: 2 * (15/16) * 140 = 262.5 GB. Time: 262.5 / 50 = 5.25s.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network Bandwidth-Bound.** The off-node transmission introduces a ~10x latency penalty, starving the GPU compute cores.
+  options:
+  - The 140 GB gradient transfer over PCIe Gen5 adds 4.4 seconds of latency per step, saturating the bus.
+  - The 16-GPU ring AllReduce transfers 262.5 GB over the 50 GB/s InfiniBand, increasing step time to 5.25s.
+  - The TCP/IP encapsulation overhead adds 2.5s of protocol serialization delay, halving throughput.
+  - Model parameters expand to 280 GB in distributed FP32, exceeding single-node NVLink limits.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: WARN
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

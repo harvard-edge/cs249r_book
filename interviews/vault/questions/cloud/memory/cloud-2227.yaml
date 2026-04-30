@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2227
+track: cloud
+level: L3
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: apply
+phase: both
+title: The NVMe Warm Cache Miss
+scenario: 'Your training cluster uses a two-tier storage architecture. A local NVMe SSD cache (3.84 TB per node, 6 GB/s read) and a shared Lustre parallel filesystem (500 GB/s aggregate). The training dataset is 50 TB. Each node processes a random shard of the data each epoch. During the first epoch, training throughput drops by 40% compared to subsequent epochs.'
+question: Why does the training throughput drop by 40% during the first epoch?
+details:
+  realistic_solution: 'During the first epoch, none of the training data is cached on local NVMe. Every data access must be served from the remote Lustre filesystem at network speed. Even at 500 GB/s aggregate, each node''s share of that bandwidth is limited by its network link (typically 100-200 Gbps = 12.5-25 GB/s). After the first epoch, the most recently accessed shards are cached on local NVMe, and subsequent reads hit the 6 GB/s local SSD instead of the remote filesystem. The 40% throughput drop in epoch 1 reflects the latency difference between NVMe (~50us) and Lustre over network (~3ms), which stalls the data pipeline and starves the GPU. The fix: pre-populate the NVMe cache before training starts (''warm the cache''), or use a caching layer like Alluxio that prefetches data based on the training schedule.'
+  common_mistake: |
+    **The Pitfall:** Blaming the GPU or the data loading library for the throughput drop.
+    **The Rationale:** The throughput drop is not a compute problem — it is a cold cache problem in the storage hierarchy during the first epoch.
+    **The Consequence:** Wasting time profiling GPU kernels when the bottleneck is remote file I/O.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Local NVMe read bandwidth: 6 GB/s (Latency: ~50μs).
+    - Remote Lustre latency per access: ~3ms.
+    - Data loader pattern: 1,000 random reads/sec.
+
+    **Calculations:**
+    - First Epoch (Cold Cache) I/O wait: 1,000 * 3ms = 3,000ms = 3.0s of wait per second of wall-clock time (severe throttling).
+    - Subsequent Epochs (Warm Cache) I/O wait: 1,000 * 50μs = 50ms of wait per second.
+    - The extreme latency differential directly blocks the host CPU from assembling mini-batches fast enough for the GPU.
+
+    **Conclusion & Interpretation:**
+    - **Result: 100% I/O-Bound in Epoch 1 (I/O-Bound)**. The initial epoch pulls all shards over the remote network, starving the GPU. Pre-warming the NVMe cache eliminates this massive 40% throughput degradation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

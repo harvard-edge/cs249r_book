@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2447
+track: cloud
+level: L5
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Routing at High Batch Size
+scenario: You replace a dense 30B parameter LLM with a 16x10B Mixture of Experts (MoE) model. Top-1 routing is used, so active parameters per token is 10B. You serve this at a high batch size of 128 on an 8xH100 cluster. You expect the MoE to be 3x faster than the dense model because active FLOPs per token drop from 30B to 10B. Instead, the MoE model is 30% slower than the 30B dense model.
+question: Why is the 16x10B top-1 MoE 30% slower than the dense 30B model at batch size 128 despite 3x fewer active FLOPs?
+details:
+  realistic_solution: 'Diagnose that MoE routing shatters the effective batch size per expert, causing a massive drop in arithmetic intensity. The GPUs must now load the weights for all accessed experts (up to 160B parameters) from HBM, taking significantly longer than loading the dense 30B model. Apply Expert-Capacity routing or EP (Expert Parallelism) to mitigate.'
+  common_mistake: |
+    **The Pitfall:** Calculating performance purely based on active FLOPs.
+    **The Rationale:** Candidates ignore how MoE routing shatters the batch size across experts.
+    **The Consequence:** They fail to realize that the arithmetic intensity drops severely, pushing the workload into a memory-bound regime.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch size 128. Dense model: 30B. MoE: 16x10B (160B total, 10B active).
+    - H100 peak compute: ~989 TFLOPS. HBM bandwidth: ~3.35 TB/s.
+
+    **Calculations:**
+    - Dense AI: 128 FLOPs/byte.
+    - Dense Compute time: (30B * 2 * 128) / 989 TFLOPS = 7.7 ms. Memory time = 60GB / 3.35 TB/s = 17.9 ms. (Takes ~17.9ms).
+    - MoE AI: ~8 tokens per expert -> 8 FLOPs/byte.
+    - MoE Memory time (worst case 160B params loaded): 320GB / 3.35 TB/s = 95.5 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 95.5 ms for MoE vs 17.9 ms for Dense (Memory-Bandwidth-Bound)**. Due to shattered arithmetic intensity.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

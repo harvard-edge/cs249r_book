@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3730
+track: cloud
+level: L5
+zone: specification
+topic: model-serving-infrastructure
+competency_area: architecture
+bloom_level: create
+phase: inference
+title: Prefill-Decode Disaggregation Architecture Specification for H100 Fleet
+scenario: Design a prefill-decode disaggregation system for serving a 70B model at 1000 req/s with P50 TTFT < 200ms and P50 TPOT < 50ms/token.
+question: How many prefill vs decode GPUs would you use, how would you transfer KV cache, and how would you load-balance 1000 req/s?
+details:
+  realistic_solution: "Prefill GPU requirement: avg prompt 512 tokens, 70B model, 50ms prefill per request at 1 GPU. Need 1000 req/s \times 0.05s = 50 concurrent prefills \rightarrow 50 H100s for prefill. Decode GPU requirement: avg 256 output tokens per response, 30 tok/s per sequence at batch=16. Throughput: 16 \times 30 = 480 tok/s per GPU. Need 1000 \times 256 / 480 = 534 decode GPUs. Ratio: 50 prefill : 534 decode = 1:10.7. KV transfer: after prefill, transfer KV cache (2\times80\times8\times128\times512\times2B = 168MB) from prefill GPU to decode GPU via RDMA over InfiniBand at 100 GB/s: 1.68ms. Load balancer: route new requests to least-loaded prefill GPU; after prefill, schedule decode on GPU with most spare capacity."
+  common_mistake: |
+    **The Pitfall:** Using the same GPU ratio as the compute ratio without accounting for the different memory bandwidth requirements.
+    **The Rationale:** Failing to isolate the compute-heavy prefill phase from the memory-bound decode phase.
+    **The Consequence:** Grossly undersizing the decode fleet, leading to severe queuing and SLA violations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Prefill: 1000 req/s, 50ms latency (512 tokens).
+    - Decode: 1000 req/s, 256 tokens average length. Throughput: 480 tok/s per GPU.
+    - KV Transfer Network: 100 GB/s InfiniBand. Model: 80 layers, 8 KV heads, 128 dim, 2 Bytes.
+
+    **Calculations:**
+    - Prefill GPUs: 1000 req/s \times 50ms = 50 concurrent prefills = 50 GPUs.
+    - Decode Tokens/s: 1000 req/s \times 256 tokens = 256K tokens/s.
+    - Decode GPUs: 256K / 480 = 534 GPUs.
+    - Total Fleet: 50 prefill + 534 decode = 584 GPUs (Ratio 1:10.7).
+    - KV Transfer Size: 2 \times 80 layers \times 8 KV heads \times 128 dim \times 512 tokens \times 2 Bytes = 168 MB.
+    - Transfer Time: 168 MB / 100 GB/s = 1.68ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 50 Prefill and 534 Decode GPUs (Memory-Bandwidth-Bound)**. Network transfer (1.68ms) is negligible, allowing strict separation into 50 Prefill and 534 Decode GPUs.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: global-0296
+track: global
+level: L4
+zone: diagnosis
+topic: activation-memory
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: OOM During Evaluation but Not Training
+scenario: Your 7B model trains fine on an A100-80GB with batch_size=16, seq_len=2048. But when you run evaluation (same batch size, same sequence length), you get a CUDA OOM error. Training uses mixed-precision with gradient checkpointing. No evaluation-specific code changes.
+question: "Why does the model OOM during evaluation but not during training?"
+details:
+  realistic_solution: 'Root cause: gradient checkpointing is active during training but automatically disabled during model.eval(). During evaluation: no backward pass is needed, so frameworks skip gradient checkpointing. But if you''re computing perplexity or doing evaluation with gradients enabled, the model stores ALL activations for ALL layers simultaneously because there''s no recomputation happening. Fix: (1) wrap eval in torch.no_grad() or torch.inference_mode(), (2) reduce eval batch size, or (3) force gradient checkpointing during eval.'
+  common_mistake: |
+    **The Pitfall:** Thinking evaluation should use LESS memory than training because there are no optimizer states or gradients.
+    **The Rationale:** Optimizer states take significant memory, so removing them seems like it should free up VRAM.
+    **The Consequence:** Crashing evaluation pipelines and failed automated testing.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 32 layers, batch size 16, seq len 2048, hidden dim 4096, 2 bytes/param (FP16/BF16).
+    - Training checkpoints every 2 layers.
+    
+    **Calculations:**
+    - Training activations (checkpointed) = 16 * (32/2) * 2048 * 4096 * 2B = 4.3 GB.
+    - Eval activations (no checkpointing, storing all) = 16 * 32 * 2048 * 4096 * 2B * 3 (with FFN) = 25.8 GB.
+    - Difference = 21.5 GB.
+    
+    **Conclusion & Interpretation:**
+    - **Result: 21.5 GB Increase (VRAM Capacity Exceeded)**. The additional 21.5 GB of activations pushes the total memory usage past the 80 GB limit during evaluation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

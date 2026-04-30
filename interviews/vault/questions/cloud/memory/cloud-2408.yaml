@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2408
+track: cloud
+level: L5
+zone: diagnosis
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: KV Cache Quantization Sinks
+scenario: A 70B parameter LLM deployed for document Q&A uses INT4 weights and an INT8 KV cache to support 32K context windows on an 8-GPU node. For prompts under 1,000 tokens, retrieval accuracy is 95%. When prompts exceed 8,000 tokens, the model hallucinates and repeats phrases. Disabling the INT8 KV cache and reverting to FP16 fixes the issue but halves max concurrency.
+question: What causes this long-context degradation?
+details:
+  realistic_solution: The symptom points to accumulated quantization error interacting with 'attention sinks'. In autoregressive LLMs, the first few tokens act as attention sinks, accumulating massive activation magnitudes. Furthermore, RoPE causes phase shifts that vary wildly across context length. Static or per-tensor INT8 quantization of the KV cache forces these massive outlier sink tokens to dictate the quantization scale for the entire sequence. As the context grows to 8K tokens, the subtle relative differences between the thousands of normal tokens are destroyed by the coarse resolution dictated by the sink tokens. The fix is to use per-channel (per-head) asymmetric quantization, or better, keep the first ~4 tokens (attention sinks) in FP16 while quantizing the rest of the KV cache to INT8.
+  common_mistake: |
+    **The Pitfall:** Assuming RoPE (Rotary Position Embeddings) simply degrades at long contexts.
+    **The Rationale:** Candidates focus on known long-context issues like RoPE extrapolation, ignoring the diagnostic clue that reverting the KV cache to FP16 fixes the bug.
+    **The Consequence:** The team attempts complex fine-tuning for RoPE extrapolation when the actual issue is catastrophic quantization error accumulation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B parameter LLM, KV cache at 8K tokens.
+    - Quantization: INT8 for KV cache, FP16 baseline.
+    - Behavior: First few tokens (attention sinks) accumulate extreme activation magnitudes (e.g., 50.0). Normal tokens have tiny magnitudes (e.g., 0.1).
+
+    **Calculations:**
+    - INT8 quantization scale based on sink token: 50.0 / 127 ≈ 0.39.
+    - Representation of normal token: 0.1 / 0.39 < 1 (quantizes to zero or loses precision).
+
+    **Conclusion & Interpretation:**
+    - **Result: Precision Loss (Quantization-Bound).** An INT8 step size of 0.39 completely zeros out the subtle differences (0.1) in the thousands of normal tokens, causing hallucinations at scale.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- llm
+- memory-optimization
+- long-context

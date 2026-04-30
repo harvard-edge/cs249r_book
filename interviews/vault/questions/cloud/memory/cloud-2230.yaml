@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2230
+track: cloud
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: 'The Metadata Storm'
+scenario: 'You manage a 10,000-GPU training cluster. At the start of each training run, all 10,000 workers simultaneously open and stat their data shards on a Lustre filesystem. The metadata server (MDS) becomes unresponsive for 2-3 minutes, delaying job startup for the entire cluster. Once training begins, data throughput is fine.'
+question: 'Why does this ''metadata storm'' happen, and how do you fix it without upgrading the MDS hardware?'
+details:
+  realistic_solution: 'Lustre separates metadata (handled by MDS) from data (handled by OSTs). When 10,000 workers simultaneously issue open() + stat() + read-stripe-layout for their data files, the MDS must handle 10,000+ metadata operations in a burst. Each operation requires a lock on the directory entry, a lookup in the inode table, and a response. Lustre''s MDS processes roughly 50,000-200,000 metadata ops/sec depending on configuration. A 10,000-node stampede issuing 3-5 ops each (open, stat, readdir, getattr) creates 30,000-50,000 concurrent metadata requests. If these all target the same directory, directory lock contention serializes them. The fix is architectural, not hardware: (1) distribute data files across many directories to avoid single-directory contention, (2) stagger job startup with a jittered delay (each worker waits random(0, 30s) before opening files), (3) use a metadata caching layer where one worker per node resolves paths and broadcasts to local GPUs, (4) use Data-on-MDT (DoM) for small metadata-heavy files to reduce round-trips.'
+  common_mistake: |
+    **The Pitfall:** Assuming the problem is data throughput.
+    **The Rationale:** Candidates fail to distinguish between metadata (handled by the MDS) and actual data transfer (handled by object storage targets), confusing IOPS with bandwidth.
+    **The Consequence:** Proposing expensive and ineffective solutions like upgrading network bandwidth instead of resolving the architectural metadata bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 10,000 workers.
+    - 4 metadata ops each.
+    - MDS capacity under contention is ~5,000 ops/sec.
+
+    **Calculations:**
+    - Total burst operations: 10,000 workers * 4 ops = 40,000 ops.
+    - Time to drain: 40,000 / 5,000 = 8s.
+    - With jittered startup over 30s: peak rate = 40,000 / 30 = ~1,333 ops/sec.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~1,333 ops/sec peak rate (I/O-Bound)**. Jittering the startup eliminates the metadata bottleneck, keeping requests within MDS capacity.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

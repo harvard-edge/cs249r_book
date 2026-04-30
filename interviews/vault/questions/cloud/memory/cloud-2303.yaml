@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2303
+track: cloud
+level: L5
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: GQA Prefill Latency Regression
+scenario: 'To support 32K context windows for a 70B model on an 8x A100 node, your team modifies the architecture from Multi-Head Attention (64 Q heads, 64 KV heads) to Grouped-Query Attention (64 Q, 8 KV). This successfully reduces KV cache memory by 8x. However, production monitoring shows a massive failure: 32K context prefill latency unexpectedly spiked from 1.2 seconds to 2.8 seconds, triggering API timeouts. Decode latency improved as expected. You must identify the root cause of the prefill regression.'
+question: What is the root cause of the prefill regression?
+details:
+  realistic_solution: |
+    The root cause is a compiler-hardware mapping failure where the algorithmic optimization (GQA) is defeated by intermediate tensor materialization. During prefill, the inference framework lacked a native GQA-optimized FlashAttention kernel. To compensate, the compiler/framework implicitly 'upsampled' or broadcasted the 8 KV heads back to 64 KV heads in High Bandwidth Memory (HBM) *before* invoking the standard MHA FlashAttention kernel. Materializing this massive 32K-length repeated tensor in HBM causes an enormous memory bandwidth bottleneck. The GPU wastes cycles and bandwidth writing the duplicated KV heads to HBM, and then reading them back into SRAM, completely eclipsing any compute savings from having fewer distinct KV heads. The fix requires hardware-compiler co-design: integrating a fused GQA-aware FlashAttention kernel (e.g., FlashAttention-2 with GQA support). In this kernel, the 8 KV heads are loaded from HBM into the SM's SRAM only once per block. The broadcast to the 64 Q heads happens entirely on-chip within the SRAM and registers, eliminating the O(N x d x H) out-of-core HBM read/write overhead.
+  common_mistake: |
+    **The Pitfall:** Assuming GQA intrinsically requires more FLOPs during prefill due to complex routing.
+    **The Rationale:** Misunderstanding the computational complexity of GQA versus memory bandwidth limits.
+    **The Consequence:** Blaming KV cache fragmentation or FLOPs rather than identifying the true memory bandwidth bottleneck caused by missing fused kernels.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 80 layers, 32K context, FP16 (2 bytes).
+    - Heads: 64 Q, 8 KV, 128 dim.
+    - A100 bandwidth: 2 TB/s. Batch size: 16.
+
+    **Calculations:**
+    - GQA KV size per layer: 32K × 8 × 128 × 2 bytes = 64 MB.
+    - MHA KV size per layer: 32K × 64 × 128 × 2 bytes = 512 MB.
+    - Implicit upsample overhead: Reads 64 MB, writes 512 MB to HBM = ~576 MB traffic per layer.
+    - Total overhead: 576 MB × 80 layers × 16 batch = 737 GB of memory traffic.
+    - Stall time: 737 GB / 2 TB/s = ~368 ms per GPU.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound**. The framework implicitly materialized the broadcasted KV tensor in HBM before attention, creating a massive memory bandwidth bottleneck that destroyed any compute savings.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

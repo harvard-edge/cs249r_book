@@ -1,0 +1,34 @@
+schema_version: '1.0'
+id: global-0125
+track: global
+level: L6+
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: The Operator Fusion Trap
+scenario: You are optimizing a custom inference chip. You fuse a sequence of 4 element-wise operations (Add, Mul, ReLU, Add) operating on a 100M element FP32 tensor. Unfused latency was 100ms. You expected fusion to drop latency to 25ms by eliminating HBM roundtrips. Instead, the fused kernel takes 150ms. Profiling shows ALU utilization is < 5%.
+question: Why did fusing the four element-wise ops make the 100M-element FP32 kernel take 150ms instead of the expected 25ms?
+details:
+  realistic_solution: The failure is caused by catastrophic register spilling. While operator fusion theoretically increases arithmetic intensity by keeping intermediate values in registers, fusing too many operations (or operations with high variable counts) exceeds the physical register file size per thread block. When registers are exhausted, the compiler spills variables to local memory, which is physically backed by the slow HBM. Because these spills are often uncoalesced, the effective memory bandwidth drops significantly below the theoretical maximum.
+  common_mistake: |
+    **The Pitfall:** Assuming operator fusion always strictly reduces memory traffic.
+    **The Rationale:** Ignoring the physical limits of the hardware's register file size per thread block.
+    **The Consequence:** Causing catastrophic register spilling that replaces sequential coalesced reads with fragmented, high-latency HBM accesses, ruining performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Bandwidth: 32 GB/s. Tensor: 100M FP32 (400 MB).
+    - Fusion of 4 element-wise ops.
+
+    **Calculations:**
+    - Unfused Memory Traffic: 4 ops * (400 MB read + 400 MB write) = 3.2 GB. Time: 3.2 GB / 32 GB/s = 100 ms.
+    - Fused Expected: 400 MB read + 400 MB write = 800 MB. Time: 800 MB / 32 GB/s = 25 ms.
+    - Fused Actual (Spilling): ~12 uncoalesced access passes per element = 4.8 GB. Time: 4.8 GB / 32 GB/s = 150 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 150 ms Actual Time (Memory-Bound)**. Exceeding register capacity forces slow, fragmented HBM accesses, destroying the theoretical fusion bandwidth gains.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18

@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3626
+track: cloud
+level: L6+
+zone: mastery
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: 'Gradient Synchronization Mastery: Pipeline Parallelism + AllReduce Co-Design'
+scenario: You are designing a 1024-GPU training system for a 175B parameter model using 3D parallelism (tensor-parallel=8, pipeline-parallel=16, data-parallel=8). Each node has 900GB/s intra-node bandwidth and 400Gbps inter-node bandwidth.
+question: "How would you schedule tensor, pipeline, and data-parallel communication for the 1024-GPU 3D-parallel 175B training system?"
+details:
+  realistic_solution: 'TP (tensor parallel, 8 GPUs): AllReduce within node for each attention/MLP layer. Volume: activation size per layer ≈ batch×seq×d_model = 4×2048×12288×2B = 200MB. Time on NVLink: 1.75 × 200MB / 900GB/s ≈ 0.39ms per layer × 96 layers ≈ 37ms total TP comm. PP (pipeline, 16 stages): P2P activation passing ≈ 200MB per micro-batch forward + backward. Time: 200MB/50GB/s (IB) = 4ms per hop. DP (data parallel, DP=8): Each GPU holds 1/(TP×PP) of the model = 1/128 = 1.37B params (2.74GB gradients). AllReduce 2.74GB over 8 GPUs (1 per node) using 400Gbps IB. Time: 2×(7/8)×2.74GB/50GB/s = 96ms. Schedule: overlap DP AllReduce with the PP flush phase and next step compute.'
+  common_mistake: |
+    **The Pitfall:** Applying a single AllReduce across all 1024 GPUs.
+    **The Rationale:** Engineers familiar with simple data parallelism assume all GPUs must sync the entire model.
+    **The Consequence:** Completely saturating the inter-node network by attempting to AllReduce 350GB globally, leading to catastrophic scaling efficiency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B params (350GB BF16). TP=8 (900GB/s), PP=16, DP=8 (400Gbps = 50GB/s).
+
+    **Calculations:**
+    - DP AllReduce: Shard per GPU = 350GB / 128 = 2.74GB. Time = 2 * (7/8) * 2.74GB / 50GB/s = 96ms.
+    - TP AllReduce: Activation = 4 * 2048 * 12288 * 2B = ~200MB. Time = 1.75 * 200MB / 900GB/s = ~0.39ms per layer. Total TP = 96 * 0.39ms = 37.4ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bound.** DP communication takes 96ms over IB and must be overlapped with the PP flush phase.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

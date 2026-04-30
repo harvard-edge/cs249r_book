@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: cloud-1881
+track: cloud
+level: L5
+zone: evaluation
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: evaluate
+phase: training
+title: 'Evaluating Sharded Checkpointing for 70B LLMs'
+scenario: 'You are training a 70B parameter model on a 1024-GPU H100 cluster. Global checkpointing every 500 steps takes over 45 minutes and frequently causes CPU RAM out-of-memory errors on the head node.'
+question: 'Should you migrate from global to distributed sharded checkpointing, and what trade-offs arise when resuming on a different cluster size?'
+details:
+  realistic_solution: 'Implement PyTorch Distributed Checkpoint (DCP) or FSDP sharded state dicts. This changes 1.1TB of state from a single-node bottleneck to 1024 parallel writes directly to object storage. Tradeoff: resuming on a cluster with a different GPU count requires an offline state-dict reshuffling script.'
+  common_mistake: |
+    **The Pitfall:** Focusing only on the head node's memory limits while failing to evaluate parallel I/O bandwidth benefits or cluster resiliency.
+    **The Rationale:** Candidates recognize the OOM error but miss the broader implications of bottlenecking a 1024-GPU cluster's network on a single node.
+    **The Consequence:** They propose partial fixes (like bigger head nodes) instead of fundamental architectural shifts, and ignore that pure sharded checkpoints cannot trivially resume on different cluster sizes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B parameters, FP32 Adam + BF16 weights (16 bytes/param).
+    - 1024 GPUs.
+    - Rank 0 write speed: ~5 GB/s. Distributed write speed: ~200 MB/s per GPU.
+
+    **Calculations:**
+    - Total state size: 70B × 16 bytes = ~1.12 TB.
+    - Global write time: 1120 GB / 5 GB/s = 224s minimum (often worse due to network).
+    - Sharded write chunk: 1.12 TB / 1024 = 1.1 GB/GPU.
+    - Sharded write time: 1.1 GB / 200 MB/s = ~5.5s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 5.5s write time vs 224s (Head-Node-IO-Bound)**. Sharding eliminates the global bottleneck.
+status: published

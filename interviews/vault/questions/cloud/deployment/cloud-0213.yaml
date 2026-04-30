@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-0213
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The GC Pause Latency Spike
+scenario: Your Python-based inference server on an A100 serves a 7B model with P50 latency of 40 ms. But every ~30 seconds, a burst of requests hits P99 latency of 800 ms — 20× the normal. The GPU utilization trace shows brief drops to 0% that correlate exactly with the spikes. The model and batch size haven't changed.
+question: What's stealing 760 ms from your GPU?
+details:
+  realistic_solution: 'This is a CPython garbage collector (GC) stop-the-world pause. Python''s cyclic GC (triggered by `gc.collect()` or automatically when the generation-2 threshold is reached) freezes *all* Python threads while it traces object references. During this pause, no new CUDA kernels can be launched because the Python threads that submit them are frozen. The GPU drains its kernel queue in ~1–2 ms and then sits idle until the GC completes. With a large Python heap (serving frameworks maintain request queues, tokenizer caches, and KV-cache metadata as Python objects), a gen-2 collection can take 500–800 ms. The ~30-second interval matches the default gen-2 threshold: after 10 gen-1 collections (each triggered by ~700 allocations), a gen-2 sweep runs. Fix: (1) disable automatic GC (`gc.disable()`) and run `gc.collect()` explicitly during low-traffic windows; (2) reduce Python-side object churn by pre-allocating buffers; (3) move the hot path to C++/Rust (like vLLM''s C++ scheduler) so the GC has fewer objects to trace.'
+  common_mistake: |
+    **The Pitfall:** Blaming thermal throttling or network congestion.
+    **The Rationale:** Engineers unfamiliar with CPython's GIL and GC behavior assume infrastructure-level disruptions.
+    **The Consequence:** They waste time profiling hardware, missing the fact that thermal throttling is gradual (not a sharp 0% drop) and network issues wouldn't zero out GPU utilization.
+  napkin_math: |
+    1. Python heap for a serving process: ~2–4 GB of Python objects.
+    2. Gen-2 GC traces all objects: at ~5M objects, tracing at ~8M objects/s takes 625 ms.
+    3. GPU kernel queue depth ≈ 20 kernels × 0.05 ms each = drains in 1 ms.
+    4. GPU sits idle for remaining 624 ms.
+    5. Requests queuing at 100 req/s: ~62 requests are delayed by 624 ms, causing a massive P99 spike.
+    6. **Result: Disabling auto-GC and offloading state to C++ reduces heap to <500K objects, dropping GC time to 12 ms and P99 back to ~52 ms.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

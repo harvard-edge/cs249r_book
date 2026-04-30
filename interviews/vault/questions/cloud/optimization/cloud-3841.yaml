@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3841
+track: cloud
+level: L3
+zone: analyze
+topic: graph-compilation
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Compiler Heuristics for MatMul Fusion
+scenario: A graph compiler targeting an A100 GPU evaluates fusing a large Feed-Forward MatMul (17.5 TFLOPs of compute, 5.1 GB memory footprint, 4.0 GB output) with a subsequent element-wise GeLU activation function. The compiler's cost model rejects the fusion and instead emits a call to the vendor-optimized cuBLAS library followed by a separate activation kernel. You need to determine why the compiler decided NOT to fuse these operations, despite the general rule that fusion saves memory bandwidth.
+question: Why would the compiler avoid fusing the compute-bound MatMul with GeLU despite the usual memory-bandwidth benefit of fusion?
+details:
+  realistic_solution: The matrix multiplication's arithmetic intensity far exceeds the A100's ridge point, making it completely compute-bound. Fusing the memory-bound activation function into a custom JIT-compiled kernel would likely forfeit the highly tuned, assembly-level Tensor Core optimizations found in cuBLAS. The compiler's cost model correctly identifies that the massive loss in FLOP efficiency from dropping the cuBLAS kernel heavily outweighs the minor memory bandwidth savings gained by avoiding the intermediate tensor write and read.
+  common_mistake: |
+    **The Pitfall:** Assuming operator fusion is universally beneficial for reducing memory roundtrips.
+    **The Rationale:** Focusing only on memory bandwidth while ignoring the execution efficiency of underlying compute kernels.
+    **The Consequence:** Severely degrading performance by replacing hand-tuned vendor libraries (cuBLAS) with less efficient generic JIT-compiled kernels for compute-bound operations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A100 specs: 2.0 TB/s bandwidth, 312 TFLOPS FP16, ridge point ~156 FLOPs/Byte.
+    - MatMul: 17.5 TFLOPs, 5.1 GB input, 4.0 GB output.
+    - JIT compiled fused kernel achieves ~250 TFLOPS (20% less efficient than cuBLAS).
+
+    **Calculations:**
+    - MatMul Arithmetic Intensity: 17.5 TFLOPs / 5.1 GB = 3,431 FLOPs/Byte (>> 156, deeply compute-bound).
+    - Unfused Time: MatMul compute (17.5 / 312) = ~56 ms. Activation memory (8.0 GB / 2.0 TB/s) = 4 ms. Total = 60 ms.
+    - Fused Time: MatMul compute (17.5 / 250) = 70 ms. Memory time is overlapped/avoided. Total = 70 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Bound**. The 14 ms compute penalty from abandoning cuBLAS heavily outweighs the 4 ms memory savings from fusion.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Napkin Math explanation for 'Fused Time' is incomplete.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: tinyml-1716
+track: tinyml
+level: L5
+zone: evaluation
+topic: communication-computation-overlap
+competency_area: optimization
+bloom_level: evaluate
+phase: both
+title: 'Throughput Impact of I/O Overlap on Microcontrollers'
+scenario: 'A Cortex-M4 at 120 MHz processes incoming audio in a 4-stage pipeline: ADC sample (3 ms), filter+windowing (2 ms), inference (10 ms), SPI transmit (5 ms). The pipeline shares a single 64 KB SRAM bank, and DMA transfers contend with CPU loads on bus arbitration - empirically each DMA-active ms costs 8% extra CPU time. Two SRAM banks could double-buffer to eliminate contention but only if the chip has dual-bank SRAM (Cortex-M4 reference part has unified bank).'
+question: 'Evaluate the realized throughput gain from double-buffering, accounting for DMA bus contention, and identify whether the chip''s single-bank SRAM bottlenecks the maximum overlap.'
+details:
+  realistic_solution: 'Sequential baseline (no overlap): total frame time = 3 + 2 + 10 + 5 = 20 ms; throughput = 50 fps. Idealised double-buffered model: stages overlap, but on a single-core Cortex-M4 the filter (2 ms) and inference (10 ms) both run on the CPU and cannot run in parallel with each other - they serialise into a 12 ms CPU stage. The two peripheral stages (ADC at 3 ms, SPI TX at 5 ms) run on hardware DMA engines and overlap freely with CPU. So steady-state rate is gated by max(ADC=3, CPU_total=2+10=12, SPI=5) = 12 ms; ideal throughput = 1000 / 12 = 83.3 fps; ideal speedup vs sequential = 83.3 / 50 = 1.67x. DMA contention correction. The single-bank SRAM forces ADC and SPI DMA to contend with CPU loads during the binding 12 ms CPU stage. ADC DMA spans 3 ms and SPI DMA spans 5 ms; both can fall fully inside the 12 ms CPU window, giving 8 ms total DMA-active during CPU. The 8% per-active- ms tax inflates the CPU stage to 12 + 8 * 0.08 = 12.64 ms. Realised throughput = 1000 / 12.64 = 79.1 fps. Realised speedup = 79.1 / 50 = 1.58x, not the naively-computed 2.0x or even the corrected 1.67x ideal. The 8% bus tax costs another ~4 fps (~5% gap from the 12 ms ideal). A dual-bank-SRAM part removes the bus contention but does not unstick the CPU bottleneck - true 2.0x speedup also requires a second core or moving the filter into a hardware accelerator. Conclusion: single-bank, single-core part already gets 95% of its achievable benefit (1.58x of 1.67x), so the dual-bank premium alone is poor value; the right lever is filter offload or dual-core silicon.'
+  common_mistake: 'Computing the overlap speedup as max(stage_i) = max(3,2,10,5) = 10 ms without recognising that filter and inference both run on the single CPU core and serialise into a 12 ms CPU stage - a Cortex-M4 cannot run two CPU tasks concurrently. A second slip is applying the DMA contention tax to ADC or SPI (the non-binding stages) instead of to the binding 12 ms CPU window.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequential baseline: 20 ms (3 ADC + 2 filter + 10 inference + 5 SPI).
+    - Serial CPU stages: filter + inference = 12 ms.
+    - DMA contention tax: 8% per ms of DMA active during CPU execution.
+
+    **Calculations:**
+    - Ideal overlap = max(3 ADC, 12 CPU, 5 SPI) = 12 ms.
+    - Ideal throughput = 1000 / 12 = 83.3 fps.
+    - Overlapping DMA time during CPU window = 8 ms.
+    - Taxed CPU stage = 12 ms + (8 ms * 0.08) = 12.64 ms.
+    - Realized throughput = 1000 / 12.64 = 79.1 fps.
+    - Realized speedup = 79.1 / 50 (baseline) = 1.58x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.58x Speedup (Memory-Bandwidth Bound)**. The single-bank SRAM contention reduces the ideal 1.67x speedup to 1.58x, highlighting that the CPU bottleneck is the true limit, not the memory banks.
+status: published
+provenance: llm-draft
+expected_time_minutes: 5
+requires_explanation: true
+validated: true
+math_verified: true
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-recall-L5
+created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

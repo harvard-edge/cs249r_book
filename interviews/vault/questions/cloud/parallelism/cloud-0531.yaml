@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0531
+track: cloud
+level: L5
+zone: diagnosis
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: The Sequence Parallelism Necessity
+scenario: You are fine-tuning a 70B model with 128k context length using tensor parallelism across 8 GPUs. The model weights fit comfortably, taking only 17.5 GB per GPU in FP16. However, you encounter an Out-Of-Memory (OOM) error immediately upon training. Your colleague suggests adding more tensor parallelism.
+question: "Why is tensor parallelism alone insufficient, and what additional technique do you need?"
+details:
+  realistic_solution: Tensor parallelism partitions the weight matrices and their corresponding GEMMs, but the activations between the partitioned regions — specifically LayerNorm inputs, dropout masks, and the residual stream — are replicated on every GPU. These "non-tensor-parallel" activations scale with sequence length and are identical on all 8 GPUs. At 128k context, they dominate memory. You need Sequence Parallelism (SP), which partitions these replicated activations along the sequence dimension across the tensor-parallel group.
+  common_mistake: |
+    **The Pitfall:** Believing that Tensor Parallelism shards all memory evenly across the GPUs.
+    **The Rationale:** Candidates incorrectly assume that "TP=8 means 1/8th the memory for everything," forgetting that non-GEMM activations are fully replicated.
+    **The Consequence:** Wasting time trying to scale TP further when the true bottleneck is the duplicated activation memory from sequence length.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sequence length: 128k. Hidden dim: 8192. Layers: 80.
+    - Replicated activations: LayerNorm + dropout + residual.
+    - Precision: FP16 (2 bytes).
+
+    **Calculations:**
+    - Replicated activation memory per layer: 3 * 128k * 8192 * 2 bytes ≈ 6.3 GB.
+    - Over 80 layers: 6.3 GB * 80 = 504 GB.
+    - This 504 GB is replicated on *every* GPU.
+
+    **Conclusion & Interpretation:**
+    - **Result: Activation-Memory-Bound**. Even with only 17.5 GB of weights, 504 GB of replicated activations vastly exceeds typical limits; applying Sequence Parallelism shards this 504 GB across the 8 GPUs (63 GB per GPU), resolving the OOM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-441
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4042
+track: cloud
+level: L4
+zone: optimization
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: AllReduce Communication Hiding with Computation Overlap
+scenario: Your 128-H100 training job has a 200ms backward pass and a 60ms AllReduce (2GB gradients over 400Gbps). Currently these are sequential, giving 260ms per iteration. You need to calculate the maximum achievable overlap and the resulting iteration time by overlapping AllReduce with backward computation.
+question: With a 200ms backward pass and 60ms AllReduce on 128 H100s, what maximum overlap and iteration time can you achieve?
+details:
+  realistic_solution: 'The backward pass computes gradients layer-by-layer from the last to the first. As soon as the last layer''s gradient is ready (early in the backward pass), its AllReduce can begin. With a model with L layers and roughly equal per-layer compute time: each layer''s backward takes 200ms/L. AllReduce per bucket (assume 1 bucket per layer): 60ms/L (uniform distribution). The overlap is: all but the first layer''s AllReduce can overlap with subsequent layers'' backward computation. Sequential portion: max(last_layer_backward_time, first_bucket_allreduce_time) = max(200ms/L, 60ms/L). With L=100 layers: sequential portion = max(2ms, 0.6ms) = 2ms for the last backward + 0.6ms for the first AllReduce that can''t overlap = 2.6ms. Overlapped portion: the remaining 59.4ms of AllReduce runs concurrently with 197.4ms of backward compute. Total: 200ms (backward, unchanged) + 0.6ms (non-overlapping AllReduce tail) = 200.6ms. Speedup: 260ms → 200.6ms = 22.8% improvement. In practice, 85-90% overlap is achievable, giving ~205-210ms.'
+  common_mistake: |
+    **The Pitfall:** Assuming 100% overlap is achievable.
+    **The Rationale:** Forgetting the sequential dependencies at the beginning and end of the backward pass and network transfers.
+    **The Consequence:** Missing the sequential tail limit: the last gradient must finish compute before its AllReduce starts, capping theoretical speedup.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Backward compute time: 200 ms. AllReduce time: 60 ms.
+    - Model layers (L): 100 (assuming uniform time distribution).
+    - Network: 400 Gbps, gradients size: 2 GB.
+
+    **Calculations:**
+    - Sequential limits: Last layer backward (200/100 = 2 ms). First layer AllReduce (60/100 = 0.6 ms).
+    - Perfect theoretical overlap: max(200, 60) = 200 ms.
+    - Sequential tail: 2 ms + 0.6 ms = 2.6 ms.
+    - Expected overlapped iteration time: 200 ms + 0.6 ms (non-overlapped AllReduce tail) = 200.6 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Bound**. Hiding communication behind computation yields a ~23% speedup (260ms → 200.6ms), effectively achieving ~90% overlap in practice.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

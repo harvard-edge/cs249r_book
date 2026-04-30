@@ -1,0 +1,32 @@
+schema_version: '1.0'
+id: cloud-0953
+track: cloud
+level: L4
+zone: diagnosis
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: Centralized Checkpoint Incast Failure
+scenario: 'Your team is training a 30B parameter LLM using FSDP on 256 A100 GPUs (32 nodes). Every hour, a centralized checkpointing mechanism pauses training. Each worker sends its 2 GB state shard to the rank-0 coordinator node over a 100 Gbps network. Rank-0 then sequentially writes the aggregated 512 GB checkpoint to a shared NFS capable of 2 GB/s. You observe severe packet drops at rank-0, and checkpointing stalls the cluster for over 4.5 minutes.'
+question: 'What bottlenecks cause the 4.5-minute centralized checkpoint stall and rank-0 packet drops?'
+details:
+  realistic_solution: 'Identify two distinct bottlenecks: the single-stream 2 GB/s NFS write limit, and the 255-to-1 network incast hitting rank-0''s single 100 Gbps NIC. The solution is to switch to distributed checkpointing (e.g., PyTorch DCP) where each node writes its local 16 GB concurrently to an object store.'
+  common_mistake: |
+    **The Pitfall:** Identifying the slow NFS write speed as the sole issue.
+    **The Rationale:** Engineers miss the severe TCP incast condition at rank-0's NIC, which causes packet drops and TCP retransmission storms.
+    **The Consequence:** Upgrading the NFS storage system without fixing the centralized network topology fails to resolve the severe packet drops.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 256 A100 GPUs, 2 GB/worker state shard (512 GB total).
+    - Rank-0 NIC: 100 Gbps (12.5 GB/s).
+    - Shared NFS limit: 2 GB/s.
+
+    **Calculations:**
+    - NFS Write Time limit: 512 GB / 2 GB/s = 256 seconds (4.26 minutes).
+    - Incast payload: 255 workers * 2 GB = 510 GB arriving concurrently.
+    - Minimum theoretical transfer: 510 GB / 12.5 GB/s = 40.8 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: TCP Incast & Storage Bottleneck.** The 255-to-1 concurrent stream overflows switch buffers causing massive packet loss, while the NFS creates a hard 4.5-minute serialization stall.
+status: published

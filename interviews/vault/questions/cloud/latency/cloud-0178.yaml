@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0178
+track: cloud
+level: L5
+zone: optimization
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: both
+title: The High-Priority Queue Stall
+scenario: 'Your team runs a real-time LLM-based agent for a financial services client. The agent must respond to urgent market events with a strict P99 Time-To-First-Token (TTFT) SLA of 100ms. To maximize hardware utilization, your team implemented a state-of-the-art continuous batching inference server. The server''s dashboard looks great: GPU utilization is consistently high, and the aggregate throughput (tokens per second) is near the hardware''s peak. However, the client is reporting that during periods of high background traffic, the agent is missing its 100ms deadline for critical alerts. You dig into the logs and confirm: a high-priority request that arrived when the system was under load had a TTFT of nearly 150ms.'
+question: Why does an optimization designed to increase throughput lead to a catastrophic failure in latency, and what is the primary cause of the excessive delay?
+details:
+  realistic_solution: 'The continuous batching server, in its quest to maximize throughput, has introduced a classic queueing theory problem: **Head-of-Line Blocking**. The server assembles a large batch of requests to maximize arithmetic intensity and saturate the GPU. When the high-priority request arrives, the server has likely just started processing a large, already-formed batch (e.g., 32 or 64 other requests). The new request must wait in the queue for the *entire ongoing batch* to complete at least one forward pass (the generation of one token). This wait time, not the execution of the request itself, is the dominant factor in the total TTFT and the cause of the SLA violation. The system is optimized for average throughput (TPOT) at the expense of worst-case latency (P99 TTFT). A real-time system requires priority-based preemption or dynamic batch splitting to pause or finish the low-priority work and immediately service the high-priority request.'
+  common_mistake: |
+    **The Pitfall:** Blaming the model size or hardware performance for the latency spike.
+    **The Rationale:** Engineers often focus solely on the execution time of the priority request itself, ignoring the queueing time and structural limitations of continuous batching.
+    **The Consequence:** Chasing hardware upgrades or model shrinking optimizations that do not solve the fundamental head-of-line blocking problem.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 70B model on an H100 (3.35 TB/s memory bandwidth).
+       - Continuous batch size of 32.
+    2. **Calculations:**
+       - Reading 140GB model weights for one decode step takes 140GB / 3.35TB/s = 41.8ms.
+       - Prefilling 1000 tokens for a batch: 2 * 70B parameters * 1000 tokens = 140 TFLOPs.
+       - At H100 sparse compute rates (~1000 TFLOPS realistic), this prefill takes ~140ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Queue-Bound. Head-of-line blocking from a single large batch prefill or decode step instantly eats the 100ms budget.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-423
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: WARN
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: edge-2153
+track: edge
+level: L4
+zone: optimization
+topic: model-serving-infrastructure
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: 'Model Partitioning for Collaborative Inference: Edge+Cloud Split on Jetson Orin'
+scenario: A collaborative inference system splits a 50-layer ResNet-152 between Jetson Orin (first k layers) and a cloud A100 (remaining layers). The Jetson Orin has 5 Mbps uplink to the cloud. Each layer output doubles the channel count until bottleneck (layer 25, output 256x28x28xFP16 = 793KB). You must determine the optimal split point to minimize total latency.
+question: With a 5 Mbps uplink, where should you split the 50-layer ResNet-152 between Jetson Orin and cloud to minimize latency?
+details:
+  realistic_solution: 'Network transfer cost: activation_size / bandwidth. At 5 Mbps = 0.625 MB/s. Layer 25 activation: 793KB / 0.625 MB/s = 1.27s upload. That''s 1.27 seconds just for network transfer — very slow. Layer 50 (final, after global avg pool): 2048x4B FP16 = 4KB. Upload: 4KB/0.625MB/s = 6.4ms. Option A: run all layers on Jetson Orin edge, send 4KB classification vector: 6.4ms network + 0ms cloud. Option B: split at layer 25: 793KB = 1270ms network alone. Option C: send raw image (640x480x3x1B = 921KB) to cloud: 921KB/0.625MB/s = 1474ms vs running locally. Optimal: run entire model on Jetson Orin, send only the 2048-dim feature vector (4KB) for final classification on cloud if needed. End-to-end latency: edge inference (~50ms) + 6.4ms upload = 56.4ms.'
+  common_mistake: |
+    **The Pitfall:** Always splitting at the bottleneck layer (layer 25) because it has the smallest intermediate activation map.
+    **The Rationale:** Ignoring the fact that running the entire model on the edge device might be faster than paying the network transfer cost for even the smallest intermediate activation.
+    **The Consequence:** Introducing massive network bottlenecks and missing latency targets by making a naive structural split.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Uplink Bandwidth: 5 Mbps = 0.625 MB/s.
+    - Layer 25 intermediate size: 793 KB.
+    - Layer 50 classification vector size: 4 KB.
+    - Full raw image size: 921 KB.
+
+    **Calculations:**
+    - Layer 25 Upload = 793 KB / 0.625 MB/s = 1.27s.
+    - Layer 50 Upload = 4 KB / 0.625 MB/s = 6.4ms.
+    - Raw Image Upload = 921 KB / 0.625 MB/s = 1.47s.
+    - Edge inference time for all 50 layers = ~50ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Computing all layers on-edge (56.4ms total) minimizes network latency bottleneck.** It avoids large mid-network transfer penalties.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

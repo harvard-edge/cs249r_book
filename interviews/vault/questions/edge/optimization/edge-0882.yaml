@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: edge-0882
+track: edge
+level: L6+
+zone: diagnosis
+topic: speculative-decoding
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Speculative Decoding Acceptance Drop
+scenario: An edge laptop runs a 7B model (FP16) and a 115M draft model for speculative decoding (K=4). For general chat, throughput is 25 tokens/sec. However, when users ask the model to generate structured JSON configurations, throughput mysteriously drops to 4 tokens/sec, which is significantly worse than the 15 tokens/sec baseline without speculative decoding.
+question: Why does speculative decoding with K=4 drop from 25 tok/s in chat to 4 tok/s for structured JSON, and how should the runtime react?
+details:
+  realistic_solution: The root cause is a catastrophic drop in the draft model's token acceptance rate for out-of-domain or highly structured text. Speculative decoding only yields a speedup if the time saved by accepted drafted tokens outweighs the overhead of running the draft model and the verification step. Generating strict JSON requires precise syntax (brackets, quotes, specific keys) that the 115M draft model likely fails to predict accurately. Consequently, the target model rejects almost all drafted tokens. The system ends up paying the latency cost of 4 draft forward passes plus a heavy verification pass, only to generate 1 valid token per step. The fix is to monitor the moving average of the acceptance rate and dynamically disable speculative decoding (fallback to standard auto-regressive) when the rate drops below the break-even threshold.
+  common_mistake: |
+    **The Pitfall:** Assuming the JSON output is hitting max-token limits or that the target model lacks JSON training data.
+    **The Rationale:** When throughput drops unexpectedly, developers often blame configuration limits or the primary model's capabilities instead of analyzing the interaction between the draft and target models.
+    **The Consequence:** Chasing ghosts by retraining models or tuning standard generation parameters instead of addressing the low draft acceptance rate.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Baseline standard auto-regressive step = 66ms (15 tok/s).
+    - Speculative step: 115M Draft = 5ms/token (4*5=20ms), 7B Verification = 66ms.
+    - Total speculative step duration = 86ms.
+
+    **Calculations:**
+    - Chat (2.15 tokens accepted): 2.15 / 86ms = 25 tok/s.
+    - JSON (0 tokens accepted): 1 valid token per step. Processing 4 rejected tokens saturates memory bandwidth, extending verification to ~230ms. Total step ~250ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: JSON generation throughput crashes to 4 tok/s due to 0% draft acceptance rate.** A dynamic fallback threshold maintains structural output efficiency.
+  options:
+  - 'The solution is to reduce model complexity until it fits within the hardware constraints, accepting the accuracy trade-off as unavoidable.'
+  - 'The model should be retrained with fewer parameters to reduce inference time, as model size is the primary driver of latency.'
+  - 'The root cause is a catastrophic drop in the draft model''s token acceptance rate for out-of-domain or highly structured text. Speculative decoding only yields a speedup if the time saved by accepted drafted tokens outweighs the overhead of running the draft model and the verification step.'
+  - 'Assuming the JSON output is hitting max-token limits or that the target model lacks JSON training data.'
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

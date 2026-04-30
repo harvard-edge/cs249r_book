@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2121
+track: cloud
+level: L5
+zone: specification
+topic: compute-cost-estimation
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: Designing Mixed-Precision Backpropagation
+scenario: You are designing a mixed-precision training pipeline for a 70B LLM. The forward pass runs in FP16 on Tensor Cores.
+question: How should tensors flow through the 70B LLM mixed-precision forward-backward-update cycle, including FP32 loss, loss scaling, and master weights?
+details:
+  realistic_solution: "Precision trace: (1) Forward: inputs and weights cast to FP16. Matrix multiplies execute on Tensor Cores at 2x throughput. Activations saved in FP16. (2) Loss computation: output cast to FP32. Loss computed in FP32 to avoid overflow (softmax cross-entropy can produce values >65,504, FP16 max). (3) Loss scaling: loss multiplied by scale factor (e.g., 2^16 = 65536) in FP32 before backward. This shifts small gradients above FP16's minimum representable value (~6e-8). (4) Backward: gradients computed in FP16 (2x throughput). The scale factor ensures gradients that would be 1e-10 (below FP16 min) become 1e-10 * 65536 = 6.5e-6 (representable in FP16). (5) Optimizer step: gradients unscaled (divided by 65536) and cast to FP32. Adam updates master weights in FP32 (critical: weight updates are often 1e-7 scale, which rounds to zero in FP16). (6) Master FP32 weights cast back to FP16 for next forward pass. Memory: FP16 weights (140 GB) + FP32 master (280 GB) + FP32 optimizer states (560 GB) = 980 GB."
+  common_mistake: |
+    **The Pitfall:** Thinking mixed precision just means "use FP16 everywhere."
+    **The Rationale:** Ignoring the numerical limits of FP16 (max 65,504, min subnormal ~6e-8).
+    **The Consequence:** Gradients underflow to zero, or loss overflows to NaN, causing training to instantly collapse.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B parameters.
+    - FP16 limits: Max 65,504; Min ~6e-8.
+    - Standard Adam optimizer footprint.
+
+    **Calculations:**
+    - Loss Scaling: Multiplying loss by 65536 in FP32 shifts a 1e-10 gradient to 6.55e-6, safely inside FP16's representable range.
+    - Memory: FP16 Weights = 70B \times 2 Bytes = 140 GB.
+    - Memory: FP32 Master Weights = 70B \times 4 Bytes = 280 GB.
+    - Memory: FP32 Optimizer States (momentum + variance) = 70B \times 8 Bytes = 560 GB.
+    - Total Memory: 140 GB + 280 GB + 560 GB = 980 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 980 GB footprint (Memory-Capacity-Bound)**. The 980 GB footprint necessitates model parallelism, while scaling prevents numerical underflow.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,43 @@
+schema_version: '1.0'
+id: cloud-3951
+track: cloud
+level: L5
+zone: analyze
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: analyze
+phase: both
+title: Sequence Parallelism AllGather Overlap in Megatron-LM
+scenario: Megatron-LM's sequence parallelism partitions the sequence dimension across tensor-parallel GPUs for LayerNorm and Dropout (which are not parallelizable by standard tensor parallelism). Before each attention/MLP block, an AllGather reconstructs the full sequence.
+question: "How does Megatron-LM overlap the sequence-parallel AllGather before attention/MLP blocks with computation?"
+details:
+  realistic_solution: 'Megatron''s approach: decompose AllGather into chunks along the sequence dimension. As each chunk arrives, start processing it: (1) AllGather chunk 0. (2) While AllGathering chunk 1, start computing attention on chunk 0. (3) For cross-chunk attention, earlier chunks are already available. (4) This works perfectly for causal models but NOT for bidirectional models where every token attends to every other.'
+  common_mistake: |
+    **The Pitfall:** Thinking AllGather and attention computation are completely independent.
+    **The Rationale:** Candidates assume network transfers can always be fully hidden, forgetting that the attention block intrinsically requires the full sequence tensor to begin.
+    **The Consequence:** Implementing naive overlap schemes that cause deadlocks or corrupt data logic.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       * Sequence Tensor Size: 8192 (seq) * 8192 (hidden) * 2 bytes.
+       * NVLink: 900 GB/s.
+       * Compute: ~5 ms per layer.
+    2. **Calculations:**
+       * Tensor Volume: 134.2 MB.
+       * AllGather Time: 134.2 MB / 900 GB/s = 0.15 ms.
+       * Overlap Ratio: 0.15 ms / 5 ms = 3%.
+    3. **Conclusion & Interpretation:** **Result: 3% Overlap (Compute-Bound)**. While the overlap per layer is tiny (0.15 ms), it accumulates across 96 layers.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

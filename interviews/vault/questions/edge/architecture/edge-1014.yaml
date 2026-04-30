@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: edge-1014
+track: edge
+level: L4
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: Optimize MobileNetV2 latency on Jetson Orin via layer pruning and depthwise op scheduling
+scenario: MobileNetV2 inference on a Jetson Orin achieves 120 FPS with TensorRT FP16. Profiling shows 35% of the execution time is spent in depthwise convolution layers, even though they represent only 5% of total FLOPs.
+question: How would you optimize the depthwise convolutions specifically for the Jetson Orin's Ampere architecture to reduce this latency?
+details:
+  realistic_solution: |
+    Jetson Orin Ampere: depthwise conv runs on CUDA cores (not tensor cores). Optimization: (1) use TRT layer-specific tactics: trt.TacticSource.EDGE_MASK_CONVOLUTIONS; (2) ensure channel counts are multiples of 32 for warp efficiency (MobileNetV2 standard channels: 16, 24, 32, 64, 96, 160, 320 — most are fine); (3) use TRT's graph optimization to fuse depthwise + BN + ReLU6 into single kernel; (4) try replacing 3x3 depthwise with 5x5 at reduced depth (MobileNetV3 insight) — sometimes faster on Jetson due to better CUDA core occupancy. Profile with nsys to confirm improvement.
+  common_mistake: |
+    **The Pitfall:** Switching depthwise layers to FP32 to target Ampere tensor cores.
+    **The Rationale:** Candidates assume tensor cores can accelerate any dense operation if the precision is changed.
+    **The Consequence:** No speedup occurs because tensor cores only accelerate dense matmul (not depthwise), wasting engineering effort.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Current metrics: 120 FPS = 8.3ms total time. 35% of 8.3ms = 2.9ms spent in depthwise ops.
+    - FLOPs utilization: 5% of 0.3 GFLOPs = 15M FLOPs.
+    - Hardware capability: Ampere CUDA core FP16 is ~100 TFLOPS.
+
+    **Calculations:**
+    - Observed performance: 15M FLOPs / 2.9ms = 5.2 GFLOPS.
+    - Utilization: 5.2 GFLOPS / 100 TFLOPS = 0.0052% utilization.
+    - Optimization: Fusing depthwise+BN+ReLU6 reduces 17 launches to 17 fused kernels at ~50µs each = 0.85ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 4x speedup (Compute-Bound)**. The 2.9ms is entirely kernel launch overhead; fusing yields massive performance gains.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

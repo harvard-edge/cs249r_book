@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-0595
+track: edge
+level: L5
+zone: specification
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: The Fused Perception Model Paradox
+scenario: 'Your team on the autonomous vehicle perception unit is tasked with optimizing two models running concurrently on a Jetson AGX Orin: a dense CNN for camera object detection (compute-bound) and a sparse, attention-based model for LiDAR point cloud segmentation (memory-bound). A junior engineer proposes fusing them into a single multi-head model with a shared backbone. The optimization reduces total memory footprint, but during road tests, overall perception pipeline FPS drops by 20% and power draw increases.'
+question: Why did fusing the dense and sparse models backfire, leading to a slower and less efficient system?
+details:
+  realistic_solution: 'The fusion created a model with a ''poisoned'' execution profile that destroyed the system''s arithmetic intensity. The Jetson AGX Orin, like any accelerator, achieves its peak TOPS only when it is compute-bound—when the work has high Arithmetic Intensity (AI). The camera CNN was compute-bound, efficiently using the Tensor Cores. The LiDAR model was memory-bound, limited by DRAM bandwidth. By fusing them, you''ve interleaved memory-intensive sparse operations with compute-intensive dense operations. The frequent, unpredictable memory accesses required by the sparse LiDAR data processing now stall the pipeline, starving the powerful compute units even when they are supposed to be working on the dense camera data. The overall model''s AI drops precipitously, falling far below the hardware''s ridge point. The GPU is now spending most of its cycles waiting for data from DRAM instead of doing math, resulting in catastrophically low utilization. This low utilization means you get far fewer *effective* TOPS, hence the FPS drop. The increased power draw comes from the chip running ''hot'' but inefficiently, unable to enter lower power states, and burning energy on memory access, which is far more expensive than computation.'
+  common_mistake: |
+    **The Pitfall:** Blaming FLOP counts or OS scheduling overhead.
+    **The Rationale:** Engineers assume that if FLOPs didn't change significantly, any 20% slowdown must be due to arbitrary OS inefficiencies or "bugs".
+    **The Consequence:** They fail to realize the character of the compute and its interaction with the memory subsystem changed entirely, fundamentally breaking accelerator utilization.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Jetson AGX Orin: 275 TOPS, 204.8 GB/s memory bandwidth.
+       - Camera model = Dense/Compute-Bound. LiDAR model = Sparse/Memory-Bound.
+    2. **Calculations:**
+       - Hardware Ridge Point = 275e12 / 204.8e9 = ~1343 Ops/Byte.
+       - The fused model artificially lowers the overall AI far below the 1343 Ops/Byte ridge point.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Paradox**. By interleaving sparse accesses, the GPU spends its cycles waiting for DRAM. Effective TOPS plummet, power efficiency tanks, and FPS drops by 20%.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+chains:
+- id: edge-chain-173
+  position: 1
+- id: edge-chain-180
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

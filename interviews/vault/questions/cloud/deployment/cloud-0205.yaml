@@ -1,0 +1,107 @@
+schema_version: '1.0'
+id: cloud-0205
+track: cloud
+level: L4
+zone: evaluation
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Token Budget Economics
+scenario: Your company is choosing between H100, A100, and TPU v5e for serving a 70B parameter LLM. The
+  CFO wants a cost-per-million-tokens comparison across these accelerators at realistic batch sizes. Walk
+  me through the napkin math and tell me which hardware wins — and when.
+question: "Which accelerator has the best cost per million tokens for serving a 70B LLM at realistic batch sizes, and when does that change?"
+details:
+  realistic_solution: 'LLM decode is memory-bandwidth bound: each token requires loading all model weights
+    from HBM once. The metric that matters is $/GB/s of memory bandwidth, not $/TFLOP. At small batch
+    sizes, the accelerator with the best bandwidth-per-dollar wins. At large batch sizes, the workload
+    shifts compute-bound and FLOPS/$ matters more. In this scenario, H100 wins across the board: it has
+    a better bandwidth-to-cost ratio for latency-sensitive low-batch workloads, and a better FLOPS-to-cost
+    ratio for compute-bound high-batch workloads.'
+  common_mistake: '"Pick the GPU with the highest FLOPS — H100 always wins." Raw FLOPS is irrelevant for
+    decode-phase serving, which is memory-bandwidth bound. The cheapest $/token depends on batch size,
+    model size, and whether you''re prefill-bound or decode-bound.'
+  napkin_math: '70B model in FP16 = 140 GB weights. Each decode token loads all weights from HBM once.
+
+
+    **H100 (80 GB HBM3):**
+
+    Model requires TP=2 minimum (140 GB > 80 GB). 70 GB/GPU.
+
+    Bandwidth per GPU = 3.35 TB/s. Per-token decode = 70 GB / 3.35 TB/s = 20.9 ms/token.
+
+    With NVLink AllReduce overhead (~0.02 ms): total ≈ 20.9 ms/token → ~47.8 tokens/s.
+
+    Cost ≈ 2 × $3.50/hr = $7.00/hr.
+
+    Tokens/hr = 47.8 × 3600 = 172,080.
+
+    Cost per 1M tokens = $7.00 / 172,080 × 10^6 = **$40.68/M tokens**.
+
+
+    **A100 (80 GB HBM2e):**
+
+    Also requires TP=2. 70 GB/GPU.
+
+    Bandwidth per GPU = 2.0 TB/s. Per-token decode = 70 GB / 2.0 TB/s = 35.0 ms/token.
+
+    With NVLink overhead: ~35 ms/token → ~28.6 tokens/s.
+
+    Cost ≈ 2 × $2.20/hr = $4.40/hr.
+
+    Tokens/hr = 28.6 × 3600 = 102,857.
+
+    Cost per 1M tokens = $4.40 / 102,857 × 10^6 = **$42.78/M tokens**.
+
+
+    **TPU v5e (16 GB HBM per chip):**
+
+    Model requires TP across 140 GB / 16 GB = 9 chips minimum.
+
+    Per-chip HBM bandwidth = 819 GB/s. Per-chip weight shard = 140/9 ≈ 15.6 GB.
+
+    Decode = 15.6 GB / 819 GB/s = 19.0 ms/token → ~52.6 tokens/s (limited by slowest chip + ICI overhead).
+
+    Cost ≈ 9 × $1.20/hr = $10.80/hr.
+
+    Tokens/hr = 52.6 × 3600 = 189,360.
+
+    Cost per 1M tokens = $10.80 / 189,360 × 10^6 = **$57.03/M tokens** (at batch=1).
+
+
+    **At large batch sizes (B=64, compute-bound regime):**
+
+    H100 (2 GPUs): 2 × 989 = 1,978 TFLOPS FP16. FLOPs/token = 2 × 70B = 140 GFLOPs.
+
+    Tokens/s = 1,978×10^12 / 140×10^9 × (MFU ~0.5) = 7,064 tokens/s.
+
+    Cost = $7.00/hr / (7,064 × 3600) × 10^6 = **$0.28/M tokens**.
+
+    TPU v5e (9 chips): ~200 TFLOPS per chip × 9 = 1,800 TFLOPS effective.
+
+    Tokens/s = 1,800×10^12 / 140×10^9 × 0.4 = 5,143 tokens/s.
+
+    Cost = $10.80/hr / (5,143 × 3600) × 10^6 = **$0.58/M tokens**.
+
+
+    **Verdict:** At batch=1 (decode-bound), H100 wins on $/token due to superior bandwidth per dollar.
+    At high batch sizes (compute-bound), H100 extends its lead due to superior FLOPS per dollar. The key insight:
+    the bottleneck metric shifts from $/GB/s (bandwidth) at low batch to $/TFLOP (compute) at high batch.'
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

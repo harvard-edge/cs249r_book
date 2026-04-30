@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-0621
+track: cloud
+level: L5
+zone: optimization
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: The CXL Memory Tier
+scenario: 'Your inference server has 80 GB of HBM (GPU VRAM) and 512 GB of CXL-attached memory at ~200 ns latency and ~64 GB/s bandwidth. You are serving a 70B model (140 GB FP16).'
+question: 'Can CXL memory avoid tensor parallelism for the 140 GB FP16 70B model, and what performance impact would it have?'
+details:
+  realistic_solution: 'CXL memory has ~3× the latency of DDR5 and ~50× less bandwidth than HBM3. You can store the model across both tiers, but the layers served from CXL will be dramatically slower. The key insight: not all layers are accessed equally during decode. The embedding table and output projection are accessed once per token, while each transformer layer is accessed once per layer per token. Offloading the right layers minimizes impact.'
+  common_mistake: |
+    **The Pitfall:** Assuming CXL memory is "just slower DRAM" and will only cause a minor slowdown.
+    **The Rationale:** Candidates ignore the access patterns. They fail to separate layers accessed once per token (embeddings) from those accessed once per layer per token (attention/MLP).
+    **The Consequence:** Misconfiguring memory tiering, resulting in catastrophic latency during low-batch decode.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - HBM vs CXL Specs: HBM = 3.35 TB/s. CXL = 64 GB/s.
+    - 70B model inference.
+
+    **Calculations:**
+    - Naive Split (43% CXL): Per-token time = (80 GB / 3350 GB/s) + (60 GB / 64 GB/s) = 0.024 s + 0.938 s = 0.96 sec/token (39x slower).
+    - Smart Split (MLP in CXL): 80 GB of attention/MLP in HBM, 60 GB of MLP in CXL.
+    - With Prefetching: Effective overhead = max(0.024 s, 0.938 s) = 0.938 sec/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0.938 sec/token (Memory Bandwidth-Bound)**. CXL helps for batch inference, not low-batch decode.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

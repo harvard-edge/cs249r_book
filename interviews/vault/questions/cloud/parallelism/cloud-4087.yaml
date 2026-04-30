@@ -1,0 +1,41 @@
+schema_version: '1.0'
+id: cloud-4087
+track: cloud
+level: L3
+zone: fluency
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: understand
+phase: training
+title: TP Layout Under an Asymmetric Bandwidth Budget
+scenario: An 8B-parameter dense block runs on a 4-GPU mini-pod where 2 GPUs share a fast NVLink lane (450 GB/s unidirectional) and the other 2 GPUs connect to that pair only over PCIe Gen4 (25 GB/s unidirectional). The block has hidden dim H_in = H_out = 8192 and is currently column-parallel, ending in an AllGather across all 4 ranks.
+question: On 4 GPUs with a 2x NVLink pair + 2x PCIe pair, should the [8192, 8192] linear block use column-parallel + AllGather or row-parallel + AllReduce, and why?
+details:
+  realistic_solution: 'Column-parallel: each rank holds [8192, 2048] of W and produces a [batch, 2048] output partition. The end-of-block AllGather across 4 ranks moves 3/4 * 4 * batch * 2048 * 2 bytes = 3 * batch * 4096 bytes through the slowest link. For batch=2048 that is ~24 MB across the slowest PCIe edge -> ~0.96 ms. Row-parallel: each rank holds [2048, 8192] of W; input must first be split [batch, 2048], and the output is a partial sum requiring an AllReduce of [batch, 8192]. AllReduce moves 2*(N-1)/N = 1.5x the [batch, 8192] tensor (32 MB at batch=2048) -> 48 MB across the slowest link -> ~1.92 ms. Column-parallel + AllGather wins by ~2x because AllGather moves N-1/N of the small sharded tensor while AllReduce moves 2*(N-1)/N of the *full* tensor. The PCIe leg is the binding link in both cases.'
+  common_mistake: |
+    **The Pitfall:** Choosing layout by FLOPs symmetry alone or assuming NVLink is the binding link.
+    **The Rationale:** Candidates overlook that AllReduce moves twice the bytes of AllGather across the same ring, and fail to identify the 18x slower PCIe link as the true bottleneck.
+    **The Consequence:** Selecting row-parallelism doubles the data transferred over the heavily constrained PCIe link, doubling the communication latency.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Dense block: [8192, 8192] on 4 GPUs.
+       - PCIe Gen4 bottleneck: 25 GB/s.
+       - Batch size: 2048, Precision: BF16 (2 bytes).
+    2. **Calculations:**
+       - Per-shard weights: 8192 * 2048 = 16.78M params = 33.55 MB.
+       - Column-parallel AllGather traffic: 3 * 2048 * 4096 = 25.16 MB.
+       - Time over 25 GB/s PCIe (Column): 25.16 MB / 25 GB/s = ~1.0 ms.
+       - Row-parallel AllReduce traffic: 1.5 * 2048 * 16384 = 50.33 MB.
+       - Time over 25 GB/s PCIe (Row): 50.33 MB / 25 GB/s = ~2.0 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound.** Column-parallel + AllGather wins by ~2x because AllGather moves half the bytes of AllReduce over the binding PCIe link.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT

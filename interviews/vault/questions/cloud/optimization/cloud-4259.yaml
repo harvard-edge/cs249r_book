@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4259
+track: cloud
+level: L5
+zone: diagnosis
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Understanding graph break costs in torch.compile for a custom CUDA extension
+scenario: 'You have a custom CUDA extension for a specialized attention variant. After wrapping the model with `torch.compile`, you get a graph break at every custom op call because the compiler cannot trace through the custom extension''s C++ dispatch.'
+question: How would you make the custom attention CUDA op traceable by torch.compile without graph breaks?
+details:
+  realistic_solution: 'Register the custom op using torch.library: define torch.ops.custom_ext.attention_fwd with a schema via torch.library.Library and use torch.library.impl_abstract() to provide a shape-inference function for TorchDynamo. This allows Dynamo to trace through the op symbolically without needing to execute it. Alternatively, use torch._dynamo.allow_in_graph(custom_func) for simpler cases where you want Dynamo to treat the function as an opaque leaf.'
+  common_mistake: |
+    **The Pitfall:** Not registering the custom op with TorchDynamo's allow-list.
+    **The Rationale:** By default, unknown Python callables or C++ extensions cause graph breaks because TorchDynamo cannot symbolically trace through them.
+    **The Consequence:** Unintended graph breaks that ruin fusion opportunities and tank performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Transformer with 32 layers using a custom CUDA attention extension.
+    - Kernel launch overhead is ~5μs per kernel.
+    - A graph break prevents fusing Q/K/V projection and attention into a single operation.
+
+    **Calculations:**
+    - Without fusion: At least 4 separate kernels are launched per layer.
+    - With fusion: 1 kernel is launched per layer.
+    - Overhead saved per layer: (4 kernels - 1 kernel) * 5μs = 15μs.
+    - Total overhead saved per step: 15μs * 32 layers = 480μs.
+
+    **Conclusion & Interpretation:**
+    - **Result: 480μs savings (Compute-Bound)**. Registering the custom op allows TorchDynamo to trace the graph symbolically, preventing graph breaks and enabling aggressive kernel fusions that eliminate launch overheads.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

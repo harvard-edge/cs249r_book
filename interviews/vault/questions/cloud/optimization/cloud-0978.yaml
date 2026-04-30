@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0978
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Diagnosing Stalled Computation During NCCL AllGather
+scenario: You are analyzing an Nsight Systems trace of a distributed LLM training step on an 8x H100 node. You implemented communication-computation overlap by placing a 2GB `ncclAllGather` on a dedicated CUDA communication stream and an attention `matmul` on the default compute stream. However, the trace shows the `ncclAllGather` waiting to start until the `matmul` is completely finished, leaving the network idle for 5ms.
+question: Why is the hardware failing to overlap these operations?
+details:
+  realistic_solution: The large `matmul` kernel is launching with enough thread blocks to fully occupy all 132 SMs on the H100. Because the GPU scheduler has no available SMs, the NCCL kernel cannot launch until the compute kernel finishes. To fix this, create the communication stream with a higher priority (e.g., `torch.cuda.Stream(priority=-1)`) so the GPU scheduler prioritizes the NCCL thread blocks concurrently, enabling true overlap.
+  common_mistake: |
+    **The Pitfall:** Assuming independent CUDA streams mathematically guarantee hardware-level concurrency.
+    **The Rationale:** CUDA streams are the standard abstraction for concurrency, leading to the assumption that assigning tasks to separate streams is sufficient.
+    **The Consequence:** Failing to realize that NCCL operations over NVLink execute as CUDA kernels that compete for Streaming Multiprocessors (SMs), resulting in unintended serialization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Communication Time: 2GB `ncclAllGather` / 900 GB/s (H100 NVLink) = 2.22ms.
+    - Compute Time: Attention `matmul` takes 5.0ms.
+
+    **Calculations:**
+    - Serial Execution Time: 5.0ms + 2.22ms = 7.22ms.
+    - Overlapped Execution Time: max(5.0ms, 2.22ms) = 5.0ms.
+    - Speedup: 7.22ms / 5.0ms = 1.44x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.44x speedup (Compute-Bound)**. Using high priority streams forces SM availability, allowing true overlap.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-046
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:20:16.498371'

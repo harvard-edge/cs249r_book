@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3848
+track: cloud
+level: L3
+zone: analyze
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: MoE Capacity Factor Communication Overhead
+scenario: You are training an 8-expert MoE model on an 8x GPU node, with 1 expert per GPU using expert parallelism. The global batch size is 16 and sequence length is 2048. To reduce token dropping, the team increases the capacity factor from 1.0 to 1.5. Profiling shows that the latency of the All-To-All communication step increases by exactly 50%, even though the total number of valid tokens routed remains exactly the same.
+question: Why does raising the MoE capacity factor from 1.0 to 1.5 increase All-To-All latency by 50% even though valid routed tokens are unchanged?
+details:
+  realistic_solution: 'In standard expert parallelism, collective communication operations (like All-To-All) require statically sized buffers to avoid dynamic allocation and synchronization overheads. The buffer size for each expert is determined by the capacity factor: Capacity = (Total Tokens / Num Experts) * Capacity Factor. When the capacity factor increases from 1.0 to 1.5, the allocated buffer size increases proportionally. Because the system must transmit the entire buffer, including padding tokens used when an expert doesn''t reach full capacity, the total communication volume and latency increase by 50% regardless of the actual valid token distribution.'
+  common_mistake: |
+    **The Pitfall:** Assuming only valid, routed tokens are transmitted over the network.
+    **The Rationale:** Candidates incorrectly attribute the slowdown to computation load imbalance or NVLink congestion, failing to realize collective operations require statically sized buffers.
+    **The Consequence:** Misdiagnosing network bottlenecks in MoE models and failing to properly tune capacity factors.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total tokens: 16 * 2048 = 32,768.
+    - Base Capacity Factor (CF): 1.0.
+    - New Capacity Factor (CF): 1.5.
+    - Token Size: 8192 Bytes.
+
+    **Calculations:**
+    - Base buffer size per expert: (32,768 / 8) * 1.0 = 4,096 tokens.
+    - Total sent (CF 1.0): 8 experts * 4,096 tokens * 8192 B = 268.4 MB.
+    - New buffer size per expert: (32,768 / 8) * 1.5 = 6,144 tokens.
+    - Total sent (CF 1.5): 8 experts * 6,144 tokens * 8192 B = 402.6 MB.
+    - Increase: 402.6 / 268.4 = 1.5x (50%).
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.5x Increase (Network-Bound)**. The statically sized All-To-All communication buffer increases by exactly 50% to accommodate padding tokens, increasing latency linearly regardless of valid token distributions.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

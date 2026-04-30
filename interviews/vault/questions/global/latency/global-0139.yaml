@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: global-0139
+track: global
+level: L5
+zone: specification
+topic: batching-strategies
+competency_area: latency
+bloom_level: evaluate
+phase: inference
+title: Continuous Batching Queueing Death Spiral
+scenario: Your summarization service handles exactly 2 QPS. Prompts are 8k tokens, outputs are 1k tokens. The business SLA is 45s end-to-end latency. You cap the batch size at 8 to strictly prevent KV cache OOMs. TPOT is a flat 30ms. Prefill is 1s. Under sustained 2 QPS load, P99 latency slowly climbs to over 5 minutes.
+question: Why does P99 latency climb past 5 minutes at 2 QPS even though TPOT is flat at 30ms, and how would you fix capacity?
+details:
+  realistic_solution: 'Decompose latency using Queueing Theory: End-to-End Latency = Queue Time + Prefill Time + (Tokens * TPOT). Service time per request = 1s + (1000 * 30ms) = 31 seconds. With a max batch size of 8, the system''s maximum service rate (mu) = 8 requests / 31 seconds = 0.258 QPS. The arrival rate (lambda) is 2 QPS. Because lambda > mu (2 > 0.258), the system is in a queueing death spiral; the queue grows infinitely. The architecture must be redesigned to increase capacity: either scale horizontally by adding 8x more replicas (2 / 0.258 = 7.7), or implement KV cache quantization (e.g., FP8/INT4) to safely increase the max batch size from 8 to 64 on the existing node.'
+  common_mistake: |
+    **The Pitfall:** Blaming continuous batching overhead and reverting to static batching, or trying to micro-optimize the TPOT.
+    **The Rationale:** Engineers focus on the per-token metrics (TPOT) rather than applying basic queueing theory to the macroscopic service rate.
+    **The Consequence:** Fiddling with kernel optimizations while the system is mathematically doomed to collapse under basic traffic load.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Prefill time: 1s. Generation TPOT: 30ms/token for 1,000 tokens. Total service time per batch = 31s.
+    - Max batch size: 8 requests. Arrival rate (lambda): 2 QPS.
+
+    **Calculations:**
+    - Generation time: 1000 tokens * 30ms = 30s. Total service time = 31s.
+    - Max throughput (mu): 8 requests / 31s = 0.258 QPS.
+    - Deficit: 2 QPS arrival - 0.258 QPS capacity = 1.74 requests/sec added to the queue.
+
+    **Conclusion & Interpretation:**
+    - **Result: Infinite Queue Growth (Capacity-Bound)**. Because arrival rate > service rate, the queue grows infinitely (death spiral), causing unbounded latency.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

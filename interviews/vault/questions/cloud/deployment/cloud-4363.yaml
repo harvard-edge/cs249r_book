@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-4363
+track: cloud
+level: L5
+zone: evaluation
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: both
+title: 'Serving a 70B Model: MI300X Single-Card vs H100 Tensor Parallel'
+scenario: 'A 70B LLM (FP16, 140GB) must be served at 200 req/s with p99 latency < 200ms. Option A: 2x MI300X (192GB each, 5.3 TB/s each) with tensor parallelism TP=2 via PCIe. Option B: 2x H100 (80GB each, 3.35 TB/s each) with TP=2 via NVLink 4.0 (900 GB/s).'
+question: For the 70B LLM at 200 req/s and p99 <200 ms, how do MI300X PCIe TP=2 and H100 NVLink TP=2 compare, and what should you deploy?
+details:
+  realistic_solution: 'Memory per card: MI300X option: 70GB per card (fits in 192GB with 122GB slack). H100 option: 70GB per card (fits in 80GB with 10GB slack). Communication analysis: AllReduce per transformer layer: tensor size = 268MB. Per 80-layer model: 160 AllReduces. MI300X PCIe 5.0 (128 GB/s): 2.1ms per AllReduce, total 336ms. H100 NVLink (900 GB/s): 0.30ms per AllReduce, total 47ms. Recommendation: single MI300X (70GB fits, 50GB+ KV cache headroom) with no TP. Single-card eliminates communication overhead entirely and leverages bandwidth for decode.'
+  common_mistake: |
+    **The Pitfall:** Assuming TP=2 communication overhead is negligible on both platforms.
+    **The Rationale:** Candidates fail to check if the model fits on a single card (which eliminates TP entirely) or ignore the massive bandwidth gap between PCIe 5.0 and NVLink 4.0.
+    **The Consequence:** Deploying a multi-GPU PCIe topology that violates the latency SLA due to inter-GPU communication bottlenecks.
+  napkin_math: |
+    - **MI300X (192GB):** Model fits on 1x MI300X ($140\text{GB} < 192\text{GB}$). KV cache headroom: $192 - 140 = 52\text{GB}$.
+    - **H100 (80GB):** 140GB > 80GB, so minimum H100 TP=2 is required.
+    - **AllReduce overhead (TP=2):** 268MB per AllReduce. 160 AllReduces per pass.
+    - **MI300X PCIe (128 GB/s):** $268\text{MB} / 128\text{GB/s} = 2.1\text{ms}$. Total = $160 \times 2.1\text{ms} = 336\text{ms}$. (Exceeds 200ms SLA).
+    - **H100 NVLink (900 GB/s):** $268\text{MB} / 900\text{GB/s} = 0.30\text{ms}$. Total = $160 \times 0.30\text{ms} = 47\text{ms}$.
+    - **Recommendation:** **Use single-card MI300X instances (no TP)** to eliminate communication overhead and fit the 200ms SLA.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

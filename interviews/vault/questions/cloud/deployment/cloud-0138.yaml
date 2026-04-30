@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0138
+track: cloud
+level: L4
+zone: analyze
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Shadow GPU Budget
+scenario: We want to shadow-test a new 70B LLM before replacing our production 13B model by mirroring all production traffic. The infrastructure team warns that the shadow deployment will cost significantly more than the production deployment itself.
+question: Why is shadow-testing an LLM so much more expensive than shadow-testing a traditional ML model, and how do you make it feasible?
+details:
+  realistic_solution: 'Shadow-testing a 70B LLM is expensive because you must run full autoregressive decoding for every request — not just a single forward pass. A classification model shadow costs one forward pass (~10ms, ~0.1 GPU-second). An LLM shadow costs prefill + N decode steps (~2-5 seconds of GPU time per request). At 1,000 QPS production traffic, the shadow needs 2,000-5,000 GPU-seconds per second of wall time — more GPUs than production itself. The fix: sample shadow traffic (10-20% of requests), use speculative decoding with the production 13B as the draft model, or run shadow only on prefill (compare logits at the first token without full generation).'
+  common_mistake: |
+    **The Pitfall:** Assuming shadow deployment is essentially free "prediction logging."
+    **The Rationale:** This holds true for stateless classification models that take 10ms per request.
+    **The Consequence:** Bankrupting the cloud budget because autoregressive LLMs require seconds of GPU time per request and suffer from massive KV-cache bottlenecks under heavy mirrored load.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Production: 13B parameter model (FP16/BF16, ~26GB weights).
+       - Shadow: 70B parameter model (FP16/BF16, ~140GB weights).
+       - Hardware: A100 80GB GPUs.
+    2. **Calculations:**
+       - Production deployment: Fits on 1x A100, leaving ~54GB for KV cache (supports large batch, e.g., 64).
+       - Shadow deployment: Requires 2x A100s (160GB total). Leaves 20GB for KV cache (batch size drops to ~8).
+       - Throughput ratio: Shadow gets ~1/8th throughput per forward pass while using 2x the GPUs.
+       - Fleet multiplier: 2 (GPUs) * 8 (throughput drop) = 16x.
+    3. **Conclusion & Interpretation:** **~16x more hardware (KV Cache Capacity-Bound).**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+chains:
+- id: cloud-chain-433
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

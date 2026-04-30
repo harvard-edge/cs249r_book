@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2178
+track: cloud
+level: L6+
+zone: design
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: create
+phase: both
+title: The Custom Fused Kernel Design
+scenario: You need to implement a fused RMSNorm + Rotary Position Embedding (RoPE) + attention score computation kernel in Triton for a LLaMA-70B deployment. The three operations are currently separate kernels, each reading and writing the full hidden state (8,192 dims) to HBM. Your target is an accelerator with 3.35 TB/s HBM bandwidth and 228 KB shared memory per SM.
+question: "What tiling strategy, work partitioning, HBM traffic reduction, and primary risk would you choose for this fused Triton kernel?"
+details:
+  realistic_solution: 'Design a tiling strategy that keeps the hidden state for a group of tokens in SRAM across all operations. Tile size: load 8 tokens per thread block (8 * 16KB = 128KB, fitting well within the 228KB shared memory). Work partition: load Q/K, compute RMSNorm using warp-level reductions, apply RoPE via precomputed registers, and compute Q@K^T partials. This fusion slashes HBM traffic by nearly 3x by eliminating intermediate materialized states. The primary risk is warp-synchronization bottlenecks during the hidden-dimension reduction for RMSNorm.'
+  common_mistake: |
+    **The Pitfall:** Naively concatenating kernel code without restructuring the underlying data flow.
+    **The Rationale:** Engineers treat kernel fusion like standard function inlining, failing to explicitly manage shared memory limits and register pressure.
+    **The Consequence:** The fused kernel spills to local memory (L1/L2 thrashing), resulting in worse performance than the separate un-fused kernels.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Hidden dim: 8,192. Precision: FP16 (2 bytes/element).
+       - Token size: 16 KB. Shared Memory: 228 KB.
+       - Batch=256, Seq=4096.
+    2. **Calculations:**
+       - Separate Kernels (Per Token): RMSNorm (16KB Read + 16KB Write) + RoPE (16R + 16W) + QK_prep (16R + 16W) = 96 KB traffic.
+       - Fused Kernel (Per Token): 16KB Read + ~2KB Write (QK scores) = 18 KB traffic.
+       - Total traffic separate: 256 * 4096 * 96 KB = 100.6 GB.
+       - Total traffic fused: 256 * 4096 * 18 KB = 18.8 GB.
+       - Time saved at 3.35 TB/s: (100.6 - 18.8) / 3350 = 24.4 ms per forward pass.
+    3. **Conclusion & Interpretation:**
+       - **Result: ~5x Traffic Reduction, 24.4ms Saved.** The separate kernels are strictly **Memory-Bandwidth-Bound**, fully mitigated by aggressive SRAM retention.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: cloud-chain-458
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

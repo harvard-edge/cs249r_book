@@ -1,0 +1,56 @@
+schema_version: '1.0'
+id: cloud-2023
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Debugging TensorRT Precision Fallbacks and Fusion Breaks
+scenario: >-
+  You are deploying a custom 7B parameter Transformer model on NVIDIA A10G GPUs (24GB VRAM, 600
+  GB/s bandwidth) using TensorRT. You compile the engine with the FP16 flag enabled. However, load testing
+  reveals the latency is 2x higher than expected. Profiling with Nsight Systems shows that memory bandwidth
+  utilization is surprisingly low, and the trace reveals frequent memory formatting nodes (casting FP16
+  to FP32 and back) inserted between otherwise fused Transformer blocks.
+question: >-
+  Why is the FP16 TensorRT engine 2x slower than expected, and how would you eliminate the formatting nodes?
+details:
+  realistic_solution: 'Analyze the TensorRT engine build logs (verbose mode) to pinpoint the exact operations falling back to FP32. Replace unsupported operations (like custom activations) with standard supported equivalents, or implement a custom TensorRT plugin in CUDA to maintain continuous FP16 execution and allow vertical kernel fusion.'
+  common_mistake: |
+    **The Pitfall:** Assuming the FP16 build flag guarantees end-to-end half-precision execution.
+    **The Rationale:** Candidates fail to realize that unsupported custom layers force TensorRT to fall back to FP32 execution, which silently breaks kernel fusion and incurs massive memory I/O penalties.
+    **The Consequence:** Deploying an "optimized" engine that actually runs slower than standard PyTorch execution.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Tensor shape is [Batch=8, Seq=1024, Hidden=4096].
+    - Activation size is 8 × 1024 × 4096 × 2 bytes (FP16) ≈ 67 MB.
+    - A10G bandwidth is 600 GB/s.
+
+    **Calculations:**
+    - Fallback VRAM roundtrip = Write 67MB (FP16), read 134MB (FP32), write 134MB (FP32), read 67MB (FP16).
+    - Total wasted traffic = 402 MB per fallback.
+    - Latency penalty = 402 MB / 600 GB/s = ~0.67 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~0.67 ms per fallback (Memory-Bound)**. Frequent casting forces excessive memory I/O, destroying performance and breaking kernel fusion.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+chains:
+- id: cloud-chain-419
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:45:55.902620'

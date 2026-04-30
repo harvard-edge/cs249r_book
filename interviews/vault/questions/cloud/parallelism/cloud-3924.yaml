@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3924
+track: cloud
+level: L3
+zone: recall
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: remember
+phase: both
+title: Overlapping Backward Pass with AllReduce in Data-Parallel Training
+scenario: In distributed data-parallel training of a ResNet-50 across 8 H100 GPUs, gradients are ready layer-by-layer during the backward pass, starting from the last layer.
+question: Why does DDP start AllReduce before the entire backward pass finishes?
+details:
+  realistic_solution: 'Gradient bucketing enables overlap: PyTorch DDP groups gradients into 25MB buckets. As soon as all gradients in a bucket are computed, AllReduce starts immediately on a separate NCCL stream while the backward pass continues computing earlier layers. This overlap hides 60-80% of communication latency behind computation.'
+  common_mistake: |
+    **The Pitfall:** Thinking AllReduce must operate on the entire gradient tensor at once.
+    **The Rationale:** Candidates assume network communication only begins after all gradients are computed.
+    **The Consequence:** This serializes communication after computation, wasting half the training time on idle network bandwidth.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - ResNet-50 parameters: ~25.6M.
+    - Precision: FP32 (4 bytes per parameter).
+    - Backward pass time on H100: ~20 ms.
+    - Interconnect: NVLink (900 GB/s).
+
+    **Calculations:**
+    - Gradient size: 25.6M * 4 bytes = 102.4 MB.
+    - AllReduce time (Ring): 2 * (8-1)/8 * 102.4 MB / 900 GB/s \u2248 0.2 ms.
+    - Time without overlap: 20 ms + 0.2 ms = 20.2 ms.
+    - Time with overlap (AllReduce hidden): ~20 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~20 ms (Network-Bound Bottleneck)**. Overlap hides communication latency behind compute.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

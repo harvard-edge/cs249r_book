@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: tinyml-0699
+track: tinyml
+level: L3
+zone: implement
+topic: mcu-compute-constraints
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: 'The Stack vs Heap on MCU'
+scenario: 'A junior engineer porting a model to a Cortex-M0+ with 32 KB SRAM asks why TFLite Micro requires declaring a static `uint8_t tensor_arena[20480]` instead of just calling `malloc(20480)`.'
+question: 'Why does TFLite Micro require a static tensor arena instead of malloc on a small Cortex-M0+, and how does dynamic allocation affect WCET analysis?'
+details:
+  realistic_solution: 'TFLite Micro''s static arena solves two ML-specific problems:
+
+  (1) **Peak Activation Memory Planning:** An ML model''s memory footprint isn''t uniform; it peaks at specific layers (e.g., a large convolution early in the network) and shrinks at others. The tensor arena size must be exactly tailored to the model''s *peak* activation memory plus weight overhead. If you use `malloc` for individual tensors dynamically during inference, the heap will fragment. A 20 KB heap might have 6 KB "free", but if the next layer requires a contiguous 4 KB activation tensor and the heap is fragmented into 50-byte holes, the inference crashes mid-execution. A static arena uses a simple bump allocator that reuses memory deterministically, guaranteeing that if the peak layer fits once, it fits forever.
+
+  (2) **WCET (Worst-Case Execution Time) Analysis:** In safety-critical ML (e.g., a vibration anomaly detector that must trigger a shutdown in 10ms), you must prove the inference latency. `malloc` is non-deterministic; its execution time depends on the current state of the heap''s free list. Searching a fragmented free list for a 4 KB block might take 10 cycles or 10,000 cycles. The static arena''s bump allocator takes $O(1)$ time (literally just adding an offset to a pointer), making the memory allocation phase of inference perfectly deterministic and allowing rigorous WCET analysis of the ML pipeline.'
+  common_mistake: |
+    **The Pitfall:** Treating `malloc` as a standard, harmless way to allocate memory.
+    **The Rationale:** On desktop or mobile operating systems, virtual memory and sophisticated allocators hide fragmentation issues.
+    **The Consequence:** On a 32 KB MCU running ML, dynamic allocation destroys reliability through memory fragmentation and breaks real-time guarantees by making allocation latency non-deterministic.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - SRAM Layout: 32 KB total (4 KB firmware, 2 KB stack, 20 KB tensor arena, 6 KB free).
+    - Allocations: 50 tensor allocations per inference.
+
+    **Calculations:**
+    - Dynamic Allocation Risk: 15% external fragmentation (~3 KB).
+    - Fragmentation Failure: The largest contiguous free block becomes 3 KB. If the next layer needs 3.5 KB, the system hard faults.
+    - Static Arena: Bump allocator resets to offset 0 each inference, ensuring 0% fragmentation.
+    - Execution Time: Bump allocator takes O(1) time.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0% fragmentation (Memory-Bound)**. Static arena prevents deterministic WCET failures and hard faults.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+chains:
+- id: tinyml-chain-011
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- 'Classification sanity - reasoning_competency and reasoning_mode are incorrectly set to None for a question that clearly tests Memory Management, TFLite Micro Architecture, and Real-Time Systems.'
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

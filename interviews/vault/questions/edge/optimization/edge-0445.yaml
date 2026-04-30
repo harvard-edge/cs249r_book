@@ -1,0 +1,98 @@
+schema_version: '1.0'
+id: edge-0445
+track: edge
+level: L3
+zone: diagnosis
+topic: kernel-fusion
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: The Real-Time Vision Stall
+scenario: You are an ML Systems Engineer on an automotive team, tasked with optimizing
+  a driver-drowsiness detection model running on a Jetson AGX Orin. Your model is
+  meeting the 30 FPS deadline on average, but you observe frequent latency spikes.
+  You run the profiler and see the GPU timeline is a long sequence of dozens of tiny,
+  distinct kernels (e.g., Conv2D, BatchNorm, ReLU) separated by small but significant
+  gaps. Each individual operation is very fast (< 15µs).
+question: Given this profile, what is the most effective optimization to consistently
+  meet the deadline?
+details:
+  realistic_solution: The correct solution is to apply **Operator Fusion**. The profiler
+    is clearly indicating that kernel launch overhead is a dominant factor. Each time
+    the CPU schedules a kernel on the GPU, there's a fixed latency cost (typically
+    5-10µs). When operations are very fast (e.g., an element-wise ReLU), this launch
+    overhead can be as large or larger than the actual computation. Operator fusion,
+    typically done with a graph compiler like NVIDIA's TensorRT or Apache TVM, combines
+    a sequence of layers (like Conv2D -> BatchNorm -> ReLU) into a single, larger,
+    more efficient kernel. This fused kernel is launched only once, drastically reducing
+    the total launch overhead. As a critical secondary benefit, the intermediate data
+    between the fused ops can be kept in fast on-chip SRAM/registers instead of being
+    written out to and read back from much slower LPDDR5 DRAM, which significantly
+    reduces memory access latency and power consumption.
+  common_mistake: '**The Pitfall:** Misdiagnosing kernel launch overhead as a model
+    size issue.
+
+    **The Rationale:** Engineers see tiny delays and assume the model is too large,
+    leading them to apply pruning instead of addressing CPU-GPU synchronization.
+
+    **The Consequence:** Wasting time on model compression techniques that degrade
+    accuracy without fixing the latency spikes caused by launch overhead.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
+    - Target deadline: 33.3ms (30 FPS).
+
+    - Kernel launch overhead on Orin: ~5µs.
+
+    - Operations are tiny (e.g., 2µs compute).
+
+
+    **Calculations:**
+
+    - Unfused Block (Conv -> BN -> ReLU): 3 launches x 5µs = 15µs overhead. Compute
+    = 3 x 2µs = 6µs. Total = 21µs.
+
+    - Fused Block: 1 launch x 5µs = 5µs overhead. Compute = 6µs. Total = 11µs.
+
+    - Across 50 blocks: Unfused = 50 x 21µs = 1.05ms. Fused = 50 x 11µs = 0.55ms.
+
+
+    **Conclusion & Interpretation:**
+
+    - **Result: Overhead-Bound (Compute-Bound).** Operator fusion nearly halves execution
+    time by eliminating CPU-GPU synchronization gaps and kernel launch delays.
+
+    '
+  options:
+  - Aggressively prune more filters from the convolutional layers to reduce the model's
+    overall FLOPs.
+  - Increase the GPU's clock frequency to reduce the execution time of each individual
+    kernel.
+  - Apply operator fusion using a graph compiler like TensorRT to combine sequential
+    layers into single kernels.
+  - Increase the number of CPU worker threads in the data loading pipeline to feed
+    the GPU faster.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+chains:
+- id: edge-chain-030
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- napkin_math is incomplete/cut off.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

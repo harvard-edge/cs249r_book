@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3619
+track: cloud
+level: L5
+zone: design
+topic: gradient-synchronization
+competency_area: networking
+bloom_level: create
+phase: training
+title: AllReduce Algorithm Selection for Heterogeneous Bandwidth Topology
+scenario: 'A 256-GPU cluster has a hierarchical network: 8 GPUs per node (NVLink 900GB/s), 8 nodes per rack (HDR InfiniBand 200Gbps), 4 racks (HDR100 100Gbps inter-rack). Gradient tensors are 40GB (FP32, 10B params).'
+question: 'What hierarchical AllReduce strategy should the 256-GPU cluster use for 40 GB gradients across NVLink and InfiniBand tiers?'
+details:
+  realistic_solution: 'Hierarchical AllReduce exploits bandwidth hierarchy. Step 1 (intra-node, 8 GPUs, NVLink): reduce 40GB to one GPU per node. Each of 32 nodes gets full gradient sum across 8 GPUs. Time: 2×(7/8)×40GB/450GB/s=155ms. Step 2 (intra-rack, 8 nodes, 200Gbps=25GB/s): ring over 8 nodes. Time: 2×(7/8)×40GB/25GB/s=2.8s. Step 3 (inter-rack, 4 racks, 100Gbps=12.5GB/s): ring over 4 racks. Time: 2×(3/4)×40GB/12.5GB/s=4.8s. Dominant cost is inter-rack. Optimize: use gradient compression at rack boundary (10× -> 4GB), inter-rack time=480ms. Total with compression: ~155ms+2.8s+480ms=~3.4s. Without: ~7.8s.'
+  common_mistake: |
+    **The Pitfall:** Using flat ring-AllReduce across all 256 GPUs.
+    **The Rationale:** Candidates may default to the standard NCCL ring topology without adapting to the network's bandwidth hierarchy.
+    **The Consequence:** Routing 80% of gradient traffic over the slow 100Gbps inter-rack links, drastically bottlenecking the entire training cluster.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 40GB gradients.
+    - Intra-node NVLink bandwidth: 450GB/s (unidirectional ring approx).
+    - Intra-rack 200Gbps bandwidth: 25GB/s.
+    - Inter-rack 100Gbps bandwidth: 12.5GB/s.
+
+    **Calculations:**
+    - Intra-node NVLink: 40GB / 450GB/s * 1.75 = 155ms.
+    - Intra-rack 200Gbps (25GB/s): 40GB / 25GB/s * 1.75 = 2.8s.
+    - Inter-rack 100Gbps (12.5GB/s): 40GB / 12.5GB/s * 1.5 = 4.8s (Critical Path).
+    - Compressing gradients at rack boundary by 10x: 4GB across racks -> 480ms.
+    - Total time with compression: 155ms + 2.8s + 480ms = 3.4s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3.4s AllReduce Time** (Inter-rack bandwidth is the bottleneck; compression reduces total time significantly).
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,34 @@
+schema_version: '1.0'
+id: cloud-3150
+track: cloud
+level: L5
+zone: implement
+topic: flash-attention
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: 'GQA-Aware FlashAttention Kernel Design'
+scenario: 'Llama-3 70B uses Grouped-Query Attention (GQA) with 64 query heads and 8 KV heads. A naive FlashAttention implementation loads K/V tiles 64 times (once per query head). The model is running on an H100 with seq_len=4096, head_dim=128, and FP16 precision.'
+question: 'How much KV bandwidth does a naive GQA FlashAttention implementation waste, and how would you tile to reuse each KV head across 8 query heads?'
+details:
+  realistic_solution: 'Load each KV head once into SRAM, process all 8 sharing query heads against it before moving to the next KV tile. Q tiles rotate while K/V stay pinned in SRAM.'
+  common_mistake: |
+    **The Pitfall:** Failing to exploit the sharing of KV heads across multiple query heads.
+    **The Rationale:** Candidates often implement standard attention algorithms without modifying them for GQA's specific memory access patterns.
+    **The Consequence:** Loading the same KV tile multiple times wastes massive amounts of memory bandwidth and increases latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 80 layers, 64 Q heads, 8 KV heads.
+    - Sequence = 4096, dim = 128, FP16 (2 bytes).
+    - HBM bandwidth = 3.35 TB/s.
+
+    **Calculations:**
+    - Tile size = 4096 × 128 × 2 bytes = ~1MB. K+V = 2MB.
+    - Naive I/O per layer: 64 loads × 2MB = 128MB.
+    - GQA-aware I/O per layer: 8 loads × 2MB = 16MB.
+    - Savings: 112MB/layer × 80 layers = 8.96GB total.
+    - Latency saved: 8.96GB / 3.35TB/s = 2.67ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 8.96GB memory traffic saved (Memory-Bandwidth-Bound)**. GQA-aware tiling saves 8x bandwidth and 2.67ms latency.
+status: published

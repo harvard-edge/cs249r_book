@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-3060
+track: cloud
+level: L4
+zone: realization
+topic: pipeline-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: 'Pipeline Parallelism Realization: Memory per Stage for LLaMA-70B'
+scenario: Size the per-GPU memory requirements for 8-stage pipeline parallelism of LLaMA-70B on H100. The model has 80 layers, hidden dim 8192, 64 attention heads, and is trained with an Adam optimizer and gradient checkpointing. Assume data parallelism (DP) degree is 1.
+question: For 8-stage pipeline parallel LLaMA-70B training on 80GB H100s with DP=1, how much memory does each stage need, does it fit, and what headroom remains?
+details:
+  realistic_solution: |
+    70B / 8 stages = 8.75B parameters. BF16 Weights = 17.5 GB. BF16 Adam optimizer demands 6 bytes/param = 52.5 GB. Gradients = 17.5 GB. Total = 87.5 GB, causing immediate OOM on an 80 GB limit. ZeRO-3 cannot save you because Data Parallelism degree is 1. The mandatory architectural solution is to implement 8-bit Adam (2 bytes/param = 17.5 GB), bringing total footprint down to ~53 GB and leaving ~27 GB of headroom.
+  common_mistake: |
+    **The Pitfall:** Forgetting the optimizer state memory entirely, or incorrectly assuming ZeRO can be used when Data Parallelism is 1.
+    **The Rationale:** Engineers frequently estimate memory strictly based on weight size (17.5 GB) and falsely conclude it easily fits, neglecting the massive footprint of the Adam optimizer states.
+    **The Consequence:** Training jobs crash with Out-Of-Memory errors immediately upon initialization, forcing a complete redesign of the parallelism strategy or forcing adoption of quantized optimizers.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: LLaMA-70B (8 stages).
+    - GPUs: 80 GB H100. DP=1 (ZeRO cannot be used).
+    - Weights per stage: 70B / 8 = 8.75B parameters.
+
+    **Calculations:**
+    - Weights (BF16): 8.75B * 2 bytes = 17.5 GB.
+    - Optimizer State (BF16 Adam): 8.75B * 6 bytes = 52.5 GB.
+    - Gradients (BF16): 8.75B * 2 bytes = 17.5 GB.
+    - Total without ZeRO: 17.5 + 52.5 + 17.5 = 87.5 GB (Exceeds 80 GB limit).
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory Capacity-Bound.** The standard Adam optimizer states consume 3x the memory of the weights, causing an immediate OOM. Switching to 8-bit Adam reduces optimizer memory to 17.5 GB, bringing total footprint to ~53 GB and allowing the model to safely fit.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 9
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

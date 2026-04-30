@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0482
+track: cloud
+level: L3
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: apply
+phase: both
+title: The Multi-Node Scaling Ceiling
+scenario: You are an MLE debugging a multi-node training job for a 175B parameter LLM. The model is being trained with simple data parallelism across 16 nodes, each containing 8 H100 GPUs. The job runs, but you observe that scaling from 8 to 16 nodes only improved throughput by 5%. Your monitoring dashboards show that `nvidia-smi` reports 95% utilization on all GPUs, but the InfiniBand NDR switch ports connecting the nodes are constantly saturated.
+question: What is the most likely cause limiting the scaling performance?
+details:
+  realistic_solution: The training job is communication-bound by the node-to-node InfiniBand interconnect. For data parallelism, all GPUs must synchronize their gradients after each backward pass in an 'all-reduce' operation. While GPUs within a single server can communicate at ultra-high NVLink speeds (900 GB/s), GPUs located in different server chassis must communicate over the much slower InfiniBand fabric (50 GB/s). For a large 175B model, the sheer volume of gradients completely saturates this inter-node link, making it the dominant factor in total step time. Adding more nodes just adds more participants to the already gridlocked communication, yielding minimal speedup.
+  common_mistake: |
+    **The Pitfall:** Assuming high GPU utilization automatically means the workload is compute-bound.
+    **The Rationale:** Engineers see 95% utilization and fail to recognize that the GPU might be spinning or stalling while waiting for data over the network.
+    **The Consequence:** Misdirected optimization efforts towards algorithmic or model parameter changes instead of addressing the inter-node communication bottleneck.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 175B parameters model.
+       - 16 nodes, simple data parallelism.
+       - InfiniBand link bandwidth: 50 GB/s (400 Gbps).
+    2. **Calculations:**
+       - Gradient size: 175B parameters * 2 bytes (FP16) = 350 GB.
+       - 16-node Ring All-Reduce transfer volume per node: 2 * (15/16) * 350 GB = 656.25 GB.
+       - Time to synchronize: 656.25 GB / 50 GB/s = 13.1 seconds minimum per step.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound. Synchronizing 656.25 GB over 50 GB/s takes ~13.1 seconds minimum per step just for communication.**
+  options:
+  - The PCIe Gen5 bus on each node is saturated transferring data between the host CPU memory and the GPU.
+  - The training is compute-bound; the H100 GPUs are simply not powerful enough to handle a 175B model efficiently.
+  - The gradient all-reduce step is saturating the InfiniBand interconnect between nodes.
+  - There is a software deadlock in the NCCL communication library when using more than 8 nodes.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

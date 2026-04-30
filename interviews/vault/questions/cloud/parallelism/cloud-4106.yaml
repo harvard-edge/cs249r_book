@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4106
+track: cloud
+level: L5
+zone: specification
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: TP Degree for Inference Latency SLA
+scenario: You must serve a 70B BF16 model with a p99 time-to-first-token (TTFT) under 200ms for 2048-token prompts. The GPUs provide 3.35 TB/s HBM3 bandwidth and 900 GB/s NVLink.
+question: "What is the minimum TP degree needed to meet this SLA?"
+details:
+  realistic_solution: For a 2048-token prefill, the operation is compute-bound, not memory-bound. Calculate the required FLOPs and map it to the effective TFLOPS of the GPUs. A single GPU takes ~414ms, violating the SLA. TP=2 yields ~207ms, which is too close to the 200ms limit to guarantee a p99 SLA. TP=4 drops compute time to 103ms; adding the NVLink All-Reduce overhead (~6ms) gives 109ms, providing ample margin for scheduling and GC jitter.
+  common_mistake: |
+    **The Pitfall:** Assuming prefill is memory-bound and calculating only weight-loading time.
+    **The Rationale:** Engineers internalize that "LLM inference is memory bound" (which is true for autoregressive decode) but incorrectly apply it to the prefill phase, which handles large matrices.
+    **The Consequence:** Vastly underestimating prefill latency and selecting a TP degree that consistently violates the TTFT SLA in production.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 70B parameters, BF16.
+       - Prompt: 2048 tokens.
+       - GPU: 989 TFLOPS peak, ~70% effective (693 TFLOPS).
+       - NVLink: 900 GB/s. SLA: <200 ms p99.
+    2. **Calculations:**
+       - Prefill FLOPs: 2 * 70B * 2048 = 286.7 TFLOPS.
+       - TP=1 Compute: 286.7T / 693T = 414 ms (Violates).
+       - TP=2 Compute: 286.7T / (2 * 693T) = 207 ms (Violates p99).
+       - TP=4 Compute: 286.7T / (4 * 693T) = 103 ms.
+       - TP=4 Comm Overhead: 2 * 80 layers * 32MB / 900 GB/s = 5.7 ms.
+       - TP=4 Total: 103 ms + 6 ms = 109 ms.
+       - 30% safety margin: 109 ms * 1.3 = 142 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: TP=4 is the minimum.** The prefill phase is strictly **Compute-Bound**, requiring the aggregated ALUs of 4 GPUs to secure the 200ms SLA.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
