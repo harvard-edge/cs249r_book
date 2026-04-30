@@ -1531,16 +1531,24 @@ class ModuleWorkflowCommand(BaseCommand):
         return 0
 
     def _check_milestone_readiness(self, completed_modules: list) -> list:
-        """Check which milestones are unlocked or ready."""
+        """Check which milestones are unlocked or ready.
+
+        The required-modules list for each milestone must match the canonical
+        definition in ``tito milestone`` (``MILESTONE_SCRIPTS`` in
+        ``tinytorch/tito/commands/milestone.py``) and in
+        ``_get_milestone_for_module`` above. Diverging copies have caused
+        ``tito module status`` to advertise milestones as ready before the
+        student has actually completed every prerequisite module (issue #1612).
+        """
         import json
 
         milestones = [
             ("01", "Perceptron (1958)", [1, 2, 3]),
             ("02", "XOR Crisis (1969)", [1, 2, 3]),
-            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6]),
-            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 8, 9]),
-            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 11, 12, 13]),
-            ("06", "MLPerf (2018)", [1, 2, 3, 4, 5, 6, 14, 15, 16, 17, 18, 19]),
+            ("03", "MLP Revival (1986)", [1, 2, 3, 4, 5, 6, 7, 8]),
+            ("04", "CNN Revolution (1998)", [1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            ("05", "Transformer Era (2017)", [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 13]),
+            ("06", "MLPerf (2018)", [1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 18, 19]),
         ]
 
         # Check which milestones have been completed (run successfully)
