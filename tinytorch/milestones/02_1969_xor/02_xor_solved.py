@@ -412,8 +412,13 @@ def main():
     # ACT 3: THE EXPERIMENT 🔬
     # ═══════════════════════════════════════════════════════════════════════
 
-    # Set seed before model creation to guarantee reproducible 100% convergence
-    rng = np.random.default_rng(7)  # The year backprop was published!
+    # Re-seed the layers' weight-init RNG to guarantee reproducible 100%
+    # convergence on XOR. With a 4-unit hidden layer, some random
+    # initializations land in a "dead ReLU" saddle point that pins accuracy
+    # at 75% (one of the four XOR cases stuck at p≈0.5). 1986 (the year of the
+    # backprop paper) reliably escapes that saddle.
+    import tinytorch.core.layers as _layers
+    _layers.rng = np.random.default_rng(1986)
 
     model = XORNetwork(hidden_size=4)
     initial_preds = model(X)
