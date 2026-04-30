@@ -265,7 +265,25 @@ def train_network(model, X, y, epochs=500, lr=0.5):
             if (epoch + 1) % 100 == 0:
                 live.console.print(f"Epoch {epoch+1:3d}/{epochs}  Loss: {loss.data:.4f}  Accuracy: {accuracy:.1%}")
 
-    console.print("\n[green]✅ Training Complete - XOR Solved![/green]")
+    # Only declare success if the network actually converged on XOR.
+    # Anything below ~95% on a noiseless 4-pattern problem means the
+    # optimizer landed in a saddle point (classic 75% dead-ReLU symptom).
+    final_accuracy = history["accuracy"][-1]
+    if final_accuracy >= 0.95:
+        console.print("\n[green]✅ Training Complete - XOR Solved![/green]")
+    else:
+        console.print(
+            f"\n[yellow]⚠️  Training Complete - but only {final_accuracy:.1%} accuracy.[/yellow]"
+        )
+        console.print(
+            "[yellow]   The network did not converge (likely stuck in a saddle point).[/yellow]"
+        )
+        console.print(
+            "[yellow]   Try re-running the milestone - random init can pin a 4-unit hidden[/yellow]"
+        )
+        console.print(
+            "[yellow]   layer at 75% on XOR. See issue #1614.[/yellow]"
+        )
 
     return history
 
@@ -454,49 +472,88 @@ def main():
 
     final_acc = history["accuracy"][-1]
 
-    console.print(Panel.fit(
-        "[bold green]🎉 Success! You Ended the AI Winter![/bold green]\n\n"
+    # Convergence threshold: noiseless 4-pattern XOR should hit >=95% when
+    # training succeeds. Below that, the optimizer is stuck in a saddle
+    # point (the classic 75% dead-ReLU symptom).
+    XOR_CONVERGENCE_THRESHOLD = 0.95
 
-        f"Final accuracy: [bold]{final_acc:.1%}[/bold] (Perfect XOR solution!)\n\n"
+    if final_acc >= XOR_CONVERGENCE_THRESHOLD:
+        console.print(Panel.fit(
+            "[bold green]🎉 Success! You Ended the AI Winter![/bold green]\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Final accuracy: [bold]{final_acc:.1%}[/bold] (Perfect XOR solution!)\n\n"
 
-        "[bold]💡 What YOU Just Accomplished:[/bold]\n"
-        "  ✓ Solved the problem that killed AI for 17 years!\n"
-        "  ✓ Built multi-layer network with YOUR components\n"
-        "  ✓ Hidden layer learns non-linear features\n"
-        "  ✓ Backprop through multiple layers works perfectly!\n"
-        "  ✓ Proved that deep networks CAN work!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "[bold]💡 What YOU Just Accomplished:[/bold]\n"
+            "  ✓ Solved the problem that killed AI for 17 years!\n"
+            "  ✓ Built multi-layer network with YOUR components\n"
+            "  ✓ Hidden layer learns non-linear features\n"
+            "  ✓ Backprop through multiple layers works perfectly!\n"
+            "  ✓ Proved that deep networks CAN work!\n\n"
 
-        "[bold]🎓 Why This Matters:[/bold]\n"
-        "  This ENDED the 17-year AI Winter!\n"
-        "  [bold red]1969:[/bold red] XOR crisis → single layers fail\n"
-        "  [bold yellow]1970-1986:[/bold yellow] AI Winter - research funding dries up\n"
-        "  [bold green]1986:[/bold green] Backprop + hidden layers solve it\n"
-        "  [bold cyan]TODAY:[/bold cyan] YOU recreated this breakthrough!\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "[bold]🎓 Why This Matters:[/bold]\n"
+            "  This ENDED the 17-year AI Winter!\n"
+            "  [bold red]1969:[/bold red] XOR crisis → single layers fail\n"
+            "  [bold yellow]1970-1986:[/bold yellow] AI Winter - research funding dries up\n"
+            "  [bold green]1986:[/bold green] Backprop + hidden layers solve it\n"
+            "  [bold cyan]TODAY:[/bold cyan] YOU recreated this breakthrough!\n\n"
 
-        "[bold]📌 The Key Insight:[/bold]\n"
-        "  Hidden layers are the KEY to modern AI.\n"
-        "  They learn new features that make problems solvable.\n"
-        "  Every deep network (GPT, AlphaGo, etc.) uses this pattern!\n"
-        "  \n"
-        "  [green]Breakthrough:[/green] Non-linear activation functions (ReLU)\n"
-        "  enable networks to learn non-linear decision boundaries.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "[bold]📌 The Key Insight:[/bold]\n"
+            "  Hidden layers are the KEY to modern AI.\n"
+            "  They learn new features that make problems solvable.\n"
+            "  Every deep network (GPT, AlphaGo, etc.) uses this pattern!\n"
+            "  \n"
+            "  [green]Breakthrough:[/green] Non-linear activation functions (ReLU)\n"
+            "  enable networks to learn non-linear decision boundaries.\n\n"
 
-        "[bold]🚀 What's Next:[/bold]\n"
-        "[dim]Milestone 03 applies this to digit images with YOUR DataLoader!\n"
-        "Train on handwritten digits and see modern ML in action![/dim]",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
-        title="🌟 1986 AI Renaissance Complete",
-        border_style="green",
-        box=box.DOUBLE
-    ))
+            "[bold]🚀 What's Next:[/bold]\n"
+            "[dim]Milestone 03 applies this to digit images with YOUR DataLoader!\n"
+            "Train on handwritten digits and see modern ML in action![/dim]",
+
+            title="🌟 1986 AI Renaissance Complete",
+            border_style="green",
+            box=box.DOUBLE
+        ))
+    else:
+        # Training did not converge - tell the student honestly and suggest
+        # how to recover, instead of falsely advertising XOR as solved.
+        console.print(Panel.fit(
+            "[bold yellow]⚠️  Training Did Not Converge[/bold yellow]\n\n"
+
+            f"Final accuracy: [bold]{final_acc:.1%}[/bold] "
+            f"(below the {XOR_CONVERGENCE_THRESHOLD:.0%} convergence threshold)\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "[bold]🔍 What Likely Happened:[/bold]\n"
+            "  A 4-unit hidden layer trained on XOR can land in a\n"
+            "  [italic]dead-ReLU saddle point[/italic] where one of the four XOR\n"
+            "  cases stays pinned at probability ≈ 0.5 forever.\n"
+            "  That gives the classic 75% accuracy plateau - the network\n"
+            "  has [bold]not[/bold] solved XOR.\n\n"
+
+            "[bold]🛠️  How to Recover:[/bold]\n"
+            "  • Re-run the milestone - a different random init usually escapes\n"
+            "  • Check your ReLU / Linear / autograd implementations\n"
+            "  • Try a larger hidden layer (e.g. hidden_size=8) for robustness\n\n"
+
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+            "[dim]Do not move on to Milestone 03 (TinyDigits) until XOR\n"
+            "actually converges - otherwise you are debugging on top of a\n"
+            "broken foundation.[/dim]",
+
+            title="⚠️  XOR Not Solved Yet",
+            border_style="yellow",
+            box=box.DOUBLE
+        ))
 
     press_enter_to_continue()
 
