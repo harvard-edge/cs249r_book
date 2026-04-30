@@ -62,7 +62,10 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 #| export
 
 import numpy as np
-rng = np.random.default_rng(7)
+# Module-level RNG is intentionally UNSEEDED so freshly-constructed layers
+# (e.g., Linear) produce different weights on every run. Tests/demos that
+# need determinism create their own seeded RNG locally (see below).
+rng = np.random.default_rng()
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
