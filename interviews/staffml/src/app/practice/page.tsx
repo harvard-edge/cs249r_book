@@ -33,7 +33,7 @@ import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { getTopicById, getZoneDefinition } from "@/lib/taxonomy";
 import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
-import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
+import { shouldShowGate, incrementReveals } from "@/lib/star-gate";
 import StarGate from "@/components/StarGate";
 import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
 import ChainStrip from "@/components/ChainStrip";
@@ -749,7 +749,7 @@ function PracticePage() {
                 key={t}
                 onClick={() => setSelectedTrack(t)}
                 className={clsx(
-                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all flex items-center gap-1.5",
+                  "px-3 py-1.5 lg:w-full rounded text-xs font-medium capitalize transition-all flex items-center gap-1.5",
                   "lg:text-left",
                   selectedTrack === t
                     ? "bg-accentBlue/10 text-accentBlue"
