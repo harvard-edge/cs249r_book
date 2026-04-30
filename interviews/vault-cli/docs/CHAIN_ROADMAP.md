@@ -3,7 +3,7 @@
 **Status:** active workstream
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-04-30
+**Last updated:** 2026-04-30 (Phase 1.1 complete)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -630,6 +630,69 @@ Week 4+
 
 **Next step:** Phase 1.1 — write `diagnose_chain_coverage.py` to identify
 the ~150 buckets that need a second pass.
+
+---
+
+### 2026-04-30 — Phase 1.1: diagnose_chain_coverage.py
+
+**What was done:**
+- Added `interviews/vault-cli/scripts/diagnose_chain_coverage.py`
+- Loads published corpus via `vault_cli.policy.is_published` (single source
+  of truth — same predicate as `vault build`) and current `chains.json`.
+- Buckets by `(track, topic)`; emits per-bucket question_count, chain_count,
+  qids, chain_ids; classifies into `uncovered_buckets` (≥3 q, 0 chains) and
+  `under_covered_buckets` (≥6 q, ≤1 chain). Prints per-track summary +
+  top-10 uncovered for quick read.
+- Output: `interviews/vault/chain-coverage.json` (gitignored —
+  regeneratable). Added `/chain-coverage.json` to `interviews/vault/.gitignore`.
+
+**Validation results (run on tree at `1ac7d4c56` + this commit):**
+- 313 buckets, 9438 published questions (matches `vault build` ✓), 373 chains.
+- **Uncovered buckets: 211** (roadmap estimate was ~150). Higher than expected
+  but same order of magnitude — the gap is mostly in `global` (32 uncovered
+  with avg ~6.5 q/bucket) and a long tail of small `mobile`/`tinyml` topics.
+- **Sanity check passes:** cloud chain density 2.95/topic vs edge 0.64,
+  mobile 0.74, tinyml 0.80, global 0.00 — matches the "<0.6 vs 3.0" claim.
+- Every chain in `chains.json` lands in a published bucket (0 orphan
+  chain-buckets) — confirms chains.json is consistent with the released
+  corpus.
+- Notable: **`cloud:roofline-analysis` (144 questions, 0 chains)** is the
+  single largest uncovered bucket — first-pass Gemini sweep missed it
+  entirely despite cloud's high overall coverage. Worth a targeted retry
+  in Phase 1.4.
+
+**Per-track table:**
+```
+track       buckets  questions  chains  chains/topic  uncov  undercov
+cloud            82       4028     242          2.95     41         0
+edge             76       2077      49          0.64     58         0
+global           48        313       0          0.00     32         0
+mobile           62       1818      46          0.74     46         1
+tinyml           45       1202      36          0.80     34         0
+```
+
+**Validators (re-run as a sanity gate on the unmodified corpus):**
+- `vault check --strict` → 10,701 loaded, 0 invariant failures ✓
+- `vault build --legacy-json` → releaseId=dev, 9438 published, chainCount=373 ✓
+
+**Files committed:**
+- `interviews/vault-cli/scripts/diagnose_chain_coverage.py` (new)
+- `interviews/vault/.gitignore` (add `/chain-coverage.json`)
+- this Progress Log entry
+
+**Notes for next session:**
+- Higher-than-expected uncovered count (211 vs ~150) means Phase 1.4
+  Gemini call budget should be re-checked: at 1 call per ~5-7 buckets we
+  may need ~30-45 calls (still under 250/day, but worth monitoring).
+- The single `under_covered` bucket (`mobile:transformer-systems-cost`,
+  54 questions, 1 chain) is a candidate for a focused retry alongside
+  the lenient sweep.
+- `chain-coverage.json` is regenerated each run; do not check it in. The
+  roadmap step 1.4 will read this file via `--buckets-from`.
+
+**Next step:** Phase 1.2 — add `--mode lenient` to
+`build_chains_with_gemini.py` (relaxed Δ rules + Δ=0 for shared-scenario
+pairs).
 
 ---
 
