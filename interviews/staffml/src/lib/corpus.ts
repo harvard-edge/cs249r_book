@@ -430,7 +430,7 @@ const _detailsCache = new Map<string, Question>();
 let _staticDetailsCache: Map<string, Question> | null = null;
 
 // Opt-in offline / local-dev mode. Set NEXT_PUBLIC_VAULT_FALLBACK=static and
-// run `vault build --legacy-json` to materialize corpus.json on disk. Not a
+// run `vault build --local-json` to materialize corpus.json on disk. Not a
 // prod safety net: production deploys neither emit nor bundle corpus.json.
 function shouldUseStaticDetails(): boolean {
   return process.env.NEXT_PUBLIC_VAULT_FALLBACK?.toLowerCase() === "static";
@@ -441,7 +441,7 @@ async function getStaticFullDetail(id: string, summary: Question): Promise<Quest
     // Function-constructor dynamic import: hides the path from Turbopack's
     // static analyzer so prod builds don't require corpus.json to exist.
     // corpus.json is materialized on disk only when a contributor runs
-    // `vault build --legacy-json` locally with NEXT_PUBLIC_VAULT_FALLBACK=
+    // `vault build --local-json` locally with NEXT_PUBLIC_VAULT_FALLBACK=
     // static. If the file is missing at runtime, the import rejects and
     // the caller surfaces an error to the UI.
     const dynImport = new Function(

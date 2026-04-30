@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-4075
+track: cloud
+level: L4
+zone: optimization
+topic: rdma-transport
+competency_area: networking
+bloom_level: apply
+phase: both
+title: NIC-Level Traffic Shaping for RDMA Fairness
+scenario: On a multi-tenant 256-GPU cluster, two training jobs share the same physical network. Job A uses 128 GPUs for AllReduce and Job B uses 128 GPUs for pipeline-parallel training. Job A's bursty AllReduce traffic starves Job B's latency-sensitive activation transfers.
+question: How would you design NIC-level traffic shaping so Job A's AllReduce does not starve Job B's latency-sensitive activation transfers?
+details:
+  realistic_solution: 'Push traffic shaping down to the Host Channel Adapter (NIC) using token bucket rate limiters. Throttle Job A''s AllReduce QPs to a hard ceiling (e.g., 300 Gbps) and constrain its maximum burst size (e.g., 32 KB). This explicitly prevents Job A from generating the massive instantaneous incast bursts that overflow switch buffers, guaranteeing Job B maintains uninterrupted, low-latency access to the remaining link bandwidth.'
+  common_mistake: |
+    **The Pitfall:** Relying strictly on switch-level QoS (Weighted Fair Queueing, strict priority) to manage traffic flows.
+    **The Rationale:** Infrastructure engineers default to traditional Top-of-Rack (ToR) switch queuing mechanisms to dictate priority.
+    **The Consequence:** The burst traffic physically enters the fabric, overflows the shallow switch buffers before the QoS engine can react, triggering PFC pauses and sporadic cross-tenant starvation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Link Bandwidth: 400 Gbps.
+    - Unshaped Job A: Bursts 400 Gbps for 60ms.
+    - Shaped Job A: Limit 300 Gbps, 32KB bursts.
+    - Job B: 8MB latency-sensitive activation transfers.
+
+    **Calculations:**
+    - Unshaped Incast Burst: 400 Gbps * 60ms = 3 GB payload (overflows switch buffers).
+    - Shaped Job B Reservation: 400 Gbps - 300 Gbps = 100 Gbps guaranteed.
+    - Job B Transfer Latency: 8 MB / (100 Gbps / 8) = 640 μs.
+
+    **Conclusion & Interpretation:**
+    - **Result: 640 μs latency (Network-Buffer Bound)**. NIC-level token bucket shaping smooths the incast burst, allowing Job B to cleanly execute 8MB transfers in 640μs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

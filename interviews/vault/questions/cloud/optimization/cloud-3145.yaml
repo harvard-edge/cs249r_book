@@ -1,0 +1,31 @@
+schema_version: '1.0'
+id: cloud-3145
+track: cloud
+level: L5
+zone: optimization
+topic: flash-attention
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: FlashAttention-2 vs FlashAttention-1 Parallelism
+scenario: 'FlashAttention-1 parallelizes over batch and heads. FlashAttention-2 reverses this: outer loop over Q tiles, inner loop over K/V tiles.'
+question: 'Why does FlashAttention-2 achieve higher occupancy than FlashAttention-1 for an H100 workload (batch=1, 32 heads, seq_len=16384, head_dim=128)?'
+details:
+  realistic_solution: 'FA-1 parallelism is batch x heads = 32 thread blocks. H100 has 132 SMs, so 100 SMs idle. FA-2 parallelism includes Q tiles = batch x heads x ceil(N/B_r) = 4,096 blocks, achieving 100% occupancy. FA-2 also reduces non-matmul FLOPs.'
+  common_mistake: |
+    **The Pitfall:** Thinking the loop reordering is a minor algorithmic tweak.
+    **The Rationale:** Candidates fail to realize that FA-1 with batch=1 drastically under-utilizes the SMs.
+    **The Consequence:** Misjudging the hardware impact, leaving 100 SMs idle and missing the concurrency benefits of FA-2.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - H100 GPU: 132 SMs.
+    - Config: batch=1, 32 heads, seq=16384, block_size=128.
+    
+    **Calculations:**
+    - FA-1 Blocks: 1 * 32 = 32 blocks.
+    - FA-1 Occupancy: 32 / 132 = 24.2%.
+    - FA-2 Blocks: 1 * 32 * ceil(16384 / 128) = 4,096 blocks.
+    - FA-2 Occupancy: 4,096 / 132 = 31 blocks per SM = 100%.
+    
+    **Conclusion & Interpretation:**
+    - **Result: Occupancy rises from 24% to 100% (Compute-Bound)**. FA-2 fixes severe SM starvation at batch=1.

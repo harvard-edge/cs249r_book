@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3844
+track: cloud
+level: L3
+zone: analyze
+topic: kv-cache-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: KV Cache Pre-allocation OOM on A100 GPU
+scenario: 'An inference service runs a 13B parameter model (26 GB FP16 weights) on a single GPU. The system is configured for a maximum sequence length of 4096 tokens and uses standard contiguous KV cache allocation. The service receives 24 concurrent requests, where each request processes a 50-token prompt and generates exactly 50 tokens. The system rejects a 25th request due to an Out-Of-Memory (OOM) error.'
+question: 'Why does the service OOM on the 25th request when each active request uses only 100 tokens of context, and the maximum KV cache for 4096 tokens is exactly 2 GB?'
+details:
+  realistic_solution: 'Because standard contiguous KV cache allocation requires memory to be laid out sequentially to ensure efficient memory access during attention computations, the system must pre-allocate the maximum possible context length (4096 tokens) for every incoming request. This prevents the need to continuously move or reallocate memory blocks as the sequence grows. Therefore, each of the 24 requests reserves 2 GB immediately. This pre-allocation consumes 48 GB of capacity, which, alongside the 26 GB model weights, exhausts the GPU memory and blocks the 25th request.'
+  common_mistake: |
+    **The Pitfall:** Assuming KV cache is allocated dynamically token-by-token.
+    **The Rationale:** Candidates incorrectly attribute the OOM to memory fragmentation, context switching, or activation memory spikes instead of recognizing the pre-allocation requirements of standard contiguous KV cache.
+    **The Consequence:** Failure to identify the need for PagedAttention or continuous batching, resulting in massive memory waste and low concurrency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Max KV cache per request = 2 GB (4096 tokens).
+    - Active requests: 24. Model weights: 26 GB.
+
+    **Calculations:**
+    - Pre-allocated for 24 requests = 24 * 2 GB = 48 GB.
+    - Total memory committed = 48 GB (KV) + 26 GB (weights) = 74 GB.
+    - Actual KV memory used per request = 2 GB * (100 / 4096) = 0.0488 GB.
+    - Total utilized KV cache = 24 * 0.0488 GB = 1.17 GB.
+    - Wasted memory = 48 GB - 1.17 GB = 46.83 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory Fragmentation Bound**. Over 46 GB of VRAM is wasted due to contiguous pre-allocation, leading to premature OOM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

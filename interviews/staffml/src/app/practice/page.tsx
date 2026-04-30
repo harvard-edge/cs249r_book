@@ -16,6 +16,7 @@ import NapkinCalc from "@/components/NapkinCalc";
 // 4,754 cohort-tagged IDs that were renamed to the clean form.
 import idRedirects from "@/data/id-redirects.json";
 import AskInterviewer from "@/components/AskInterviewer";
+import MarkdownText from "@/components/MarkdownText";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
@@ -32,7 +33,7 @@ import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { getTopicById, getZoneDefinition } from "@/lib/taxonomy";
 import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
-import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
+import { shouldShowGate, incrementReveals } from "@/lib/star-gate";
 import StarGate from "@/components/StarGate";
 import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
 import ChainStrip from "@/components/ChainStrip";
@@ -392,6 +393,22 @@ function PracticePage() {
     setNapkinResult(null);
   }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly, chainsOnly, visualOnly]);
 
+  const pickRandom = useCallback((fromPool?: Question[]) => {
+    // Track skip if there was a current question that wasn't scored
+    if (current && !showAnswer) {
+      track({ type: 'question_skipped', topic: current.topic, level: current.level });
+    }
+    const p = fromPool || pool;
+    if (p.length === 0) return;
+    const idx = Math.floor(Math.random() * p.length);
+    setCurrent(p[idx]);
+    questionShownAt.current = Date.now();
+    setShowAnswer(false);
+    setUserAnswer("");
+    setNapkinResult(null);
+    setRubricItems([]);
+  }, [pool, current, showAnswer]);
+
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -412,23 +429,7 @@ function PracticePage() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAnswer, current]);
-
-  const pickRandom = useCallback((fromPool?: Question[]) => {
-    // Track skip if there was a current question that wasn't scored
-    if (current && !showAnswer) {
-      track({ type: 'question_skipped', topic: current.topic, level: current.level });
-    }
-    const p = fromPool || pool;
-    if (p.length === 0) return;
-    const idx = Math.floor(Math.random() * p.length);
-    setCurrent(p[idx]);
-    questionShownAt.current = Date.now();
-    setShowAnswer(false);
-    setUserAnswer("");
-    setNapkinResult(null);
-    setRubricItems([]);
-  }, [pool, current, showAnswer]);
+  }, [showAnswer, current, pickRandom]);
 
   // Submit-gradient guard: intercept reveals that look like
   // "didn't really try." The restructured layout puts the Reveal
@@ -577,7 +578,7 @@ function PracticePage() {
       setReviewMode(false);
     }
     pickRandom();
-  }, [reviewMode, pool]);
+  }, [reviewMode, pool, pickRandom]);
 
   if (!mounted) {
     return (
@@ -748,7 +749,7 @@ function PracticePage() {
                 key={t}
                 onClick={() => setSelectedTrack(t)}
                 className={clsx(
-                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all flex items-center gap-1.5",
+                  "px-3 py-1.5 lg:w-full rounded text-xs font-medium capitalize transition-all flex items-center gap-1.5",
                   "lg:text-left",
                   selectedTrack === t
                     ? "bg-accentBlue/10 text-accentBlue"
@@ -1065,16 +1066,24 @@ function PracticePage() {
                         </div>
                       )}
 
+                      {/* Scenario prose */}
+                      <div className="prose max-w-none mt-6">
+                        {current.scenario ? (
+                          <p className="text-textSecondary leading-relaxed text-base">
+                            {cleanScenario(current.scenario)}
+                          </p>
+                        ) : (
+                          <ScenarioSkeleton />
+                        )}
+                      </div>
+
                       {/*
                         STICKY Your-task callout. Pins to the top of the
                         scroll container so the question stays visible
-                        while the user scrolls to read more scenario or
-                        compare their answer with the model. Negative
-                        horizontal margins + re-added padding make the
-                        sticky bar span the full left-column width so the
-                        background covers scrolling text cleanly.
+                        while the user scrolls. Moved below Scenario
+                        to provide context before the ask.
                       */}
-                      <div className="sticky top-0 z-20 -mx-8 lg:-mx-12 px-8 lg:px-12 py-3 bg-background border-b border-border">
+                      <div className="sticky top-0 z-20 -mx-8 lg:-mx-12 px-8 lg:px-12 py-3 bg-background border-b border-border mt-8">
                         {current.question && !scenarioAlreadyContainsQuestion(current.scenario, current.question) ? (
                           <div className="p-4 rounded-lg border-l-4 border-accentBlue bg-accentBlue/5">
                             <div className="flex items-center gap-2 mb-1.5">
@@ -1082,7 +1091,7 @@ function PracticePage() {
                               <span className="text-[10px] font-mono text-accentBlue uppercase tracking-widest">Your task</span>
                             </div>
                             <p className="text-textPrimary leading-relaxed text-base font-medium">
-                              {current.question}
+                              <MarkdownText text={current.question} />
                             </p>
                           </div>
                         ) : !current.question && current.scenario && !current.scenario.trim().endsWith("?") ? (
@@ -1101,19 +1110,8 @@ function PracticePage() {
                           /* Scenario ends with ?; no callout needed but reserve minimal spacing */
                           <div className="flex items-center gap-2 text-[10px] font-mono text-textTertiary uppercase tracking-widest">
                             <Target className="w-3.5 h-3.5" />
-                            Your task — see scenario below
+                            Your task — see scenario above
                           </div>
-                        )}
-                      </div>
-
-                      {/* Scenario prose */}
-                      <div className="prose max-w-none mt-6">
-                        {current.scenario ? (
-                          <p className="text-textSecondary leading-relaxed text-base">
-                            {cleanScenario(current.scenario)}
-                          </p>
-                        ) : (
-                          <ScenarioSkeleton />
                         )}
                       </div>
 
@@ -1233,7 +1231,9 @@ function PracticePage() {
                               <span className="text-[10px] font-mono text-accentRed uppercase mb-1 flex items-center gap-1">
                                 <XCircle className="w-3 h-3" /> Common Mistake
                               </span>
-                              <p className="text-sm text-textSecondary leading-relaxed">{current.details.common_mistake}</p>
+                              <div className="text-sm text-textSecondary leading-relaxed whitespace-pre-wrap">
+                                <MarkdownText text={current.details.common_mistake} />
+                              </div>
                             </div>
                           )}
 
@@ -1241,7 +1241,9 @@ function PracticePage() {
                             <span className="text-[10px] font-mono text-accentGreen uppercase mb-1 flex items-center gap-1">
                               <CheckCircle2 className="w-3 h-3" /> Model Answer
                             </span>
-                            <p className="text-sm text-textPrimary leading-relaxed">{current.details.realistic_solution}</p>
+                            <div className="text-sm text-textPrimary leading-relaxed whitespace-pre-wrap">
+                              <MarkdownText text={current.details.realistic_solution} />
+                            </div>
                           </div>
 
                           {current.details.napkin_math && (

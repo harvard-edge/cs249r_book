@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2846
+track: cloud
+level: L4
+zone: analyze
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: training
+title: Tree AllReduce on 8 Ranks
+scenario: Eight GPU ranks are participating in an AllReduce to aggregate an 800 MB gradient tensor. The interconnect is hierarchical where leaf ranks connect to their parent at 100 GB/s, and parents connect to the root at 200 GB/s. You are comparing a simple Pipelined Tree AllReduce against a Ring AllReduce mapped onto this exact topology.
+question: What are the bandwidth-bound wall-clock times for Pipelined Tree and Ring AllReduce for the 800 MB tensor, and how do Double Binary Trees fix the bandwidth deficiency of simple trees?
+visual:
+  kind: svg
+  path: cloud-2846.svg
+  alt: 'Tree AllReduce topology: 8 leaf ranks R0 through R7 at the bottom, each paired into 4 mid-tier aggregators P0 through P3 via 100 GB/s links, and all four aggregators connecting up to a single Root via 200 GB/s links.'
+  caption: Tree AllReduce on 8 ranks — leaf links 100 GB/s, parent links 200 GB/s.
+details:
+  realistic_solution: For a simple Pipelined Tree AllReduce, the full 800 MB tensor must be streamed up to the root (reduce-up) and back down (broadcast). Ring is actually faster for pure bandwidth! A simple tree only wins on latency (O(log N) hops vs O(N) hops). To fix the bandwidth deficiency, NCCL uses Double Binary Trees, which split the tensor in half and run two trees in opposite directions, utilizing both RX and TX links simultaneously during both phases, effectively doubling the bandwidth.
+  common_mistake: |
+    **The Pitfall:** Assuming Tree AllReduce magically reduces the total volume of data transmitted.
+    **The Rationale:** Candidates incorrectly conflate the O(log N) latency advantage of trees with a bandwidth reduction.
+    **The Consequence:** Underestimating the bandwidth bottleneck, leading to incorrect hardware evaluations where a simple Tree AllReduce actually moves MORE data per bottleneck link (2*S) than a Ring AllReduce.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Ranks: 8. Tensor: 800 MB.
+    - Links: Leaf (100 GB/s), Root (200 GB/s).
+    - Bottleneck: 100 GB/s (100,000 MB/s).
+
+    **Calculations:**
+    - Pipelined Tree Reduce-up: 800 MB / 100,000 MB/s = 8 ms.
+    - Pipelined Tree Broadcast: 800 MB / 100,000 MB/s = 8 ms.
+    - Total Tree time: 16 ms.
+    - Ring AllReduce Data per rank: 2 * (7/8) * 800 MB = 1400 MB.
+    - Total Ring time: 1400 MB / 100,000 MB/s = 14 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 14 ms Ring, 16 ms Tree (Bandwidth-Bound)**. Ring AllReduce is 2 ms faster than a simple Tree. NCCL uses Double Binary Trees to halve this by sending in both directions simultaneously.
+status: draft
+provenance: llm-then-human-edited
+expected_time_minutes: 8
+requires_explanation: true
+validated: false
+math_verified: false
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- visual-archetype-topology
+- dot-rendered

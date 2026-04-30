@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-3703
+track: cloud
+level: L3
+zone: realization
+topic: roofline-analysis
+competency_area: memory
+bloom_level: apply
+phase: both
+title: 'Memory-Bound vs Compute-Bound Classification for Attention'
+scenario: A team runs multi-head attention with sequence length 2048, 32 heads, head_dim=128 on an accelerator with 312 TFLOPS BF16 and 2 TB/s HBM bandwidth. The QK^T matmul produces a 2048x2048 attention matrix per head. The observed throughput is only 45 TFLOPS.
+question: Is the 2048-token, 32-head QK^T attention operation compute- or memory-bound, and what should you use to improve it?
+details:
+  realistic_solution: The operation is heavily memory-bound. While the GEMM itself has high arithmetic intensity, materializing the full 2048x2048 attention matrix to HBM for all 32 heads dominates the runtime. The arithmetic intensity (114 FLOPs/byte) is below the hardware's ridge point (156 FLOPs/byte). To improve this, use FlashAttention to avoid materializing the attention matrix entirely, which dramatically boosts the arithmetic intensity and moves the operation into the compute-bound regime.
+  common_mistake: |
+    **The Pitfall:** Treating the full attention operation as one dense GEMM and ignoring HBM reads/writes.
+    **The Rationale:** Candidates look at the matrix multiplication FLOPs and assume it must be compute-bound without accounting for the massive bandwidth cost of writing the QK^T matrix to memory before the softmax.
+    **The Consequence:** Engineers fail to diagnose the root bottleneck and attempt to tune block sizes instead of applying FlashAttention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: 312 TFLOPS BF16, 2 TB/s HBM.
+    - Dimensions: 2048 tokens, 32 heads, 128 head_dim, BF16 (2 bytes).
+
+    **Calculations:**
+    - Ridge point: 312 TFLOPS / 2 TB/s = 156 FLOPs/byte.
+    - Read size (Q, K): 2048 * 128 * 2 bytes = 512 KB each.
+    - Write size (Attention matrix): 2048 * 2048 * 2 bytes = 8.39 MB.
+    - Memory per head: 512 KB + 512 KB + 8.39 MB = 9.41 MB.
+    - Total Memory (32 heads): 32 * 9.41 MB = 301.1 MB.
+    - Total FLOPs: 2 * 32 * 2048 * 2048 * 128 = 34.36 GFLOPs.
+    - Arithmetic Intensity: 34.36 GFLOPs / 301.1 MB = 114 FLOPs/byte.
+
+    **Conclusion & Interpretation:**
+    - **Result: 114 FLOPs/byte (Memory-Bound)**. The AI is below the hardware ridge point of 156 FLOPs/byte; use FlashAttention-2.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

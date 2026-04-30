@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-0770
+track: cloud
+level: L3
+zone: fluency
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: The DataLoader Deadlock
+scenario: Your training job on 8 A100 GPUs hangs at step 1 and never progresses. GPU utilization is 0%. CPU utilization is 100% across all cores. `htop` shows 128 Python processes in `D` (uninterruptible sleep) state. You set `num_workers=16` per GPU in the DataLoader.
+question: "What happened, and what's the maximum safe value for `num_workers`?"
+details:
+  realistic_solution: 'You''ve created 128 worker processes (16 per GPU x 8 GPUs) that are all competing for shared resources and deadlocking. The `D` state means they''re waiting on I/O or kernel locks. Fix: set `num_workers = min(cpu_cores / num_gpus, 4)` as a starting point. For 64 cores and 8 GPUs: `num_workers=4`. Increase `/dev/shm` to 16 GB in Docker (`--shm-size=16g`).'
+  common_mistake: |
+    **The Pitfall:** Assuming "more workers means faster data loading" and setting it as high as possible.
+    **The Rationale:** Candidates focus on PyTorch documentation recommendations without considering system-level resource limits like `/dev/shm`, FDs, and CPU cores.
+    **The Consequence:** Uninterruptible deadlocks (`D` state) that freeze the entire training job without throwing explicit error messages.
+  napkin_math: |
+    - **Total workers:** `num_workers=16` per GPU $\times$ 8 GPUs = 128 workers.
+    - **CPU oversubscription:** 128 workers on 64 cores = $2\times$ oversubscribed, leaving ~35% effective CPU per worker.
+    - **Shared memory:** 128 workers $\times$ 19 MB/batch = 2.4 GB needed. Docker default `/dev/shm` is 64 MB (38$\times$ oversubscribed).
+    - **File descriptors:** 128 $\times$ 10 = 1,280 FDs. Default `ulimit -n` is 1024.
+    - **Safe Configuration:** `num_workers=4` per GPU $\times$ 8 GPUs = 32 workers.
+    - **Result:** $32 \times 19\text{ MB} = 608\text{ MB}$ shm. **Set `--shm-size=2g` and use 4 workers per GPU for stable throughput.**
+status: archived
+deletion_reason: 'Cell-fit error: topic is 3d-parallelism but the entire scenario is single-host data-loading deadlock (workers in D-state, /dev/shm exhaustion, file-descriptor limits, CPU oversubscription) — none of which involves any of TP/PP/DP. The diagnosis is concrete and useful, but it belongs under data-engineering / dataloader-debugging, not 3d-parallelism. Rewriting the dataloader content into a 3D-parallel scenario would lose the per-process-resource-limit teaching that makes the original valuable.'
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-084
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

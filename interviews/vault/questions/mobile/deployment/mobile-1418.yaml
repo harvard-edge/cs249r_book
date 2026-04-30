@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-1418
+track: mobile
+level: L4
+zone: optimization
+topic: model-format-conversion
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: CoreML Fallback Memory Transfer Bottleneck
+scenario: You are converting a PyTorch vision transformer for real-time video processing on the Apple A17 Pro Neural Engine to meet a strict ~5W power budget. After CoreML conversion, profiling shows that an unsupported custom attention operator forces execution to fall back to the CPU. This fallback requires transferring large intermediate feature maps across the shared 8 GB unified memory, causing latency to spike and missing your 33ms per frame target.
+question: How would you eliminate CoreML CPU fallback for a custom attention operator on the A17 Pro Neural Engine?
+details:
+  realistic_solution: The correct approach is to modify the source PyTorch model to replace the custom attention operator with mathematically equivalent standard operations that the CoreML compiler can map directly to the 16-core Neural Engine. This eliminates the CPU fallback, keeping the entire execution graph on the ANE and avoiding the costly unified memory round-trips entirely.
+  common_mistake: |
+    **The Pitfall:** Aggressively quantizing the model to INT8 or writing a custom CPU op in Swift.
+    **The Rationale:** Candidates often focus on speeding up compute or custom operators, ignoring that the true bottleneck is the memory transfer overhead between the ANE and CPU.
+    **The Consequence:** The ANE-to-CPU synchronization and memory copy overhead persist, failing to resolve the latency spikes and missed frame budget.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target: 33.3ms per frame budget.
+    - Feature map size: [1, 512, 64, 64] (FP16, 2 bytes).
+    - Unified Memory Bandwidth (fragmented): ~50 GB/s.
+
+    **Calculations:**
+    - Single map footprint: $1 \times 512 \times 64 \times 64 \times 2 = 4.19\text{ MB}$.
+    - CPU round-trip (read + write): $4.19\text{ MB} \times 2 = 8.38\text{ MB}$.
+    - Transfer latency per layer: $8.38\text{ MB} / 50,000\text{ MB/s} = 0.167\text{ ms}$.
+    - Total penalty (12 blocks): $12 \times 0.167\text{ ms} \approx 2.0\text{ ms}$.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2.0ms Latency Overhead**. The CPU fallback wastes 6% of the total frame budget strictly on memory movement. Fusing operations natively onto the ANE eliminates this transfer bottleneck entirely.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

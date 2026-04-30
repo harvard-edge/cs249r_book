@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3225
+track: cloud
+level: L5
+zone: diagnosis
+topic: kv-cache-management
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: KV-Cache Memory Fragmentation in Long-Running Services
+scenario: Your vLLM serving instance has been running for 6 hours. Nvidia-smi shows 30 GB free GPU memory, but the system rejects new requests claiming insufficient memory. The KV-cache pool reports 35 GB allocated but only 22 GB actively used.
+question: Why does vLLM reject new requests despite 30 GB free GPU memory and only 22 GB of 35 GB allocated KV-cache actively used?
+details:
+  realistic_solution: "The 13 GB gap (35 GB allocated in the pool - 22 GB actively used by current requests) is primarily caused by Automatic Prefix Caching (APC) and internal block fragmentation. Causes: (1) Prefix cache pollution: vLLM retains KV blocks from completed requests in the pool to accelerate future requests sharing the same prefix (e.g., system prompts). These blocks appear 'allocated' but are not part of active generation. (2) Internal fragmentation: PagedAttention allocates in fixed-size blocks (e.g., 16 tokens). A request ending at token 17 requires 2 full blocks, wasting 15 tokens of space. For 1000 concurrent requests, this internal fragmentation is negligible (~2.5 GB). The bulk of the 13 GB is speculative prefix caching. Fix: (1) If the workload has low prefix overlap, disable prefix caching (--enable-prefix-caching=False) or tune eviction policies. (2) The system rejecting new requests implies the pool is fully fragmented or cached blocks are not being evicted correctly under memory pressure."
+  common_mistake: |
+    **The Pitfall:** Blaming GPU memory fragmentation (which is rare with modern allocators).
+    **The Rationale:** Misunderstanding the difference between raw GPU memory and the internally managed vLLM KV-cache block pool.
+    **The Consequence:** Wasting time restarting the service or trying to defragment GPU memory instead of tuning the prefix caching eviction policies.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total Pool: 35 GB. Active: 22 GB. Gap: 13 GB.
+    - 1000 concurrent requests. Average internal waste: 8 tokens/request.
+    - Token size: 320 KB.
+
+    **Calculations:**
+    - Internal Fragmentation: 1000 requests \times 8 tokens \times 320 KB = 2.5 GB.
+    - Prefix Cache Pollution: 13 GB gap - 2.5 GB fragmentation = 10.5 GB.
+    - Cached Tokens: 10.5 GB / 320 KB = 32,812 cached tokens (e.g., 30 variations of a 1000-token system prompt).
+
+    **Conclusion & Interpretation:**
+    - **Result: 13 GB gap is mostly prefix caching (Memory-Allocator-Bound)**. The 13 GB gap is mostly prefix caching, and the allocator fails to evict historical blocks to satisfy new contiguous requests.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: tinyml-0530
+track: tinyml
+level: L3
+zone: diagnosis
+topic: mcu-compute-constraints
+competency_area: precision
+bloom_level: apply
+phase: inference
+title: The Silent Overflow Catastrophe
+scenario: You are a TinyML engineer optimizing a keyword spotting model for a Cortex-M4 based microcontroller. Your FP32 model achieves 95% accuracy. After applying standard post-training INT8 quantization using a calibration dataset of 100 clean audio samples, the model's accuracy on the validation set plummets to 11%. You profile the layers and discover that one specific convolutional layer's FP32 activations are typically in the `[-4.0, 4.0]` range for the clean calibration data. However, the validation set contains noisy real-world audio where these same activations occasionally spike to `+8.0`.
+question: Why does clean-audio PTQ calibration make noisy +8.0 activations collapse a Cortex-M4 KWS model to random accuracy?
+details:
+  realistic_solution: The root cause is activation overflow due to an unrepresentative calibration dataset. The quantization parameters (scale and zero-point) were calculated based on the limited `[-4.0, 4.0]` dynamic range seen in the clean calibration data. When the model later encounters a noisy sample causing an activation of `+8.0`, this value is clipped to the maximum representable INT8 value. This saturation destroys the feature information, causing a cascade of errors through subsequent layers and leading to a near-total collapse in accuracy. The fix is to use a more representative calibration dataset that includes noisy samples reflecting real-world conditions, or to selectively keep the problematic layer in a higher precision format like FP16 (mixed-precision quantization).
+  common_mistake: |
+    **The Pitfall:** Blaming the model architecture or toolchain for quantization failures.
+    **The Rationale:** Failing to recognize that the quantization process is only as good as the data used to calibrate it, leading engineers to abandon quantization prematurely.
+    **The Consequence:** Wasting time on complex debugging when the root cause is an unrepresentative calibration dataset.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Clean Calibration Range: [-4.0, 4.0].
+    - INT8 Range: 255 steps.
+
+    **Calculations:**
+    - Symmetric INT8 Scale = 4.0 / 127 ≈ 0.0315.
+    - Noisy Spike (+8.0) Quantized Value = 8.0 / 0.0315 = 254 (clips to max INT8 value 127).
+    - Dequantization = 127 x 0.0315 = 4.0. Error = 50%.
+    - Recalibrating with [-8.0, 8.0] yields Scale = 8.0 / 127 ≈ 0.063.
+
+    **Conclusion & Interpretation:**
+    - **Result: 50% Error (Precision-Bound)**. The unrepresentative calibration causes massive clipping on real-world data, destroying feature representations and causing total model collapse.
+  options:
+  - The model's architecture uses activation functions that are fundamentally incompatible with 8-bit integers.
+  - Weight quantization error was too high, destroying the model's learned representations across all layers.
+  - The calibration dataset was not representative, causing activation value clipping during inference on real-world data.
+  - The Cortex-M4's DSP instructions have a bug in the INT8 convolution kernel, leading to incorrect matrix multiplications.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

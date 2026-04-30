@@ -114,7 +114,7 @@ def main() -> int:
     args = parser.parse_args()
 
     records: list[dict] = []
-    for path in sorted(QUESTIONS_DIR.glob("*/*.yaml")):
+    for path in sorted(QUESTIONS_DIR.rglob('*.yaml')):
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         question = (data.get("question") or "").strip()
         scenario = data.get("scenario") or ""

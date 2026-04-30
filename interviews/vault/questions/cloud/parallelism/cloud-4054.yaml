@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-4054
+track: cloud
+level: L6+
+zone: mastery
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: AllReduce Algorithm Selection in NCCL
+scenario: NCCL auto-selects between ring, tree, and recursive halving-doubling algorithms based on message size and GPU count. You need to manually specify the optimal algorithm on a 2048-MI300X cluster with 8-rail 400Gbps networking for (a) 64KB control parameters, (b) 256MB per-layer gradient, (c) 4GB full-model gradient.
+question: "Which AllReduce algorithm should you choose for 64KB, 256MB, and 4GB gradients on 2048 MI300X GPUs, and why under LogP?"
+details:
+  realistic_solution: 'LogP model: T = L + o + (steps × g × D/B), where L = network latency (5μs for RoCE), o = software overhead (2μs for NCCL kernel), g = gap between messages. (a) 64KB: Recursive halving-doubling. Steps = 2log₂(2048) = 22. T = 22 × (5+2)μs + 22/2048 × 64KB/50GB/s = 154μs + 0.014μs = 154μs. Ring would be: 2×2047×7μs + 2×2047/2048 × 64KB/50GB/s = 28.7ms. Halving-doubling is 186× faster. (b) 256MB: Tree (double binary tree). Steps = 2log₂(2048) = 22 for tree. T = 22×7μs + 2×11/2048 × 256MB × 2/50GB/s = 154μs + 55μs = 209μs per tree level (simplified). Ring: 2×2047×7μs + 2×2047/2048 × 256MB/50GB/s = 28.7ms + 10.2ms = 38.9ms. Tree with multi-rail (8 rails): effective bandwidth 400GB/s. T_tree ≈ 22 × 7μs + 22/2048 × 256MB/400GB/s = 154μs + 6.9μs ≈ 161μs. Tree wins. (c) 4GB: Ring with chunking. At 4GB, bandwidth term dominates. Ring: 2×2047/2048 × 4GB / 400GB/s = 20ms. Tree: bandwidth penalty (~2×) = 40ms. Ring wins for large messages. NCCL crossover point: typically ~1MB for ring-to-tree transition at N>256.'
+  common_mistake: |
+    **The Pitfall:** Always choosing the Ring algorithm because it is bandwidth-optimal.
+    **The Rationale:** Neglecting the O(N) latency term that dominates for small messages at large scale.
+    **The Consequence:** Massive performance degradation for small control parameters across thousands of GPUs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 2048 GPUs.
+    - At 2048 GPUs, Ring latency overhead = 2 * 2047 * 7μs = 28.7 ms.
+    - Tree latency overhead = 2 * 11 * 7μs = 154 μs.
+
+    **Calculations:**
+    - Latency advantage = 28.7 ms / 154 μs = 186x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 186x latency advantage (Network Topologies)**. Tree has a significant latency advantage, meaning Ring only wins when the bandwidth term exceeds 28.5 ms (messages > ~5.7 GB).
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

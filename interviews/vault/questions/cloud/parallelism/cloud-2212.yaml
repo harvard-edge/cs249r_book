@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-2212
+track: cloud
+level: L3
+zone: diagnosis
+topic: scheduling-resource-management
+competency_area: parallelism
+bloom_level: apply
+phase: inference
+title: The Rail-Optimized Placement Problem
+scenario: You are scheduling a 32-GPU data-parallel training job on a cluster where each node has 8 GPUs connected by NVLink (900 GB/s intra-node) but nodes connect via InfiniBand (50 GB/s inter-node). The scheduler places GPUs across 6 different nodes. The training job's AllReduce takes 3x longer than expected.
+question: Why did the placement cause the AllReduce to be 3x slower, and what scheduling constraint would fix it?
+details:
+  realistic_solution: 'The scheduler should enforce rail-optimized (topology-aware) placement: allocate complete nodes first, then fill partial nodes only if necessary. For 32 GPUs with 8-GPU nodes, the optimal placement is exactly 4 complete nodes. This ensures the AllReduce tree maps cleanly onto the network hierarchy — intra-node reduction over NVLink first, then inter-node reduction over InfiniBand. With asymmetric placement across 6 nodes, the AllReduce ring has unequal segment bandwidths, and the slowest link (50 GB/s IB) dominates the entire ring.'
+  common_mistake: |
+    **The Pitfall:** Blaming the InfiniBand network bandwidth as inherently insufficient.
+    **The Rationale:** Engineers assume 50 GB/s is just too slow to sustain the gradient synchronization.
+    **The Consequence:** Pushing for massive and expensive IB upgrades instead of realizing a simple, zero-cost scheduling constraint flag would resolve the load imbalance entirely.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B model gradients = 14 GB.
+    - NVLink = 900 GB/s.
+    - InfiniBand = 50 GB/s.
+
+    **Calculations:**
+    - Optimal 4-node ring = Intra-node (14GB / 900GB/s ≈ 16ms) + Inter-node (14GB / 50GB/s * 2(4-1)/4 ≈ 420ms) ≈ 436ms.
+    - Bad 6-node placement = Inter-node (14GB / 50GB/s * 2(6-1)/6 ≈ 467ms) + straggler overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Asymmetric placement yields ~1.3s total time. Rail-optimized placement fixes it (Network Topology Stragglers)**. Bottleneck: Network Topology Stragglers.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

@@ -1,0 +1,35 @@
+schema_version: '1.0'
+id: global-0133
+track: global
+level: L5
+zone: evaluation
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: Continuous Batching Decode Spikes
+scenario: You operate a multi-turn chat service using a 13B model. The business SLA mandates a Time Between Tokens (TPOT) of < 50ms to ensure smooth text generation. With continuous batching enabled, average TPOT is 25ms. However, P99 TPOT frequently spikes to 200ms+. Telemetry shows these spikes correlate exactly with new users submitting long prompts (e.g., 4k tokens) into the system.
+question: Why do 4k-token prompts cause P99 TPOT spikes to 200ms+, and how would you keep TPOT under 50ms?
+details:
+  realistic_solution: 'Decompose the latency: Continuous batching mixes prefill and decode phases in the same forward pass. A 4k-token prefill requires massive matrix multiplications, taking ~150ms of compute. Because the GPU executes the batch synchronously, the decode steps for all other requests in the batch are blocked until the 150ms prefill completes, violating the 50ms TPOT SLA. The architectural requirement is to implement Chunked Prefill (e.g., Sarathi or Piggybacking). By chunking the 4k prompt into segments of 512 tokens, the prefill compute is bounded to ~20ms per step. This allows decode steps to interleave, keeping the step latency below 45ms and satisfying the TPOT SLA while slightly increasing TTFT.'
+  common_mistake: |
+    **The Pitfall:** Assuming the GPU is simply overloaded and decreasing the maximum batch size to reduce compute pressure.
+    **The Rationale:** Treating all GPU latency spikes as generalized capacity bottlenecks.
+    **The Consequence:** Drastically lowering total serving throughput without actually solving the head-of-line blocking problem caused by large prefills.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - TPOT SLA: < 50ms.
+    - 4k-token prefill compute time: ~150 ms.
+    - Standard decode step time: ~20 ms.
+
+    **Calculations:**
+    - Unchunked Iteration: max(150, 20) = 150 ms (violates 50 ms SLA).
+    - Chunked Prefill (512 tokens): Compute ≈ 18 ms.
+    - Chunked Iteration: max(18, 20) = 20 ms (satisfies 50 ms SLA).
+
+    **Conclusion & Interpretation:**
+    - **Result: 20 ms Latency (Compute-Bound)**. Chunked prefill is architecturally required to prevent massive matrix multiplications from blocking concurrent token decoding.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12

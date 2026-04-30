@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-4300
+track: cloud
+level: L5
+zone: specification
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Prefill-Decode Affinity and Context Caching
+scenario: Your service adds prompt caching where if a request shares a prefix with a recently processed request, the KV-cache for that prefix is reused.
+question: "Where should prefix KV-caches live in a disaggregated architecture, how should they be invalidated, and what TTFT savings come from a 60% hit rate?"
+details:
+  realistic_solution: Store prefix KV-caches on decode nodes. On a cache hit, the request skips prefill entirely, and decode starts immediately without any KV transfer. Use consistent hashing on the prefix to route requests to the correct decode node. Invalidate via LRU eviction when KV pool utilization exceeds an 85% watermark.
+  common_mistake: |
+    **The Pitfall:** Storing prefix caches on prefill nodes.
+    **The Rationale:** Candidates intuitively associate "prompt caching" with the "prefill phase" since prefill creates the cache.
+    **The Consequence:** A cache hit avoids compute but still requires transferring the massive KV-cache over the network to the decode node, paying a severe latency penalty.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Prefix length: 2048 tokens.
+    - Model: 96 layers, 8 KV heads, 128 dim, FP16 (2 bytes).
+    - Network: 50 GB/s InfiniBand.
+    - Baseline Prefill: 10.2 ms.
+
+    **Calculations:**
+    - KV cache payload: 2 * 8 * 128 * 2048 * 96 * 2 bytes = 805 MB (768 MiB).
+    - Transfer latency over network: 805 MB / 50,000 MB/s = 16.1 ms.
+    - Hit penalty if stored on prefill node: 16.1 ms (transfer) > 10.2 ms (compute).
+    - Hit savings if stored on decode node: 10.2 ms + 15.4 ms = ~25.6 ms total.
+    - At 60% hit rate: 0.6 * 25.6 ms = 15.36 ms average savings.
+
+    **Conclusion & Interpretation:**
+    - **Result: 15.36 ms avg savings (Network-Bound)**. Moving the 768 MiB KV cache takes longer than recomputing it, so caches must reside natively on the decode nodes.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

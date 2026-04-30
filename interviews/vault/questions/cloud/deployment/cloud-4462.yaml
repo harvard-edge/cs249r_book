@@ -1,0 +1,39 @@
+schema_version: '1.0'
+id: cloud-4462
+track: cloud
+level: L3
+zone: fluency
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: understand
+phase: inference
+title: Prefill Warmup and JIT Compilation Latency at Service Start
+scenario: A newly deployed prefill node takes 45 seconds to serve its first request due to JIT compilation and CUDA graph capture. During this time, the load balancer routes traffic to the node anyway, causing 45 seconds of 30x higher latency.
+question: How should the deployment readiness lifecycle prevent traffic routing before JIT compilation and CUDA graph warmup complete?
+details:
+  realistic_solution: 'Deployment readiness lifecycle for prefill nodes: (1) Startup phase: load model weights (8B: ~5s, 70B: ~80s); (2) Warmup phase: run dummy forward passes at all expected batch sizes and sequence lengths to trigger CUDA graph capture and cuBLAS kernel selection. Duration: 10-30 seconds for sequence lengths 128, 256, 512, 1024, 2048. (3) Readiness check: node emits ready signal after warmup completion. Kubernetes readinessProbe: use exec probe that checks a local file written by the server after warmup. (4) Load balancer integration: Kubernetes readinessProbe failure excludes pod from Service endpoints. New pod starts traffic only after readiness probe succeeds. (5) Canary deployment: first route 1% traffic to warm pod, verify P99 latency within 10% of baseline, then increase to 100%. Implementation: vLLM''s --enable-prefix-caching and --max-num-seqs should be specified at startup; warmup script runs representative prompts at each sequence length.'
+  common_mistake: |
+    **The Pitfall:** Using a simple HTTP health check as the readiness signal.
+    **The Rationale:** Most standard web services are ready once the HTTP server binds to the port, so developers reuse this pattern, forgetting that ML models require massive asynchronous compilation after the port opens.
+    **The Consequence:** The load balancer floods a compiling node with traffic, destroying P99 latency for 45 seconds during every scale-up event.
+  napkin_math: |
+    - **Startup Timeline:** Model load (80s) + CUDA graph capture (e.g., 8 batch sizes $\times 7.5\text{s} = 60\text{s}$) = 140 seconds before ready.
+    - **Impact:** At 1 pod scale-up per minute during a traffic spike, there is a continuous 140s gap where incoming traffic hits cold pods.
+    - **Conclusion:** **Kubernetes readinessProbes must rely on a post-warmup signal**, or the system must maintain a warm-standby pool to hide the 140s initialization.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

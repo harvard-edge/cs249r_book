@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-2176
+track: cloud
+level: L5
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: The CUDA Streams Overlap Failure
+scenario: You design a 3-stage pipeline for LLM inference using CUDA streams. Stream 1 copies token embeddings (H2D), Stream 2 runs the forward pass, and Stream 3 copies logits (D2H). Profiling with Nsight Systems shows the streams execute sequentially with no overlap.
+question: Why did the three CUDA streams serialize, and what synchronization design enables proper overlap?
+details:
+  realistic_solution: 'There are three common causes for stream overlap failure: (1) Default stream contamination: If any operation runs on the default stream, it acts as a global barrier. Fix: use per-thread default streams or explicitly create non-blocking streams. (2) Implicit synchronization from memory allocation: `cudaMalloc` or `cudaFree` during the pipeline forces a device-wide synchronization. Fix: pre-allocate a ring buffer. (3) Missing events for inter-stream dependencies: The correct design uses a double-buffered scheme with `cudaEventRecord` after each operation and `cudaStreamWaitEvent` at the start of dependent operations.'
+  common_mistake: |
+    **The Pitfall:** Assuming placing operations on different CUDA streams automatically guarantees concurrent execution.
+    **The Rationale:** Candidates don't realize that any operation interacting with the default stream (stream 0) implicitly acts as a global synchronization barrier.
+    **The Consequence:** The pipeline operates completely sequentially, wasting memory bandwidth and leaving the GPU massively underutilized.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Times: H2D = 0.5ms, Compute = 5ms, D2H = 0.3ms.
+
+    **Calculations:**
+    - Sequential execution: 0.5 + 5 + 0.3 = 5.8ms per batch.
+    - Overlapped (steady state): max(0.5, 5, 0.3) = 5.0ms.
+    - Speedup: 5.8 / 5.0 = 1.16x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.16x speedup (Memory Transfer-Bound)**. Proper overlap yields a 16% throughput speedup by hiding memory transfer latencies.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

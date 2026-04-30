@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-1870
+track: edge
+level: L4
+zone: analyze
+topic: dma-data-movement
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Optimizing Data Movement on NVIDIA Jetson Orin
+scenario: You are deploying a real-time object detection model on an NVIDIA Jetson Orin with 32 GB LPDDR5, targeting 275 TOPS INT8 for inference. The model processes 1080p RGB frames at 30 FPS. Upon profiling, you find that data transfer from the camera buffer (host memory) to the GPU (device memory) consumes a significant portion of the frame processing time. The frames are initially allocated in standard CPU-managed pageable memory.
+question: 'Why are 1080p frame transfers slow from pageable camera buffers on Jetson Orin, and which pinned or zero-copy techniques would fix them?'
+details:
+  realistic_solution: Inefficient DMA transfers occur when data resides in pageable host memory. Even on the Jetson Orin's UMA, standard CPU allocations are pageable. The DMA engine performs an extra internal copy to a temporary pinned buffer before transferring. Use Pinned Memory (`cudaHostAlloc`) or Zero-Copy mechanisms (`cudaMallocManaged`) guided by nsys profiling to bypass these internal copies and reclaim latency.
+  common_mistake: |
+    **The Pitfall:** Focusing solely on raw LPDDR5 bandwidth (e.g., 204 GB/s) and assuming it should easily handle 1080p.
+    **The Rationale:** Candidates fail to recognize the specific latency overheads associated with transferring data from pageable host memory to the GPU via the DMA engine, even in a Unified Memory Architecture (UMA).
+    **The Consequence:** The system suffers from high I/O latency and misses real-time 30 FPS targets despite having massive theoretical memory bandwidth.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Frame size: 1080p RGB = 1920 * 1080 * 3 bytes = 6.22 MB.
+    - Target FPS: 30 FPS (33.3 ms budget).
+    - Jetson Orin LPDDR5: ~204 GB/s.
+
+    **Calculations:**
+    - Target data rate = 6.22 MB/frame * 30 FPS = 186.6 MB/s.
+    - A 10ms page-fault penalty drops effective transfer rate to 6.22 MB / 0.01s = 622 MB/s (consuming 30% of the 33.3ms budget).
+    - Pinned memory eliminates the 10ms CPU-to-Pinned copy overhead entirely.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~10ms overhead eliminated via Zero-Copy (Latency-Bound)**. Zero-copy eliminates critical DMA engine wait times.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

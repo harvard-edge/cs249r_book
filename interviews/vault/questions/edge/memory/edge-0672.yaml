@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: 'edge-0672'
+track: 'edge'
+level: 'L4'
+zone: 'diagnosis'
+topic: 'compound-ai-systems'
+competency_area: 'memory'
+bloom_level: 'analyze'
+phase: 'both'
+title: 'The Repeated Model Loading Memory Leak'
+scenario: 'An edge device (Qualcomm RB5, 8 GB RAM, Hexagon DSP) runs a multi-model pipeline: a person detector, then a pose estimator, then an action classifier. To save memory, models are loaded and unloaded on demand. After 3 days of continuous operation, the device OOM-kills the inference process. Memory monitoring shows a steady climb of 50 MB/day, even though each model is only 15 MB.'
+question: 'What''s leaking?'
+details:
+  realistic_solution: |
+    The Qualcomm SNPE (Snapdragon Neural Processing Engine) runtime allocates intermediate activation buffers on the Hexagon DSP's shared memory (ION/DMA-BUF allocations) each time a model is loaded. When the model is unloaded, SNPE releases the model weights but doesn't fully release the DSP's scratch memory allocations. This is a known behavior in several edge ML runtimes — the runtime keeps a memory pool for fast re-allocation, but the pool grows monotonically because each load/unload cycle fragments the pool slightly differently.
+  common_mistake: |
+    **The Pitfall:** Assuming the model files aren't being freed and adding explicit `del model` calls.
+    **The Rationale:** Python developers assume object destruction maps perfectly to hardware memory release.
+    **The Consequence:** The leak persists because the model weights are actually freed; the issue lies deep within the DSP runtime's scratch pool.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 3 models at 15 MB each.
+    - Hexagon DSP Carveout: ~256 MB.
+    - Leak Rate: 50 MB/day from dynamic load/unload fragmentation.
+
+    **Calculations:**
+    - Static Loading Overhead: 3 * 15 MB = 45 MB.
+    - Available Memory for Leak: 256 MB - 45 MB = 211 MB.
+    - Time to OOM: 211 MB / 50 MB/day = ~4.2 days.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~4.2 days to OOM (Memory-Bound).** The dynamic loading "optimization" causes fatal fragmentation; static loading is actually safer here.
+  options:
+  - '"The bottleneck is PCIe transfer between CPU and GPU; using zero-copy memory will eliminate this overhead entirely."'
+  - '"The model files aren''t being freed — add explicit `del model` calls."'
+  - '"The pipeline bottleneck is always the largest model; optimizing smaller models in the pipeline has negligible impact on end-to-end latency."'
+  - '"The Qualcomm SNPE (Snapdragon Neural Processing Engine) runtime allocates intermediate activation buffers on the Hexagon DSP''s shared memory (ION/DMA-BUF allocations) each time a model is loaded. When the model is unloaded, SNPE releases the model weights but doesn''t fully release the DSP''s scratch memory allocations."'
+  correct_index: 3
+status: 'published'
+provenance: 'imported'
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: 'OK'
+validation_date: '2026-04-01'
+validation_model: 'gemini-2.5-flash'
+math_verified: true
+math_status: 'CORRECT'
+math_date: '2026-04-03'
+math_model: 'gemini-3.1-pro-preview'
+human_reviewed:
+  status: 'not-reviewed'
+  by: null
+  date: null
+  notes: null

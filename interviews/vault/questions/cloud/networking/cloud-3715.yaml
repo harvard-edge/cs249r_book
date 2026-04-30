@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: cloud-3715
+track: cloud
+level: L5
+zone: mastery
+topic: collective-communication
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: ReduceScatter vs AllReduce for Pipeline Parallelism on H100 Cluster
+scenario: A 16-GPU cluster uses pipeline parallelism (8 pipeline stages) plus data parallelism (2-way DP). Micro-batch size is 4.
+question: How do ZeRO-1 and ZeRO-3 communication patterns compare within the 2-way DP groups of the 8-stage pipeline for a 70B model?
+details:
+  realistic_solution: 'Hybrid setup: 8-stage PP × 2-way DP = 16 GPUs. Each PP stage holds ~70B/8 = 8.75B params. ZeRO-1 within DP groups (2 GPUs): optimizer state sharded 2×. FP32 optimizer: 8.75B × 12B = 105GB per stage → sharded = 52.5GB per GPU. ZeRO-1 only communicates at the end of the batch: ReduceScatter gradients (8.75GB) and AllGather updated parameters (8.75GB). Total: 17.5GB at 450 GB/s = 38.8ms per GPU. ZeRO-3 within DP groups: params also sharded. Each PP stage needs AllGather before forward and ReduceScatter after backward for every micro-batch. With 4 micro-batches: 4 × 2 = 8 collectives per GPU. Each collective transfers 8.75GB at 450 GB/s = 19.4ms. Total critical path communication for ZeRO-3: 8 × 19.4ms = 155ms per batch vs ZeRO-1 adding 38.8ms.'
+  common_mistake: |
+    **The Pitfall:** Applying ZeRO sharding blindly across all 16 GPUs.
+    **The Rationale:** Forgetting that pipeline parallelism requires adjacent stages to share full parameter copies.
+    **The Consequence:** Massive unnecessary communication overhead on the critical path.
+  napkin_math: |
+    - **ZeRO-1 DP communication**: ReduceScatter grads + AllGather params = 17.5GB at 450 GB/s = 38.8ms per step.
+    - **ZeRO-3 communication**: 4 micro-batches * 2 collectives = 8 collectives per GPU.
+    - **ZeRO-3 time**: 8 * 19.4ms = 155ms.
+    - **Result**: **ZeRO-1 is significantly better for pipeline critical path latency.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

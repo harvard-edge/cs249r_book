@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3227
+track: cloud
+level: L5
+zone: specification
+topic: kv-cache-management
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: KV-Cache Aware Autoscaling Policy
+scenario: 'Your LLM serving cluster autoscales based on GPU utilization (threshold: 70%). During a traffic spike, GPU utilization is only 45% but requests are being rejected. Your SRE team increases the GPU utilization threshold, making the problem worse.'
+question: 'What autoscaling metric should replace GPU utilization when requests are rejected at 45% GPU utilization during a traffic spike?'
+details:
+  realistic_solution: 'The correct autoscaling metric for LLM serving is KV-cache memory utilization, not GPU compute utilization. At 45% GPU utilization, the system is rejecting requests because all available KV-cache memory is consumed by existing long-context requests. Adding GPU utilization threshold just prevents scale-up, making rejection worse. Specification: (1) Primary metric: KV-cache pool utilization = allocated_blocks / total_blocks. Scale up when >80%. (2) Secondary metric: request queue depth. Scale up when queue > 10 requests for > 5 seconds. (3) Tertiary: P99 TTFT latency. Scale up when >2× SLA target. (4) Scale-down: when KV-cache utilization < 40% for 5 minutes (prevent thrashing). (5) Pre-warming: new instances need 30-60s to load model weights — scale up preemptively based on traffic prediction.'
+  common_mistake: |
+    **The Pitfall:** Utilizing GPU compute utilization as the primary horizontal autoscaling signal for LLM serving workloads.
+    **The Rationale:** Standard SRE practices ported from stateless microservices assume that low CPU/GPU utilization implies available capacity, completely missing that LLM decode is memory-bandwidth and KV-cache capacity bound.
+    **The Consequence:** The autoscaler fails to add nodes during heavy traffic, leading to 100% request rejection while dashboards show a seemingly healthy "45% GPU usage".
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Autoscaler target: GPU utilization (currently 45%).
+    - Traffic: High concurrency (many long-context requests).
+    - Symptom: OOMs and request rejections.
+
+    **Calculations:**
+    - Decode compute utilization is inherently low (memory-bound).
+    - HBM capacity (80GB) is fully allocated: ~15GB weights, ~60GB KV cache pool.
+    - If KV-cache pool utilization = 98%, maximum concurrent batch size is reached.
+
+    **Conclusion & Interpretation:**
+    - **Result: KV-Cache Capacity Bound**. The autoscaler must be immediately reconfigured to trigger on custom metrics: **KV-cache block utilization (>80%)** and request queue depth, completely ignoring GPU compute utilization.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: cloud-1056
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Diagnosing H2D Transfer Overlap Failures
+scenario: You are profiling a PyTorch training loop. The model processes batches of 512 images (approx. 150MB per batch). The compute step takes 30ms, and the Host-to-Device (H2D) transfer takes 6ms over PCIe Gen4. You have set `pin_memory=True` on the DataLoader and use `tensor.to(device, non_blocking=True)`.
+question: Why are H2D copies and compute still sequential despite pin_memory=True and non_blocking=True, and how do you overlap them?
+details:
+  realistic_solution: 'The H2D transfer must be executed in a dedicated, non-default CUDA stream using `with torch.cuda.stream(copy_stream):`. Before compute kernels execute on the default stream, synchronize them to ensure data is fully transferred.'
+  common_mistake: |
+    **The Pitfall:** Assuming that setting `non_blocking=True` is sufficient for asynchronous execution.
+    **The Rationale:** PyTorch's `non_blocking=True` suggests asynchronous behavior, leading developers to believe no further stream management is needed.
+    **The Consequence:** Operations on the default stream block until completion unless a separate CUDA stream is explicitly managed, preventing overlap.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Effective PCIe Gen4 transfer rate: ~25 GB/s.
+    - Batch size: 150 MB.
+    - Compute time: 30ms.
+
+    **Calculations:**
+    - Transfer time: 150 MB / 25 GB/s = 6ms.
+    - Sequential time: 30ms + 6ms = 36ms.
+    - Overlapped time: max(30ms, 6ms) = 30ms.
+    - Throughput increase: 36ms / 30ms = 1.2x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 1.2x speedup (Stream-Synchronization-Bound)**. 20% speedup achieved by overlapping H2D copy and compute.
+status: published

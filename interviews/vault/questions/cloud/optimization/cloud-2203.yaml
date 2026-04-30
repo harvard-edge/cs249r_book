@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-2203
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: The Conservation of Bottlenecks
+scenario: You profile a 500ms training step and find GEMM kernels in FFN layers consume 45% of step time, while AllReduce takes 22%. You apply operator fusion to the FFN, reducing GEMM time by 40%. After re-profiling, total step time decreased by only 12%, and now AllReduce consumes 25% of step time.
+question: How does Conservation of Complexity explain the FFN fusion's 12% step-time reduction and AllReduce becoming the bottleneck?
+details:
+  realistic_solution: 'This is Conservation of Complexity (or Liebig''s Law applied to systems). Before optimization: GEMM = 45%, AllReduce = 22%, other = 33% of a 500ms step. After fusing FFN GEMMs (40% reduction in time): GEMM''s theoretical time drops to 135ms (27% of the original step time), but AllReduce time didn''t change — its absolute time is the same (~110ms), but it''s now a larger fraction because the denominator shrank. The step went from 500ms to 440ms (a 12% reduction in time), which is exactly what Amdahl''s Law predicts: S = 1 / (0.55 + 0.45/1.67) = 1 / (0.55 + 0.27) = 1.22x throughput. The remaining gap from 1.22x theoretical throughput to 1.136x actual is the added overhead of the fused kernel (launch cost, register pressure). The optimization did work — it just shifted the binding constraint from compute to communication. The next optimization should target AllReduce: gradient compression, communication-computation overlap, or topology-aware placement.'
+  common_mistake: |
+    **The Pitfall:** Expecting a 40% reduction in the bottleneck to yield a proportional end-to-end improvement.
+    **The Rationale:** Candidates forget Amdahl's Law and the fact that fixing one bottleneck simply reveals the next one.
+    **The Consequence:** Teams misallocate engineering resources trying to further optimize the old bottleneck instead of targeting the new one.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Initial 500ms step. GEMM is 45% (225ms). AllReduce is 22% (110ms). Other is 33% (165ms).
+       - FFN fusion reduces GEMM by 40%.
+    2. **Calculations:**
+       - Before fusion: 500ms total = 225ms (GEMM) + 110ms (AllReduce) + 165ms (other).
+       - Calculate new GEMM time: 225ms × 0.6 = 135ms.
+       - Calculate new total time: 135ms + 110ms + 165ms = 410ms (18% theoretical reduction).
+       - Account for actual reduction: Actual time is 440ms (12% reduction) due to fusion overhead (register pressure, kernel launch).
+       - Calculate new AllReduce share: 110ms / 440ms = 25% (making it the new bottleneck).
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound. The bottleneck has cleanly shifted from compute (GEMM) to network (AllReduce).**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

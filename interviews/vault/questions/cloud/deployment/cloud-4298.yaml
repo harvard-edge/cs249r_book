@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-4298
+track: cloud
+level: L5
+zone: evaluation
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: Cross-Pool KV Compression Tradeoff
+scenario: Your team proposes compressing the KV-cache before transferring it from prefill to decode GPUs (e.g., quantizing KV from FP16 to INT8 or FP8). The expected compression ratio is 2x, halving transfer time.
+question: Should you compress the KV-cache before prefill-to-decode transfer, and under what conditions is the 2x transfer reduction net-positive?
+details:
+  realistic_solution: 'Benefits: KV transfer halved (e.g., 7.7 ms → 3.8 ms for the Q62001 scenario), reducing TTFT. Each decode step reads KV from HBM: INT8 KV halves KV read bandwidth, increasing decode throughput on bandwidth-bound GPUs. Costs: (1) Compression adds latency at end of prefill (~0.5-1 ms for CUDA kernel, negligible). (2) Decompression per decode step adds ~0.1-0.2 ms per step — on a 200-token output this is 20-40 ms extra TPOT overhead. (3) Quantization error in KV accumulates over long generations — INT8 KV causes measurable quality degradation at 1k+ output tokens. Net-positive when: output length is short (<200 tokens), TTFT is the binding SLO (not TPOT), and network is the bottleneck (< 200 Gbps). Net-negative when: long outputs, TPOT-sensitive workloads, or high-bandwidth network (400+ Gbps) where transfer latency is already small.'
+  common_mistake: |
+    **The Pitfall:** Approving compression unconditionally based solely on the 2x transfer speedup.
+    **The Rationale:** Candidates fail to account for the ongoing decompression compute cost on the decode GPU and the accuracy impact over long generations.
+    **The Consequence:** Worsening overall Time-Per-Output-Token (TPOT) latency for long-generation tasks, despite improving Time-To-First-Token (TTFT).
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Network bandwidth: 400 Gbps (50 GB/s).
+       - KV transfer size: 384 MB.
+       - Output length: 200 tokens.
+       - Decompression overhead: ~0.2 ms per decode step.
+    2. **Calculations:**
+       - Baseline transfer time: 384 MB / 50 GB/s = 7.68 ms.
+       - Compressed transfer time (2x): 7.68 ms / 2 = 3.84 ms.
+       - TTFT savings: 7.68 ms - 3.84 ms = 3.84 ms.
+       - Total decompression overhead (TPOT impact): 200 tokens * 0.2 ms/token = 40 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Bound. Net negative for typical workloads (3.84 ms saved vs 40 ms lost), unless outputs are very short (< 20 tokens) or network bandwidth is severely constrained.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

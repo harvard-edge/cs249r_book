@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2456
+track: cloud
+level: L5
+zone: evaluation
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Multi-LoRA Continuous Batching
+scenario: A multi-tenant SaaS serves 100 distinct fine-tuned LoRA adapters over a single 13B base model. Traffic per tenant is 2 QPS. Deploying dedicated GPUs per tenant is cost-prohibitive. You multiplex them on a single GPU using continuous batching, but grouping requests by LoRA adapter results in tiny batch sizes and 20% GPU utilization.
+question: "How can you batch requests across 100 different LoRA adapters on one 13B base model without destroying GPU utilization?"
+details:
+  realistic_solution: The tradeoff is between batching efficiency (GPU compute utilization) and kernel dispatch overhead. Standard batching requires all requests to use the same weights. To batch requests across *different* LoRAs, you must use grouped GEMM (e.g., Punica kernels). The base model weights are applied to the entire batch in one highly efficient large matrix multiplication. The LoRA-specific computations are handled by a custom CUDA kernel that applies different low-rank matrices to different rows of the batch simultaneously. This maximizes base-model throughput at the cost of slightly slower, custom attention/linear kernels for the LoRA adapters and increased complexity in managing a fragmented LoRA weight cache in VRAM.
+  common_mistake: |
+    **The Pitfall:** Dynamically swapping base model weights with LoRA weights in GPU memory per request.
+    **The Rationale:** It seems like a clean way to isolate memory spaces for different tenants.
+    **The Consequence:** Constant weight loading destroys memory bandwidth and cripples throughput, rendering the system unable to handle even moderate QPS.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 13B base model (FP16) = 26 GB.
+       - 100 LoRAs (rank 16) = 100 × 50 MB = 5 GB.
+       - Total fits within 40 GB VRAM.
+       - Batch size 16.
+    2. **Calculations:**
+       - Unbatched sequential execution: 15ms × 16 requests = 240ms.
+       - Grouped GEMM: Base model GEMM takes 20ms.
+       - Grouped LoRA GEMM (16 small parallel GEMMs) takes 5ms.
+       - Total Grouped GEMM time: 25ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Utilization-Bound. Grouped GEMM maximizes base model throughput, increasing performance by nearly 10x.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2581
+track: cloud
+level: L5
+zone: evaluation
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Cloud Megatron Parallelism L5 0
+scenario: 'You are distributing a 70B model across 64 GPUs (8 nodes of 8 GPUs). You must choose between Option A: TP=8 within each node, DP=8 across nodes, or Option B: TP=4 and PP=2 within each node, DP=8 across nodes.'
+question: Which parallelism layout yields better throughput for the 70B model, and why?
+details:
+  realistic_solution: 'Option A (TP=8, DP=8): each layer''s weights split across 8 GPUs. All-reduce per layer on NVLink (fast). But TP=8 means each GPU processes 1/8 of each matmul — very small tiles, potentially poor GPU utilization on tensor cores. DP gradient sync across nodes: 1 AllReduce of sharded gradients per GPU = 17.5 GB chunk. Ring All-Reduce transfers 2*(7/8)*17.5 GB = 30.6 GB at node interconnect speed. Option B (TP=4, PP=2, DP=8): TP=4 gives larger tiles per GPU (2x vs TP=8), better GPU utilization. PP=2 splits model into 2 stages of 40 layers each, introducing pipeline bubbles (bubble fraction ≈ 1/(micro_batches) per step). With 8 micro-batches: bubble = 12.5%. GPU utilization: TP=4 has ~90% utilization vs TP=8 at ~75%. Net: B trades pipeline bubble (12.5%) for better per-GPU utilization (+15%). B wins if bubble overhead < utilization gain.'
+  common_mistake: |
+    **The Pitfall:** Blindly maximizing tensor parallelism degree (TP=8) just because the node has 8 GPUs.
+    **The Rationale:** Candidates assume larger TP is always better for memory, ignoring the fact that small matmul tiles underutilize tensor cores.
+    **The Consequence:** The GPUs run inefficiently due to low arithmetic intensity, resulting in lower overall throughput compared to using Pipeline Parallelism.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64 GPUs total (8 nodes, 8 GPUs/node).
+    - Option A: TP=8, DP=8.
+    - Option B: TP=4, PP=2, DP=8.
+    - PP=2 uses 8 micro-batches.
+
+    **Calculations:**
+    - Option A (TP=8): 1024-dim matmul tile -> ~75% tensor core utilization. Effective throughput = 0.75.
+    - Option B (TP=4): 2048-dim matmul tile -> ~90% tensor core utilization.
+    - Option B Pipeline Bubble: ~1/8 = 12.5% overhead (87.5% efficiency).
+    - Option B Effective throughput: 0.90 * 0.875 = 0.7875 (78.75%).
+
+    **Conclusion & Interpretation:**
+    - **Result: Option B wins by ~5% (Compute-Bound)**. The utilization gain from larger matrix tiles outweighs the pipeline bubble penalty.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-491
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

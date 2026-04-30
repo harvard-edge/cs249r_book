@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: edge-2416
+track: edge
+level: L5
+zone: implement
+topic: queueing-theory
+competency_area: latency
+bloom_level: evaluate
+phase: both
+title: 'Coral TPU Batching Effect on Queue Stability'
+scenario: 'A 4-lane traffic-monitoring pipeline on an Edge TPU runs YOLOv5n at a fixed resolution. Per-frame service time is 25 ms for batch-of-1, 32 ms for batch-of-2, and 48 ms for batch-of-4. Frames arrive Poisson at 60 fps aggregated across the four lanes. The system must hold a 95th-percentile response time under 80 ms to satisfy a downstream signal-control SLA.'
+question: 'Evaluate whether batch-of-1, batch-of-2, or batch-of-4 best satisfies the 60 fps arrival rate at the 80 ms p95 SLA using M/D/1 queueing theory.'
+details:
+  realistic_solution: 'Arrival rate lambda = 60 fps. Batch-of-1 (mu=40, rho=1.5) is unstable - drop. Batch-of-2 effective mu = 62.5 fps but the unit of work is a 2-frame batch, so view as M/D/1 with lambda_b = 30 batches/s, mu_b = 31.25 batches/s, rho = 0.96 - very close to instability, expected fill time 1/lambda_b * 1 ~= 33 ms wait for the second frame plus M/D/1 Wq = (rho / (2*mu_b*(1-rho))) = 0.96/(2*31.25*0.04) = 384 ms - fails the SLA badly. Batch-of-4: lambda_b = 15, mu_b = 20.83 (1/0.048), rho = 0.72; M/D/1 Wq = 0.72 / (2*20.83*0.28) = 62 ms; fill time for the slowest frame in a batch of 4 at 60 fps arrivals ~= 3/60 = 50 ms; service 48 ms; total ~= 62 + 50 + 48 = 160 ms total response (head of batch sees less). For p95 with deterministic service and Poisson arrivals, the dominant term is fill + service for the last-arriving frame in the batch, which exceeds 80 ms in every batch >= 2 case at this load. Recommend dropping the offered load (e.g., spatial down-sampling) or upgrading to a faster TPU; static batching cannot meet the 80 ms p95 at 60 fps Poisson here. Use nsys profiling to monitor actual queue depths.'
+  common_mistake: |
+    **The Pitfall:** Picking the largest batch for the highest throughput ceiling.
+    **The Rationale:** Candidates ignore the fill-time penalty required to assemble the batch.
+    **The Consequence:** A batch-of-4 forces the first arriving frame to wait for three more arrivals, adding ~50 ms of pure waiting, blowing the 80 ms SLA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Poisson arrival rate: lambda = 60 fps.
+    - Service times: B=1 (25ms), B=2 (32ms), B=4 (48ms).
+
+    **Calculations:**
+    - B=1: rho = 1.5 (unstable).
+    - B=2: rho = 0.96, W_q = ~384 ms.
+    - B=4: rho = 0.72, W_q = ~62 ms.
+    - B=4 Fill time = ~50 ms. Total = 62 + 50 + 48 = 160 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~160 ms (Latency-Bound)**. None meets p95 < 80 ms SLA at lambda=60 fps.
+status: published
+provenance: llm-draft
+expected_time_minutes: 10
+requires_explanation: true
+validated: true
+math_verified: true
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-implement-L5
+created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

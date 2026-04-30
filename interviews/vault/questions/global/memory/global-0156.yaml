@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: global-0156
+track: global
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: XIP Flash Cache Thrashing
+scenario: You deploy an updated 200KB keyword spotting model to a Cortex-M7 (400MHz, 32KB D-Cache). The weights stream from external QSPI Flash via Execute-In-Place (XIP). After an on-device Federated Learning sparsity update, latency jumps from 15ms to 78ms and power spikes, despite FLOPs decreasing by 10%.
+question: "Why does the FL sparsity update make the 200KB keyword spotting model slower and higher power despite 10% fewer FLOPs?"
+details:
+  realistic_solution: 'The root cause is D-Cache thrashing due to a loss of spatial locality. The original dense model accessed weights sequentially, perfectly utilizing the 32-byte cache lines. The FL sparsity update introduced unstructured sparsity or a compressed format (e.g., CSR) that requires non-sequential pointer chasing. Nearly every non-sequential read of the 45,000 active weights misses the cache, forcing a 40ns fetch from QSPI Flash instead of a 2ns cache hit, stalling the pipeline and keeping the QSPI bus continuously active.'
+  common_mistake: |
+    **The Pitfall:** Assuming the FL sparsity update introduced unoptimized fallback kernels that take more CPU cycles.
+    **The Rationale:** When FLOPs go down but time goes up, developers usually blame bad software instruction optimization.
+    **The Consequence:** Wasting time rewriting assembly code when the issue is hardware-level memory access patterns destroying spatial locality.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 400MHz CPU, 32KB D-Cache, 32B cache lines.
+       - 200KB model streaming via XIP QSPI Flash (40ns fetch latency).
+       - 90% sparse updates cause non-sequential pointer chasing.
+    2. **Calculations:**
+       - Dense Model Misses: 200KB / 32B = 6,250 sequential misses.
+       - Sparse Model Active Weights: 50,000 * 0.9 = 45,000 non-sequential fetches.
+       - Sparse Model Misses: ~45,000 cache misses (loss of spatial locality).
+       - Raw Fetch Latency: 45,000 misses * 40ns = 1.8ms wait states.
+       - Added pipeline stalls and bus turnaround add >60ms.
+    3. **Conclusion & Interpretation:**
+       - **Cache thrashing from non-sequential access dominates execution time despite fewer FLOPs.**
+       - **Result: Memory-Latency Bound (Thrashing)**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

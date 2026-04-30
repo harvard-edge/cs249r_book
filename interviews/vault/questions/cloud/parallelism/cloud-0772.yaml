@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0772
+track: cloud
+level: L4
+zone: diagnosis
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: 'The NCCL Timeout'
+scenario: 'You are training a 30B model across 64 H100 GPUs (8 nodes × 8 GPUs). At random intervals—sometimes after 2 hours, sometimes after 20—the job hangs and eventually dies with `NCCL WARN Timeout on rank 47`. The hang always resolves to a different rank. Your network monitoring shows no packet loss.'
+question: 'What is causing the random NCCL timeout hangs across different ranks, and how do you diagnose it?'
+details:
+  realistic_solution: 'The timeout means one GPU fell behind the collective — all other ranks are waiting for rank 47 to contribute its chunk in the AllReduce ring, but rank 47 is still computing. The randomness across ranks points to a *stochastic* slowdown, not a deterministic one. Top suspects: (1) **GPU thermal throttling** — one node''s cooling is marginal; under sustained load, a random GPU hits 83°C and throttles from 700W to ~500W, falling behind the collective. The "random rank" pattern occurs because different GPUs throttle at different times depending on workload and airflow. (2) **ECC error correction storms** — intermittent HBM errors trigger ECC correction, which stalls memory accesses for microseconds. At 64 GPUs, even rare per-GPU events become frequent cluster-wide. (3) **OS-level interference** — a cron job, log rotation, or kernel memory compaction on the host CPU stalls the PCIe DMA engine, delaying the GPU''s NCCL kernel launch. Diagnosis: set `NCCL_DEBUG=INFO` and `NCCL_DEBUG_SUBSYS=COLL` to log per-rank timing. Correlate the slow rank with `nvidia-smi -q -d TEMPERATURE,ECC` and host-level `dmesg` logs.'
+  common_mistake: |
+    **The Pitfall:** Assuming it's a network issue and increasing `NCCL_TIMEOUT` to give the slow node more time.
+    **The Rationale:** Because NCCL errors mention timeouts, engineers reflexively treat it as a network configuration problem.
+    **The Consequence:** Increasing the timeout just delays the crash; it doesn't fix the root cause, and the randomness across ranks rules out a single bad NIC.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - AllReduce for 30B * 4 bytes = 120 GB across 64 GPUs via ring.
+    - Bandwidth time = 2 * 120 GB / 50 GB/s = 4.8 s. Per-step budget = 4.8 / (2 * 63) ~ 38 ms.
+
+    **Calculations:**
+    - A thermally throttled GPU running at 71% speed adds ~15 ms per step (38 ms / 0.71 = 53.5 ms). Over 126 steps, this accumulates to ~1.9 s delay.
+    - If hit by an ECC storm (~50 ms for 10 corrections), total delay = (15 + 50) * 126 = 8.2 s per AllReduce.
+
+    **Conclusion & Interpretation:**
+    - **Result: 8.2 s delay (Latency-Bound)**. Accumulated delays exceed NCCL's default timeout.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-084
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

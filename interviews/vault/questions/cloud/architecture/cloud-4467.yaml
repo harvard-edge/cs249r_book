@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4467
+track: cloud
+level: L5
+zone: design
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: evaluate
+phase: inference
+title: 'Feature Freshness vs Serving Latency: Pre-Compute vs Real-Time'
+scenario: 'A recommendation system uses 200 features per (user, item) pair. 50 features change in real-time (e.g., current session behavior). 150 features change hourly (e.g., item popularity).'
+question: 'Which of the 200 features should be pre-computed versus computed at request time, given 50 real-time and 150 hourly features?'
+details:
+  realistic_solution: 'Tiered feature architecture: (1) Static features (pre-computed, refreshed daily): user demographics, item metadata, historical statistics. Store in Redis/RocksDB. Latency: 0.5ms lookup. (2) Hourly features (pre-computed, refreshed hourly): item popularity counts, user preference histograms, collaborative filtering embeddings. Store in Redis. Staleness: 0-60 minutes. Acceptable for popularity signals. (3) Real-time features (computed at serving time): current session behavior (last 5 clicked items), real-time inventory status, time-of-day. Compute from streaming pipeline output (Kafka consumer reading session events). Latency: 1-2ms to query session store. (4) Near-real-time features (micro-batch, refreshed every 1 minute): aggregate session signals (click rate in last 10 minutes). Pre-computed by a Flink streaming job, served from feature store with 1-minute staleness. Total feature fetch latency: 0.5ms static + 0.5ms hourly + 1.5ms real-time = 2.5ms. Without pre-computation (all real-time): 8-12ms. Pre-computing saves 5-10ms of the 100ms budget.'
+  common_mistake: |
+    **The Pitfall:** Treating all 200 features as equally time-sensitive.
+    **The Rationale:** Candidates either pre-compute everything (serving stale real-time features) or compute everything dynamically (adding unnecessary latency for slow-changing features).
+    **The Consequence:** The system either misses critical real-time user intent, degrading recommendation quality, or violates strict latency SLAs by repeating expensive stream joins.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 150 hourly features (Redis GET)
+    - 50 real-time features (In-memory session store)
+    - Encoding cost: 4 bytes per feature
+
+    **Calculations:**
+    - Redis fetch for 150 features = 1 ms (1 network RTT + hash lookups)
+    - Session store fetch for 50 features = 0.1 ms
+    - Float tensor encoding = 200 * 4B = 800 bytes = ~0.9 ms
+    - Total latency with pre-computation = 1 ms + 0.1 ms + 0.9 ms = 2.0 ms
+    - Pure real-time stream join (5 Kafka topics) = 10-50 ms
+
+    **Conclusion & Interpretation:**
+    - **Result: 2.0 ms (Latency-Bound)**. A tiered architecture (pre-computing hourly, real-time for session) saves ~8-48 ms of the strict serving budget compared to pure real-time computation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

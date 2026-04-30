@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-1095
+track: mobile
+level: L3
+zone: analyze
+topic: graph-compilation
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: TPU Graph Operator Fusion Performance Anomaly
+scenario: You are profiling the ahead-of-time compilation of a custom transformer model for a mobile NPU. After the compiler applies an aggressive operator fusion pass (combining LayerNorm and MatMul), you observe that the fused subgraph executes significantly slower than the original unfused operations.
+question: Why can LayerNorm+MatMul fusion run slower than unfused ops despite reducing LPDDR memory traffic?
+details:
+  realistic_solution: |
+    The performance regression occurs because the compiler lacks a highly optimized, hand-tuned kernel for that specific fused LayerNorm+MatMul signature. While topological fusion successfully avoids writing intermediate activations back to the LPDDR memory (saving minimal bandwidth), the resulting generic fallback kernel suffers from disastrously low arithmetic intensity. It completely fails to utilize the NPU's dense systolic matrix multiply units. The massive compute penalty of a poorly utilized NPU vastly outweighs the microsecond-level memory bandwidth savings of the fusion.
+  common_mistake: |
+    **The Pitfall:** Assuming topological graph fusion universally guarantees a performance speedup.
+    **The Rationale:** Candidates rigidly believe that reducing DRAM trips mathematically guarantees faster execution, entirely ignoring the extreme performance cliff of dropping off hand-tuned hardware fast-paths.
+    **The Consequence:** Blindly forcing compiler passes that inadvertently replace lightning-fast native kernels with generic CPU/DSP fallbacks, tanking throughput.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Hardware: Edge NPU capable of ~6 TOPS with optimized kernels.
+       - Workload: 8.3 MFLOPs compute; 4 KB intermediate DRAM access at 50 GB/s bandwidth.
+       - Unfused Kernels: Hit optimized paths executing at 6 TOPS.
+       - Fused Generic Kernel: Unoptimized, hitting only 1 TOPS.
+    2. **Calculations:**
+       - Unfused Latency: (8.3 MFLOPs / 6 TOPS) + (4 KB / 50 GB/s) = 1.38 µs + 0.08 µs = 1.46 µs.
+       - Fused Latency (no DRAM roundtrip): 8.3 MFLOPs / 1 TOPS = 8.3 µs.
+       - Regression Multiplier: 8.3 µs / 1.46 µs = ~5.6x slower.
+    3. **Conclusion & Interpretation:**
+       **Result: 5.6x slower execution (Compute-Bound regression).** The 0.08µs saved on memory bandwidth is destroyed by the 6.9µs compute penalty of an unoptimized kernel.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

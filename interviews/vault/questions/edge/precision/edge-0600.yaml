@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: edge-0600
+track: edge
+level: L5
+zone: evaluation
+topic: real-time-deadlines
+competency_area: precision
+bloom_level: evaluate
+phase: inference
+title: The Headlight Overflow Failure
+scenario: You are the ML Systems lead for a new autonomous driving platform deploying a 3D object detection model on an NVIDIA Jetson AGX Orin with a hard real-time deadline of 33ms per frame. The model was converted from FP32 to INT8 using Post-Training Static Quantization (PTQ), calibrated on 10,000 representative daytime driving images. During daytime validation, the system is flawless. However, during night-time testing, the perception system completely stops detecting any objects for several seconds whenever a car with modern, bright LED headlights directly approaches the camera.
+question: Why is the system failing catastrophically instead of showing a graceful mAP drop, and what specific steps would you take to fix it?
+details:
+  realistic_solution: This is a classic Activation Overflow event. The PTQ calibration set lacked extreme high-contrast lighting. The intense luminance forces the early layer activations outside the calibrated dynamic range, clamping values at the INT8 limit (e.g., 127) and mathematically destroying feature representation. Mitigation requires implementing Mixed-Precision inference (running the first few sensitive layers in FP16 and the rest in INT8) to absorb the dynamic range without missing the 33ms deadline.
+  common_mistake: |
+    **The Pitfall:** Dismissing it as a simple domain gap or training data issue.
+    **The Rationale:** Candidates often state, "The training data didn't include headlights, just retrain it," diagnosing the 'what' (data mismatch) but completely missing the 'why' (catastrophic hardware-level overflow).
+    **The Consequence:** Applying a simple retrain and requantize strategy that still fails if the activation calibration ranges aren't explicitly robust to extreme outliers.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target Deadline: 33ms.
+    - Hardware: Jetson AGX Orin (275 INT8 TOPS, ~137 FP16 TFLOPS, 204.8 GB/s).
+    - Operations: Assume ~4 TFLOPs of compute and 200MB memory fetch required for a single frame.
+
+    **Calculations:**
+    - FP16 Pure Compute Time = 4 TFLOPs / 137 TFLOPS = 29.2 ms.
+    - FP16 Pure Memory Time = 200 MB / 204.8 GB/s = 0.97 ms.
+    - Total FP16 Time ≈ 30.17 ms (dangerously close to 33ms deadline).
+    - Mixed Precision Strategy (80% INT8, 20% FP16):
+      - INT8 Compute Time = (4 * 0.8) / 275 = 11.6 ms.
+      - FP16 Compute Time = (4 * 0.2) / 137 = 5.8 ms.
+      - Memory Fetch (Assuming ~120MB due to INT8 compression) = 120 MB / 204.8 GB/s = 0.58 ms.
+      - Total Mixed Precision Time = 11.6 + 5.8 + 0.58 = 17.98 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~18 ms (Compute-Bound Mixed Precision)**. Mixed precision safely solves the activation overflow while maintaining the 33ms real-time deadline.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

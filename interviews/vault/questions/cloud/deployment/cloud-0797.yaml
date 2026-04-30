@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0797
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Model Deprecation Cliff
+scenario: Your platform has 23 models in production. You discover that 8 older models collectively serve only 2% of total traffic but consume 30% of your GPU fleet. Your PM asks why these old models can't just be co-located on the same GPUs as the newer models to save money.
+question: Why does maintaining multiple model generations simultaneously fragment your serving cluster and destroy GPU utilization?
+details:
+  realistic_solution: Co-locating multiple model generations on a single GPU creates severe memory fragmentation and scheduling bottlenecks. Old models often use different precision formats (e.g., FP32 vs FP16), different CUDA graph compilations, and different batch sizes. When you load multiple distinct models onto one GPU, each model statically reserves its own CUDA context, workspace memory, and KV-cache blocks. Because the models don't share weights or attention architectures, the serving framework (like vLLM or Triton) cannot easily batch requests across them. The GPU ends up context-switching between different kernels, destroying arithmetic intensity, while the VRAM is partitioned into small, inflexible silos that prevent any single model from achieving a large enough batch size to be compute-bound.
+  common_mistake: |
+    **The Pitfall:** "Just put them all in the same Docker container."
+    **The Rationale:** Treating GPU VRAM and scheduling exactly like system RAM and CPU processes.
+    **The Consequence:** Ignores static CUDA context allocation and KV-cache sharding, completely destroying GPU hardware utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: 80 GB H100.
+    - Base model (13B): 26 GB weights. Free VRAM: 54 GB (unified KV-cache).
+    - Co-location: Three 7B models (14 GB weights each = 42 GB total).
+
+    **Calculations:**
+    - Single model KV-cache available: 54 GB (allows ~100+ concurrent requests).
+    - Co-located KV-cache available: 80 GB - 42 GB = 38 GB.
+    - Fragmented KV-cache per model: 38 GB / 3 = 12.6 GB (allows ~20 concurrent requests each).
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound (Fragmentation)**. Co-locating models shards the KV-cache, forcing low batch sizes and destroying arithmetic intensity, dropping throughput by 3-4x.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-100
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

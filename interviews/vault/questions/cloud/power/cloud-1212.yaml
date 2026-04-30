@@ -1,0 +1,62 @@
+schema_version: '1.0'
+id: cloud-1212
+track: cloud
+level: L4
+zone: diagnosis
+topic: energy-per-operation
+competency_area: power
+bloom_level: analyze
+phase: both
+title: Root-Causing Memory Power in LLM Inference
+scenario: 'Your team is profiling an auto-regressive decoding microservice serving a 20-billion parameter LLM (FP16, 40GB memory footprint) on a single GPU (2.0 TB/s HBM bandwidth). At a batch size of 1, generating 50 tokens per second, the chip''s arithmetic logic units (ALUs) consume merely ~0.1W, but overall chip power draw unexpectedly hits ~180W.'
+question: "Why does the 20B batch-1 decoding service draw 180W with only ~0.1W of ALU work, and how would you reduce it?"
+details:
+  realistic_solution: 'Diagnose the issue as extreme energy-per-byte disparity. At batch size 1, every parameter must be loaded from HBM to SRAM for a single multiply-accumulate. Off-chip HBM access costs ~80 pJ/byte, whereas an FP16 MAC operation costs ~0.1 pJ. On an A100 with 2 TB/s bandwidth, a 40 GB model at batch=1 can generate at most ~50 tokens/sec (2 TB/s / 40 GB). At this rate, memory reads alone consume ~160W while compute (at 0.1 pJ/MAC) uses only ~0.1W. To resolve the power bottleneck, increase the batch size (to amortize weight reads over multiple tokens) or quantize weights to INT4/FP8 to significantly reduce the raw bytes fetched.'
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing the power draw as an inefficient matrix multiplication kernel or static leakage.
+    **The Rationale:** Failing to realize that data movement (fetching weights from HBM) inherently costs orders of magnitude more energy than ALUs.
+    **The Consequence:** Wasting time optimizing compute kernels instead of increasing batch size or quantizing weights.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 40 GB footprint per token at batch 1.
+    - 50 tokens/sec.
+    - HBM Energy = 80 pJ/byte.
+    - Compute = 40 GFLOPs/token, 0.05 pJ/FLOP (0.1 pJ/MAC).
+
+    **Calculations:**
+    - HBM Read Volume: 40 GB * 50 = 2.0 TB/sec.
+    - Memory Power: 2e12 bytes/sec * 80e-12 J/byte = 160 Watts.
+    - Compute Power: 40 GFLOPs * 50 = 2 TFLOPs/sec. 2e12 FLOPs/sec * 0.05e-12 J/FLOP = 0.1 Watts.
+    - Total Power: ~160W + ~0.1W + ~20W overhead = ~180W.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory data movement consumes ~1600x more power than compute (Memory-Bandwidth-Bound).**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+chains:
+- id: cloud-chain-128
+  position: 1
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- HBM bandwidth for A100 80GB is 1.9 TB/s, not 2 TB/s, though 2 TB/s is a common approximation.
+validation_status_pro: ERROR
+validation_issues_pro:
+- The required memory bandwidth of 4 TB/s exceeds the physical limits of current single accelerators like the A100 (~2 TB/s) or H100 (~3.35 TB/s).
+- The compute power calculation is dimensionally incorrect and uses inconsistent numbers; it should be based on 4 TFLOP/s for a 20B model, not 40 TFLOPs.
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Inconsistent arithmetic: specifies MAC costs ~0.1 pJ (so 1 FLOP = 0.05 pJ) but calculates compute power using 0.1 pJ per FLOP'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:12:15.757312'

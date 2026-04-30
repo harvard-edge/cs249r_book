@@ -31,7 +31,7 @@ def load_yaml_overrides() -> dict[str, dict]:
     questions_dir = VAULT_DIR / "questions"
     if not questions_dir.exists():
         return out
-    for path in questions_dir.glob("*/*.yaml"):
+    for path in questions_dir.rglob('*.yaml'):
         try:
             data = yaml.safe_load(path.read_text()) or {}
         except Exception:

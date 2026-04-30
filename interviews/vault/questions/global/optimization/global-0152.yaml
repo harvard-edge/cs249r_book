@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: global-0152
+track: global
+level: L4
+zone: diagnosis
+topic: graph-compilation
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: 'The Strided Cache Miss'
+scenario: 'A custom 2D Convolution layer for a visual wake word model takes 80ms to execute, but the theoretical MAC count suggests it should take 15ms. Weights are in QSPI Flash, activations in 256KB SRAM.'
+question: 'Why is the custom 2D convolution taking 80ms instead of the 15ms suggested by its MAC count?'
+details:
+  realistic_solution: 'The root cause is a severe spatial locality violation in the custom kernel''s nested loops. The activations are stored in row-major order (NHWC), but the custom C++ loop iterates over them in column-major order (or iterates over channels in the outermost loop). On a Cortex-M7 with a 16KB D-Cache and 32-byte cache lines, this access pattern guarantees a cache miss on almost every memory load. The CPU spends the majority of its time stalled, waiting for the memory controller to fetch new cache lines from SRAM or Flash, destroying performance and wasting power.'
+  common_mistake: |
+    **The Pitfall:** Concluding that the QSPI Flash bandwidth is fundamentally too slow for the required weight fetches.
+    **The Rationale:** Blaming the hardware interconnect limits instead of diagnosing the extreme inefficiency of the software access pattern.
+    **The Consequence:** Abandoning the low-power hardware for a more expensive chip when simply reordering the nested loops would fix the latency.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Image: 96x96x1 (9,216 bytes). Activations in NHWC (row-major).
+    - Cache: 16KB D-Cache, 32-byte lines. Miss penalty: 15 cycles.
+    - Custom kernel iterates column-major.
+
+    **Calculations:**
+    - Accessing (x, y) loads a 32-byte row chunk.
+    - Accessing (x, y+1) jumps 96 bytes away, guaranteeing a cache miss.
+    - Misses per filter: 96 * 96 * 15 wasted cycles = ~138k cycles.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~5x latency increase (Memory-Latency-Bound)**. By spatial locality violation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

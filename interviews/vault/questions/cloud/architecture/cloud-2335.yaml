@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2335
+track: cloud
+level: L6+
+zone: diagnosis
+topic: neural-architecture-search
+competency_area: architecture
+bloom_level: analyze
+phase: training
+title: Dataflow Compiler Thrashing on Dynamic Shapes
+scenario: You migrate a speech-to-text Transformer model from GPUs to a static dataflow accelerator. On the GPU, p99 latency is 45ms. On the new dataflow architecture, despite having 10x the SRAM, p99 latency spikes to 850ms. Tracing shows the hardware is idle 90% of the time.
+question: Why does the static dataflow accelerator show 850ms p99 and 90% idle time for variable-length speech inputs, and how would you fix it?
+details:
+  realistic_solution: |
+    The symptom (massive latency spikes and idle hardware on a static dataflow chip) is caused by dynamic input shapes (variable audio sequence lengths). Static dataflow architectures (like Groq) rely on a deterministic compiler that schedules every instruction, memory fetch, and network route at compile time. They do not have dynamic instruction schedulers or hardware control flow like GPUs. When a request arrives with a novel sequence length, the runtime must either trigger a Just-In-Time (JIT) recompilation of the entire dataflow graph (taking hundreds of milliseconds) or pad the sequence to a massive pre-compiled maximum length, wasting cycles. The algorithm-compiler co-design solution is to implement 'bucketization'—compiling the model for 3-4 fixed sequence lengths (e.g., 128, 512, 2048) at deployment time, and padding incoming requests to the nearest bucket, entirely avoiding JIT recompilation.
+  common_mistake: |
+    **The Pitfall:** Assuming the dataflow architecture lacks raw FLOPS or memory bandwidth.
+    **The Rationale:** Engineers apply dynamic GPU execution intuition to static graph hardware.
+    **The Consequence:** They fail to realize that dynamic input shapes trigger massive Just-In-Time (JIT) recompilation penalties on hardware that lacks dynamic instruction schedulers.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - JIT compilation time for new shape: ~800ms.
+    - Static execution compute time (padded to 3000 tokens): ~0.6ms.
+
+    **Calculations:**
+    - Penalty of JIT: 800ms per variable sequence length.
+    - Penalty of padding: <1ms compute overhead.
+    - Latency reduction: 850ms -> <2ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compiler-Bound Latency**. Padding to fixed buckets eliminates the 800ms JIT compilation penalty at the cost of <1ms wasted compute.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- dataflow
+- compiler
+- dynamic-shapes
+- latency

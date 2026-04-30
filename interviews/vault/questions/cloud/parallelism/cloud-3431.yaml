@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-3431
+track: cloud
+level: L2
+zone: analyze
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: 3D Parallelism Sizing — Adam State + Activations on A100s
+scenario: A 70B-parameter transformer is trained on 80 GB A100s. Each parameter under mixed-precision Adam costs 16 bytes of model state. Reserve 16 GB per GPU for activations and workspace. The team must choose tensor parallelism (TP), pipeline parallelism (PP), and data parallelism (DP) sizes that respect the per-GPU HBM budget.
+question: Decompose how DP, TP, and PP affect the per-GPU memory footprint, and choose the minimum (TP, PP) to fit.
+details:
+  realistic_solution: 'DP replicates model state across ranks — it does *not* reduce per-GPU memory at all. TP shards weights, gradients, and (with ZeRO-1) part of the optimizer state along a tensor dimension; the full model state divides by TP. PP shards layers across stages; the full model state divides by PP. For 70B params * 16 bytes = 1120 GB of model state; per-GPU budget is 80 - 16 = 64 GB; minimum (TP * PP) ≥ 1120 / 64 = 17.5 → 18, rounded up to a topology-friendly TP=8 (within a node, on NVLink) and PP=4 (across nodes), giving TP*PP = 32, per-GPU model state = 35 GB, leaving 29 GB for activations and workspace. DP can then be added freely for throughput without affecting fit.'
+  common_mistake: |
+    **The Pitfall:** Assuming Data Parallelism (DP) reduces per-GPU model memory.
+    **The Rationale:** Novices often think "splitting the job" across GPUs reduces memory footprint everywhere, missing that DP replicates the full model state on every rank unless ZeRO is used.
+    **The Consequence:** The training job instantly OOMs because the DP ranks are starved of memory, or naive TP is placed across slow InfiniBand nodes, stalling training.
+  napkin_math: |
+    - **Total Model State:** $70\text{B params} \times 16\text{ bytes} = 1120\text{ GB}$.
+    - **Per-GPU Budget:** $80\text{ GB} - 16\text{ GB (activations)} = 64\text{ GB}$.
+    - **Required Splitting:** $\text{min}(TP \times PP) = \lceil 1120 / 64 \rceil = 18$.
+    - **Topology Selection:** Choose $TP=8$ (NVLink-bound intra-node) and $PP=4$ (cross-node).
+    - **New Footprint:** $TP \times PP = 32$. $1120\text{ GB} / 32 = 35\text{ GB}$ per GPU.
+    - **Conclusion:** **TP=8, PP=4 fits the model in 35GB**, leaving ample room for activations. DP divides the batch but does not shrink model state.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

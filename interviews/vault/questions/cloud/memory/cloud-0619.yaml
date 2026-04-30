@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-0619
+track: cloud
+level: L5
+zone: diagnosis
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: The Strided Memory Fetch
+scenario: You are writing a custom CUDA kernel to perform an element-wise addition of two 1GB tensors. Version A reads the tensors sequentially (`A[i] + B[i]`). Version B reads the tensors with a stride of 1024 (`A[i*1024] + B[i*1024]`). Both perform the exact same number of floating-point operations.
+question: "Why does Version B run 30x slower?"
+details:
+  realistic_solution: You destroyed memory coalescing. GPUs do not fetch individual bytes from HBM; they fetch massive contiguous blocks called cache lines (typically 32 or 128 bytes at a time). In Version A, when thread 0 requests `A[0]`, the GPU pulls a 128-byte block into SRAM, meaning the next 31 threads get their data for 'free' from the ultra-fast cache. In Version B, thread 0 requests `A[0]`, pulling 128 bytes. But thread 1 requests `A[1024]`, which is in a completely different cache line. The GPU must issue a brand new fetch to HBM for every single thread. You are forcing the memory bus to transfer 128 bytes to utilize only 4 bytes, wasting 97% of your bandwidth.
+  common_mistake: |
+    **The Pitfall:** Thinking of memory as an array of independent bytes.
+    **The Rationale:** Ignoring the physical hardware of the memory bus and the existence of cache lines.
+    **The Consequence:** Destroying memory coalescing, leading to 30x slower performance due to massive bandwidth waste.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - HBM Cache Line: 128 bytes fetched per memory transaction.
+       - Data size: 4-byte floats.
+    2. **Calculations:**
+       - Version A Utilization = 128 bytes used / 128 bytes fetched = 100%.
+       - Version B Utilization = 4 bytes used / 128 bytes fetched = 3.125%.
+       - Effective Bandwidth for B = 2,000 GB/s * 0.03125 = 62.5 GB/s.
+    3. **Conclusion & Interpretation:**
+       - **Result: 97% Bandwidth Waste (Memory-Bandwidth-Bound).** The stride-1024 kernel destroys memory coalescing, forcing the bus to fetch 128 bytes for every 4 bytes used.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-245
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

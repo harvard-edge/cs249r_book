@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-3954
+track: cloud
+level: L3
+zone: implement
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: Overlapping Gradient Norm Computation with AllReduce
+scenario: 'Gradient clipping requires computing the global gradient norm across all parameters on all GPUs before the optimizer step, typically via a separate AllReduce performed after the gradient AllReduce.'
+question: 'How can you overlap the global gradient norm computation with the gradient AllReduce to eliminate its latency overhead?'
+details:
+  realistic_solution: 'Overlap strategy: (1) As each gradient bucket finishes its AllReduce, immediately compute the L2 norm of that bucket on the local GPU (sum of squares). (2) Accumulate per-bucket norms into a running sum. This norm computation overlaps with subsequent buckets'' AllReduce. (3) After all buckets are reduced and all local norms computed, do one tiny AllReduce of a single float (the local squared norm sum) to get the global norm. (4) This tiny AllReduce (<1us) replaces a sequential norm computation that would take 2-5ms. Implementation in PyTorch DDP: use register_comm_hook to insert norm computation after each bucket''s AllReduce. Result: gradient clipping adds near-zero overhead instead of 2-5ms.'
+  common_mistake: |
+    **The Pitfall:** Computing gradient norms only after all gradients are fully reduced.
+    **The Rationale:** Candidates follow the naive mathematical definition, fully sequentializing: backward → AllReduce → norm computation → norm AllReduce → clip.
+    **The Consequence:** A synchronous computation blocks the pipeline, adding 2-5ms of latency to every single training step.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Sequential norm computation latency: ~2.0 ms.
+       - Standard AllReduce latency for norm: ~0.1 ms.
+       - Fused tiny AllReduce (single float) latency: ~0.001 ms.
+    2. **Calculations:**
+       - Standard Approach = AllReduce finish + norm compute (2.0 ms) + norm AllReduce (0.1 ms) = 2.1 ms overhead.
+       - Overlapped Approach = Concurrent norm compute (0 ms hidden) + tiny AllReduce (0.001 ms) = 0.001 ms overhead.
+    3. **Conclusion & Interpretation:** **Result: Latency-Bound**. Overlapping the computation eliminates ~2.1 ms of synchronous blocking per step, significantly increasing overall training throughput.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

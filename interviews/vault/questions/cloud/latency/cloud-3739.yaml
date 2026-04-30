@@ -1,0 +1,32 @@
+schema_version: '1.0'
+id: cloud-3739
+track: cloud
+level: L5
+zone: optimization
+topic: model-serving-infrastructure
+competency_area: latency
+bloom_level: create
+phase: inference
+title: Disaggregated Serving with Chunked Prefill on A100 80GB
+scenario: 'A LLM serving system on A100 80GB alternates between large prefill requests (2048 tokens, ~400ms) and decode requests (single tokens, ~10ms each). Full prefill preempts all decode requests, causing P99 decode latency spikes to 2 seconds. Implement chunked prefill to bound decode interference.'
+question: 'How would you choose a chunked-prefill size to bound decode latency spikes from 2048-token prefills, and what TTFT trade-off results?'
+details:
+  realistic_solution: 'Problem: 400ms prefill preempts 40 decode steps at 10ms each -> P99 decode spikes. Chunked prefill: split 2048 tokens into C chunks, interleave one chunk with each decode step. Chunk size selection: minimum chunk for A100 efficiency ≈ 128 tokens (below this, tensor core utilization drops). With 128-token chunks: 2048/128 = 16 chunks, each taking ~25ms (attention is O(n x chunk_size)), interleaved with 16 decode steps at 10ms each. Total time: 16 x (25+10) = 560ms vs original 400ms+10ms x old_decode. Decode P99: max wait = 25ms (one chunk) vs 400ms. TTFT increases (2048 tokens now take 560ms vs 400ms), but P99 decode latency drops 16x from 400ms to 25ms. Trade-off: TTFT +40%, decode interference -94%.'
+  common_mistake: |
+    **The Pitfall:** Chunking prefill into extremely small, equal-size chunks (e.g., < 64 tokens).
+    **The Rationale:** Engineers focus purely on minimizing decode interruption, forgetting that tiny chunks suffer from high kernel launch overhead and poor Tensor Core utilization.
+    **The Consequence:** Effective prefill throughput plummets, massively increasing total time to first token (TTFT).
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A100 80GB, 2048-token prefill (~400ms), 10ms decode steps.
+    - Chunk size: 128 tokens.
+
+    **Calculations:**
+    - Chunks required: 2048 / 128 = 16 chunks.
+    - Chunk duration: ~25ms (due to O(N * chunk_size) attention scaling).
+    - New P99 Decode Wait: Interleaved behind 1 chunk max = 25ms.
+    - New TTFT: 16 chunks * (25ms + 10ms decode interleave) = 560ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute Interference Bounded.** P99 decode latency drops 16x (400ms to 25ms), trading a 40% TTFT increase for strict SLA compliance.
+status: published

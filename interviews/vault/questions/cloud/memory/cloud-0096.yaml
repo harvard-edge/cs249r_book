@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0096
+track: cloud
+level: L3
+zone: fluency
+topic: vram-budgeting
+competency_area: memory
+bloom_level: apply
+phase: both
+title: The Memory Wall of Long Contexts
+scenario: An H100 system serving LLMs handles 64 concurrent users with short prompts efficiently. However, when a few users submit 16k-token contexts, the system OOMs and the entire batch fails.
+question: Why can a few 16k-token conversations cause an OOM on an H100 system that comfortably handles 64 short-prompt users?
+details:
+  realistic_solution: |
+    The problem is the massive memory consumption of the KV cache for long sequences. In a transformer, the key-value (KV) states for every token in the context window must be stored in GPU memory to generate the next token. This memory usage scales linearly with sequence length and batch size. While continuous batching is efficient, it doesn't eliminate the fundamental memory requirement of the KV cache. A few users with very long contexts can quickly exhaust the 80 GB of HBM on an H100, causing an OOM that kills the entire batch of users currently being processed. The system needs KV cache compression (like quantization), paged attention mechanisms, or a stricter limit on the maximum sequence length per user to manage this.
+  common_mistake: |
+    **The Pitfall:** Assuming memory usage is dictated entirely by model weights.
+    **The Rationale:** Engineers calculate static parameters but ignore the dynamic, linear scaling of the KV cache relative to context length.
+    **The Consequence:** The serving infrastructure is drastically under-provisioned for long-context generation, leading to catastrophic batch failures in production.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 80 GB total VRAM. 70 GB model weights = 10 GB available for KV cache.
+    - Short Prompt KV Cost: 163,840 bytes/token * 512 tokens = ~83.8 MB/user.
+
+    **Calculations:**
+    - Short Prompt (64 users): 64 * 83.8 MB = 5.37 GB (safely fits).
+    - Long Prompt KV Cost: 163,840 bytes/token * 16,384 tokens = ~2.68 GB/user.
+    - Long Prompt (4 users): 4 * 2.68 GB = 10.72 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 10.72 GB KV cache for 4 users (Memory-Capacity-Bound)**. Just 4 long-context users instantly exhaust the 10 GB overhead budget, triggering an OOM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-218
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

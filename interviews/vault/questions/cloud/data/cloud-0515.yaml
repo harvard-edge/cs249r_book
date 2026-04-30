@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-0515
+track: cloud
+level: L4
+zone: diagnosis
+topic: mlops-lifecycle
+competency_area: data
+bloom_level: analyze
+phase: both
+title: The Backpressure Cascade
+scenario: Your real-time ML pipeline ingests clickstream events from Kafka (50,000 events/sec), enriches them with user features from Redis, runs a fraud scoring model, and writes results to a downstream Kafka topic. During a flash sale, the event rate spikes to 200,000/sec. Within 90 seconds, the fraud model's latency jumps from 5ms to 800ms, even though GPU utilization is only 40%.
+question: "What is happening, and how do you prevent it?"
+details:
+  realistic_solution: This is a severe backpressure cascade triggered by Redis I/O saturation. At 200k/sec, Redis hits its throughput ceiling, causing enrichment buffer queues to explode. This triggers JVM/Python Garbage Collection (GC) pauses, timing out the Kafka consumer heartbeat. The Kafka group rebalances, pausing all consumers and building a massive backlog. Prevent this by implementing load shedding (sampling events during spikes), circuit breakers with fast timeouts for Redis, and capping `max.poll.records` in Kafka.
+  common_mistake: |
+    **The Pitfall:** Assuming the GPU is the bottleneck and attempting to scale the inference cluster.
+    **The Rationale:** Engineers see the ML model latency spike and instinctively blame the neural network compute, ignoring the 40% GPU utilization metric.
+    **The Consequence:** Wasting massive capital on unneeded GPUs while the pipeline continues to fatally collapse under Redis/Kafka backpressure.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Normal: 50k events/sec. Spike: 200k events/sec.
+       - Redis limit: ~150k ops/sec.
+       - Kafka heartbeat timeout: 10s. Rebalance time: 45s.
+    2. **Calculations:**
+       - Queue buildup rate: 200k - 150k = 50,000 events/sec.
+       - Queue size in 30s: 1.5M events * 200 bytes = 300 MB (triggers GC pause).
+       - Backlog during 45s rebalance: 200k/sec * 45s = 9,000,000 events.
+       - Catch-up time post-rebalance: 9M events / 150k limit = 60 seconds (but new events keep arriving).
+    3. **Conclusion & Interpretation:**
+       - **Result: 9M Event Backlog.** The system is **I/O-Bound by Redis**, leading to catastrophic cascading failure through the Kafka consumer group.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

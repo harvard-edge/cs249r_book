@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-4319
+track: cloud
+level: L5
+zone: evaluation
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: Embedding Lookup All-to-All Communication
+scenario: Your DLRM training cluster shows that GPU utilization during embedding forward passes is 8% while MLP backward passes reach 90%. Profiling shows an all-to-all collective taking 85% of the embedding step time.
+question: Why does embedding all-to-all dominate DLRM training, and what architectural change would reduce communication volume?
+details:
+  realistic_solution: 'In DLRM training, embedding tables are sharded across GPUs (model parallelism for embeddings) while input batches are replicated across GPUs (data parallelism for MLPs). Each GPU in the batch needs embedding rows that live on different GPUs — this creates an all-to-all: each of N GPUs sends to each of N GPUs. Volume: batch_size × embedding_dim × num_tables bytes per collective. At 64 GPUs, all-to-all scales as O(N²) in communication pairs. Fix: (1) Embedding table placement optimization: group tables accessed together by the same requests onto the same GPU, reducing inter-GPU communication to only tables that span GPU boundaries. (2) Hybrid sharding: replicate small hot tables on all GPUs (row-wise for large, replicated for small). This converts all-to-all to all-gather for replicated tables (O(N) vs O(N²) scaling). (3) Reduce embedding dimension: use 64-dim instead of 256-dim embeddings where accuracy permits (4× reduction in all-to-all volume).'
+  common_mistake: |
+    **The Pitfall:** Trying to optimize the NCCL all-to-all implementation directly.
+    **The Rationale:** Performance engineers see a collective bottleneck and immediately try to tune the network layer or environment variables.
+    **The Consequence:** Ignoring the fundamental architectural flaw of the sharding strategy, which mathematically forces an O(N²) communication scaling bottleneck.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 64 GPUs, batch=2048, 100 tables, dim=64 (FP32).
+       - Compute step time: 2ms.
+       - Cross-node InfiniBand: 200 Gbps (25 GB/s).
+    2. **Calculations:**
+       - Volume per batch sent to each GPU: (2048 / 64) × 100 × 64 × 4 bytes = 819.2 KB.
+       - Total sent per GPU: 819.2 KB × 63 = 51.6 MB per step.
+       - Bandwidth needed for 2ms overlap: 51.6 MB / 2ms = 25.8 GB/s.
+    3. **Conclusion & Interpretation:** **Result: Network-Bound.** The required 25.8 GB/s exceeds the 25 GB/s InfiniBand limit, causing the all-to-all to completely dominate the 1ms compute step. Replicating hot tables is required.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

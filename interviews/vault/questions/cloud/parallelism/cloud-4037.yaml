@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4037
+track: cloud
+level: L3
+zone: implement
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: 'Bucket Fusion in NCCL AllReduce'
+scenario: 'A ResNet-152 model has 232 gradient tensors ranging from 4KB (bias terms) to 64MB (large conv layers). Without fusion, NCCL launches 232 separate AllReduce operations.'
+question: 'With NCCL_BUFFSIZE=4MB, how many fused AllReduce operations does ResNet-152 need, and what speedup comes from reduced launch overhead?'
+details:
+  realistic_solution: 'Total gradient size for ResNet-152: ~232MB (60M parameters * 4 bytes FP32, though gradients are often FP16 = ~120MB). With 4MB buckets: 120MB / 4MB = 30 buckets. Instead of 232 AllReduce launches, we now have 30. Each AllReduce launch has fixed overhead: CUDA kernel launch (~5\mu s) + NCCL initialization (~20\mu s) + network RTT (~5\mu s) = ~30\mu s per launch. Saved overhead: (232 - 30) * 30\mu s = 6.06ms. For a 100ms training iteration, this is a 6% speedup just from reducing launch overhead. Additionally, larger messages (4MB vs average 517KB) achieve better bandwidth utilization — small messages are latency-bound. NCCL fusion bucket fills bottom-up from the last layer''s gradients, enabling overlap: the first bucket (last layers'' gradients) starts AllReduce while earlier layers are still computing their backward pass.'
+  common_mistake: |
+    **The Pitfall:** Believing bucket fusion simply concatenates tensors randomly to hit a size target.
+    **The Rationale:** Candidates fail to understand that fusion must respect backward-pass reverse ordering to overlap communication with computation effectively.
+    **The Consequence:** Misconfiguring NCCL parameters or custom communication hooks that block the backward pass and eliminate all potential overlap gains.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total FP16 gradient size: ~120 MB
+    - Bucket size: 4 MB
+    - Fixed overhead per launch: ~30 \mu s
+    - Bandwidth: 50 GB/s
+
+    **Calculations:**
+    - Number of buckets = 120 MB / 4 MB = 30 launches
+    - Saved overhead = (232 - 30) * 30 \mu s = ~6 ms
+    - Unfused time = (232 * 30 \mu s) + (120 MB / 50 GB/s) = 6.96 ms + 2.4 ms = 9.36 ms
+    - Fused time = (30 * 30 \mu s) + (120 MB / 50 GB/s) = 0.9 ms + 2.4 ms = 3.3 ms
+
+    **Conclusion & Interpretation:**
+    - **Result: ~6 ms Saved (Latency-Bound)**. Fusing small tensors reduces launch latency by ~6 ms, yielding a 2.8x speedup on the communication phase.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

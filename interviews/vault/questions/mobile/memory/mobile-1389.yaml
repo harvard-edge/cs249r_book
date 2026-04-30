@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-1389
+track: mobile
+level: L6+
+zone: mastery
+topic: memory-pressure-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: On-Device Fine-Tuning Memory Orchestration
+scenario: You are designing a background on-device fine-tuning pipeline for a 2B parameter text model. The operating system guarantees eviction if your background service exceeds a strict 2.0 GB footprint. The base model is quantized to 4-bit, but memory fragmentation and activation memory during backprop constantly trigger OOMs.
+question: How should memory be orchestrated for on-device fine-tuning with a 4-bit base model and LoRA adapters to maintain the footprint under 2.0 GB?
+details:
+  realistic_solution: Implement a custom memory allocator that pre-allocates a single contiguous 1.9 GB dmabuf buffer shared between the CPU and NPU to eliminate fragmentation. Map the 1 GB 4-bit base weights directly into this buffer. For training, use gradient accumulation with a micro-batch size of 4, storing the 32-bit gradients and optimizer states in a fixed memory arena, while aggressively discarding intermediate activations using gradient checkpointing at the transformer block level.
+  common_mistake: |
+    **The Pitfall:** Proposing standard mobile training loops without pinned memory (dmabuf/ION).
+    **The Rationale:** Candidates fail to account for the unified memory architecture and strict OS eviction rules.
+    **The Consequence:** This leads to page faults, severe memory fragmentation, and guaranteed Android LMK eviction before the first forward pass completes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target memory limit: 1.9 GB (to avoid 2.0 GB LMK eviction).
+    - Base weights (2B INT4) = 1.0 GB.
+    - LoRA weights & Optimizer states = 50 MB.
+    - NPU Workspace = 100 MB.
+
+    **Calculations:**
+    - Activations (micro-batch=4, seq=512, gradient checkpointing) = 150 MB.
+    - Total Peak Memory: 1.0 GB + 50 MB + 100 MB + 150 MB = 1.30 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Peak memory is 1.30 GB, safely avoiding eviction (Memory-Capacity-Bound).** Static allocation is critical to bypass Android LMK fragmentation.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

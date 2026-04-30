@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: tinyml-0653
+track: tinyml
+level: L5
+zone: design
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: The Dual-Core Synchronization Deadlock
+scenario: You are using an RP2040 (Dual-core Cortex-M0+). Core 0 handles camera I/O and Core 1 runs the ML model. To share the tensor arena safely, you implement a simple boolean spinlock `while(lock == true); lock = true;`. Core 0 locks it, writes the image, and unlocks it. Core 1 locks it, runs ML, and unlocks it. After an hour, both cores freeze simultaneously in the `while` loop.
+question: Why can a simple boolean spinlock deadlock an RP2040 when both Cortex-M0+ cores share the tensor arena?
+details:
+  realistic_solution: 'The boolean spinlock is not atomic on RP2040. The read-modify-write sequence (read lock, check if false, write true) takes multiple cycles. If both cores execute the read simultaneously and both see ''false'', both set ''true'' and proceed — corrupting shared data. Eventually, a timing coincidence causes both cores to enter the while() loop waiting for the other to release. At 133MHz with a 15ns race window, this happens roughly once per hour at 30 fps. Fix: use RP2040''s hardware spinlocks (SIO block) — atomic test-and-set in a single cycle, guaranteed by silicon, not software.'
+  common_mistake: |
+    **The Pitfall:** Assuming a core forgot to release the lock.
+    **The Rationale:** In single-core or preemptive environments, deadlocks are usually logical errors (missing unlocks).
+    **The Consequence:** Engineers waste hours hunting for a logical software bug when the issue is a fundamental hardware atomicity failure.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Architecture: Dual-core Cortex-M0+ (RP2040) at 133 MHz.
+    - Spinlock: Non-atomic read-modify-write in software.
+    - Inference rate: 30 fps (30 lock contentions per second).
+
+    **Calculations:**
+    - Race window: A non-atomic read-modify-write takes ~2 cycles ≈ 15 ns at 133 MHz.
+    - Collision probability: Independent core execution loops will periodically phase-align, creating a non-zero probability of simultaneous entry into the 15 ns window.
+    - Expected Time to Failure (MTBF): At 30 lock acquisitions per second, the probability compounds until a simultaneous read occurs, often taking ~1 hour to align perfectly.
+
+    **Conclusion & Interpretation:**
+    - **Result: Deadlock (Concurrency-Bound)**. The non-atomic boolean lock guarantees a race condition that will eventually deadlock the system due to hardware atomicity failure.
+  options:
+  - One core forgot to release the lock, causing the other core to spin forever.
+  - The boolean spinlock is not atomic on RP2040. Both cores can simultaneously read false, set true, and proceed, corrupting state.
+  - The Cortex-M0+ cores lack a data cache, creating a timing window where both cores see stale 'false' values.
+  - The compiler optimized away the while() loop because it detected the boolean variable is never modified within the loop body.
+  correct_index: 1
+status: flagged
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+deletion_reason: 'Physics violation: 3d-parallelism has no substrate on tinyml'
+validated: false
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Classification sanity - `reasoning_competency` and `reasoning_mode` are incorrectly
+  set to `None` for a question that clearly tests Concurrency, Synchronization, Low-Level
+  Programming, and Hardware Architecture.
+- Napkin Math - The collision probability calculation for a "15ns collision window
+  might take an hour to hit" is an estimation without specific details, making it
+  difficult to precisely verify.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- off-topic-general-eng

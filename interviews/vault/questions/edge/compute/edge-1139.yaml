@@ -1,0 +1,43 @@
+schema_version: '1.0'
+id: edge-1139
+track: edge
+level: L6+
+zone: mastery
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: create
+phase: both
+title: 'Edge Systolic Array Mastery: Optimal Dataflow Selection for Edge Deployment'
+scenario: 'You are deploying a custom vision transformer (ViT-Tiny: 5M params, 1.3 GOPS, patch_size=16, seq=196+1, hidden=192, heads=3) for plant disease detection on Jetson Orin (275 TOPS INT8, 60W, DLA 11 TOPS).'
+question: 'For ViT-Tiny on Jetson Orin, should attention, FFN, and patch embedding run on GPU or DLA, and what latency and energy meet 30 FPS?'
+details:
+  realistic_solution: 'DLA supports: Conv, FC, pooling. Does NOT support attention (gather/scatter, softmax). GPU handles attention. Strategy: run patch embedding (conv) on DLA, then run the 12 ViT blocks (Attention + FFN) entirely on GPU to avoid passing activations back and forth between GPU and DLA every block. ViT-Tiny attention FLOPs: 4 projections (Q,K,V,O) = 4*(2*197*192*192)=58.1M FLOPs. QK^T and Softmax+V = 2*(2*197^2*64*3)=29.8M. Total attention = 87.9M. FFN FLOPs: 2*(2*197*192*768)=116.2M. Total per block = 204.1M FLOPs. GPU computes block in 204.1M/275T = 0.74µs. But memory is the bottleneck: moving ~5MB of activations per block at 204.8 GB/s takes 24.4µs. DLA patch embed: 2*192*14*14*(16^2*3) = 57.8M FLOPs. AI=57.8M/335KB=172 (compute bound on DLA). DLA time = 57.8M/11T = 5.25µs.'
+  common_mistake: 'Running ViT on DLA without checking if the self-attention operation (irregular data access pattern) is supported by the DLA''s fixed dataflow engine, which typically only supports CNNs and simple FC layers.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - ViT-Tiny params on Jetson Orin.
+    - 275 TOPS INT8 GPU, 11 TOPS DLA.
+
+    **Calculations:**
+    - Patch embed (DLA): 57.8M FLOPs. Weights: 147KB. IO: 335KB. Time = 57.8M / 11 TOPS = 5.25µs.
+    - GPU Attention+FFN (1 block): 204.1M FLOPs. Bandwidth bound: 5MB / 204.8 GB/s = 24.4µs per block.
+    - 12 blocks: 12 * 24.4µs = 293µs = 0.293ms.
+    - Total latency: 5.25µs (DLA) + 293µs (GPU) = 0.298ms.
+    - Energy: DLA (2W * 5.25µs) = 10.5µJ. GPU (60W * 293µs) = 17.6mJ.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0.298ms (Memory-Bandwidth Bound)**. At 30 FPS, budget is 33ms, so 0.298ms easily meets it. Total energy per frame ≈ 17.6mJ.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed

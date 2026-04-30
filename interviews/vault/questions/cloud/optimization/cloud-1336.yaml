@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-1336
+track: cloud
+level: L3
+zone: fluency
+topic: graph-compilation
+competency_area: optimization
+bloom_level: apply
+phase: inference
+title: Graph Tracing Control Flow OOM
+scenario: You are deploying a custom Transformer on a GPU. The model's `forward` method contains data-dependent control flow conditionally calling flash attention. You compile the model using `torch.jit.trace` with a dummy input of shape `[batch=1, seq_len=128]`. The standard attention path consumes 0.5GB at `seq_len=128` and scales quadratically. During peak hours, a request with `seq_len=1024` arrives.
+question: What happens when the traced Transformer compiled at seq_len 128 receives seq_len 1024, and how much VRAM does it require?
+details:
+  realistic_solution: '`torch.jit.trace` only records the sequence of operations executed by the dummy input, silently omitting unexecuted control flow branches. The trace bakes in the standard attention path. The `seq_len=1024` request will be forced through standard attention, which requires 32GB of VRAM. This will trigger an Out-Of-Memory (OOM) crash. The correct approach is to use `torch.jit.script` (which parses Python AST to preserve control flow) or modern compilers like `torch.compile`.'
+  common_mistake: |
+    **The Pitfall:** Assuming the traced model dynamically evaluates the `if` statement at runtime.
+    **The Rationale:** Developers confuse `torch.jit.trace` (which blindly records the specific ops executed by the dummy input) with `torch.jit.script` or AST-parsing compilers that preserve control flow.
+    **The Consequence:** Production OOM crashes when edge cases hit code paths that the trace entirely erased.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - `seq_len=128` requires 0.5GB VRAM.
+    - Memory scaling is quadratic O(N^2).
+
+    **Calculations:**
+    - Sequence Length Scale Factor: 1024 / 128 = 8x.
+    - Expected VRAM: 0.5 GB * (8^2) = 0.5 GB * 64 = 32 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: OOM Crash (Memory-Bound)**. The traced model ignores the flash_attn branch, forcing the 1024-length request through standard attention, requiring 32 GB and causing an OOM crash.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+chains:
+- id: cloud-chain-173
+  position: 0
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T22:38:10.647801'

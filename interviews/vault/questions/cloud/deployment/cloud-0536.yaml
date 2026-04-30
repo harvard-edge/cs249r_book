@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-0536
+track: cloud
+level: L5
+zone: optimization
+topic: container-orchestration
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: The GPU Scheduling Dilemma
+scenario: 'You manage a shared GPU cluster: 256 GPUs across 32 nodes (8 GPUs per node, NVLink within node, InfiniBand between nodes). Three teams submit jobs simultaneously: Team A wants 64 GPUs for a 70B model training run (needs NVLink topology — all 8 GPUs per node), Team B wants 128 GPUs for a distributed data-parallel job (topology-flexible), Team C wants 64 GPUs for hyperparameter sweeps (many small 1-GPU jobs).'
+question: How do you schedule these to maximize cluster utilization without starving any team?
+details:
+  realistic_solution: 'This requires **topology-aware gang scheduling** with preemption policies. Team A''s 70B training requires tensor parallelism across NVLink-connected GPUs — it *must* get full 8-GPU nodes (gang scheduling). Allocate 8 nodes (64 GPUs) as a contiguous NVLink-connected block. Team B''s data-parallel job is topology-flexible — each replica just needs 1 GPU, and gradient sync over InfiniBand is acceptable. Allocate 16 nodes (128 GPUs), but these can be any available nodes. Team C''s hyperparameter sweeps are embarrassingly parallel 1-GPU jobs — they can fill *any* gaps. Allocate the remaining 8 nodes (64 GPUs), but also allow Team C to **backfill** into any GPU left idle by Teams A or B during checkpointing, data loading, or communication stalls. Implement a priority system: Team A gets guaranteed NVLink nodes (highest topology constraint), Team B gets guaranteed GPU count (medium constraint), Team C gets best-effort backfill (lowest constraint but highest flexibility). Use Kubernetes with the NVIDIA GPU Operator and a custom scheduler plugin that understands NVLink topology.'
+  common_mistake: |
+    **The Pitfall:** Applying "First-Come-First-Served" or strictly equal shares without topology constraints.
+    **The Rationale:** Candidates treat all GPUs as equal, independent resources rather than interconnected nodes with varying communication capabilities.
+    **The Consequence:** FCFS heavily fragments the cluster, forcing Team A's training job to fall back to PCIe bandwidth instead of NVLink, slowing the training loop down by 3.5x.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 256 GPUs across 32 nodes.
+    - Team A (64 GPUs NVLink), Team B (128 GPUs flex), Team C (64 GPUs gap-fill).
+
+    **Calculations:**
+    - Without Topology: NVLink broken, ~3.5x slower.
+    - Gang Scheduling: Base utilization ~65% due to stalls.
+    - Backfill Boost: Fills idle cycles, raising to ~82%.
+
+    **Conclusion & Interpretation:**
+    - **Result: 17% improvement saves ~$764k/year**. Maximizes cluster utilization.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-061
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

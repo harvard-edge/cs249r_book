@@ -1,0 +1,41 @@
+schema_version: '1.0'
+id: cloud-0752
+track: cloud
+level: L4
+zone: evaluation
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: The Elastic Training Scaling
+scenario: You're pretraining a 13B model on a cloud cluster using synchronous data parallelism. Spot instances give you between 32 and 128 GPUs at any time — nodes can be preempted with 30 seconds notice.
+question: How do you handle GPUs appearing and disappearing mid-training without restarting from scratch?
+details:
+  realistic_solution: 'Use an elastic training framework (e.g., TorchElastic/`torchrun` with `--rdzv_backend=c10d`). Key mechanisms: (1) **Rendezvous protocol** — when a node joins or leaves, surviving workers detect the change, re-form the process group, and redistribute data shards without reloading the model. (2) **Batch size adjustment** — with fewer GPUs, either reduce global batch size (changes optimization dynamics) or increase per-GPU batch size (may OOM). The safe approach: keep per-GPU batch size fixed, let global batch size float, and apply linear learning rate scaling ($\text{lr} \propto \text{global\_batch}$). (3) **In-memory checkpoint** — replicate model state across nodes so a preempted node''s state can be recovered from peers in seconds, not minutes.'
+  common_mistake: |
+    **The Pitfall:** Proposing to "just checkpoint frequently and restart with the new GPU count" from persistent storage.
+    **The Rationale:** Candidates fail to calculate the devastating overhead of writing/reading checkpoints to disk, rebuilding process groups, and re-warming pipelines.
+    **The Consequence:** With preemptions every ~30 minutes, the cluster spends more time restarting and reading from NFS than actually training.
+  napkin_math: |
+    - 13B model with FSDP: At 128 GPUs, per-GPU shard = 13B * 16 bytes / 128 ≈ 1.625 GB.
+    - At 32 GPUs: per-GPU shard = 6.5 GB. Still fits easily in 80GB VRAM.
+    - Learning Rate Scaling: lr_32 = lr_128 * (128/512) = lr_128 / 4.
+    - In-memory checkpoint peer reload: 6.5 GB / 900 GB/s (NVLink) or 50 GB/s (IB) = fractions of a second.
+    - **Disk reload from NFS: 6.5 GB / 2 GB/s = 3.25s per GPU. 32 GPUs hitting NFS simultaneously creates a bottleneck taking minutes. In-memory checkpoints reduce this to seconds.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

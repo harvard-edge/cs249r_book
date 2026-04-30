@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-3925
+track: cloud
+level: L4
+zone: optimization
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: 'Gradient Bucket Size Tuning for Optimal Communication Overlap'
+scenario: 'Your DDP training of a 1.3B parameter model across 32 GPUs has 40% communication overhead despite gradient bucketing. The current bucket size is 25MB (PyTorch default). Network is 400 Gbps InfiniBand. Profiling shows many small AllReduce calls with high startup latency.'
+question: 'How would you tune DDP gradient bucket size to reduce the 40% communication overhead for the 1.3B model?'
+details:
+  realistic_solution: 'Optimal bucket size depends on the tradeoff between AllReduce startup latency and overlap opportunity. Profile and find the knee. Typically 50-100MB for InfiniBand. Also try NCCL tree AllReduce and set NCCL_MIN_NCHANNELS=4 for better bandwidth utilization. Use torch.nn.parallel.DistributedDataParallel(bucket_cap_mb=100) and measure throughput.'
+  common_mistake: |
+    **The Pitfall:** Blindly maximizing bucket size to minimize the number of AllReduce calls.
+    **The Rationale:** Engineers try to eliminate all startup latency by making the bucket as large as possible.
+    **The Consequence:** Extremely large buckets prevent communication from starting early, destroying the ability to overlap AllReduce with the backward pass computation and drastically increasing step time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1.3B parameter model across 32 GPUs.
+    - 4 bytes per parameter.
+    - 50μs startup latency per AllReduce.
+    - Network is 400 Gbps (50 GB/s) InfiniBand.
+    - Backward pass is ~200ms.
+
+    **Calculations:**
+    - Total gradients: 1.3B params * 4 bytes = 5.2GB.
+    - 25MB buckets: 5.2GB / 25MB = 208 buckets. Startup latency = 208 * 50μs = 10.4ms wasted purely on startup.
+    - 100MB buckets: 52 buckets. Startup drops to 2.6ms.
+    - Baseline theoretical time: 5.2GB / 50 GB/s = 104ms.
+    - Perfect overlap yields max(200, 104) = 200ms. A 40% overhead means 200 + 80ms = 280ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~210-220ms step time (Network-Bound)**. Finding the optimal bucket size (often 50-100MB) can reduce step time significantly.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

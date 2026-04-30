@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-2106
+track: cloud
+level: L6+
+zone: mastery
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Multi-Architecture Serving Fleet Design
+scenario: 'You are the Staff ML Systems engineer responsible for a serving fleet that must run three model types simultaneously: (1) a 175B dense transformer for chat, (2) a 500B MoE model for code generation, and (3) a DLRM with 2 TB embeddings for ads ranking. You have a budget of 256 GPUs, each with 80GB memory.'
+question: "How would you allocate 256 GPUs and choose parallelism strategies to serve the 175B dense transformer, 500B MoE, and 2 TB DLRM?"
+details:
+  realistic_solution: 'Model 1 Dense 175B Transformer (chat): Needs 350 GB (BF16) -> 8-way TP across 8 GPUs per replica. KV cache is the batch-size limiter. Allocate 64 GPUs (8 replicas of 8-GPU TP groups). Model 2 500B MoE (code gen): ~1 TB total weights but only ~60B active per token. Use 128-way EP (1 GPU per expert) within each replica. Requires NVLink/NVSwitch within each EP group. Allocate 128 GPUs (1 replica of 128 GPUs). Model 3 DLRM (2 TB embeddings): Model-parallel embeddings across ~32 GPUs. Allocate 64 GPUs (2 replicas of 32 GPUs).'
+  common_mistake: |
+    **The Pitfall:** Treating all three architectures the same and applying a uniform 8-way Tensor Parallelism strategy.
+    **The Rationale:** Engineers copy-paste standard dense transformer setups, failing to analyze the unique mathematical bottlenecks of MoEs or Embedding tables.
+    **The Consequence:** The MoE suffers massive AllToAll latency, the DLRM starves for embedding bandwidth, and the dense model wastes memory on fragmented KV caches.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Fleet: 256 GPUs.
+       - Dense 175B: 350 GB memory (FP16).
+       - MoE 500B: ~1TB total weights.
+       - DLRM 2TB: 2000 GB embeddings.
+       - GPU memory: 80 GB per GPU.
+    2. **Calculations:**
+       - Dense 175B: 350 / 80 = 4.375 -> 8 GPUs (TP=8). 8 replicas = 64 GPUs.
+       - MoE 500B: 1024 / 80 = 12.8 -> 128 GPUs (EP=128 for 1-GPU/expert). 1 replica = 128 GPUs.
+       - DLRM 2TB: 2000 / 80 = 25 -> 32 GPUs (MP=32 power-of-two). 2 replicas = 64 GPUs.
+       - Total: 64 + 128 + 64 = 256 GPUs.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Allocation.** The transformer is KV-limited (TP), MoE is AllToAll-limited (EP), and DLRM is embedding-limited (MP). Exactly 256 GPUs are allocated correctly based on architectural bottlenecks.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

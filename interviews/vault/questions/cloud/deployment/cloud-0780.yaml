@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-0780
+track: cloud
+level: L6+
+zone: mastery
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: Global Scale Real-Time Two-Tower Recommendation
+scenario: We are re-architecting a recommendation retrieval system to support 50 billion candidates globally, served from 12+ datacenters. We want to use a massive 500B parameter two-tower model to improve relevance.
+question: "How would you design the embedding table distribution and serving infrastructure on TPU v5e pods to ensure sub-50ms p99 latency while maximizing TPU High-Bandwidth Memory (HBM) utilization?"
+details:
+  realistic_solution: Completely decouple the user and item towers for inference. The item tower's embeddings for the 50B candidates must be pre-computed strictly offline via batch jobs and loaded into a globally distributed, sharded in-memory vector database (e.g., ScaNN / Vertex Vector Search). The TPUs are reserved exclusively for executing the user tower in real-time, utilizing Tensor Parallelism to fit the user weights across multiple chips and broadcasting the resulting query vector to the fast ANN retrieval tier.
+  common_mistake: |
+    **The Pitfall:** Attempting to serve both towers dynamically in real-time.
+    **The Rationale:** Candidates treat retrieval models like generative LLMs, assuming all 500B parameters must be loaded into device HBM and executed simultaneously per request.
+    **The Consequence:** Catastrophic HBM fragmentation, impossible real-time cross-node communication overhead, and missing the 50ms latency SLA by orders of magnitude.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 500B params. User tower: ~100B params.
+       - Items: 50B. Dimensions: 256.
+       - TPU v5e: 16 GB HBM per chip. SLA: <50ms.
+    2. **Calculations:**
+       - User tower weights (INT8): 100B * 1 byte = 100 GB.
+       - TPUs needed for weights: ceil(100 GB / 16 GB) = 7. (Use 8-way TP).
+       - Item vector DB footprint: 50B * 256 * 4 bytes (FP32) = 51.2 TB RAM required (sharded offline).
+       - Latency budget: 15ms (TPU User Embedding) + 5ms (Network) + 10ms (ScaNN Top-K) = 30ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 30ms latency, Offline Item Compute.** The system is **Memory-Capacity-Bound**; attempting to store 51.2TB of item vectors in TPU HBM is physically impossible and must be offloaded to RAM.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

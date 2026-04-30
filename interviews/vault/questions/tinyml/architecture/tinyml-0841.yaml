@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: tinyml-0841
+track: tinyml
+level: L3
+zone: implement
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Implement depthwise separable conv for Cortex-M4 with CMSIS-NN
+scenario: 'You are deploying a 3-layer depthwise separable CNN on an STM32F4 (Cortex-M4, 168MHz, 256KB SRAM) for keyword detection. The model has layers: depthwise 3x3 (16ch, 32x32 input), pointwise 1x1 (16->32ch), depthwise 3x3 (32ch, 16x16).'
+question: How should the three-layer depthwise separable CNN be implemented with CMSIS-NN and buffered to fit STM32F4 SRAM?
+details:
+  realistic_solution: 'CMSIS-NN functions: arm_depthwise_conv_s8() for depthwise, arm_convolve_1x1_s8_fast() for pointwise 1×1. Buffer strategy: ping-pong buffers A and B. Layer 1: input from A, output to B. Layer 2: input from B, output to A. Layer 3: input from A, output to B. Peak SRAM: max(|A|, |B|) + scratch buffer. |A_0| = 32×32×16×1B = 16KB. |B_0| = 32×32×32×1B = 32KB after pointwise... wait, after layer 1 depthwise: 32×32×16 = 16KB. After pointwise: 32×32×32 = 32KB. After layer 3 depthwise: 16×16×32 = 8KB. Peak: 32KB (B after pointwise) + 16KB (A input). Plus model weights.'
+  common_mistake: |
+    **The Pitfall:** Allocating separate input and output buffers globally for every layer simultaneously.
+    **The Rationale:** Candidates used to high-level frameworks (like Python/PyTorch) assume dynamic allocation handles memory, rather than statically reusing memory buffers.
+    **The Consequence:** The model immediately runs out of SRAM (OOM) because all intermediate activations are needlessly kept alive at once.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Architecture: 3-layer depthwise separable CNN.
+       - Layer 1: Depthwise 3x3, 16ch, 32x32 input.
+       - Layer 2: Pointwise 1x1, 16->32ch.
+       - Layer 3: Depthwise 3x3, 32ch, 16x16 input (assumed stride 2 from prev).
+       - Memory Strategy: Ping-pong buffers A and B.
+    2. **Calculations:**
+       - Buffer A (Layer 1 Input): 32 × 32 × 16 × 1B = 16 KB.
+       - Buffer B (Layer 1 Output / L2 Input): 32 × 32 × 16 × 1B = 16 KB.
+       - Buffer A (Layer 2 Output / L3 Input): 32 × 32 × 32 × 1B = 32 KB.
+       - Buffer B (Layer 3 Output): 16 × 16 × 32 × 1B = 8 KB.
+       - Peak Buffer Memory: Buffer A max (32 KB) + Scratch/Weights (~5 KB) = 37 KB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Ping-pong buffering yields a 37 KB peak, fitting easily in 256 KB.** **Result: Memory-Bound Optimization.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

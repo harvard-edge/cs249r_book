@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-4296
+track: cloud
+level: L5
+zone: realization
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: MI300X KV Pool Sizing vs H100
+scenario: You are choosing the GPU for your decode pool in a disaggregated serving deployment for a 70B FP16 model. You must compare an 80GB GPU against a 192GB GPU.
+question: For a 70B FP16 decode pool, how do the two GPUs compare on concurrency and token throughput, and which is better?
+details:
+  realistic_solution: 'Model weights for 70B FP16 = 140 GB. GPU A (80GB): 140 GB exceeds 80 GB → needs tensor parallelism (TP=2, two GPUs), leaving each GPU with 80-70=10 GB for KV. GPU B (192GB): 192 GB fits entire model on one GPU with 52 GB free for KV. Total KV per sequence at 4096 tokens (96 layers, 8 KV heads GQA, head_dim 128, FP16) = 1.5 GB. GPU A TP=2 (sharded KV, 0.75 GB/GPU): 10 GB / 0.75 GB ≈ 13 sequences. GPU B (unsharded KV, 1.5 GB/GPU): 52 GB / 1.5 GB ≈ 34 sequences. Token throughput (bandwidth-limited): GPU A pair at 2×3.35 TB/s = 6.7 TB/s / 140 GB = 47.8 tokens/s per sequence × 13 = 621 tok/s aggregate. GPU B at 5.3 TB/s / 140 GB = 37.8 tokens/s single sequence × 34 = 1285 tok/s aggregate. GPU B wins on aggregate throughput per GPU-unit for decode, especially when eliminating TP communication overhead.'
+  common_mistake: |
+    **The Pitfall:** Choosing the larger GPU purely for memory capacity without calculating bandwidth.
+    **The Rationale:** Knowing that decode is memory-bound, but forgetting that token generation throughput scales directly with memory *bandwidth*, not just capacity.
+    **The Consequence:** Failing to realize that higher capacity only provides higher aggregate throughput if the application has enough concurrent requests to utilize the deeper queues.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B parameters in FP16 = 140 GB.
+    - KV Cache per Sequence (4096 tokens, 96 layers, 8 heads, 128 dim): ~1.5 GB.
+    - GPU A: 80 GB capacity, 3.35 TB/s bandwidth. Requires Tensor Parallelism (TP=2).
+    - GPU B: 192 GB capacity, 5.3 TB/s bandwidth. Fits on 1 GPU.
+
+    **Calculations:**
+    - GPU A (TP=2) Free Memory: (2 × 80 GB) - 140 GB = 20 GB (10 GB/GPU).
+    - GPU A Concurrency: 20 GB / 1.5 GB = ~13 sequences.
+    - GPU A Throughput: (2 × 3.35 TB/s) / 140 GB = 47.8 tok/s × 13 = 621 aggregate tok/s.
+    - GPU B Free Memory: 192 GB - 140 GB = 52 GB.
+    - GPU B Concurrency: 52 GB / 1.5 GB = ~34 sequences.
+    - GPU B Throughput: 5.3 TB/s / 140 GB = 37.8 tok/s × 34 = 1285 aggregate tok/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bandwidth-Bound**. GPU B supports 2.6x more concurrency and delivers double the aggregate throughput by avoiding TP memory fragmentation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-4251
+track: cloud
+level: L5
+zone: design
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Optimizing backward pass memory for a contrastive learning model on MI300X
+scenario: 'You train a CLIP-style vision-language model on a 192GB GPU. The contrastive loss requires computing similarity between all N×N image-text pairs in a batch. With N=4096, the similarity matrix is 4096×4096 pairs. The backward pass through the loss OOMs even though the hardware has 192GB.'
+question: 'How would you compute the 4096×4096 CLIP contrastive loss without materializing O(N²) gradients and OOMing?'
+details:
+  realistic_solution: 'Use GradCache or MoCo-style gradient chunking: split the batch into chunks of size K (e.g., K=256), compute similarity in chunks, and accumulate gradients without materializing the full N×N matrix. The memory cost becomes O(N×K) instead of O(N²). Using K=512 reduces similarity matrix memory dramatically while maintaining full effective batch size.'
+  common_mistake: |
+    **The Pitfall:** Attempting to compute and materialize the full N×N similarity matrix as a dense tensor with gradients all at once.
+    **The Rationale:** Candidates underestimate the O(N²) memory scaling of pairwise contrastive loss backwards passes combined with large encoder activations.
+    **The Consequence:** The computation requires >100GB of memory for a single operation, immediately triggering an Out-of-Memory (OOM) crash.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - GPU: 192GB VRAM. Batch (N): 4096.
+       - Forward similarity matrix: 4096 × 4096.
+    2. **Calculations:**
+       - Base similarity matrix memory: 4096 × 4096 × 4 bytes = 64 MB.
+       - Gradients: 2 × 64 MB = 128 MB.
+       - The true OOM culprit is storing the full-batch high-dimensional encoder activations (e.g., 4096 images × ViT-L activations ≈ 40GB+).
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity-Bound. Gradient chunking (K=512) prevents materializing the O(N²) backward pass and full activations simultaneously, averting the OOM.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

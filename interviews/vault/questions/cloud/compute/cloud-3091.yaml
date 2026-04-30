@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3091
+track: cloud
+level: L6+
+zone: mastery
+topic: systolic-dataflow
+competency_area: compute
+bloom_level: evaluate
+phase: both
+title: 'Systolic Array Mastery: Roofline Analysis for Custom LLM Kernel'
+scenario: 'A custom fused LLM decoding kernel on TPU v5e (197 TFLOPS BF16, 819 GB/s) shows 12 TFLOPS effective throughput during profiling (6.1% MFU). The kernel does: load attention KV cache (batch=1, L=512, H=16, D=128, BF16), and compute 1 decode step.'
+question: 'Is the 12 TFLOPS decode kernel compute- or memory-bound, what is the attainable performance, and which optimization gives the largest gain?'
+details:
+  realistic_solution: 'Decode step (batch=1): load KV for all 512 context tokens. KV size: 512 * 16 heads * 128 * 2 * 2 bytes = 4MB. Weight loads (1-layer): 4 projection matrices * 4096^2 * 2 = 134MB total per layer. Attention compute: 2*1*512*128*16 = 2M FLOPs. Weight FLOPs: 2*4096^2*4 = 134G FLOPs. AI = 134G/134MB = 1000 FLOPs/byte — compute bound for weights. But KV: 2M/4MB = 0.5 FLOPs/byte — heavily memory bound. The combined kernel is mixed. Bottleneck: KV cache loading. Fix: GQA (Grouped Query Attention) reduces KV heads from 16 to 4 → 4x less KV bandwidth.'
+  common_mistake: |
+    **The Pitfall:** Blaming compute efficiency (low MFU) for the poor performance.
+    **The Rationale:** Candidates see 6.1% MFU and assume the kernel logic is bad, failing to realize that batch=1 decoding is overwhelmingly memory-bandwidth bound.
+    **The Consequence:** Wasting time unrolling loops or tweaking instructions when the only way to improve throughput is to reduce memory traffic (e.g., using Grouped Query Attention) or increase batch size.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: TPU v5e (197 TFLOPS BF16, 819 GB/s).
+    - Config: Batch=1, L=512, H=16, D=128, BF16.
+
+    **Calculations:**
+    - KV Cache Memory: 512 * 16 * 128 * 2 * 2 bytes = ~4 MB.
+    - Weight Memory: 4 * 4096^2 * 2 bytes = ~134 MB.
+    - Component AI: Weights AI = 134G / 134MB = ~1000 FLOPs/byte. KV AI = 2M / 4MB = 0.5 FLOPs/byte.
+    - Bounds: Compute min time = 134G / 197T = 0.68 ms. Memory min time = 138MB / 819GB/s = 0.168 ms.
+    - Actual Time: 134G FLOPs / 12 TFLOPS = 11 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 11 ms actual time (Memory-Bound)**. Inefficient memory access patterns for the KV cache at batch=1 destroy throughput; GQA is required.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

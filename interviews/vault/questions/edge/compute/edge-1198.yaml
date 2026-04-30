@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1198
+track: edge
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: Diagnose Decode Latency Regression from KV Cache Format on Hailo-8
+scenario: A 3B transformer on Hailo-8 shows 8ms/token during the first 32 decode steps, then degrades to 22ms/token for steps 33-128. The KV cache is stored in row-major format [seq][layer][head][dim]. The Hailo-8 DMA controller accesses the KV cache sequentially by layer during attention computation.
+question: Why does the Hailo-8 transformer slow from 8ms/token to 22ms/token after step 32, and what KV layout fixes it?
+details:
+  realistic_solution: |
+    In a `[seq][layer][head][dim]` layout, accessing the KV cache by layer causes the DMA controller to stride across sequence positions. At step 33, the stride crosses an 8KB LPDDR5 row boundary, causing cache line aliasing and massive row activation penalties. The O(N) memory access pattern becomes heavily fragmented. The solution is to transpose the layout to `[layer][head][seq][dim]`. This ensures that the DMA controller reads sequence tokens contiguously, resulting in a single LPDDR5 row activation per attention head and eliminating the memory bandwidth bottleneck during autoregressive decoding.
+  common_mistake: |
+    **The Pitfall:** Attributing the latency degradation to the O(n²) scaling of attention compute.
+    **The Rationale:** Candidates know attention compute scales quadratically, but fail to realize the compute difference between N=32 and N=33 is negligible.
+    **The Consequence:** Proposing compute-bound solutions (like sparse attention) instead of addressing the actual memory access pattern and cache line aliasing bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Layout: `[seq][layer][head][dim]` with 64 dim, 2 bytes (FP16).
+    - LPDDR5 Row Size: 8 KB.
+    - Row Activation Penalty: 10 ns per miss.
+
+    **Calculations:**
+    - KV Size per Head (32 tokens): 32 * 64 * 2B = 4,096 B (4 KB), fitting within one 8 KB row.
+    - At Step 33: 33rd token stride = 32 * 8 * 64 * 2B = 32,768 B apart, forcing a new row activation.
+    - Total Overhead: 10 ns * 8 layers * 8 heads = 640 ns per attention step (accumulates per token).
+
+    **Conclusion & Interpretation:**
+    - **Result: 640 ns overhead per step causing 14ms latency regression (Memory Bandwidth-Bound)**. Row Activation Thrashing.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

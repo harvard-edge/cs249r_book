@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-0779
+track: mobile
+level: L4
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Diagnosing TFLite NNAPI Delegate Subgraph Fallback
+scenario: Your team deploys a 5MB MobileNetV3-based model to Android via TFLite. On an edge device, 4-thread CPU inference takes 18ms. You enable the NNAPI delegate to leverage the NPU, expecting sub-5ms latency. Instead, overall latency jumps to 35ms and battery drain increases. Profiling reveals the model outputs correct results, but performance is strictly worse than the CPU baseline.
+question: Why can enabling the TFLite NNAPI delegate make a MobileNetV3 model slower than CPU inference?
+details:
+  realistic_solution: |
+    Rigorously profile the TFLite execution timeline to hunt for subgraph partitioning faults. A single unsupported operator lodged in the center of the network forces a hard fallback to the host CPU. This aggressively shatters the topological graph, mandating massive hardware context switches, cache flushes, and catastrophic synchronization overhead between the CPU and NPU limits. The solution is structurally replacing the unsupported op so the entire execution tree coalesces into a solitary, unbroken NPU subgraph.
+  common_mistake: |
+    **The Pitfall:** Mistakenly assuming the hardware is physically throttling or limited by fixed initialization bounds.
+    **The Rationale:** Engineers trust that enabling hardware delegates (like NNAPI/CoreML) universally improves math latency, failing to evaluate whether the graph fragmented into disconnected execution domains.
+    **The Consequence:** Wasting time debugging hardware power curves instead of excising the singular offending operator fracturing the compile execution.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Target Latency: < 5 ms.
+       - Subgraphs generated: 1 unsupported middle op creates a 3-part fracture (NPU -> CPU -> NPU).
+       - Transition Synchronization Overhead: ~15 ms per inter-hardware transition.
+    2. **Calculations:**
+       - Unbroken Raw Compute time: NPU (4 ms) + CPU (1 ms) = 5 ms.
+       - Transition Penalty: 2 structural transitions * 15 ms = 30 ms.
+       - Total Latency: 5 ms compute + 30 ms transition overhead = 35 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: 35ms latency via subgraph thrashing (Synchronization-Bound).** Context switching between discrete accelerator domains completely negates native math speedups.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: mobile-chain-030
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:47:23.784792'

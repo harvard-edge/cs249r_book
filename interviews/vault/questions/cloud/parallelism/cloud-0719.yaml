@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0719
+track: cloud
+level: L6+
+zone: mastery
+topic: 3d-parallelism
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: The Expert Parallelism Communication
+scenario: 'You are training a Mixture-of-Experts model with 64 experts, placing one expert per GPU across 64 GPUs connected via 400 Gbps InfiniBand. Each token is routed to 2 experts. During training, you notice the all-to-all communication takes longer than the expert computation itself.'
+question: 'At what point does the network become the bottleneck in this MoE training setup, and how do you fix it?'
+details:
+  realistic_solution: 'In expert parallelism, every GPU must send a fraction of its tokens to every other GPU (all-to-all). This requires full bisection bandwidth and cannot be optimized into rings or trees. To fix this, confine expert-parallel groups to 8 GPUs within high-bandwidth NVLink domains, and use data parallelism across nodes.'
+  common_mistake: |
+    **The Pitfall:** Assuming all-to-all communication scales identically to all-reduce.
+    **The Rationale:** Engineers familiar with data parallelism treat all collectives equally, missing that all-to-all requires full bisection bandwidth and cannot be optimized into rings or trees.
+    **The Consequence:** Deploying MoE models across massively oversubscribed network topologies, resulting in severe network incast and stalled training.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 64 GPUs, 400 Gbps (50 GB/s) InfiniBand, 2:1 oversubscribed.
+    - Batch of 4096 tokens per GPU, routed to 2 experts.
+    - Token Size: Hidden dim=4096 in FP16 (8192 bytes = 8 KiB).
+
+    **Calculations:**
+    - Tokens Sent: 4096 * 2 * (63/64) ≈ 8064 tokens.
+    - Data Volume: 8064 tokens * 8 KiB = 63 MiB per GPU.
+    - Network Time: At 400 Gbps, ideal time = 63 MiB / 50 GB/s = 1.26 ms. With a 2:1 oversubscribed fat-tree, effective bandwidth is 25 GB/s, taking 2.52 ms.
+    - Compute Time: One FFN layer compute takes ≈ 0.5 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bound**. Communication (2.52 ms) is over 5x slower than the actual expert compute (0.5 ms).
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

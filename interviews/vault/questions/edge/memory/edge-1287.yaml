@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1287
+track: edge
+level: L4
+zone: diagnosis
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Hailo-8 Model Thrashing with mmap Weight Loading
+scenario: 'We are deploying a sequential multi-model pipeline (Detection, Pose, Re-ID) on an edge gateway. To conserve host RAM, we implemented memory-mapped weight loading (mmap) from the local eMMC for the three 15MB models. During load testing, inference runs perfectly for a single model in isolation, but the full pipeline experiences severe stuttering and the effective compute drops to less than 1 TOPS.'
+question: 'Why does the mmap-based three-model pipeline stutter and drop below 1 TOPS even though each 15 MB model runs alone?'
+details:
+  realistic_solution: 'The root cause is host OS page faulting stalling the DMA stream. Because the accelerator has no local DRAM, it relies entirely on host memory to stream weights and activations. Using mmap lazily maps the weights; when the pipeline switches models, the memory requests trigger major page faults. The host CPU must halt the stream and fetch the weights from the slow eMMC into RAM. The solution is to pin the weights in host RAM using mlock or process larger batches to amortize disk I/O latency.'
+  common_mistake: |
+    **The Pitfall:** Suspecting PCIe bandwidth or thermal throttling.
+    **The Rationale:** Candidates miss the interaction between OS-level lazy loading (mmap) and the accelerator's lack of local DRAM.
+    **The Consequence:** Time is wasted tuning PCIe settings when the actual issue is major page faults continuously hitting the slow eMMC disk.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 15MB INT8 model requires ~15 GOPs.
+    - Accelerator provides 26 TOPS.
+    - eMMC read speed is 150 MB/s.
+    - 3 models loaded sequentially per frame.
+
+    **Calculations:**
+    - Compute time per frame = (3 * 15) / 26000 = 1.73 ms.
+    - Disk loading time = 3 * (15MB / 150 MB/s) = 300 ms.
+    - Total frame latency = 301.73 ms (~3.3 FPS).
+
+    **Conclusion & Interpretation:**
+    - **Result: 301.73 ms latency (I/O-Bound)**. Effective accelerator utilization drops to ~0.15 TOPS due to severe I/O starvation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

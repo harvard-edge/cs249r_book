@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: cloud-2258
+track: cloud
+level: L3
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: apply
+phase: training
+title: The Lowering Pass Fusion Loss
+scenario: After adding a custom activation function (SwiGLU) to your model, you profile the compiled kernel and find that the compiler failed to fuse it with the preceding linear layer. The standard ReLU version of the same architecture fuses perfectly.
+question: "Why would SwiGLU break the fusion pass, and at which IR level does the failure occur?"
+details:
+  realistic_solution: 'The fusion failure occurs at the graph-level IR (e.g., MLIR''s `linalg` dialect or XLA''s HLO). Standard fusions like matmul+bias+ReLU are implemented as pattern-matching rewrite rules: the compiler recognizes the specific subgraph and replaces it with a fused kernel. SwiGLU has the form $\text{SwiGLU}(x) = (xW_1) \otimes \sigma(xW_2)$, which requires two parallel linear projections followed by an elementwise multiply — a non-trivial data dependency pattern. The fusion pass sees two matmuls feeding into a multiply, which doesn''t match its matmul+activation fusion template. The fix is to implement SwiGLU as a single custom Triton kernel that handles both projections and the gating internally.'
+  common_mistake: |
+    **The Pitfall:** Dismissing the failure as "just a compiler bug" and filing an issue.
+    **The Rationale:** Candidates don't understand that fusions in graph-level IRs (like MLIR `linalg` or XLA HLO) rely on strict pattern-matching. SwiGLU's branching data dependency doesn't match standard matmul+activation templates.
+    **The Consequence:** Deploying extremely memory-bound inference pipelines while waiting for an upstream compiler fix instead of writing a custom Triton kernel.
+  napkin_math: |
+    - **Unfused SwiGLU (hidden_dim=8192):** Two matmul writes to HBM ($2 \times 8192 \times B \times 2\text{B} = 32\text{KB} \times B$) + reads ($32\text{KB} \times B$) + final write.
+    - **Fused version:** Eliminates intermediate HBM reads/writes, saving $64\text{KB} \times B$ bandwidth.
+    - **At B=2048 tokens:** $64\text{KB} \times 2048 = 128\text{MB}$ saved per layer.
+    - **Conclusion:** **For 80 layers, 10.24 GB of memory traffic is saved per forward pass, translating to ~3.0ms latency reduction.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

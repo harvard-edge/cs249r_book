@@ -1,0 +1,30 @@
+schema_version: '1.0'
+id: cloud-1573
+track: cloud
+level: L4
+zone: diagnosis
+topic: mixed-precision-training
+competency_area: memory
+bloom_level: analyze
+phase: training
+title: Diagnosing Mixed-Precision OOM Failures
+scenario: A machine learning team transitions a 7B parameter causal language model from standard FP32 training to FP16 Mixed-Precision training on a single node of 8x 80GB GPUs, aiming to increase their batch size. They use PyTorch DDP and the AdamW optimizer. Immediately after initializing the model and optimizer (before the first forward pass), the script crashes with a CUDA Out of Memory (OOM) error.
+question: Why does FP16 mixed-precision AdamW for a 7B model OOM before the first forward pass under DDP, and how would you fix it?
+details:
+  realistic_solution: Identify that standard mixed-precision actually increases the parameter memory footprint from 16 bytes/param to potentially 20 bytes/param (if FP32 gradient accumulators are used). To resolve the OOM on 80GB GPUs, the team must shard the optimizer states across the 8 GPUs using ZeRO Stage 1 or PyTorch FSDP.
+  common_mistake: |
+    **The Pitfall:** Assuming mixed-precision halves all memory requirements.
+    **The Rationale:** Candidates often think moving from 4 bytes to 2 bytes per parameter halves the total memory, failing to account for the FP32 master weights and FP32 optimizer states required to prevent gradient underflow.
+    **The Consequence:** Underestimating the static memory footprint of mixed-precision training, leading to unexpected OOMs.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 7B parameter model.
+       - FP16 Mixed-Precision Training using AdamW.
+    2. **Calculations:**
+       - Standard FP32 Training: 4B (weights) + 4B (grads) + 4B (momentum) + 4B (variance) = 16 bytes/param. Total: 16 bytes × 7B = 112 GB.
+       - Mixed-Precision Training: 2B (FP16 weights) + 2B (FP16 grads) + 4B (FP32 master weights) + 4B (FP32 momentum) + 4B (FP32 variance) = 16 bytes/param.
+       - Many framework implementations also keep 4B FP32 gradients around, pushing it to 20 bytes/param (140 GB).
+    3. **Conclusion & Interpretation:**
+       - **Mixed-precision requires FP32 master weights and optimizer states, maintaining or exceeding the 112 GB footprint; this mandates optimizer state sharding (e.g., FSDP) to resolve the OOM.**
+       - **Result: Memory-Bound**
+status: published

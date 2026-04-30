@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1867
+track: edge
+level: L6+
+zone: realization
+topic: memory-mapped-inference
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Optimizing Memory-Mapped Inference on Hailo-8 for Edge AI
+scenario: A new generation of edge AI devices leveraging the Hailo-8 accelerator requires ultra-low latency inference for a real-time object detection model. The model's weights are 500MB. Due to system constraints, the model weights cannot reside entirely in dedicated on-chip memory and must be loaded from external flash memory. To minimize cold start latency and enable fast context switching between different models, memory-mapped I/O (mmap) is proposed for loading the weights.
+question: How would you use mmap for 500 MB model weights to achieve fast boot or model swaps, avoid page-fault pitfalls, and share weights across processes?
+details:
+  realistic_solution: A robust solution involves mmaping the weight file and strategically using `madvise(MADV_WILLNEED)` to proactively pre-fetch critical portions of the model weights (e.g., initial layers) into the page cache during application startup or model loading, rather than waiting for demand paging. For models with clear layer boundaries, an 'on-demand' mmap strategy might be employed where only the currently active layer's weights are guaranteed to be resident. To avoid cold start latency, a background thread could progressively `touch` pages of the mmapped region after initial boot. For shared memory, utilize `MAP_SHARED` with proper mutexes or semaphores, and ensure cache coherence mechanisms (e.g., `msync` or platform-specific DMA cache management) are considered to prevent stale data visibility issues, especially on a dataflow accelerator like Hailo-8 which might have its own memory management units.
+  common_mistake: |
+    **The Pitfall:** Relying on naive demand-paging by mmaping the entire file without `MADV_WILLNEED`.
+    **The Rationale:** Candidates trust the OS to perfectly manage page faults without realizing that real-time edge AI requires deterministic memory pre-fetching to avoid extreme latency spikes during initial layer execution.
+    **The Consequence:** Severe cold start latency and missed real-time deadlines on the first inference, as the accelerator stalls waiting for synchronous flash memory reads.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model size: 500 MB.
+    - Flash read speed: 100 MB/s.
+    - Critical initial layers: 10% of model (50 MB).
+
+    **Calculations:**
+    - Full sequential load time: 500 MB / 100 MB/s = 5 seconds.
+    - Pre-fetch critical layers (`MADV_WILLNEED`): 50 MB / 100 MB/s = 0.5 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: I/O Bound Mitigated**. Selectively pre-fetching only the initial 50 MB drops the effective cold start latency from 5 seconds to 0.5 seconds, unblocking the execution pipeline.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Reasoning Competency, Knowledge Area, and Mode are missing.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

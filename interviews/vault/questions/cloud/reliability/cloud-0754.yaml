@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0754
+track: cloud
+level: L4
+zone: diagnosis
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: The Checkpoint Resurrection
+scenario: We're training a 175B model on 10,000 GPUs. At step 50,000, a node fails and the job crashes. We checkpoint every 1,000 steps. The PM asks if we only lost 1,000 steps of work and will only lose 30 minutes.
+question: Why is the PM's 30-minute recovery estimate dangerously optimistic?
+details:
+  realistic_solution: 'The PM''s estimate misses four costs: (1) **Checkpoint write time** — a 175B model in mixed-precision training has ~2.8 TB of state. Writing this to distributed storage takes significant time. (2) **Lost compute** — the 1,000 steps between checkpoints represent real GPU-hours that are irrecoverable. (3) **Restart overhead** — re-initializing 10,000 GPUs, re-establishing NCCL rings, and verifying consistency takes 15-45 minutes. (4) **Checkpoint loading** — reading 2.8 TB from distributed storage back into 10,000 GPUs is not instant.'
+  common_mistake: |
+    **The Pitfall:** Assuming checkpoint overhead is negligible and recovery is instantaneous.
+    **The Rationale:** Candidates ignore the massive physical reality of writing and reading terabytes of distributed state, and the synchronization costs of 10,000 GPUs.
+    **The Consequence:** Drastically under-budgeting cluster time and money for large-scale training failures.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 175B parameter model (mixed precision requires 16 bytes/param for states).
+    - 10,000 GPUs. Checkpoints every 1,000 steps (~1.5s/step).
+    - Storage write/read speed: ~10 GB/s.
+
+    **Calculations:**
+    - Checkpoint Size: 175B params × 16 bytes = 2.8 TB.
+    - Checkpoint Write Time: 2.8 TB / 10 GB/s = ~280 seconds (~4.7 min).
+    - Lost Compute: 1,000 steps at ~1.5s/step = 25 mins of training. 10,000 GPUs × 1,500s = 4,167 GPU-hours.
+    - Restart Cost: Job queue (5m) + NCCL init (10m) + Checkpoint Load (5m) + Warmup (5m) = ~25 minutes of idle time.
+    - Total Wasted Compute: 4,167 hours (lost) + 4,167 hours (idle) = 8,334 GPU-hours.
+
+    **Conclusion & Interpretation:**
+    - **Result: I/O-and-Sync-Bound**. A single failure wastes over 8,300 GPU-hours due to lost progress and massive 10,000-node restart overheads.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-151
+  position: 3
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

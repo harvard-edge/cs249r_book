@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: edge-2133
+track: edge
+level: L4
+zone: optimization
+topic: mixture-of-experts
+competency_area: memory
+bloom_level: apply
+phase: both
+title: MoE Sparse Activation on Jetson Orin
+scenario: You want to deploy a 4-expert MoE language model on Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W). Each expert has 500M INT8 parameters (500 MB). Only top-1 expert activates per token. The full model does not fit in GPU memory if all experts are loaded simultaneously, but the unified memory architecture gives you flexibility. Design a memory management strategy.
+question: How would you manage the 500MB experts and prefetching so the 4-expert top-1 MoE runs on Jetson Orin without token stalls?
+details:
+  realistic_solution: Pre-load the top-2 most-used experts based on a lightweight prefix classifier. Use the router's first-token prediction to speculatively prefetch the likely expert for the next token while the current expert executes. Pin the dense layers and the router in memory permanently. Use pinned CUDA memory for the remaining experts.
+  common_mistake: Treating Jetson like a discrete GPU and trying to pre-load all 4 experts into the 32GB LPDDR5, ignoring that LPDDR5 bandwidth (68 GB/s) is 50× lower than H100 HBM3. Loading an expert on-demand causes 500 MB / 68 GB/s ≈ 7.4 ms stalls per token.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 4 experts, 500 MB each.
+    - LPDDR5 bandwidth: 68 GB/s.
+    - Orin INT8 throughput for expert FFN (500M ops) / 275 TOPS = 1.8 ms.
+
+    **Calculations:**
+    - Total expert params = 4 * 500 MB = 2 GB + ~1 GB dense layers = 3 GB total (fits in 32 GB).
+    - Prefetch latency = 500 MB / 68 GB/s = 7.4 ms.
+    - Net overhead without overlap = max(7.4, 1.8) - 1.8 = 5.6 ms/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: 7.4 ms latency (Memory-Bandwidth-Bound)**. Loading experts on-demand over the constrained memory bus causes significant stalls, requiring speculative prefetching to hide the latency.
+status: deleted
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+deletion_reason: 'Physics violation: mixture-of-experts inapplicable on edge'
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3969
+track: cloud
+level: L4
+zone: optimization
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: 'Bucket Fusion Order and Its Effect on First-Bucket Overlap Latency'
+scenario: In DDP, gradient buckets are filled in reverse model order. The first bucket to fill contains the output layer's gradients (~1MB), finishing its AllReduce quickly but starting late. Meanwhile, huge intermediate layer buckets (25MB each) could benefit from earlier AllReduce starts.
+question: How would you form DDP gradient buckets to improve AllReduce overlap for the 1MB output layer and 25MB intermediate layers?
+details:
+  realistic_solution: 'Custom bucket assignment: (1) Group the output layer''s small gradients into the same bucket as the last few intermediate layers. This makes the first bucket larger (25MB) and delays its readiness by only a few ms, but the AllReduce is more bandwidth-efficient. (2) Use DDP''s bucket_cap_mb and find_unused_parameters to control bucketing. (3) Alternative: use gradient_as_bucket_view=True to eliminate buffer copies, and set bucket_cap_mb based on profiling. (4) Advanced: NVIDIA''s Apex DDP allows custom bucket assignments via register_grad_hook_per_bucket.'
+  common_mistake: |
+    **The Pitfall:** Using the same bucket size for all layers.
+    **The Rationale:** The output layer's small gradients create a tiny first bucket that underutilizes AllReduce bandwidth.
+    **The Consequence:** Large intermediate layers are delayed, increasing overall communication latency and reducing training throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - AllReduce bandwidth: 900 GB/s.
+    - First bucket: 1MB. Optimal first bucket: 25MB.
+    
+    **Calculations:**
+    - First Bucket Time: 1MB / 900 GB/s = 0.0011 ms.
+    - Optimal First Bucket Time: 25MB / 900 GB/s = 0.027 ms.
+    - Savings Per Step: ~50 microseconds (by reducing latency overhead of extra calls).
+    
+    **Conclusion & Interpretation:**
+    - **Result: 10ms savings (Latency-Bound)**. Over 200 steps, this saves 10ms of pure communication overhead.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

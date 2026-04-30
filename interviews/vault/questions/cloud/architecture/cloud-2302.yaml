@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2302
+track: cloud
+level: L5
+zone: diagnosis
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: MoE Expert Parallelism Decode Bottleneck
+scenario: You deploy an 8x8B Mixture-of-Experts (MoE) LLM (top-2 routing, ~16B active parameters) on a single 8-GPU node (640GB HBM total) to serve 500 QPS of chat completions. You observe decode latency stuck at 150ms/token with GPU SM utilization under 15%. A dense 13B model on the exact same hardware achieves 30ms/token.
+question: "Why is the MoE model failing to achieve expected performance, and how do you redesign the deployment?"
+details:
+  realistic_solution: The failure stems from using Expert Parallelism (EP) during the memory-bound autoregressive decode phase. In EP, each GPU holds one expert, forcing an all-to-all token routing over NVLink. At batch size 1, reading 16GB of FP16 weights to process a single token is catastrophically memory-bandwidth bound, compounded by all-to-all kernel sync overheads. The fix is to redesign the mapping by using Tensor Parallelism (TP=8). By sharding the weights of all experts across all 8 GPUs, you eliminate cross-GPU token routing and divide the massive memory read by 8, saturating aggregate bandwidth.
+  common_mistake: |
+    **The Pitfall:** Assuming the bottleneck is KV cache capacity and attempting to increase batch size or apply quantization.
+    **The Rationale:** Engineers see low SM utilization and assume standard dense-model bottlenecks, ignoring the unique architectural cost of EP all-to-all routing during decode.
+    **The Consequence:** The model remains structurally starved for memory bandwidth, never meeting the real-time 30ms/token SLA.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Active Experts: 16B parameters (32GB in FP16).
+       - Hardware: 8 GPUs, 2.0 TB/s bandwidth each.
+       - Workload: Autoregressive decode (batch=1).
+    2. **Calculations:**
+       - EP (1 GPU per expert): 1 GPU loads 16GB. Time = 16 GB / 2.0 TB/s = 8 ms.
+       - EP Overhead: All-to-all NVLink syncs per layer across 32 layers add massive latency > 100ms.
+       - TP=8 (Weights sharded): Each GPU loads 32GB / 8 = 4GB.
+       - TP=8 Time: 4 GB / 2.0 TB/s = 2 ms.
+       - TP=8 Overhead: Eliminates all-to-all token routing entirely.
+    3. **Conclusion & Interpretation:**
+       - **Result: 2ms vs >100ms.** The decode phase is **Memory-Bandwidth and Comm-Bound**. Switching to TP=8 divides the memory read time and eliminates the lethal sync overhead.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

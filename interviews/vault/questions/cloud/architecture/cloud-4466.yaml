@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4466
+track: cloud
+level: L4
+zone: specification
+topic: recommendation-systems-engineering
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Multi-Stage Ranking Latency Budget Decomposition
+scenario: 'A recommendation pipeline has a 100ms total latency SLO. It runs: retrieval (ANN search), light ranking (score 10K candidates), and heavy ranking (score 500 candidates).'
+question: How would you allocate a 100ms recommendation latency budget across retrieval, light ranking, and heavy ranking?
+details:
+  realistic_solution: |
+    Latency budget allocation: Retrieval (ANN search, 1M candidates to 10K): HNSW or FAISS at 1M items, 128-dim vectors. On GPU: 1ms. Allocate 5ms (5x headroom for network, sorting). Light ranking (10K candidates to 500): run a small 2-layer MLP (0.5M params) scoring 10K items. At H100: 10K x 0.5M x 2 FLOP = 10B FLOP / 989T = 0.01ms. Including embedding lookup: 10K lookups x 256B = 2.5MB at 3.35TB/s = 0.75μs. Allocate 20ms for light ranker (includes embedding table lookups, feature engineering). Heavy ranking (500 candidates): run a large cross-feature DNN (50M params). 500 x 50M x 2 FLOP = 50B FLOP / 989T = 0.05ms compute. Dominant cost: embedding lookups for 500 items, feature interaction layers. Allocate 50ms. Buffer: 25ms for serialization, network, runtime overhead. Total: 5 + 20 + 50 + 25 = 100ms.
+  common_mistake: |
+    Allocating latency budget equally across stages (33ms each). Retrieval is embarrassingly parallel and can be very fast. Heavy ranking is the accuracy bottleneck and should receive the most budget. Equal allocation wastes budget on fast stages and under-allocates to the quality-critical stage.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Heavy ranker: 50M params, batch=500, 20 embedding tables.
+    - H100 specs: 989 TFLOPS, 3.35 TB/s memory bandwidth.
+
+    **Calculations:**
+    - DNN forward 50M inference FLOP: 500 * 50M * 2 = 50B FLOP.
+    - DNN compute time: 50B FLOP / 989 TFLOPS = 0.050ms.
+    - Embedding lookups bandwidth: 500 items * 20 tables * 256B = 2.56MB.
+    - Embedding lookup time: 2.56MB / 3.35 TB/s = 0.76µs.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~1ms total raw compute/lookup (Latency-Budget-Bound)**. Heavy ranking is allocated 50ms to account for feature interaction, preprocessing, network, and batch formation overheads.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2924
+track: cloud
+level: L6+
+zone: mastery
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: create
+phase: both
+title: Memory Capacity Planning for Concurrent RAG Agents on H100
+scenario: You are deploying a compound AI system on a single node where 16 concurrent agent sessions each run a 13B LLM plus a shared 7B reranker. Each agent session holds an 8192-token KV cache.
+question: Do the 16 concurrent 13B agent sessions plus shared 7B reranker fit on one 8xH100 node, and how would you allocate memory with tensor parallelism?
+details:
+  realistic_solution: 'Allocate TP=4 for the 13B model and TP=2 for the 7B reranker. The KV cache must be explicitly modeled. With BF16 weights, the 13B shards consume 6.5GB per GPU, and the KV cache across 16 sessions adds ~2.67GB total (distributed to ~0.67GB per GPU). The total memory footprint per GPU easily fits within the 80GB limit. NVLink ensures rapid all-reduce across the shards.'
+  common_mistake: |
+    **The Pitfall:** Forgetting to account for KV cache memory when planning model parallelism.
+    **The Rationale:** Teams focus exclusively on allocating GPU memory for model weights and activation memory.
+    **The Consequence:** Overloading the node by failing to realize that many concurrent sessions with large KV caches can consume more memory than the model weights themselves.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Single node with 8x 80GB GPUs.
+    - 13B model (bf16, 26GB weights, 40 layers, 1 KV head, 128 head_dim).
+    - 7B reranker (bf16, 14GB weights).
+    - 16 concurrent sessions, 8192-token KV cache each.
+
+    **Calculations:**
+    - 13B weights per GPU (TP=4): 26 GB / 4 = 6.5 GB.
+    - KV cache per session: 2 * 40 * 1 * 128 * 2 bytes * 8192 = 167.77 MB.
+    - Total KV cache for 16 sessions: 16 * 167.77 MB = ~2.68 GB.
+    - KV cache per GPU (TP=4): 2.68 GB / 4 = 0.67 GB.
+    - 13B total memory per GPU: 6.5 GB + 0.67 GB + ~2 GB (activations) = 9.17 GB.
+    - 7B reranker per GPU (TP=2): 14 GB / 2 = 7 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~16.17 GB per GPU (Memory-Feasible)**. With ~70GB headroom remaining per GPU on the 13B shards, the entire compound system easily fits on the single node.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

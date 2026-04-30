@@ -1,0 +1,34 @@
+schema_version: '1.0'
+id: global-0095
+track: global
+level: L4
+zone: diagnosis
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: analyze
+phase: both
+title: FP8 Gradient Casting Overflow Crisis
+scenario: You are migrating a 70B parameter LLM fine-tuning pipeline from FP16 to FP8 to double throughput. The forward pass works perfectly, but during the backward pass in QAT, the loss immediately spikes to NaN after 15 steps. The gradient norms are roughly ~800.0 before the crash.
+question: What caused this catastrophic failure?
+details:
+  realistic_solution: 'The root cause is a mismatch in FP8 encoding formats. FP8 has two standard formats: E4M3 (4 exponent bits, 3 mantissa bits) and E5M2 (5 exponent bits, 2 mantissa bits). You used E4M3 for both the forward and backward passes. E4M3 provides higher precision but has a maximum representable value of 448. When gradients hit ~800.0, E4M3 overflows, producing NaNs. The fix is to use E4M3 for the forward pass (activations and weights) and E5M2 for the backward pass (gradients), as E5M2 sacrifices precision for a much larger dynamic range (max value 57,344).'
+  common_mistake: |
+    **The Pitfall:** Assuming FP8 has a uniform dynamic range and attributing the NaN to a learning rate that is too high for quantized training.
+    **The Rationale:** Treating all 8-bit floats as having identical exponent/mantissa distributions.
+    **The Consequence:** Spending weeks tuning hyperparameters for a fundamentally impossible numerical representation, stalling the FP8 migration.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Gradients hit ~800.0.
+    - FP8 E4M3 vs E5M2 formats.
+
+    **Calculations:**
+    - FP8 E4M3 Max Value: (1 + 6/8) * 2^(15-7) = 1.75 * 256 = 448.
+    - Overflow Check: 800 > 448 (NaN crash).
+    - FP8 E5M2 Max Value: (1 + 3/4) * 2^(30-15) = 1.75 * 32,768 = 57,344.
+
+    **Conclusion & Interpretation:**
+    - **Result: Max Value 448 (Precision-Bound)**. The E4M3 format strictly overflows at 448. Gradients must use E5M2 to accommodate values up to 57,344.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10

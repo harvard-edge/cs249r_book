@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-1615
+track: cloud
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Diagnosing Asymmetric OOM in Tensor Parallel Inference
+scenario: 'You are deploying a 70B parameter model on an 8-GPU node using Tensor Parallelism (TP=8). Weights consume ~17.5GB/GPU. During a load test with batch size 128 and sequence length 2048, the system crashes with an OutOfMemoryError specifically on GPU 0. GPUs 1-7 report normal utilization.'
+question: 'Why does the 8-way tensor-parallel 70B model OOM only on GPU 0 during batch-128, sequence-2048 inference?'
+details:
+  realistic_solution: 'The final unembedding layer projects hidden states into logits across the entire vocabulary. If all logits are naively gathered onto GPU 0 for token sampling, it creates a massive, localized memory spike. The solution is to compute the argmax or sample locally within the vocab-parallel shards on each GPU, communicating only the final selected token IDs via a lightweight AllGather.'
+  common_mistake: |
+    **The Pitfall:** Blaming the KV cache size or weight imbalance.
+    **The Rationale:** Candidates fail to analyze the final layer memory profile, missing that full-vocabulary logits are often erroneously gathered on a single device for sampling.
+    **The Consequence:** Wasting time tuning TP degrees or KV cache parameters while the actual structural bottleneck remains unaddressed.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Logits shape: [batch=128, seq=2048, vocab=32000].
+    - Precision: BF16 (2 bytes), FP32 upcasting for softmax (4 bytes).
+
+    **Calculations:**
+    - Base logit memory = 128 * 2048 * 32,000 * 2 bytes = 16.77 GB.
+    - FP32 upcasting doubles this to 33.5 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: The logits spike to 33.5 GB on GPU 0 alone, pushing it past the memory limit (Memory-Bound).**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-272
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: OK
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

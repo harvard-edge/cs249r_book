@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4047
+track: cloud
+level: L5
+zone: design
+topic: gradient-synchronization
+competency_area: parallelism
+bloom_level: create
+phase: training
+title: Gradient Synchronization for ZeRO Stage 3
+scenario: 'ZeRO Stage 3 partitions model parameters, gradients, and optimizer states across GPUs. Forward and backward passes require all-gather of parameters before each layer and reduce-scatter of gradients after.'
+question: 'What is the ZeRO-3 per-layer communication schedule and cost for a 64-GPU, 30B-parameter, 60-layer training run?'
+details:
+  realistic_solution: 'The 30B parameters (60GB FP16) are sharded, giving ~937.5MB per GPU. The per-layer schedule requires an AllGather (forward), an AllGather (backward), and a ReduceScatter (gradients). Each primitive moves (N-1)/N * Total_Size bytes over the bus. With 64 GPUs, this is 63/64 * 1GB per operation. Total bus traffic is roughly 3GB per layer. High-bandwidth networks paired with prefetching allow this communication to be heavily overlapped with compute.'
+  common_mistake: |
+    **The Pitfall:** Applying the 2*(N-1)/N AllReduce factor to AllGather and ReduceScatter independently.
+    **The Rationale:** Candidates double-count traffic by forgetting that AllReduce is composed of ReduceScatter + AllGather, and each alone only moves (N-1)/N data.
+    **The Consequence:** Overestimating ZeRO-3 bus traffic by a factor of 2, leading to flawed networking design decisions.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 30B parameters = 60GB FP16.
+    - GPUs (N): 64. Layers: 60.
+
+    **Calculations:**
+    - Traffic per layer: AllGather (fwd) + AllGather (bwd) + ReduceScatter.
+    - Cost: 3 * (63/64) * 1 GB = ~2.95 GB per layer.
+    - Total iteration traffic: 60 layers * 2.95 GB = ~177.2 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ZeRO-3 requires ~1.5x more bus traffic than flat AllReduce, easily hidden by prefetching on high-bandwidth networks (Communication-Bound).**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,43 @@
+schema_version: '1.0'
+id: cloud-3957
+track: cloud
+level: L5
+zone: analyze
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: analyze
+phase: both
+title: Weight Update Sharding with Overlapped AllGather in FSDP2
+scenario: PyTorch FSDP2 (Fully Sharded Data Parallel v2) uses a ReduceScatter-then-AllGather pattern instead of AllReduce. After backward, gradients are reduce-scattered, each GPU updates its parameter shard locally, then AllGather broadcasts updated parameters.
+question: "What overlap opportunities exist in FSDP2's ReduceScatter, local optimizer, and AllGather pipeline?"
+details:
+  realistic_solution: 'FSDP2 overlap pipeline per layer: (1) ReduceScatter(layer L gradients) -> each GPU has its gradient shard. (2) Optimizer step on shard (local, no communication). (3) AllGather(layer L updated params) -> all GPUs have full updated layer. Overlap opportunities: (a) ReduceScatter(L) overlaps with backward compute for layer L-1. (b) Optimizer step for layer L overlaps with ReduceScatter(L-1). (c) AllGather(L) overlaps with optimizer step for L-1 and ReduceScatter(L-2).'
+  common_mistake: |
+    **The Pitfall:** Thinking ReduceScatter and AllGather are equivalent in overlap opportunity.
+    **The Rationale:** Candidates lump all collective communication together without tracking data dependencies.
+    **The Consequence:** They fail to pipeline operations correctly, leading to serialization and poor scaling efficiency.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Per layer: ReduceScatter (RS) = 1.5 ms, Optimizer (Opt) = 0.5 ms, AllGather (AG) = 1.5 ms, Backward (BW) = 5 ms.
+       - Serial pipeline: 1.5 + 0.5 + 1.5 + 5 = 8.5 ms per layer.
+    2. **Calculations:**
+       - Pipelined depth overlaps: RS(L) || Opt(L+1) || AG(L+2) || BW(L-1).
+       - Max bottleneck in pipelined stage: max(1.5, 0.5, 1.5, 5) = 5 ms.
+       - Serial time for 80 layers: 80 × 8.5 ms = 680 ms.
+       - Pipelined time for 80 layers: 80 × 5 ms = 400 ms.
+    3. **Conclusion & Interpretation:** **Pipelining communication with compute achieves a 1.7x speedup (400 ms vs 680 ms). Result: Compute-Bound.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

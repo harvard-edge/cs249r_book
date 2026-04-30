@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-0886
+track: mobile
+level: L6+
+zone: mastery
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: Mastering On-Device Knowledge Base Update Strategy for Compound AI on Tensor G3
+scenario: A Tensor G3 (7.5 TOPS, 12GB) enterprise mobile app serves 10,000 users with personalized on-device RAG. Each user has a local corpus of 2,000 documents. The enterprise syncs 50 new/updated documents per user per day via MDM push. The embedding model (256-dim, INT8, 22MB) runs at 150 vecs/s on Tensor G3 NPU.
+question: How would you design a knowledge base update strategy that maintains retrieval quality, minimizes battery impact, and handles the case where updates arrive while the user is actively using the app?
+details:
+  realistic_solution: 'Copy-on-write index with shadow update: (1) Maintain active index (read-only, served from mmap). (2) Background thread builds shadow index by cloning active index and adding new vectors. (3) When shadow is complete, atomic pointer swap (< 1ms). (4) During active use: queue incoming updates in a tiny flat index (max 50 entries = 50*256*4=51KB). Serve queries from: active_index + flat_pending_index, merge results. (5) Shadow build schedule: when screen-off for > 30s or charging, at 10% NPU duty cycle. 50 docs at 150 vecs/s full power: 50/150=0.33s. At 10% duty: 3.3s background wall-clock. Battery: 10% * 5W NPU * 3.3s = 1.65J = 0.00046Wh — negligible. Active-use overhead: flat index search on 50 docs = 0.5ms — imperceptible.'
+  common_mistake: |
+    **The Pitfall:** Updating the FAISS index atomically by taking a write lock during active user querying.
+    **The Rationale:** Developers often use simple thread locks for data structure updates without calculating the blocking time caused by the underlying NPU embedding latency.
+    **The Consequence:** The retrieval stage blocks for up to 333ms, causing users to experience random, noticeable pauses mid-conversation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Update Workload: 50 docs/day at 150 vecs/s.
+    - Index insertion: FAISS HNSW adding 50 vectors takes ~5ms.
+    - Active-use Overhead (Flat Index): 50 vectors * 256 dims * 4 bytes = 51 KB. Search time = 0.5ms.
+
+    **Calculations:**
+    - Active NPU time: 50 / 150 = 0.33s.
+    - Battery Impact: 5W NPU * 0.33s = 1.65 J = ~0.00046 Wh per day.
+    - Combined Query Latency: HNSW(2000 docs) at 5ms + flat(50 docs) at 0.5ms = 5.5ms.
+    - Background Shadow Build (10% duty cycle): 0.33s * 10 = 3.3s wall-clock time.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3.3s wall-clock, 5.5ms latency (Compute-Bound)**. The dual-index strategy ensures negligible impact on latency and battery while seamlessly handling real-time updates.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: mobile-1070
+track: mobile
+level: L5
+zone: analyze
+topic: speculative-decoding
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: Speculative Decoding Feasibility on Mobile NPU
+scenario: On a Snapdragon 8 Gen 3 device, you run a 3B INT4 target model. A 150M INT4 draft model achieves an acceptance rate (alpha) of 0.60.
+question: How does speculative decoding impact on-device latency given the NPU cannot run two models concurrently and must swap them in shared memory?
+details:
+  realistic_solution: Mobile NPUs rely on Unified Memory Architecture (UMA) where model switching incurs a severe penalty due to reloading weights from LPDDR5X DRAM into the NPU's SRAM. The context-switching overhead heavily offsets the theoretical gains of speculative decoding. While the draft model rapidly generates tokens, the constant DRAM contention and NPU driver overhead to swap between the draft and target models yields only a marginal end-to-end latency improvement, making it a poor architectural choice compared to simple autoregressive generation with an optimized KV-cache.
+  common_mistake: |
+    **The Pitfall:** Ignoring the context-switching and weight-loading overhead of mobile NPUs.
+    **The Rationale:** Candidates often assume mobile NPUs can seamlessly multi-task or hold multiple models in SRAM like datacenter GPUs, forgetting LPDDR5X bandwidth limits.
+    **The Consequence:** The candidate incorrectly predicts a massive speedup (e.g., 2-3x), whereas the actual performance gain is heavily degraded by memory I/O bottlenecks.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Target Model (3B INT4): 1.5GB weights. LPDDR5X = 51.2 GB/s.
+       - Draft Model (150M INT4): 75MB weights. Alpha = 0.60, K = 5 tokens.
+       - Model Switching Overhead = ~5ms per swap.
+    2. **Calculations:**
+       - Target read time = 1.5GB / 51.2 GB/s = 29.3ms/token (memory-bound).
+       - Draft read time = 75MB / 51.2 GB/s = 1.5ms/token -> 7.5ms for 5 tokens.
+       - Sequence = Load draft (5ms) + 5 draft tokens (7.5ms) + Load target (5ms) + verify 6 tokens (29.3ms) = 46.8ms total.
+       - Expected Tokens = (1 - 0.6^6) / 0.4 = 2.38 tokens.
+       - Effective Latency = 46.8ms / 2.38 tokens = 19.6ms/token.
+    3. **Conclusion & Interpretation:**
+       - Switching eats ~21% of the potential gain.
+       - **Result: Memory-Bandwidth Bound (Marginal 1.49x Speedup)**.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

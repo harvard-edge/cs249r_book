@@ -1,0 +1,39 @@
+schema_version: '1.0'
+id: mobile-0559
+track: mobile
+level: L3
+zone: diagnosis
+topic: quantization-fundamentals
+competency_area: precision
+bloom_level: apply
+phase: inference
+title: 'The Saturated Stop Sign'
+scenario: You are a mobile ML engineer deploying a new sign detection model to an automotive system running on a Snapdragon 8 Gen 3 SoC. To meet the latency budget, you convert the model from FP32 to per-tensor INT8 quantization using a representative calibration dataset. During testing, you discover that while overall accuracy is acceptable, the model's recall for Stop Sign has dropped to almost zero, a critical safety failure. You profile the activations of the final convolutional layer and find that for most signs (like Speed Limit), the maximum activation value is around 45.0. However, for stop signs, especially at night with headlight glare, the maximum activation value spikes to 550.0.
+question: What is the most likely cause of this catastrophic accuracy drop for a single class, and how would you solve it?
+details:
+  realistic_solution: 'The root cause is activation overflow poisoning the quantization parameters. With per-tensor quantization, the scaling factor is determined by the absolute maximum value observed across the entire calibration dataset. The 550.0 outlier from the stop sign forces the quantization range to be very large. This results in a small scaling factor that maps the vast majority of useful activations (in the ~45.0 range) to a tiny, non-descriptive range of integers, effectively destroying their information content.'
+  common_mistake: |
+    **The Pitfall:** Blaming the model architecture or assuming INT8 is simply not precise enough.
+    **The Rationale:** Engineers switch to higher-precision FP16, sacrificing performance, instead of recognizing that quantization maps distributions and outliers can poison that mapping.
+    **The Consequence:** They miss a simple calibration fix and unnecessarily lose 2x-4x performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - INT8 provides 256 discrete values (-128 to 127). Max magnitude represents 127 steps.
+
+    **Calculations:**
+    - With normal max activation of 45.0, resolution = 45.0 / 127 = ~0.35 per step.
+    - With outlier max activation of 550.0, resolution = 550.0 / 127 = ~4.33 per step.
+    - Normal activations (0 to 45.0) are compressed into buckets = 45.0 / 4.33 = ~10 quantization buckets.
+
+    **Conclusion & Interpretation:**
+    - **Result: 10 buckets (Precision-Bound)**. Over 90% of precision is lost; a percentile-based clipping calibration is required.
+  options:
+    - The Snapdragon NPU has a known bug with certain convolutional operators when handling saturated INT8 values. You should force this specific layer to run on the CPU or GPU instead of the NPU.
+    - The model requires higher precision for this feature. You should use mixed precision, keeping the final convolutional and classification layers in FP16 while quantizing the rest to INT8.
+    - The weights in the layer have a high dynamic range, not the activations. You should apply per-channel quantization to the weights of the final convolutional layer instead of per-tensor.
+    - The high activation values from stop signs are creating a large dynamic range, crushing the quantization resolution for all other classes. You should use a percentile-based clipping calibration method to ignore these rare outliers.
+  correct_index: 3
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6

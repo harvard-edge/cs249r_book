@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-4459
+track: cloud
+level: L4
+zone: analyze
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Decode Pool Tensor Parallelism Degree Selection
+scenario: 'A 70B model decode pool can use TP=1 (192GB MI300X single GPU), TP=2 (2xH100 NVLink), or TP=4 (4xH100 NVLink).'
+question: 'How do TP=1 MI300X, TP=2 H100, and TP=4 H100 compare for 70B decode throughput, TPOT, and cost per token?'
+details:
+  realistic_solution: 'Decode throughput analysis per TP degree: TP=1 on MI300X: memory-bound decode at 5.3 TB/s / 140GB (70B BF16) = 37.9 tok/sec per stream. KV cache: 192-140 = 52GB available. TP=2 on 2xH100: each GPU holds 70GB model shard. Effective BW = 2 * 3.35 = 6.7 TB/s for model weights. tok/sec = 6.7TB/140GB = 47.9 tok/sec. But all-reduce latency per step: 2 * (N-1)/N * message_size / NVLink_BW = 2 * 0.5 * small_message / 900GB/s. For TP=2 attention reduce: message = 2 * seq_len * hidden * 2B = 2 * 1 * 8192 * 2 = 32KB. All-reduce: 32KB / 900GB/s = 0.036us — negligible. TP=2 wins over MI300X single in throughput. TP=4 on 4xH100: BW = 4 * 3.35 = 13.4 TB/s effective. tok/sec = 13.4TB/140GB = 95.7 tok/sec. All-reduce for TP=4: 3 * 32KB / 900GB/s = 0.107us — still negligible. TP=4 wins on throughput. But cost: TP=4 requires 4 GPUs at $12/hr vs MI300X at $4/hr. Cost per token: TP=4: $12/hr / (95.7 * 3600) = $0.000035/token. MI300X: $4/(37.9*3600) = $0.0000293/token. MI300X is cheaper per token.'
+  common_mistake: |
+    **The Pitfall:** Assuming higher Tensor Parallelism (TP) always improves decode performance.
+    **The Rationale:** TP reduces per-GPU memory bandwidth requirement but adds all-reduce communication overhead per decode step.
+    **The Consequence:** Over-provisioning TP, which increases cost exponentially while potentially harming latency at small batch sizes due to all-reduce overhead.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 70B model decoding.
+    - MI300X: Cost $4/hr.
+    - H100: Cost $3/hr/GPU. TP=2 is $6/hr, TP=4 is $12/hr.
+
+    **Calculations:**
+    - TP=1 MI300X: 5.3 TB/s / 140 GB = 37.9 tok/sec. Cost: $4/hr. $0.0000293/token.
+    - TP=2 H100: Effective BW = 2 * 3.35 TB/s = 6.7 TB/s. 6.7 TB/s / 140 GB = 47.9 tok/sec. Cost: $6/hr. $0.0000348/token.
+    - TP=4 H100: Effective BW = 4 * 3.35 TB/s = 13.4 TB/s. 13.4 TB/s / 140 GB = 95.7 tok/sec. Cost: $12/hr. $0.0000348/token.
+
+    **Conclusion & Interpretation:**
+    - **Result: $0.0000293/token on MI300X (Memory Bandwidth-Bound)**. MI300X single is most cost-efficient, whereas TP=4 doubles throughput vs MI300X but costs 3x more.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-1995
+track: cloud
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Diagnosing Explainability Control Plane Latency
+scenario: 'A trust-and-safety API serves a 70B parameter LLM. The control plane captures per-layer attention entropy and MoE routing probabilities for real-time explainability dashboards. At peak load, P99 latency spikes from 55ms/token to over 400ms/token. Profiling shows GPU utilization drops from 85% to 30%, while CPU utilization on the control plane node remains under 40%. The system extracts 2GB of internal state tensors per forward pass via standard Device-to-Host PCIe transfers.'
+question: 'What is causing the 400ms/token P99 spike, and how would you extract the 2GB of state without starving the GPUs?'
+details:
+  realistic_solution: |
+    Synchronous PCIe transfers are blocking the main CUDA compute stream. The solution is to allocate pinned host memory and use `cudaMemcpyAsync` on a secondary CUDA stream to extract the state asynchronously without blocking the forward pass.
+  common_mistake: |
+    **The Pitfall:** Assuming the control plane CPU is the bottleneck.
+    **The Rationale:** Candidates see low GPU utilization and assume the CPU is too slow to process the 2GB payload, missing the synchronous PCIe blocking issue.
+    **The Consequence:** Unnecessary hardware upgrades or heavy downsampling of explainability state, completely missing the true stream synchronization overhead.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 2GB state extracted per forward pass.
+    - PCIe Gen5 x16 effective bandwidth: ~50 GB/s.
+    - Baseline token generation time: 55ms.
+
+    **Calculations:**
+    - PCIe transfer time: 2GB / 50 GB/s = 0.04s = 40ms.
+    - If synchronous, total time = 55ms + 40ms = 95ms per layer sync, compounding dramatically across layers to 400ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 40ms transfer latency (PCIe/Stream-Bound)**. Asynchronous transfers are required to hide the latency behind the 55ms compute time.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:37:18.769059'

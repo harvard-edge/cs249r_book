@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: tinyml-1142
+track: tinyml
+level: L5
+zone: evaluation
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: Ethos-U55 vs CPU Tensor Placement Tradeoffs
+scenario: 'You are deploying a MobileNetV2-based wake-word detector on a Corstone-300 subsystem with an ARM Cortex-M7 and an Ethos-U55 NPU. The system has exactly 512 KB of shared SRAM. Your model contains an early non-linear operator that the U55 compiler falls back to running on the M7 CPU. You have two options for the intermediate activation tensors surrounding this fallback: (A) pin them to a dedicated ''CPU-accessible'' region of the 512 KB SRAM, or (B) use a unified flat tensor arena managed by the U55 driver.'
+question: Which memory planning approach do you choose and how does it impact your SRAM peak usage?
+details:
+  realistic_solution: 'Option B (unified flat tensor arena) is generally superior for peak SRAM reduction, despite the coherency overhead. By allowing the compiler to overlay the U55''s input/output tensors with the M7''s working memory in a single arena, you minimize peak SRAM usage. To mitigate the cache trashing, you must explicitly issue D-cache clean/invalidate commands only at the boundary of the CPU fallback operator, ensuring the U55 reads the M7''s output correctly and vice versa, without sacrificing the space benefits of offline memory planning.'
+  common_mistake: |
+    **The Pitfall:** Assuming any shared 512 KB placement is equally fast without cache management.
+    **The Rationale:** Candidates forget that the M7 uses a D-cache while the U55 accesses SRAM directly via AXI.
+    **The Consequence:** Failing to perform cache clean/invalidate operations causes data corruption when handing off tensors between the CPU and NPU.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Shared SRAM: 512 KB.
+    - Activation tensor before fallback: 64 KB.
+    - Output activation tensor: 32 KB.
+
+    **Calculations:**
+    - Option A (Split Arenas): Requires dedicated 96 KB handoff region. Fast U55 memory reduced to 416 KB.
+    - Option B (Unified Arena): Reuses 96 KB for other layers. Cache maintenance (clean 32 KB, invalidate 64 KB) takes hundreds of cycles instead of thousands for DMA copy.
+
+    **Conclusion & Interpretation:**
+    - **Result: 96 KB (Memory-Bound)**. The unified arena reduces peak SRAM by 96 KB and executes faster, provided D-cache coherency is manually managed.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-2045
+track: cloud
+level: L4
+zone: specification
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: evaluate
+phase: both
+title: The Vector DB Sharding Strategy
+scenario: Your vector index has grown to 500M embeddings (1536-dim FP32, ~3 TB raw). You need sub-20ms P99 search latency at 5,000 QPS. A single machine can hold at most 384 GB in RAM.
+question: Should you shard by document ID range (range-based) or by random hash (hash-based)?
+details:
+  realistic_solution: 'Neither — you should shard by embedding space clustering. Range-based sharding on document ID gives even distribution but searches must fan out to all shards (every shard might contain the nearest neighbor). Hash-based is the same problem. With 10 shards and scatter-gather: P99 = max(P99 of 10 shards), which is much worse than single-shard P99 due to tail latency amplification. Better: use IVF-style sharding where vectors are clustered using k-means and each shard holds one or more clusters. At query time, the query is compared to cluster centroids (stored in a routing layer) and routed to only 2-3 relevant shards instead of all 10. This reduces fan-out from 10× to 2-3×, dramatically improving tail latency. Memory per shard: 3TB / 10 shards = 300 GB per shard. With PQ compression (32× ratio): 9.4 GB per shard — fits easily. Keep full vectors on SSD for reranking.'
+  common_mistake: |
+    **The Pitfall:** Choosing hash-based sharding because 'it distributes load evenly.'
+    **The Rationale:** For vector search, even load distribution is less important than minimizing fan-out.
+    **The Consequence:** Tail latency amplification because P99 = max(P99 of all shards).
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Throughput: IVF routing to 3 out of 10 shards means each shard receives 5000 * (3/10) = 1500 QPS/shard.
+
+    **Calculations:**
+    - Fan-out to 10 shards: P99 \u2248 P99_single \u00d7 (1 + ln(10)/3) \u2248 12ms \u00d7 1.77 = 21.2ms.
+    - IVF routing to 3 shards: P99 \u2248 12ms \u00d7 (1 + ln(3)/3) = 12ms \u00d7 1.37 = 16.4ms (within SLA).
+
+    **Conclusion & Interpretation:**
+    - **Result: 16.4ms (Latency-Bound)**. IVF routing meets the sub-20ms SLA.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-447
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

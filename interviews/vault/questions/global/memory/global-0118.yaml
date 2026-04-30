@@ -1,0 +1,31 @@
+schema_version: '1.0'
+id: global-0118
+track: global
+level: L6+
+zone: evaluation
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Long-Running Inference OOM Death
+scenario: Your dynamic batching LLM server runs perfectly for the first 6 hours, processing requests with varying lengths (100 to 8000 tokens). However, around hour 12, the service consistently crashes with CUDA OOM, despite Prometheus metrics showing the theoretical peak memory usage never exceeding 45GB on an 80GB A100 GPU.
+question: What is causing the 12-hour CUDA OOMs despite 45GB theoretical use, and how would you redesign KV memory management?
+details:
+  realistic_solution: 'The root cause is severe external and internal memory fragmentation. Contiguous memory allocators fail when allocating and freeing variable-sized KV cache tensors over long periods. When a large contiguous block is requested for an 8000-token sequence, the allocator fails because available memory is scattered. The architectural fix is to implement a PagedAttention memory manager. Pre-allocate a single massive contiguous block of HBM at startup. Divide it into fixed-size physical blocks (e.g., 16 or 32 tokens) with a page table mapping logical to physical blocks.'
+  common_mistake: |
+    **The Pitfall:** Assuming a memory leak in Python/PyTorch and adding aggressive garbage collection calls.
+    **The Rationale:** A slow climb to OOM over many hours is the classic signature of an application memory leak.
+    **The Consequence:** Failing to fix the crash because the memory isn't leaked; it is physically trapped in unallocatable fragmented gaps by the contiguous allocator.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - KV size: ~125 KB per token.
+    - Max sequence: 8000 tokens x 64 batch.
+    
+    **Calculations:**
+    - Max required size naively: 8000 x 64 x 125 KB = ~64 GB.
+    - Fragmentation: 45 GB is allocated but fragmented into tiny 50 MB chunks.
+    - Block size of 16 tokens = ~2 MB per block.
+    
+    **Conclusion & Interpretation:**
+    - **Result: ~64 GB (Fragmentation-Bound)**. A 40 GB PagedAttention KV pool gives 20,000 physical blocks, eliminating external fragmentation completely.
+status: published

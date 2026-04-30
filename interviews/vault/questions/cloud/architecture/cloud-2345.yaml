@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-2345
+track: cloud
+level: L4
+zone: specification
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: evaluate
+phase: both
+title: Bypassing CPU for Massive Checkpoints
+scenario: You are architecting a fault-tolerant training cluster for a 500B parameter model. You must asynchronously save 80 GB of optimizer state and weights per GPU every 15 minutes to a distributed NVMe filesystem. Writing via the host CPU causes the training loop to stall for 45 seconds per checkpoint, dropping GPU utilization. The nodes have dual 200Gbps NICs and a PCIe Gen4 architecture.
+question: Why do asynchronous 80GB-per-GPU checkpoints stall for 45s through the host CPU, and what data path should replace it?
+details:
+  realistic_solution: 'Implement GPUDirect Storage (GDS) or GPUDirect RDMA. This enables the NIC to execute PCIe DMA pulls directly from GPU HBM, bypassing the CPU bounce buffer and freeing up the PCIe/Memory bus bottleneck.'
+  common_mistake: |
+    **The Pitfall:** Trying to multithread the CPU memory copy operations or using a larger CPU RAM buffer.
+    **The Rationale:** Candidates assume the CPU is just under-utilized and can process the data faster with more threads.
+    **The Consequence:** They fail to address the fundamental PCIe and CPU memory bus bandwidth bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 80 GB per GPU, 8 GPUs = 640 GB total per node.
+    - CPU RAM bounce buffer limits throughput to ~14 GB/s.
+    - Dual 200Gbps NICs (50 GB/s total egress).
+
+    **Calculations:**
+    - Traditional stall time: 640 GB / 14 GB/s = 45.7 seconds.
+    - GPUDirect Storage (GDS) throughput: Bypasses CPU, utilizes full 50 GB/s NIC bandwidth.
+    - GDS checkpoint time: 640 GB / 50 GB/s = 12.8 seconds.
+
+    **Conclusion & Interpretation:**
+    - **Result: GDS reduces stall from 45s to 12.8s (CPU-PCIe-Bus-Bound)**. The traditional path is bottlenecked.
+  options:
+  - 'The NVMe filesystem has insufficient IOPS to handle 640 GB of concurrent writes, requiring an upgrade to a parallel filesystem like Lustre.'
+  - 'The CPU memory bus and PCIe pathways become saturated because the checkpoint data is bounced through host RAM, which can be bypassed using GPUDirect Storage (GDS).'
+  - 'The PyTorch training loop is Single-Thread-Bound, taking 45.7 seconds (640GB / 14GB/s) to serialize the tensors.'
+  - 'The dual 200Gbps NICs are bottlenecking the transfer; upgrading to 400Gbps NICs will eliminate the 45-second stall by providing 100 GB/s.'
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

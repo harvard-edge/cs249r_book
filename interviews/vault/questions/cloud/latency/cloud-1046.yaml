@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: cloud-1046
+track: cloud
+level: L4
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: Diagnosing P99 Latency Jitter on CPU Inference
+scenario: You deployed a BERT-based NER model on a dual-socket AWS c6i.16xlarge (64 vCPUs, 2 NUMA nodes) using TorchServe. While P50 latency is stable at 15ms, P99 latency randomly spikes to over 85ms under moderate load. CPU utilization hovers around 40%. Hardware profiling reveals a massive spike in Last Level Cache (LLC) misses specifically during these high-latency requests.
+question: How do you diagnose and resolve this performance jitter?
+details:
+  realistic_solution: Diagnose thread migration using 'perf stat' and 'numastat'. The OS scheduler is migrating worker threads across physical cores and NUMA boundaries, destroying warm L1/L2/LLC caches. Fix by pinning inference threads to specific cores using taskset or numactl, and binding memory allocations to the local NUMA node.
+  common_mistake: |
+    **The Pitfall:** Blindly increasing `OMP_NUM_THREADS` to utilize all 64 cores.
+    **The Rationale:** Developers see low CPU utilization and high latency, assuming more threads will speed up the compute.
+    **The Consequence:** Spanning threads across NUMA boundaries drastically worsens cross-node memory traffic and cache thrashing, leading to even higher P99 latency spikes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - L1/L2 access time: ~1-4 ns.
+    - LLC miss (Main memory access): ~100 ns.
+    - Memory operations: ~100 million reads per forward pass.
+
+    **Calculations:**
+    - Impact of 5% LLC Miss Rate: 5% of 100M = 5,000,000 misses.
+    - Stall time = 5,000,000 misses * 100 ns = 500,000,000 ns = 500 ms.
+    - Out-of-order execution hides some latency, but 500 ms of potential stall easily bridges the 70ms P99 gap.
+
+    **Conclusion & Interpretation:**
+    - **Result: 500 ms (Memory-Bound)**. Cross-NUMA node thread migration destroys cache locality, leading to massive LLC misses and 70ms+ tail latency spikes.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+math_verified: true

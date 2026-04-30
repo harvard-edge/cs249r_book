@@ -1,0 +1,41 @@
+schema_version: '1.0'
+id: cloud-0992
+track: cloud
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Diagnosing OOM from Retained Graphs
+scenario: You are training a 1.5B parameter transformer using PyTorch on an instance with 8 GPUs. The training uses FP32 precision, and processes batches of 32 sequences (sequence length 2048) per GPU. The forward and backward passes execute normally initially, but the allocated GPU memory steadily increases by roughly 2.5GB per iteration. This eventually causes a CUDA Out of Memory (OOM) error around step 25. For logging purposes, the training loop appends the training loss directly to a Python list at the end of each step to compute the epoch average later.
+question: "What is causing GPU memory to grow by 2.5GB per iteration, and how should the loss logging code be fixed?"
+details:
+  realistic_solution: The OOM is caused by appending the loss tensor to a persistent list, which inadvertently keeps the entire computational graph alive in memory for every past iteration. The solution is to detach the scalar value from the graph by calling .item() or .detach() before storing it.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing the OOM as a standard batch size or model capacity issue.
+    **The Rationale:** Candidates see memory saturation and immediately suggest heavy systems workarounds (gradient accumulation, activation checkpointing) without tracing the leak.
+    **The Consequence:** The leak persists, and the job will still OOM eventually, regardless of how small the batch size or model becomes.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 1.5B params, FP32.
+       - Memory leak per step: 2.5 GB.
+       - Available memory per GPU: 80 GB.
+    2. **Calculations:**
+       - Baseline memory: 1.5B * (4B weights + 4B grads + 8B Adam states) = ~24 GB.
+       - Available for activations/workspace: 80 GB - 24 GB = 56 GB.
+       - Max steps before OOM: 56 GB / 2.5 GB = 22.4 steps.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Leak.** The un-detached loss tensor retains the full 2.5 GB computational graph per step, perfectly predicting the CUDA OOM error observed around step 25.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

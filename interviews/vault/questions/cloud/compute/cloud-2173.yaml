@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-2173
+track: cloud
+level: L4
+zone: analyze
+topic: roofline-analysis
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: 'The Occupancy vs IPC Tradeoff'
+scenario: 'Two versions of a matrix multiply kernel target an H100 SM. Version A achieves 100% occupancy (2,048 threads resident) using 32 registers per thread and small 16x16 tiles. Version B achieves only 25% occupancy (512 threads) using 128 registers per thread and large 64x64 tiles. Counterintuitively, Version B runs 2x faster despite having 4x fewer resident threads.'
+question: 'Why did the lower-occupancy 64x64-tile GEMM run 2x faster, and when should you intentionally sacrifice occupancy?'
+details:
+  realistic_solution: 'Occupancy''s purpose is latency hiding: when one warp stalls on a memory access, the SM switches to another warp. But this only helps when the kernel is memory-latency-bound. Version A uses tiny tiles (16x16), so each thread accumulates over a small register tile and must reload data from shared memory or HBM frequently. The high occupancy hides this latency but doesn''t eliminate the traffic. Version B uses large 64x64 tiles held entirely in registers (128 regs x 4 bytes = 512 bytes per thread). Each loaded element is reused 64 times within the register file (1ns access) instead of being reloaded from shared memory (5ns) or HBM (300ns). The register-level data reuse transforms the kernel from memory-bound to compute-bound, where it hits the Tensor Core throughput ceiling. At that point, additional occupancy adds nothing — the SMs are already fully utilized by the resident warps. This is Volkov''s insight: for compute-bound kernels, maximize IPC (instructions per clock) through register-level data reuse, not occupancy.'
+  common_mistake: |
+    **The Pitfall:** Assuming occupancy is the primary predictor of performance.
+    **The Rationale:** Treating occupancy as a target to maximize, applying the "more threads = more latency hiding" heuristic without considering data reuse.
+    **The Consequence:** Designing kernels that are constantly waiting on memory rather than fully utilizing compute execution units.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Version A (16x16 tile, 100% occupancy): Each thread processes 16 output elements, reusing each loaded element 16x. High shared memory contention.
+    - Version B (64x64 tile, 25% occupancy): Each thread processes 64 output elements, reusing each loaded element 64x.
+
+    **Calculations:**
+    - Shared memory loads are 4x lower for Version B.
+
+    **Conclusion & Interpretation:**
+    - **Result: 4x lower memory loads (Compute-Bound)**. The massive register-level data reuse transforms the kernel from memory-bound to compute-bound, maximizing IPC regardless of lower occupancy.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

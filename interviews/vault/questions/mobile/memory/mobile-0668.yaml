@@ -1,0 +1,59 @@
+schema_version: '1.0'
+id: mobile-0668
+track: mobile
+level: L3
+zone: diagnosis
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: apply
+phase: inference
+title: The Budget Phone Crash
+scenario: Your ML-powered camera app works perfectly on the Samsung Galaxy S24 (Snapdragon 8 Gen 3, 8 GB RAM) but crashes on the Samsung Galaxy A15 (MediaTek Helio G99, 4 GB RAM) within 30 seconds of opening the camera. Logcat shows `java.lang.OutOfMemoryError` followed by a native crash in the TFLite runtime. The model is a 15 MB INT8 segmentation model.
+question: Why does a 15 MB model crash a 4 GB phone?
+details:
+  realistic_solution: 'The 15 MB model file expands dramatically at runtime, and the Galaxy A15''s memory budget is far smaller than you think:
+
+    1. **Model weights in memory:** 15 MB (INT8, loaded into SRAM for inference)
+    2. **Input tensor:** Camera feed at 1080p = 1920×1080×3 bytes ≈ 6 MB (FP32: 24 MB)
+    3. **Intermediate activations:** The segmentation model''s peak activation tensor (the largest feature map kept in memory between layers) can be 100-200 MB for a 1080p input.
+    4. **Output mask:** 1920×1080×1 = 2 MB
+    5. **Runtime overhead:** TFLite runtime, delegates, memory allocator ≈ 10-20 MB
+    6. **Total runtime footprint:** ~247 MB
+
+    On the Galaxy S24 (8 GB), the per-app memory budget is ~1.5 GB, leaving plenty of headroom. On the Galaxy A15 (4 GB), the per-app budget is ~768 MB, but this is shared with WebViews, ad SDKs, and analytics. A single camera autofocus event can allocate ~200 MB in temporary buffers, pushing total usage past the native heap limit and triggering the OOM crash.
+
+    **The fix:** Reduce the model''s input resolution from 1080p to 256×256. This shrinks activation memory by ~18×, dropping the runtime footprint from 247 MB to ~169 MB and providing enough headroom to survive memory spikes.'
+  common_mistake: |
+    **The Pitfall:** "The model is too big for the phone — use a smaller model."
+    **The Rationale:** Candidates focus solely on the model's static file size (15 MB) and ignore the runtime memory expansion.
+    **The Consequence:** They propose unnecessary model compression techniques instead of addressing the actual memory bottleneck: high-resolution input activations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Galaxy A15 total RAM: 4 GB
+    - Android per-app heap limit (budget): ~512 MB to 768 MB
+    - Model weights: 15 MB
+    - Input: 1080p (1920x1080x3 = ~6 MB)
+    - Camera focus buffers: ~200 MB spike
+
+    **Calculations:**
+    - Base Runtime memory = 15 MB (weights) + 6 MB (input) + 200 MB (activations) + 26 MB (OS/overhead) = ~247 MB
+    - Background overhead (WebViews, Ads) = ~150 MB
+    - Total App Usage during focus = 247 MB + 150 MB + 200 MB = 597 MB
+
+    **Conclusion & Interpretation:**
+    - **Result: 597 MB (OOM Crash)**. The high-resolution activations plus the camera buffer spike push total memory to 597 MB, exceeding the strict ~512 MB heap limit on 4GB devices. Resolution must be downscaled.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+chains:
+- id: mobile-chain-071
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

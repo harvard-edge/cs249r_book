@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: mobile-0811
+track: mobile
+level: L4
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: analyze
+phase: training
+title: Mobile New 0011
+scenario: You quantize a MobileNet to INT8. The model size drops by 4x, but inference latency on the mobile CPU remains identical to the FP32 version. Profiling reveals the CPU's floating-point vector units are fully saturated.
+question: Why did INT8 quantization reduce MobileNet size but not CPU inference latency?
+details:
+  realistic_solution: |
+    The symptom of unchanged latency combined with fully saturated FP32 Vector ALUs definitively points to "Fake Quantization" (or a total lack of native INT8 operator support in the inference engine). While the model weights are successfully compressed to INT8 on disk/RAM (yielding the 4x storage reduction), the inference engine forcibly inserts transparent `Dequantize` nodes before every operation. At runtime, the engine casts the INT8 weights back up to FP32 and executes standard floating-point math, entirely nullifying any expected arithmetic speedup.
+  common_mistake: |
+    **The Pitfall:** Assuming that a smaller file size automatically and structurally guarantees faster quantized integer execution.
+    **The Rationale:** Engineers observe the 4x weight reduction and naively assume the hardware compiler will natively utilize highly optimized INT8 integer ALUs without explicitly validating operator support.
+    **The Consequence:** The system incurs hidden dequantization overhead continuously at runtime, completely negating any compute speedups and sometimes running even slower than the FP32 baseline.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Storage Target: FP32 (10 MB) -> INT8 (2.5 MB), achieving 4x reduction.
+       - Target Compute: 100M MACs.
+       - Execution path: Engine lacking native INT8 `Conv2D` operators.
+    2. **Calculations:**
+       - Expected Latency (Native INT8): 100M MACs ~2.5 ms.
+       - Actual Latency (FP32 Pipeline): 100M MACs ~10 ms.
+       - Fake Quantization Penalty: Continuous `Cast(INT8 -> FP32)` nodes inject an additional ~1 ms overhead.
+       - Total execution: 10 ms (math) + 1 ms (casting) = 11 ms.
+    3. **Conclusion & Interpretation:**
+       **Result: 11ms Fake Quantization Latency (Compute-Bound).** The absence of strict INT8 hardware pathways forces runtime unrolling, destroying arithmetic acceleration.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

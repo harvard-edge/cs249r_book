@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2009
+track: cloud
+level: L4
+zone: diagnosis
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Diagnosing Non-Contiguous Tensor Memory Bottlenecks
+scenario: 'You are profiling a PyTorch transformer training loop on a single GPU. After introducing a novel multi-head attention mechanism that heavily relies on tensor reshaping, slicing, and `.transpose()`, the GPU SM utilization drops from 75% to 20%, while memory bandwidth utilization spikes to 95%. Profiling shows that time spent in `aten::clone` and uncoalesced element-wise kernels has increased by 10x, severely bottlenecking the iteration.'
+question: 'What is the root cause of this degradation at the tensor abstraction level, and how do you resolve it?'
+details:
+  realistic_solution: 'The `transpose()` and slicing operations only alter the tensor''s metadata (shape and strides), creating a non-contiguous memory view. Subsequent operations (like cuBLAS GEMMs or layer norms) require contiguous memory, forcing PyTorch to implicitly trigger synchronous `aten::clone` operations. The fix is to explicitly call `.contiguous()` immediately after the reshape to amortize the cost, or utilize `einops` / custom Triton kernels to fuse the operations and avoid materializing the intermediate non-contiguous tensor.'
+  common_mistake: |
+    **The Pitfall:** Assuming the new attention math is computationally heavier or blaming Python interpreter overhead.
+    **The Rationale:** Candidates often overlook how logical tensor metadata (strides) impacts physical memory layouts and implicit data movement.
+    **The Consequence:** Missing the fact that non-contiguous memory views trigger synchronous `aten::clone` operations, severely bottlenecking memory bandwidth.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Tensor size: B=32, H=16, S=4096, D=128 in FP16 = 512 MB.
+    - GPU HBM bandwidth is 3 TB/s.
+    - 10 non-contiguous operations per layer across 32 layers.
+
+    **Calculations:**
+    - Implicit clone forces 512 MB read + 512 MB write = 1 GB traffic.
+    - Memory overhead per clone: 1 GB / 3 TB/s = ~0.33 ms.
+    - Total forward pass overhead: 10 * 32 * 0.33 ms = ~106 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory Bandwidth Bound** (Implicit contiguous clones starve the compute units).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-414
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:42:40.082359'

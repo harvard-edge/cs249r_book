@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-3950
+track: cloud
+level: L4
+zone: implement
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: Async Checkpointing Overlap with Training Computation
+scenario: Checkpointing a 70B model every 100 steps takes 45 seconds (copying 280GB of model and optimizer states from GPU to CPU to disk).
+question: How would you make 70B model checkpoints asynchronous so the 45-second save every 100 steps does not pause training?
+details:
+  realistic_solution: 'Async checkpointing pipeline: (1) At checkpoint step: copy model state_dict from GPU to a pre-allocated pinned memory buffer on a separate CUDA stream (D2H async, ~4s for 280GB at 64 GB/s PCIe). (2) Once D2H completes (event signal), launch a background CPU thread to serialize and write to NVMe SSD (280GB at 5 GB/s = 56s). (3) Training continues immediately after the D2H copy starts — the 56s disk write happens in the background, overlapped with the next ~3 training steps. (4) Use a double-buffer for pinned memory to avoid blocking if the next checkpoint arrives before disk write finishes. PyTorch''s torch.distributed.checkpoint provides async_save() for this pattern.'
+  common_mistake: |
+    **The Pitfall:** Using `torch.save()` synchronously.
+    **The Rationale:** Assuming the GPU is not involved in disk I/O, developers use `torch.save()`, failing to realize it holds the Python GIL and blocks the training loop.
+    **The Consequence:** The training loop is completely blocked while the CPU serializes and writes to disk, causing significant overhead.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sync checkpoint = 45s pause every 100 steps.
+    - Compute cycle = 180s.
+    - D2H stall = 4s.
+
+    **Calculations:**
+    - Sync overhead = 45s / 180s = 25%.
+    - Async overhead = 4s / 180s = 2.2%.
+    - Throughput increase = 225s / 184s ≈ 1.22x.
+
+    **Conclusion & Interpretation:**
+    - **Result: 22% increase in throughput by hiding disk I/O (I/O Bound Synchronous Save)**. Bottleneck: I/O Bound Synchronous Save.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4431
+track: cloud
+level: L5
+zone: specification
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: Reward Model Architecture for RLHF at Scale
+scenario: Design a reward model (RM) for an RLHF pipeline fine-tuning a 70B policy model. The RM needs to score completions at 500 QPS during PPO rollouts. You have a budget of 4x GPUs.
+question: What reward model size, architecture, and serving strategy would you use to score PPO completions at 500 QPS on a 4x GPU budget?
+details:
+  realistic_solution: 'RM sizing: empirical finding is that RM performance plateaus at 10-20% of policy model size for typical RLHF tasks. Use 7B RM on 2x GPUs in TP=2. Architecture: take a pretrained 7B model, replace next-token prediction head with a scalar output head. Serving for 500 QPS: 7B model on 2x GPUs, BF16, sequence length 512. With continuous batching at batch=16: ~120 QPS per GPU pair = 240 QPS for 2 serving instances. For 500 QPS: need 3 pairs = 6x GPUs. With 4x GPU budget: use 2x GPUs for serving and queue the remaining requests, or serve at FP8 for higher throughput.'
+  common_mistake: |
+    **The Pitfall:** Using the same size model as the policy for the reward model.
+    **The Rationale:** Assuming the RM requires identical representational capacity to the 70B policy model.
+    **The Consequence:** A 70B RM would require massive compute just to serve, consuming more resources than the policy training itself and missing the latency constraints.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target: 500 QPS.
+    - Budget: 4x GPUs (FP8 capable).
+    - RM size: 7B parameters.
+
+    **Calculations:**
+    - 7B forward pass at 512 tokens: ~12ms on one GPU.
+    - Single GPU serial throughput: 1000ms / 12ms ≈ 83 QPS.
+    - Continuous batching (batch=8) effective throughput: ≈ 200 QPS per GPU.
+    - 2x GPUs (TP=2) handle 200 QPS. 4x GPUs in two TP=2 instances handle 400 QPS at BF16.
+    - FP8 provides a ~1.5x throughput boost: 400 * 1.5 = 600 QPS.
+
+    **Conclusion & Interpretation:**
+    - **Result: 600 QPS using FP8 on 4x GPUs (Compute-Bound)**. Easily meets the 500 QPS requirement within budget.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

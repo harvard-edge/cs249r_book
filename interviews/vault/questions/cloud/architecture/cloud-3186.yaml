@@ -1,0 +1,32 @@
+schema_version: '1.0'
+id: cloud-3186
+track: cloud
+level: L4
+zone: fluency
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: apply
+phase: both
+title: MoE All-to-All Communication Volume
+scenario: A Mixtral-style 8x7B MoE model uses top-2 routing with hidden dimension 4096 in BF16. Each token dispatches to 2 of 8 experts distributed across 8 GPUs (one expert per GPU). A local micro-batch of 2048 tokens is processed per GPU.
+question: For a local micro-batch of 2048 tokens per GPU, what is the all-to-all communication volume per layer in each direction?
+details:
+  realistic_solution: 'Each token sends its 4096-dim BF16 hidden state (8 KB) to 2 experts. With uniform routing, each GPU sends 2048 × 2 / 8 = 512 token-states to each of the other 7 GPUs. Total outbound per GPU: 512 × 7 × 8 KB = 28 MB per direction. The dispatch all-to-all and combine all-to-all together move ~56 MB per GPU per layer. For 32 layers, that is ~1.8 GB per GPU per forward pass — a significant fraction of NVLink bandwidth at 900 GB/s.'
+  common_mistake: |
+    **The Pitfall:** Forgetting that all-to-all is bidirectional and that each token sends its state to 2 experts.
+    **The Rationale:** Candidates often calculate the volume for a single top-1 dispatch or forget the combine phase (returning the expert outputs).
+    **The Consequence:** Underestimating the NVLink bandwidth requirements by a factor of 2x to 4x.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 8x7B MoE model. Top-2 routing. 4096 hidden dimension in BF16 (2 bytes).
+       - Micro-batch of 2048 tokens per GPU.
+    2. **Calculations:**
+       - Per-token payload size = 4096 dimensions × 2 bytes = 8,192 bytes (8 KB).
+       - With top-2 uniform routing, a GPU sends its 2048 tokens to 2 experts total.
+       - Tokens sent to each expert = (2048 tokens × 2 experts) / 8 total experts = 512 tokens per expert.
+       - Outbound to the other 7 GPUs = 512 tokens × 7 GPUs × 8 KB = 28,672 KB ≈ 28.7 MB.
+       - Total bidirectional volume per layer (Dispatch + Combine) = 28.7 MB × 2 ≈ 57.3 MB.
+    3. **Conclusion & Interpretation:**
+       - **The all-to-all communication volume is ~28.7 MB per direction per GPU per layer.**
+       - **Result: Network-Bound**
+status: published

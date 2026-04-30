@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: tinyml-1120
+track: tinyml
+level: L4
+zone: diagnosis
+topic: tensor-arena-planning
+competency_area: memory
+bloom_level: analyze
+phase: inference
+title: Nordic nRF5340 SRAM Crash During Convolution
+scenario: You are deploying a keyword spotting model on a Nordic nRF5340. The offline memory planner reports a peak SRAM usage of 140 KB for the tensor arena. The RTOS and BLE stack statically consume 60 KB of SRAM, which theoretically leaves a safe 56 KB margin out of the 256 KB total. However, when you execute the model, the device immediately hard faults with an out-of-memory error during the first optimized convolution operation.
+question: Why does the model HardFault during the first optimized convolution despite a 140 KB tensor arena estimate?
+details:
+  realistic_solution: 'The root cause is that the offline planner calculated the peak memory for tensor activations but omitted the operator scratchpad memory (such as im2col buffers) required by the CMSIS-NN convolution kernel running on the app core. The fix is to use an MCU-aware memory planner that includes scratchpad requirements and adjust the linker script to allocate the correct contiguous arena size.'
+  common_mistake: |
+    **The Pitfall:** Blindly trusting offline activation-only memory estimates.
+    **The Rationale:** Candidates incorrectly diagnose this as dynamic memory fragmentation caused by the BLE stack or suspect a memory leak, ignoring the MCU kernels.
+    **The Consequence:** They waste days debugging the RTOS instead of analyzing how optimized CMSIS-NN kernels utilize temporary workspace memory for operations like im2col.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total SRAM: 256 KB.
+    - System usage: 60 KB.
+    - Planner arena (activations only): 140 KB.
+
+    **Calculations:**
+    - Available SRAM margin: 256 - 60 - 140 = 56 KB.
+    - Required CMSIS-NN scratchpad (im2col for 3x3 filter, 32 in-channels, 16x16 out): 3 * 3 * 32 * 16 * 16 = 73,728 bytes (~72 KB).
+    - Actual peak arena: 140 KB (activations) + 72 KB (scratchpad) = 212 KB.
+    - Total SRAM required: 212 KB + 60 KB = 272 KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 272 KB (Memory-Bound)**. 272 KB strictly exceeds the 256 KB limit. The kernel's scratchpad memory drastically expands the footprint, resulting in a deterministic crash.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

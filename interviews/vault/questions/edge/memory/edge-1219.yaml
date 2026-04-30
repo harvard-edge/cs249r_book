@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: edge-1219
+track: edge
+level: L3
+zone: analyze
+topic: dma-data-movement
+competency_area: memory
+bloom_level: apply
+phase: both
+title: Hailo-8 Host-Device DMA Bottleneck
+scenario: You are deploying a custom INT8 vision model on a Hailo-8 edge accelerator (26 TOPS INT8, 2.5W). The Hailo-8 is a dataflow accelerator with no local DRAM, meaning all data must stream continuously from host memory via DMA over a PCIe link. Profiling reveals the inference pipeline is capped at 166 FPS, despite the Hailo-8 compute utilization being very low. You notice the host CPU is heavily utilized during inference.
+question: What host memory-management issue causes high CPU use and caps the Hailo-8 pipeline at 166 FPS despite low accelerator utilization?
+details:
+  realistic_solution: The bottleneck is caused by using pageable (swappable) memory on the host instead of pinned (page-locked) memory. Because the Hailo-8 lacks local DRAM, it relies entirely on its DMA engine to pull data directly from the host. If memory is pageable, the CPU must first copy the data to a temporary pinned buffer before the DMA transfer can occur. This CPU-bound memory copy for every frame's input/output overwhelms the host CPU, starving the Hailo-8 of data. The solution is to use zero-copy techniques by allocating pinned memory directly for the application buffers.
+  common_mistake: |
+    **The Pitfall:** Assuming the PCIe bus itself is saturated or the 26 TOPS compute limit is being hit.
+    **The Rationale:** Candidates look at standard metrics like bus bandwidth and theoretical compute without understanding the driver-level memory hierarchy.
+    **The Consequence:** They miss that without local DRAM, every single tensor requires active CPU memory management, making pageable buffers devastating to throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model requires 2 MB of IO data per frame.
+    - PCIe Gen3 x4 bus: 4 GB/s.
+    - CPU host logic: 5.0 ms.
+
+    **Calculations:**
+    - Streaming at 500 FPS requires 1.0 GB/s, which easily fits within a 4 GB/s PCIe Gen3 x4 bus.
+    - A CPU memcpy of 2 MB from pageable to pinned memory takes ~1.0 ms.
+    - If host logic takes 5.0 ms, total CPU time per frame is 6.0 ms.
+    - Max system throughput = 1 / 0.006s = 166 FPS.
+
+    **Conclusion & Interpretation:**
+    - **Result: 166 FPS (Compute-Bound)**. The 26 TOPS accelerator sits idle 66% of the time waiting on the CPU memory hierarchy.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-1611
+track: cloud
+level: L5
+zone: evaluation
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Evaluating TP and PP Placement for 175B LLMs
+scenario: Your team is architecting the training cluster for a 175B parameter language model using FP16. The model states require over 2TB of memory. You have a cluster of 8-GPU nodes featuring 600 GB/s intra-node NVLink and 200 Gbps inter-node InfiniBand.
+question: "How would you place Tensor Parallelism and Pipeline Parallelism across the nodes to maximize MFU for the 175B FP16 model?"
+details:
+  realistic_solution: Restrict Tensor Parallelism (TP) strictly to intra-node GPUs (e.g., TP=8) to leverage the 600 GB/s NVLink for intensive, blocking All-Reduce operations. Employ Pipeline Parallelism (PP) across nodes, as PP only requires transmitting activation boundaries per micro-batch, a lightweight operation easily handled by the 200 Gbps InfiniBand links.
+  common_mistake: |
+    **The Pitfall:** Placing Tensor Parallelism across node boundaries.
+    **The Rationale:** Candidates fail to profile the distinct communication patterns; TP demands high-frequency, blocking All-Reduce syncs on full tensor slices, while PP passes narrow activation slices infrequently.
+    **The Consequence:** The TP All-Reduce operations are choked by the slow inter-node InfiniBand, plummeting cluster MFU and causing GPUs to idle.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Intra-node: 600 GB/s (NVLink).
+       - Inter-node: 200 Gbps = 25 GB/s (InfiniBand).
+       - Micro-batch: seq=2048, hidden=12288, BF16 (2 bytes).
+    2. **Calculations:**
+       - TP communication requirement: ~100 GB/s per layer.
+       - IB vs NVLink mismatch: 25 GB/s vs 600 GB/s (24x penalty).
+       - PP boundary activation size: 1 (batch) * 2048 (seq) * 12288 (dim) * 2 bytes = 50.3 MB.
+       - PP inter-node transfer time: 50.3 MB / 25 GB/s = ~2 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: TP intra-node, PP inter-node.** The architecture remains **Compute-Bound**, masking the 2ms PP network latency behind the much larger >10ms per-stage compute latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-270
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: ERROR
+validation_issues_pro:
+- The napkin math for Pipeline Parallelism activation size is stated as ~50GB per micro-batch, which is incorrect by three orders of magnitude; it should be closer to ~50MB.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T23:50:19.389570'

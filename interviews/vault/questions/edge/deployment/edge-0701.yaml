@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: edge-0701
+track: edge
+level: L5
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: The Edge LLM Context Window
+scenario: Your team wants to run a 3B-parameter LLM (Phi-3-mini, INT4 quantized) on an edge SoC for a conversational robotics assistant. The robot needs to maintain a 4096-token context window for multi-turn dialogue. During testing, the first response is fast (40 tokens/sec), but by the 10th turn of conversation, generation has slowed to 8 tokens/sec and the system is swapping.
+question: What went wrong with the multi-turn generation latency, and how is memory bandwidth involved?
+details:
+  realistic_solution: The KV-cache is eating your memory alive, and it grows with every token generated across every conversation turn.
+  common_mistake: |
+    **The Pitfall:** Concluding that "The model is too large for the device".
+    **The Rationale:** Candidates focus on the static parameter size alone (a 3B INT4 model is ~1.5 GB, well within RAM) and miss the real memory consumer: the KV-cache, which grows linearly with sequence length.
+    **The Consequence:** Wasting time trying to further quantize the model parameters instead of optimizing the KV-cache using Grouped Query Attention (GQA), sliding window attention, or KV quantization.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       * Phi-3-mini (32 layers, 32 heads, 96 head_dim).
+       * FP16 precision for KV cache.
+       * 4096 context tokens generating at 40 tokens/sec.
+       * SoC memory bandwidth is ~68 GB/s.
+    2. **Calculations:**
+       * KV-cache per token = 2 (K,V) * 32 layers * 32 heads * 96 dim * 2 bytes = 393,216 bytes (≈384 KB).
+       * Total KV-cache at 4096 tokens = 4096 * 384 KB = ≈1.5 GB.
+       * Memory bandwidth needed for KV-cache reads at 40 tokens/sec = 1.5 GB * 40 tokens/sec = 60 GB/s.
+    3. **Conclusion & Interpretation:**
+       * **The 60 GB/s completely saturates the available 68 GB/s bandwidth, while uncontrolled KV-cache growth pushes the system into swap memory. Result: Memory Bandwidth-Bound.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: edge-chain-041
+  position: 1
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- The KV-cache calculation for FP16 is incorrect; it should be (2 × Num_Heads × Head_Dim) × (2 bytes/FP16)
+  per token, and the provided number (393 KB) implies a much smaller head dimension than the commonly
+  understood 128/96 for Phi-3.
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- The product 2 × 32 × 32 × 96 × 2 is 393,216 bytes, not 192 bytes.
+- 393,216 bytes is 384 KB, not 393 KB.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

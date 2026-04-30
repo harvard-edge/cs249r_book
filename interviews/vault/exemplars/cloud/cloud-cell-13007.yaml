@@ -1,0 +1,27 @@
+schema_version: 1
+id: cloud-cell-13007
+title: 'Pipeline Parallelism Realization: Activation Memory with Gradient Checkpointing'
+topic: pipeline-parallelism
+status: published
+provenance: human
+scenario: A 40-stage pipeline (one transformer layer per H100 stage) trains a 40B model. For sequence length 4096 and batch size 8, you must determine whether the H100 can accommodate the memory footprint without checkpointing.
+question: What are the activation memory savings per stage with gradient checkpointing, and can the H100 accommodate the memory footprint without it?
+details:
+  realistic_solution: 'Single transformer layer activations without checkpointing: attention (Q,K,V,attn weights,output) + FFN (up,gate,down intermediates) ≈ 12 * hidden * seq * batch * 2 bytes. Hidden = 8192 (40B model), seq=4096, batch=8. Activation size = 12 * 8192 * 4096 * 8 * 2 = 6.4GB per stage. With checkpointing: store only input = 8192 * 4096 * 8 * 2 = 537MB. Savings: 6.4GB vs 537MB = 12x reduction. Without checkpointing: 40B/40 * 2 = 2GB weights + 6.4GB activations = 8.4GB — fits easily. With gradient and optimizer: much larger.'
+  common_mistake: |
+    **The Pitfall:** Assuming gradient checkpointing is a "free" memory optimization.
+    **The Rationale:** Looking purely at the memory footprint reduction without accounting for the extra forward pass required during backpropagation.
+    **The Consequence:** A ~33% increase in compute time per step, unnecessarily slowing down training if memory was already sufficient.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 40B model, 40 stages -> 1B params per layer.
+       - Hidden dim = 8192, Seq = 4096, Batch = 8.
+       - Single layer activations (uncheckpointed) ≈ 12 × hidden × seq × batch × 2 bytes.
+    2. **Calculations:**
+       - Uncheckpointed activations = 12 × 8192 × 4096 × 8 × 2 bytes = 6.44 GB.
+       - Checkpointed activations (input only) = 1 × 8192 × 4096 × 8 × 2 bytes = 537 MB.
+       - Weights + Gradients + Optimizer (1B params, BF16, Adam) = 2 GB + 2 GB + 6 GB = 10 GB.
+       - Total without checkpointing = 10 GB + 6.44 GB = 16.44 GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Sufficient.** The 16.44 GB footprint easily fits in an 80GB H100. Gradient checkpointing is unnecessary and would just add a 33% compute penalty.
+last_modified: '2026-04-01'

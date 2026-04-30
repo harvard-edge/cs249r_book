@@ -1,0 +1,37 @@
+schema_version: '1.0'
+id: cloud-3172
+track: cloud
+level: L6+
+zone: realization
+topic: speculative-decoding
+competency_area: latency
+bloom_level: create
+phase: inference
+title: Speculative Decoding with Continuous Batching
+scenario: 'You run vLLM on 4x H100 with continuous batching and want to add speculative decoding. The challenge: different requests in the batch have different draft token counts (some K=5, some K=3 after early rejection).'
+question: 'How should continuous batching verify requests with variable speculation lengths in a single target forward pass?'
+details:
+  realistic_solution: 'Variable-length sequence packing packs all draft tokens into a single sequence dimension with position IDs. FlashAttention-2 supports variable sequence lengths via cu_seqlens parameter. Implementation: sort by K, pack with cu_seqlens, and run single forward pass.'
+  common_mistake: |
+    **The Pitfall:** Padding all requests in the batch to the maximum K value before verification.
+    **The Rationale:** Candidates default to standard static tensor padding for batched operations, ignoring the massive compute waste when K values vary wildly due to early rejection.
+    **The Consequence:** The verification forward pass wastes massive amounts of arithmetic intensity on empty pad tokens, entirely defeating the speedup gained by speculative decoding.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 100 requests in batch.
+    - Max K = 5. Avg K = 3.5.
+
+    **Calculations:**
+    - Padding Approach: 100 * 6 (K+1) = 600 tokens processed. Waste = (5 - 3.5) / 5 = 30%.
+    - Packing Approach (cu_seqlens): 100 * 4.5 = 450 tokens. 0% waste.
+    - Compute Savings = 150 saved tokens * 140 GFLOPs/token = 21 TFLOPs.
+    - Time Savings at 3.96 PFLOPS = ~5.3ms per decoding round.
+
+    **Conclusion & Interpretation:**
+    - **Result: 5.3ms Saved (Compute-Bound)**. Variable-length sequence packing completely eliminates the 30% compute waste from padding, restoring the intended speedup of speculative decoding.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 16
+validated: true
+math_verified: true

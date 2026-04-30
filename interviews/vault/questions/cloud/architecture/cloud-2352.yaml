@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-2352
+track: cloud
+level: L6+
+zone: mastery
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Asynchronous Checkpoint Storage Tiering
+scenario: 'You are architecting the storage hierarchy for a 16,384 GPU cluster training a 1T parameter LLM. Requirements: (1) Dataloaders require 100 MB/s per GPU (1.6 TB/s total) of continuous read. (2) Fault tolerance dictates saving 16TB of optimizer state and weights every 15 minutes. (3) GPU pause time for checkpointing must be strictly < 100ms.'
+question: How would you architect storage and checkpoint data flow for the 16,384-GPU job to sustain 1.6TB/s reads and keep checkpoint pauses under 100ms?
+details:
+  realistic_solution: |
+    Implement a 3-tier locality-aware architecture isolating read and write paths. GPUs synchronously copy state to pinned host DRAM via PCIe (<100ms pause), then a background CPU daemon asynchronously flushes the checkpoint from DRAM to the remote parallel filesystem, spreading the 16TB write over 5 minutes.
+  common_mistake: |
+    **The Pitfall:** Writing checkpoints directly from GPU memory to a remote parallel filesystem synchronously.
+    **The Rationale:** Synchronous remote writes stall the GPUs for seconds and cause network microbursts.
+    **The Consequence:** GPUs sit idle waiting for slow storage, and network congestion disrupts continuous dataloading reads.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Cluster: 16,384 GPUs.
+    - State size: 16 TB.
+    - SLAs: < 100ms sync pause, 1.6 TB/s continuous read.
+
+    **Calculations:**
+    - State per GPU: 16 TB / 16,384 = ~1 GB.
+    - Sync pause (PCIe Gen5 to Host DRAM): 1 GB / 64 GB/s ≈ 15.6 ms.
+    - Async flush bandwidth: 16 TB / 300 seconds = 53.3 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 15.6ms Pause (I/O-Bound Mitigated)**. Using a 3-tier architecture safely meets the <100ms SLA by flushing to local DRAM and draining remotely at 53.3 GB/s in the background.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

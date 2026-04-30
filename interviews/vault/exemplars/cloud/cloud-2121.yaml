@@ -1,0 +1,29 @@
+schema_version: 1
+id: cloud-2121
+title: Designing Mixed-Precision Backpropagation
+topic: compute-cost-estimation
+status: published
+provenance: human
+scenario: You are designing a mixed-precision training pipeline for a 70B LLM. The forward pass runs in FP16 on Tensor Cores.
+question: Why must the loss be computed in FP32, why is a loss scaler needed, and what happens to master weights during the optimizer step?
+details:
+  realistic_solution: 'Precision trace: (1) Forward: inputs and weights cast to FP16. Matrix multiplies execute on Tensor Cores at 2x throughput. Activations saved in FP16. (2) Loss computation: output cast to FP32. Loss computed in FP32 to avoid overflow (softmax cross-entropy can produce values >65,504, FP16 max). (3) Loss scaling: loss multiplied by scale factor (e.g., 2^16 = 65536) in FP32 before backward. This shifts small gradients above FP16''s minimum representable value (~6e-8). (4) Backward: gradients computed in FP16 (2x throughput). The scale factor ensures gradients that would be 1e-10 (below FP16 min) become 1e-10 * 65536 = 6.5e-6 (representable in FP16). (5) Optimizer step: gradients unscaled (divided by 65536) and cast to FP32. Adam updates master weights in FP32 (critical: weight updates are often 1e-7 scale, which rounds to zero in FP16). (6) Master FP32 weights cast back to FP16 for next forward pass. Memory: FP16 weights (140 GB) + FP32 master (280 GB) + FP32 optimizer states (560 GB) = 980 GB.'
+  common_mistake: |
+    **The Pitfall:** Assuming mixed precision simply means mapping every operation and weight to FP16.
+    **The Rationale:** Misunderstanding how small gradients interact with the minimum representable bounds of half-precision formats.
+    **The Consequence:** Gradient underflow during backpropagation, leading to stalled learning and catastrophic divergence.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - FP16 minimum subnormal value: ~5.96e-8.
+    - Weight updates (LR * gradient) frequently operate at ~1e-7 scale.
+
+    **Calculations:**
+    - Without scaling: a gradient of 1e-10 rounds to 0.
+    - With scaling (factor 65536): 1e-10 * 65536 = 6.5e-6 (safely representable).
+    - Optimizer memory: FP16 weights (140 GB) + FP32 master (280 GB) + FP32 states (560 GB) = 980 GB total footprint.
+
+    **Conclusion & Interpretation:**
+    - **Result: 980 GB (Precision-Bound)**. Loss scaling is required to avoid zeroing gradients. The FP32 master copy is mandatory to accumulate tiny optimizer steps correctly.
+last_modified: '2026-04-01'
+tags:
+- scope:Foundations

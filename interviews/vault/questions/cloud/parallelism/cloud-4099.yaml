@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-4099
+track: cloud
+level: L4
+zone: diagnosis
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: TP Load Imbalance from Uneven Head Counts
+scenario: 'A custom model architecture uses 48 attention heads. Your team deploys with TP=8 on MI300X GPUs. Each GPU gets 6 heads, which works. But profiling shows that the MLP layers have slightly uneven execution times across TP ranks.'
+question: 'If TP=8 partitions the 48-head model correctly, what can cause slight MLP execution-time imbalance across MI300X ranks?'
+details:
+  realistic_solution: 'Even with perfect weight partitioning (each GPU holds exactly H_out/8 columns), several factors cause micro-imbalance: (1) Thermal throttling: MI300X GPUs in different physical positions experience different cooling, causing 2-5% clock frequency variation. The hottest GPU becomes the straggler in every AllReduce. (2) Memory alignment: depending on partition sizes, some GPU shards may have dimensions that align better with the memory controller''s interleaving (e.g., multiples of 256 bytes), giving slightly better memory throughput. (3) NCCL ring ordering: the AllReduce ring topology means some GPUs start sending/receiving earlier. (4) OS jitter: interrupts and context switches on one GPU''s host thread cause microsecond delays that compound over thousands of layers. Mitigation: ensure adequate cooling, use CUDA MPS to reduce context-switching, pin NCCL to optimal ring topologies with NCCL_RINGS environment variable.'
+  common_mistake: |
+    **The Pitfall:** Assuming that equal partition sizes guarantee equal execution time.
+    **The Rationale:** Candidates abstract away physical realities, forgetting that hardware is analog.
+    **The Consequence:** Wasting time debugging 'incorrect' partition logic when the real issue is GPU clock throttling, memory access patterns, or NCCL ring ordering.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model has 80 layers, 2 MLPs per layer (160 MLPs total).
+    - MLP GEMM base execution time: 0.5 ms.
+    - 5% clock throttle on one straggler MI300X.
+    - Total step time: 100 ms.
+
+    **Calculations:**
+    - Straggler MLP execution time: 0.5 ms * 1.05 = 0.525 ms.
+    - Wasted time per MLP: 0.025 ms.
+    - Total wasted time per step: 160 MLPs * 0.025 ms = 4 ms.
+    - Throughput loss: 4 ms / 100 ms = 4%.
+
+    **Conclusion & Interpretation:**
+    - **Result: 4% Throughput Loss** (At a 100 ms step time, this straggler effect accounts for a measurable throughput loss due to thermal throttling).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- Calculation 80 * 0.025 = 2 ignores the 'x 2 MLPs' factor. It should be 160 * 0.025
+  = 4 ms wasted.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

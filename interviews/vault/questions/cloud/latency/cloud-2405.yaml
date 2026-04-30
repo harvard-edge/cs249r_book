@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: cloud-2405
+track: cloud
+level: L5
+zone: design
+topic: compound-ai-systems
+competency_area: latency
+bloom_level: create
+phase: both
+title: Pipelined Guardrails in Compound Systems
+scenario: 'You are deploying a financial compliance RAG API that must return a complete JSON payload. The SLA for P90 latency is 1000ms. Current sequential pipeline: Embedding & Vector Retrieval (250ms) -> Main LLM Generation for avg 150 tokens (600ms) -> Output Compliance Guardrail evaluating the full text (300ms). Total P90 is 1150ms. You cannot change the models, replace the guardrail, or return partial/streamed responses. The guardrail latency scales linearly with token count (50 tokens = 100ms).'
+question: 'How would you orchestrate retrieval, generation, and the 300ms guardrail to meet the 1000ms P90 SLA?'
+details:
+  realistic_solution: 'Implement a Pipelined Guardrail architecture. Instead of waiting for the main LLM to emit all 150 tokens before starting the 300ms guardrail check, orchestrate the system to evaluate chunks asynchronously via an internal stream, hiding the guardrail latency within the generation phase.'
+  common_mistake: |
+    **The Pitfall:** Suggesting to stream the response directly to the client to reduce perceived Time-To-First-Token (TTFT).
+    **The Rationale:** Direct streaming is the standard UX trick to lower perceived latency in chatbots.
+    **The Consequence:** Violating the strict requirement to return a complete, validated JSON payload, breaking the downstream API contract for financial compliance.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Target SLA: P90 < 1000ms. No partial streaming allowed.
+       - Retrieval: 250ms.
+       - LLM Gen: 150 tokens in 600ms (4ms/token).
+       - Guardrail: 50 tokens = 100ms.
+    2. **Calculations:**
+       - Chunking: 50 tokens = 200ms LLM generation, 100ms Guardrail check.
+       - T=0: Start Retrieval.
+       - T=250: Start LLM Gen.
+       - T=450: Chunk 1 done. Start Guardrail(C1).
+       - T=650: Chunk 2 done. Guardrail(C1) finished at 550. Start Guardrail(C2).
+       - T=850: Chunk 3 done. Guardrail(C2) finished at 750. Start Guardrail(C3).
+       - T=950: Guardrail(C3) finishes.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency-Bound. Pipelining chunks asynchronously reduces the critical path to 950ms, meeting the strict 1000ms SLA without breaking the JSON payload contract.**
+  options:
+  - "Implement a Pipelined Guardrail architecture by chunking the LLM output every 50 tokens. The guardrail evaluates chunks asynchronously, overlapping with the generation of subsequent chunks, which reduces the critical path to 950ms and meets the SLA."
+  - "Stream the LLM response directly to the client as it is generated, bypassing the guardrail for the first 100 tokens to ensure the Time-To-First-Token (TTFT) meets the 1000ms SLA."
+  - "Reduce the LLM generation target from 150 tokens to 100 tokens to save 200ms, and run the 300ms guardrail sequentially at the end to achieve exactly 950ms."
+  - "Deploy the Guardrail model onto the same GPU as the main LLM to eliminate network transfer latency, saving exactly 200ms to hit the 950ms target."
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

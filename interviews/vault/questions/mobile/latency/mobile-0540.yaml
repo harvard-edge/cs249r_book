@@ -1,0 +1,60 @@
+schema_version: '1.0'
+id: mobile-0540
+track: mobile
+level: L3
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: apply
+phase: inference
+title: 'The Live Translation Freeze'
+scenario: 'You are the lead ML engineer for a new ''live translate'' feature on a flagship Android phone powered by a Snapdragon 8 Gen 3. The UI must feel real-time, with a strict target for Time To First Token (TTFT) of under 80ms. To maximize hardware utilization, your team implemented a static batching strategy, where the system waits for 4 pending requests before dispatching a batch to the NPU. During testing under load, users report that the translation ''freezes'' for a moment before the first word appears. Your profiling confirms their complaint: the TTFT for the first request in a busy sequence is consistently ~165ms, badly missing the budget. You know the end-to-end, single-token inference time is 40ms, and the batched inference time follows the formula T = 40ms + (N-1)*5ms.'
+question: 'What causes the live translation feature''s excessive TTFT when static batching waits for four pending requests?'
+details:
+  realistic_solution: 'The root cause is not the model''s inference speed or the hardware''s capability, but the static batching policy. This policy introduces a significant queueing delay. A request is forced to wait until three other requests have arrived, regardless of its own latency budget. This ''head-of-line blocking'' for batches is fatal for interactive applications. The solution is to switch to a vLLM-style continuous (or ''dynamic'') batching strategy. In this model, the inference engine runs at a fixed cadence (e.g., every 40ms). In each iteration, it batches together *all* requests currently waiting in the queue and processes them. This ensures that no single request is starved for too long, dramatically improving TTFT at the slight expense of maximum theoretical throughput.'
+  common_mistake: |
+    **The Pitfall:** Over-optimizing for theoretical throughput with static batching.
+    **The Rationale:** Engineers focus only on the raw inference time ('service time') and forget that in interactive applications, queueing delay is often the dominant factor.
+    **The Consequence:** A design that causes 'head-of-line blocking', leading to severe TTFT violations and an unresponsive UI.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Request 1 arrives at t=0. Wait for Request 4 to arrive.
+    - If arrival rate is e.g. 1 req/30ms, batch fills at t=90ms.
+
+    **Calculations:**
+    - Batch of 4 service time: 40ms + (3)*5ms = 55ms.
+    - Request 1 TTFT: 90ms (wait) + 55ms (compute) = 145ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 145ms TTFT (Latency-Bound)**. The dominant cause of latency is not the compute time, but the static batching queue wait.
+  options:
+  - 'The model''s single-token inference time of 40ms is too slow for the 80ms budget and requires further optimization.'
+  - 'The Snapdragon 8 Gen 3 NPU is saturated by a batch of 4, causing thermal throttling and increased latency.'
+  - 'The static batching policy creates excessive queueing delay, as early requests are starved waiting for the batch to fill.'
+  - 'The device''s LPDDR5x memory bandwidth is insufficient for batching, causing stalls when moving four requests'' data to the NPU.'
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+chains:
+- id: mobile-chain-056
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- 'Reasoning_competency and reasoning_mode are not specified, which is unusual for an L3 question.'
+validation_status_pro: WARN
+validation_issues_pro:
+- 'The napkin math section is empty, containing only a title and no calculations.'
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

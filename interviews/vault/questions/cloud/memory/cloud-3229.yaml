@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-3229
+track: cloud
+level: L5
+zone: evaluation
+topic: kv-cache-management
+competency_area: memory
+bloom_level: evaluate
+phase: inference
+title: KV-Cache Recomputation vs Storage Tradeoff
+scenario: 'A user sends a 4096-token prompt and then asks 5 follow-up questions (each 100 tokens) spaced over 30 seconds. Option A: store the KV-cache for the 4096-token prefix between follow-ups. Option B: recompute the prefix KV-cache for each follow-up.'
+question: 'For Llama 3 70B on 2×H100, which is more economical: storing the KV-cache or recomputing it?'
+details:
+  realistic_solution: 'Option A (store): KV-cache for 4096 tokens = 1.31 GB. Held in GPU memory for the duration of the conversation (~5 follow-ups over ~30 seconds). Memory cost: 1.31 GB × 30s = 39.3 GB-seconds. On H100 at $2/GPU-hr: 39.3 GB-seconds × ($2/3600s) / 80 GB = $0.00027. Option B (recompute): Prefill 4096 tokens on 70B model: ~200ms on 2×H100 at ~989 TFLOPS utilized. FLOPs: 2 × 70B × 4096 = 574 TFLOPs per prefill. GPU cost per prefill: 200ms × $2/3600s × 2 GPUs = $0.00022. For 5 follow-ups: 5 × $0.00022 = $0.0011 + 5 × 200ms = 1 second of latency. Option A costs $0.00027 + 0ms latency. Option B costs $0.0011 + 1000ms latency. Storing is 4× cheaper and eliminates 1 second of user-facing latency. The breakeven: if memory is so scarce that storing 1.31 GB prevents serving 2+ additional requests, recomputation may win. Rule of thumb: cache the prefix if follow-ups > 2.'
+  common_mistake: |
+    **The Pitfall:** Always choosing to recompute because 'memory is expensive'.
+    **The Rationale:** For long prefixes with many follow-ups, the cumulative recomputation cost far exceeds the one-time memory cost of caching, not to mention the impact on user latency.
+    **The Consequence:** Massively inflated compute costs and high user-facing latency for multi-turn conversations.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Prefix: 4096 tokens. KV-cache size: 1.31 GB.
+       - Duration: 30s. GPU cost: $2/hr per H100.
+       - Recompute latency: ~200ms for 4096 tokens on 2x H100.
+    2. **Calculations:**
+       - Option A (Store) Cost: 1.31 GB held for 30s. VRAM proportionate cost ≈ $0.0003.
+       - Option B (Recompute) Cost: 5 follow-ups × 200ms × 2 GPUs × ($2/3600s) = $0.0011.
+       - Option B Latency penalty: 5 × 200ms = 1000ms (1s).
+    3. **Conclusion & Interpretation:** **Store is ~3.7× cheaper ($0.0003 vs $0.0011) and saves 1s latency. Memory-Capacity vs Compute-Cost Tradeoff.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

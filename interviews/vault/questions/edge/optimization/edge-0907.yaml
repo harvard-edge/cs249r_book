@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: edge-0907
+track: edge
+level: L4
+zone: specification
+topic: real-time-deadlines
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: Edge TPU Spatial Tiling Overhead
+scenario: You are deploying a U-Net based super-resolution model on a Google Edge TPU (8MB SRAM, USB 3.0 interface). To fit the 1080p input image, the host CPU spatially tiles the image into 16x16 overlapping patches and sends them to the TPU sequentially. The system targets 30 FPS but only achieves 4 FPS. USB bandwidth monitoring shows 1.8 GB/s of sustained bidirectional transfer.
+question: What is causing the 4 FPS bottleneck, and how would you change tiling and execution to reach 30 FPS?
+details:
+  realistic_solution: The severe bottleneck is the redundant PCIe/USB host-to-device data transfer caused by naive spatial tiling. Because convolutions have receptive fields, splitting an image into spatial tiles requires overlapping 'halos' to prevent edge artifacts. In a deep U-Net, this halo grows exponentially with depth. If the host tiles the input, it must transmit the massive overlapping regions repeatedly, saturating the USB 3.0 bandwidth. The co-design solution is 'Fused Layer Execution' or 'Depth-First Scheduling' inside the compiler. Instead of host-side tiling, send the entire image (or large chunks) to the TPU's DRAM. The TPU compiler should be configured to tile the computation internally inside the 8MB SRAM, calculating a tile all the way through the depth of the network before evicting. This keeps the intermediate halo exchanges entirely within the high-bandwidth on-chip SRAM, drastically reducing USB I/O.
+  common_mistake: |
+    **The Pitfall:** Compressing the image data over the USB bus using JPEG to save bandwidth.
+    **The Rationale:** Candidates see a bandwidth bottleneck and immediately apply standard image compression techniques from general networking.
+    **The Consequence:** JPEG compression introduces latency and artifacts that completely ruin the super-resolution model's output quality.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 1080p image = 1920 x 1080 x 3 = ~6.22 MB.
+       - USB 3.0 practical bandwidth: ~400 MB/s.
+       - Tiling redundancy: 4x area redundancy.
+    2. **Calculations:**
+       - Tiled frame size = 6.22 MB * 4 = 24.88 MB.
+       - Bidirectional data per frame = 24.88 MB (in) + 24.88 MB (out) = 49.76 MB.
+       - Max framerate = 400 MB/s / 49.76 MB/frame = 8 FPS (or ~4 FPS under heavy contention).
+    3. **Conclusion & Interpretation:**
+       - **Result: 49.76 MB per frame.** The tiling strategy saturates the bus, making the system critically **I/O-Bandwidth-Bound**.
+  options:
+  - The severe bottleneck is the redundant PCIe/USB host-to-device data transfer caused by naive spatial tiling. Because convolutions have receptive fields, splitting an image into spatial tiles requires overlapping 'halos' to prevent edge artifacts. In a deep U-Net, this halo grows exponentially with depth.
+  - The system should be redesigned to offload inference to the cloud, as edge hardware fundamentally cannot meet the latency and accuracy requirements.
+  - Profiling overhead is masking the true performance; disabling all instrumentation will reveal that the system is already meeting targets.
+  - Compressing the image data over the USB bus using JPEG, which introduces latency and compression artifacts ruining the super-resolution.
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- '`reasoning_competency` and `reasoning_mode` are set to `None`, which limits proper classification of the question''s learning objectives.'
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

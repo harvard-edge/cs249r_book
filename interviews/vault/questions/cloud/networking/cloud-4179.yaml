@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-4179
+track: cloud
+level: L4
+zone: specification
+topic: interconnect-topology
+competency_area: networking
+bloom_level: apply
+phase: both
+title: Cross-Rack Bandwidth Planning for Data Parallelism
+scenario: You have 8 racks of 8 MI300X GPUs each (64 total). Each rack has one 400 Gbps uplink to the spine. You want to run 64-way data-parallel training with a 7B model. The gradient size is 14 GB (FP16).
+question: Will the cross-rack bandwidth support AllReduce, and if not, how do you fix it without adding spine bandwidth?
+details:
+  realistic_solution: 'A flat ring AllReduce on 64 GPUs is extremely inefficient here. In a topology-aware flat ring, the rack uplink carries 2 × (63/64) × 14 GB ≈ 27.5 GB. Since the 8 GPUs share a single 50 GB/s (400 Gbps) uplink, this takes over 550ms. Hierarchical AllReduce barely helps: after an intra-rack reduce-scatter, the rack has 8 chunks of 1.75 GB. All 8 chunks must be reduced across the 8 racks over the single uplink, generating 8 × (2 × 7/8 × 1.75 GB) = 24.5 GB of traffic on the uplink. The inter-rack step alone takes 24.5 GB / 50 GB/s = 490ms, so hierarchical only drops total time to ~517ms because the uplink is a hard bottleneck. Fix without adding spine BW: Gradient compression (e.g., TopK at 0.1%) reduces payload 1000x, making the inter-rack transfer trivial and removing the uplink bottleneck.'
+  common_mistake: |
+    **The Pitfall:** Calculating bandwidth as if AllReduce traffic is evenly distributed across all links at wire speed.
+    **The Rationale:** Engineers ignore network topology constraints, assuming a 64-GPU ring has unhindered throughput.
+    **The Consequence:** The rack uplink becomes a severe bottleneck because 8 GPUs are competing for a single 400 Gbps port, causing training to stall indefinitely.
+  napkin_math: |
+    - Flat ring: 14 GB gradient, 64 GPUs. 1 link leaves the rack, carrying 2 × (63/64) × 14 GB ≈ 27.5 GB total per rack. 27.5 GB / 50 GB/s = 550ms.
+    - Hierarchical: intra-rack RS (12.25 GB / 896 GB/s = 13.7ms).
+    - Inter-rack AllReduce: the 8 GPUs share 1 uplink. They must collectively reduce 14 GB across 8 racks.
+    - Traffic = 8 GPUs × (2 × 1.75 GB × 7/8) = 24.5 GB.
+    - Inter-rack time = 24.5 GB / 50 GB/s = 490ms.
+    - Total hierarchical time = 490ms + 13.7ms = 517.4ms.
+    - **The single uplink fundamentally limits 14 GB AllReduce to ~500ms regardless of topology. Gradient compression is strictly required.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- The original math calculated the inter-rack traffic for only one of the 8 GPUs in the rack, concluding the inter-rack step took 61ms. In reality, all 8 GPUs must share the single uplink to reduce their partitions, generating 8x more traffic (24.5 GB) and taking 490ms.
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

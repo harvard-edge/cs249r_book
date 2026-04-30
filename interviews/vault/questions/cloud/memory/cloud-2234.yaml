@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-2234
+track: cloud
+level: L5
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: evaluate
+phase: both
+title: The Data Gravity Problem
+scenario: Your organization trains models on an on-premise GPU cluster (2,048 GPUs) but stores all training data in a cloud object store (S3). The cluster connects to the cloud via a 400 Gbps dedicated link. A new multimodal training job requires 200 TB of image-text pairs. The team estimates 8 epochs over 40 hours. After starting, they discover the job will take 55 hours instead.
+question: "What bottleneck caused the 200 TB S3-backed training job to slip from 40 to 55 hours, and what storage architecture fixes it?"
+details:
+  realistic_solution: 'The 400 Gbps link provides 50 GB/s — respectable for large sequential transfers, but catastrophic for iterative training with small files. While compute takes 5 hours per epoch (40 hours / 8), streaming from S3 encounters contention and GET latency. Effective throughput drops to ~8 GB/s, pushing epoch data time to ~6.9 hours. Because data loading is slower than compute, the GPUs are starved, and each epoch takes 6.9 hours (total ~55 hours). The fix is a hierarchical caching architecture: (1) One-time bulk transfer: copy the entire 200 TB dataset to on-premise Lustre before training starts (takes ~67 minutes at 50 GB/s using sequential reads). (2) Lustre serves as the warm tier at 500 GB/s aggregate. (3) Each node caches its data shards on local NVMe after the first epoch. (4) S3 remains the source of truth for versioning and durability. This eliminates repeated cross-WAN reads and keeps all 8 epochs compute-bound.'
+  common_mistake: |
+    **The Pitfall:** Trying to fix the issue by provisioning more network bandwidth.
+    **The Rationale:** Candidates focus on the 400 Gbps limit, ignoring the latency overhead of continuous random GETs from an object store.
+    **The Consequence:** The company buys an expensive 800 Gbps link but still misses the 40-hour target because S3 small-file throughput doesn't scale linearly with pipe size.
+  napkin_math: |
+    - Compute time per epoch: 40 hrs / 8 = 5 hrs.
+    - Dedicated link bandwidth: 400 Gbps = 50 GB/s.
+    - S3 random GET throughput on small files drops effective speed to ~8 GB/s.
+    - Data load time per epoch (from S3): 200 TB / 8 GB/s = 25,000s ≈ 6.94 hours.
+    - Since 6.94 hrs > 5 hrs compute, data loading is the bottleneck.
+    - Total training time: 8 epochs * 6.94 hrs ≈ 55.5 hours.
+    - **Conclusion:** **A one-time sequential copy to on-premise Lustre (200 TB / 50 GB/s ≈ 67 mins) hides data loading behind compute, saving ~15 hours.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: cloud-chain-462
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

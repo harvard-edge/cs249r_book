@@ -33,13 +33,14 @@ def register(app: typer.Typer) -> None:
         ),
         release_id: str = typer.Option("dev", "--release-id", help="Release identifier to stamp."),
         as_json: bool = typer.Option(False, "--json", help="Emit machine-readable summary."),
-        legacy_json: bool = typer.Option(
+        local_json: bool = typer.Option(
             False,
-            "--legacy-json",
-            help="Also regenerate the site-compatible corpus.json at "
-                 "interviews/staffml/src/data/corpus.json from YAML. "
-                 "Required until Phase-4 cutover; closes §11.1 'corpus.json "
-                 "is generated, not authored'.",
+            "--local-json",
+            help="Also write a site-readable corpus.json at "
+                 "interviews/staffml/src/data/corpus.json so the StaffML "
+                 "frontend can serve full question content from disk during "
+                 "local dev (with NEXT_PUBLIC_VAULT_FALLBACK=static). "
+                 "Production never reads this file; it is dev-only.",
         ),
     ) -> None:
         """Compile all YAML questions under vault/questions/ to a SQLite file.
@@ -64,13 +65,13 @@ def register(app: typer.Typer) -> None:
             release_id=release_id,
         )
 
-        if legacy_json:
-            legacy_out = Path("interviews/staffml/src/data/corpus.json")
-            legacy_result = emit_legacy_corpus(vault_dir, loaded, legacy_out)
-            result["legacy_json"] = legacy_result
+        if local_json:
+            local_out = Path("interviews/staffml/src/data/corpus.json")
+            local_result = emit_legacy_corpus(vault_dir, loaded, local_out)
+            result["local_json"] = local_result
             console.print(
-                f"[dim]legacy corpus.json: {legacy_result['count']} questions → "
-                f"{legacy_result['output']}[/dim]"
+                f"[dim]local corpus.json: {local_result['count']} questions → "
+                f"{local_result['output']}[/dim]"
             )
             # Mirror visual assets alongside the JSON. The frontend
             # references /question-visuals/<track>/<file>.svg directly
@@ -90,8 +91,8 @@ def register(app: typer.Typer) -> None:
             # recurring stale-manifest pre-commit failure (the manifest
             # was previously hand-maintained).
             manifest_out = Path("interviews/staffml/src/data/vault-manifest.json")
-            # Count chains from the corpus.json the legacy emitter just
-            # wrote — chain shape there is the canonical published view.
+            # Count chains from the corpus.json we just wrote — chain shape
+            # there is the canonical published view.
             chains_seen: set[str] = set()
             for lq in loaded:
                 if lq.question.status != "published":
@@ -105,7 +106,7 @@ def register(app: typer.Typer) -> None:
                 release_hash=str(result["release_hash"]),
                 schema_version="1",
                 policy_version=str(result["policy_version"]),
-                published_count=int(legacy_result["count"]),
+                published_count=int(local_result["count"]),
                 chain_count=len(chains_seen),
             )
             result["manifest"] = manifest_result

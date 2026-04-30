@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2906
+track: cloud
+level: L5
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: apply
+phase: both
+title: Implement custom depthwise conv CUDA kernel with shared memory optimization
+scenario: The standard cuDNN depthwise conv achieves only 18% SM utilization on H100 for a 3x3 depthwise layer with C=512 channels, 14x14 spatial resolution, batch=32. You need to write or configure a higher-performance implementation.
+question: 'How would you optimize the C=512, 14x14, batch-32 depthwise 3x3 layer on H100 beyond cuDNN''s 18% SM utilization?'
+details:
+  realistic_solution: 'H100 SM has 228KB shared memory per SM. Key optimizations: (1) load input halo into shared memory, coalesced global -> shared memory load; (2) use warp-level parallelism across the spatial dimension; (3) fuse BN + ReLU6 into the depthwise kernel; (4) use __half2 or __nv_bfloat162 vectorized loads for 2x memory bandwidth; (5) tile along channel dimension so each thread block handles 32 channels. Alternatively, use torch.compile with triton which auto-generates fused depthwise+BN+activation kernels. PyTorch 2.x with inductor backend achieves ~2x over cuDNN for these small depthwise shapes.'
+  common_mistake: |
+    **The Pitfall:** Trying to use Tensor Cores for depthwise convolutions.
+    **The Rationale:** Tensor Cores require dense matmul patterns (MMA instructions) and cannot be natively used for depthwise ops where each output channel depends only on one input channel.
+    **The Consequence:** Wasting time trying to map a fundamentally incompatible operation to matrix hardware.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Input: 32x512x14x14 = 3.2M elements * 2B = 6.4MB. Output: same = 6.4MB.
+    - HBM bandwidth: 3.35TB/s (H100).
+    - Peak compute: 989 TFLOPS.
+
+    **Calculations:**
+    - Total HBM traffic: 12.8MB. At 3.35TB/s: 3.8 µs minimum.
+    - FLOPs: 2*32*512*9*196 = 57.8M FLOPs.
+    - At 18% of 989 TFLOPS = 178 TFLOPS: 57.8M/178T = 0.32 µs compute.
+    - Ratio: memory is 12x slower -> severely memory-bound.
+
+    **Conclusion & Interpretation:**
+    - **Result: Shared memory tiling reduces HBM traffic (Memory-Bound)**. Shared memory tiling reduces HBM traffic by 3x3=9x for spatial halo. Target: <0.5 µs per invocation at 70% HBM bandwidth utilization.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

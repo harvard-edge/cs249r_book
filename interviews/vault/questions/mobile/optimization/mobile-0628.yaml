@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: mobile-0628
+track: mobile
+level: L5
+zone: diagnosis
+topic: speculative-decoding
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: The Speculative Decoding Memory Trap
+scenario: To accelerate a 2B parameter LLM on a mobile SoC, your team implements speculative decoding. They use a tiny 150M parameter draft model to generate 4 candidate tokens, which the main 2B model then verifies in a single forward pass. This works on a cloud GPU, but on the mobile device, the app's memory usage balloons after a few hundred generated tokens, and the OS terminates it. The verification step is a single, parallel operation that should be compute-efficient.
+question: Why does this time-saving algorithm lead to catastrophic memory failure on a mobile device, and what specific hardware constraint is being violated?
+details:
+  realistic_solution: |
+    The failure is caused by the explosive growth of the KV Cache due to rejected speculative tokens. With speculative decoding (k=4), you compute and store keys and values for all 4 tokens before verification. If the main model rejects tokens, the KV cache data for those rejected tokens becomes wasted space in the pre-allocated contiguous buffer. This unreclaimed memory accumulates rapidly over hundreds of steps, breaching the strict OS Jetsam limit and forcing termination.
+  common_mistake: |
+    **The Pitfall:** Blaming a software memory leak or the draft model's size.
+    **The Rationale:** Candidates fail to realize that speculative decoding fundamentally trades memory capacity (storing unverified KV states) for latency reduction, a trade that breaks down on memory-constrained edge hardware.
+    **The Consequence:** Wasting time debugging application code when the core algorithm is mathematically incompatible with the mobile memory budget.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 2B model KV cache per token: ~4MB.
+    - OS Memory budget: ~2GB.
+    - Speculative decoding k=4, 75% rejection rate (1 token accepted).
+
+    **Calculations:**
+    - Standard decoding (200 steps): 200 tokens * 4 MB = 800 MB (Under 2GB budget).
+    - Speculative decoding (200 steps): Each step writes 4 tokens to cache.
+    - Total data: 200 steps * 4 tokens/step * 4 MB/token = 3200 MB (3.2 GB).
+    - 3.2 GB > 2.0 GB OS budget.
+
+    **Conclusion & Interpretation:**
+    - **Result: 3.2 GB (Memory Capacity)**. Speculative decoding increases memory pressure by 4x, triggering Jetsam eviction.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+- id: mobile-chain-029
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-4312
+track: cloud
+level: L5
+zone: optimization
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: Tail Latency of Decode Under Mixed Workloads
+scenario: Your decode pool shows P50 TPOT of 35 ms and P99 TPOT of 280 ms — an 8× tail ratio. The workload mix is 70% short-output requests (≤50 tokens) and 30% long-output requests (500–2000 tokens). The decode GPU is an H100.
+question: What causes the 8× P99/P50 TPOT tail on H100 with 30% long outputs, and what priority scheduling intervention would reduce it?
+details:
+  realistic_solution: 'When long-output requests accumulate in the batch, they hold KV-cache slots for hundreds of steps. At high occupancy (e.g., 90% of KV pool used by long requests), each decode step processes a large batch. The H100 is bandwidth-bound at decode: at batch size B, step time = max(model_weight_read / HBM_bw, compute). With many long requests in batch, step time is ~constant at ~42 ms (140 GB / 3.35 TB/s for 70B). Short requests entering this batch wait for each step the same as long requests — no priority. A short request that generates 50 tokens spends 50 × step_time = 50 × 42 ms = 2.1 s if unlucky enough to enter when batch is saturated. Fix: separate decode queues for short vs. long outputs. Short-output queue (predicted ≤50 tokens) gets absolute priority: the scheduler reserves 20% of batch slots for short requests. When short-output queue is non-empty, long requests cannot fill those slots. Result: P99 TPOT for short requests drops from 280 ms to ~50 ms (2 batch-lengths of wait + 1 step). P99 for long requests may increase slightly (5-10%).'
+  common_mistake: |
+    **The Pitfall:** Attributing tail TPOT to memory bandwidth variability or thermal throttling.
+    **The Rationale:** These cause 10-20% variance, not 8×.
+    **The Consequence:** Implementing hardware-level fixes instead of addressing head-of-line blocking from large batches.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - H100 decode step time for 70B: 140 GB / 3.35 TB/s = 41.8 ms/step.
+    - P99 TPOT without priority: 280 ms.
+
+    **Calculations:**
+    - Without priority, short request (50 tokens) step time is inflated by large batch \u2248 42 ms \u00d7 (B/B_short) overhead.
+    - With priority, short requests always find a batch slot within 1-2 steps.
+
+    **Conclusion & Interpretation:**
+    - **Result: 84 ms (Latency-Bound)**. P99 TPOT with priority: 2 \u00d7 42 = 84 ms (3.3\u00d7 improvement).
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

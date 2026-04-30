@@ -1,0 +1,55 @@
+schema_version: '1.0'
+id: mobile-0413
+track: mobile
+level: L3
+zone: diagnosis
+topic: attention-scaling
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: The Transformer Tax on Mobile
+scenario: Your team is building a 'visual search from camera' feature on a mobile device. The latency budget is 100ms. The V1 model, a MobileNetV3 CNN, runs in 80ms. A new hire proposes switching to a small Vision Transformer (ViT) of similar parameter count, citing its superior accuracy. You benchmark the ViT and find it's 5x slower (~400ms), completely missing the budget.
+question: How would you diagnose the architectural reason for the ViT's poor latency on mobile hardware, despite its comparable size?
+details:
+  realistic_solution: |
+    The ViT is dramatically slower due to the memory access patterns of its core self-attention mechanism. Self-attention requires computing scores between every pair of tokens, resulting in non-local, quasi-random memory accesses from DRAM for the Q, K, and V matrices. CNNs, conversely, exhibit strong spatial locality, which mobile memory subsystems heavily optimize for via caches and prefetchers. The ViT's memory access thrashes the cache, starving the NPU and exposing the SoC's DRAM bandwidth bottleneck.
+  common_mistake: |
+    **The Pitfall:** Assuming equal parameter count equates to equal latency.
+    **The Rationale:** Candidates focus solely on FLOPs or parameter count without analyzing the arithmetic intensity and memory access patterns of self-attention on mobile caches.
+    **The Consequence:** Deploying architectures fundamentally mismatched with mobile memory subsystems, leading to severe latency regressions and missed SLAs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - NPU Ridge Point: ~683 Ops/Byte.
+    - Tokens: 196 (14x14 patches), Dimension: 768.
+    - Precision: FP16.
+
+    **Calculations:**
+    - FLOPs for Q * K^T: 2 * 196 * 768 * 196 = ~59 MFLOPs.
+    - Memory accessed: (2 * 196 * 768) + (196 * 196) = ~340 K-elements = ~680 KB.
+    - Arithmetic Intensity (AI) = 59 MFLOPs / 680 KB = ~87 Ops/Byte.
+
+    **Conclusion & Interpretation:**
+    - **Result: 87 Ops/Byte (Memory Bandwidth)**. Because 87 Ops/Byte << 683 Ops/Byte ridge point, the self-attention operation is severely memory-bound.
+  options:
+  - The LayerNorm operations in the ViT are not supported by the ANE, causing slow CPU fallbacks.
+  - The ViT has a much larger total activation memory footprint, exceeding the ANE's on-chip SRAM.
+  - Self-attention's non-local memory access patterns have low arithmetic intensity, making it bottlenecked by DRAM bandwidth.
+  - The patch embedding (stem) layer of the ViT uses a large convolution that is inefficient on mobile GPUs.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

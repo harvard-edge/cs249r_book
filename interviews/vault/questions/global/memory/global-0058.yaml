@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: global-0058
+track: global
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: The Memory-Bound Custom MLP
+scenario: 'You are optimizing a custom 13B parameter model on an H100 GPU (3.35 TB/s HBM bandwidth). The model uses a novel activation function in its MLP: `CustomGLU(x) = x * tanh(alpha * x + beta)`. For a batch size of 4 and sequence length of 2048, the MLP expansion layer (hidden size 5120 -> 13824) is a major bottleneck. Profiling shows SM compute utilization is only 15%, but HBM bandwidth utilization is pinned at 96% (~3.2 TB/s).'
+question: "What is the bottleneck in the CustomGLU MLP with 96% HBM bandwidth utilization, and how would you optimize it?"
+details:
+  realistic_solution: 'The symptom (low SM utilization, maxed HBM bandwidth on element-wise operations) indicates that intermediate tensors are being fully materialized to global memory (HBM) instead of being kept in SRAM/registers. In standard eager execution, the framework dispatches separate kernels for `alpha * x`, `+ beta`, `tanh`, and `* x`. Each discrete kernel must read from and write back to HBM. To fix this, you must apply operator fusion (via `torch.compile`, XLA, or writing a custom Triton kernel). Fusion combines these sequential element-wise operations into a single kernel. The intermediate results (`alpha * x`, etc.) are kept in the GPU''s fast registers, drastically reducing the number of trips to HBM from multiple round-trips to exactly one read and one write.'
+  common_mistake: 'Attempting to quantize the weights (e.g., to INT8 or FP8) to reduce memory bandwidth, missing that the bottleneck is the intermediate activation reads/writes.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Custom MLP block: CustomGLU(x) = x * tanh(alpha * x + beta).
+    - HBM bandwidth = 3.35 TB/s.
+    - Expansion tensor size = 226 MB.
+    
+    **Calculations:**
+    - Eager execution traffic (4 unfused ops): 9 trips to HBM (reads/writes) * 226 MB = 2.03 GB.
+    - Eager execution time = 2.03 GB / 3.35 TB/s = ~0.6ms.
+    - Fused kernel traffic: 1 read (x) + 1 write (output) * 226 MB = 452 MB.
+    - Fused execution time = 452 MB / 3.35 TB/s = ~0.13ms.
+    
+    **Conclusion & Interpretation:**
+    - **Result: ~4.6x Speedup (Memory-Bandwidth Bound)**. Operator fusion keeps intermediate activations in registers, transforming a heavy memory-bound chain into a single efficient kernel.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

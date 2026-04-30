@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: mobile-1088
+track: mobile
+level: L3
+zone: analyze
+topic: distribution-drift-detection
+competency_area: reliability
+bloom_level: apply
+phase: inference
+title: 'On-Device PSI Drift Compute Bottleneck'
+scenario: 'A mobile app uses an on-device LLM on a TPU to summarize notifications. To detect concept drift, a nightly background job calculates the Population Stability Index (PSI) by retrieving the last 50,000 raw notification texts, re-loading the LLM into memory, generating 768-dimensional FP16 embeddings for all 50,000 texts, and comparing their distribution against a baseline. Telemetry shows this nightly job frequently causes thermal throttling and triggers the OS to terminate other background apps.'
+question: 'How would you analyze why this specific statistical detection workflow degrades system reliability?'
+details:
+  realistic_solution: 'The system failure is caused by re-running model inference in a dense batch rather than the PSI calculation. Allocating 2-3 GB to load the LLM in a background service violates OS background constraints, triggering the OOM killer. Furthermore, running continuous inference maxes out the TPU, causing thermal buildup. The robust approach is to cache the 768-dimensional embeddings incrementally at inference time during the day, which makes the nightly PSI calculation computationally trivial.'
+  common_mistake: |
+    **The Pitfall:** Assuming the PSI mathematical formula itself is the performance bottleneck.
+    **The Rationale:** Candidates focus on the statistical calculation and fail to distinguish it from the massive cost of data preparation (embedding generation).
+    **The Consequence:** The proposed fix focuses on optimizing the PSI math while ignoring the actual thermal and memory constraints triggered by the LLM.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 50,000 text notifications. LLM TPU limit: 7.5 TOPS.
+    - Embedding compute cost: ~5 GOPs/embedding. FP16 format (2 bytes/dim).
+
+    **Calculations:**
+    - Compute cost to re-run: 50,000 texts x 5 GOPs = 250,000 GOPs (250 TOPS).
+    - Time on TPU: 250 TOPS / 7.5 TOPS = 33.3 seconds of sustained 100% utilization.
+    - Embedding storage (cached): 50,000 x 768 dims x 2 bytes = 76.8 MB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 33.3 seconds (Compute-Bound)**. Re-computing embeddings burns 33.3 seconds of sustained TPU load, leading to throttling. Caching the 76.8 MB of embeddings directly bypasses this entire workload.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

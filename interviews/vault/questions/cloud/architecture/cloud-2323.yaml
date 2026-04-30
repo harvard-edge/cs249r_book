@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-2323
+track: cloud
+level: L4
+zone: diagnosis
+topic: transformer-systems-cost
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: MoE Router Logit Overflow in FP16
+scenario: 'You are training an 8x22B Mixture of Experts (MoE) model using FP16. After 2,000 steps, the evaluation loss spikes, and profiling shows that all tokens are suddenly being routed uniformly to all experts, destroying the sparsity. The routing mechanism uses a standard linear layer followed by a Softmax.'
+question: 'Why do all tokens suddenly route uniformly in the FP16 MoE, and what precision change should be made to the router?'
+details:
+  realistic_solution: 'The issue is FP16 numeric overflow in the router logits. As the network gains confidence, logit magnitude grows, overflowing the FP16 max value of 65504 to Infinity. The Softmax over Infinity returns NaNs or uniform probabilities, destroying sparsity. The architectural requirement is to cast the router inputs to FP32 before projection.'
+  common_mistake: |
+    **The Pitfall:** Assuming the load balancing auxiliary loss coefficient is too high.
+    **The Rationale:** Load balancing loss is explicitly designed to force tokens toward a uniform distribution across experts.
+    **The Consequence:** Wasting time tuning loss hyperparameters while the fundamental numerical stability issue remains, leading to repeated training collapse.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Routing layer precision: FP16.
+    - FP16 Maximum value: 65,504.
+
+    **Calculations:**
+    - Router Compute: Linear layer computes X * W.
+    - Overflow Condition: If X ≈ 100 and W ≈ 700, X * W = 70,000.
+    - Precision Failure: 70,000 > 65,504, causing an overflow to Inf.
+    - Softmax Evaluation: Softmax([Inf, Inf, 0, 0]) evaluates to [NaN, NaN, 0, 0] or uniform fallback [0.25, 0.25, 0.25, 0.25].
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Bound**. The FP16 limit is breached; casting the router strictly to FP32 prevents collapse.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- training
+- moe
+- fp16

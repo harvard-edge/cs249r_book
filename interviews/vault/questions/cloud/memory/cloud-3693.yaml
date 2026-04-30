@@ -1,0 +1,33 @@
+schema_version: '1.0'
+id: cloud-3693
+track: cloud
+level: L3
+zone: fluency
+topic: pipeline-parallelism
+competency_area: memory
+bloom_level: remember
+phase: training
+title: Micro-batch Size Selection Under Memory Constraints
+scenario: 'You are setting up pipeline parallelism on 4 H100s for a 40B parameter model in BF16. Model parameters alone consume 80 GB across 4 GPUs (20 GB/GPU). The optimizer states (Adam) add 40 GB across 4 GPUs (10 GB/GPU). You have 50 GB free per GPU for activations. The activation memory per layer per sample is 16 MB, and each GPU handles 20 layers.'
+question: 'What is the maximum micro-batch size you can use with 8 micro-batches in flight?'
+details:
+  realistic_solution: 'Activation memory per layer = seq_len x batch_size x hidden_dim x bytes. With 8 micro-batches in flight, total activation memory = 8 x (activation per micro-batch). Solve for max batch size given 50 GB free. Apply gradient checkpointing to reduce activation memory by ~3x at the cost of one extra forward pass.'
+  common_mistake: |
+    **The Pitfall:** Calculating activation memory for a single micro-batch and multiplying by the global batch size.
+    **The Rationale:** Engineers misunderstand GPipe-style pipeline parallelism, where all `m` micro-batches accumulate activations simultaneously in the forward pass before backprop begins.
+    **The Consequence:** Severe VRAM underestimation, causing an OOM error during the pipeline warmup phase.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 50 GB free VRAM per GPU.
+    - 20 layers per GPU, 16 MB activation memory per layer per sample.
+    - 8 micro-batches in flight (pipeline parallelism).
+
+    **Calculations:**
+    - Activation per micro-batch sample: 20 * 16 MB = 320 MB.
+    - Pipeline footprint per sample: 8 micro-batches * 320 MB = 2.56 GB.
+    - Max batch size constraint: 2.56 GB * B_m <= 50 GB.
+    - B_m <= 50 / 2.56 = 19.53.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound Micro-batching.** The maximum micro-batch size is 19 (or typically 16 for power-of-2 efficiency) without gradient checkpointing.
+status: published

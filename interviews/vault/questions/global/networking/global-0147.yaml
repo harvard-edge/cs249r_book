@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: global-0147
+track: global
+level: L4
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Ring Attention Compute Starvation
+scenario: You deploy a document-analysis LLM supporting a 1M token context window across an 8-GPU node using Ring Attention. To minimize activation memory, you set the sequence chunk size (block size) to 1024 tokens. During the 1M token prefill, NSYS traces show the GPU SMs are idle 75% of the time, and the prefill takes 45 seconds instead of the theoretically calculated 12 seconds.
+question: Why does the 1M-token Ring Attention prefill stall with 1024-token chunks, and what chunk-size change would you make?
+details:
+  realistic_solution: The symptom is caused by compute starvation due to a mismatch between the chunk size and the network bandwidth. To hide network latency, computation time must exceed transfer time. Increase the chunk size to 8192 or 16384 to increase arithmetic intensity.
+  common_mistake: |
+    **The Pitfall:** Blaming FlashAttention for poor performance on long sequences or assuming the KV cache is naturally overflowing.
+    **The Rationale:** These are common bottlenecks in standard attention mechanisms, so they are the first suspects.
+    **The Consequence:** Time is wasted tuning attention implementations instead of addressing the fundamental compute-to-network imbalance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Chunk size (C) = 1024. Hidden dim (d) = 128, heads = 32.
+    - NVLink = 450 GB/s. Compute = 989 TFLOPS.
+
+    **Calculations:**
+    - Compute Time = (2 * C^2 * d * 32) / 989 TFLOPS = 8.6 us.
+    - Network Time = (2 * C * d * 32 * 2 bytes) / 450 GB/s = 37 us.
+    - GPU waits 37 - 8.6 = 28.4 us (76% idle).
+    - Increasing C to 8192: Compute = 544 us, Network = 296 us.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bound (Latency).** With C=1024, network transfer stalls compute. Increasing chunk size to 8192 fully hides the network latency by drastically increasing intensity.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- distributed-inference
+- nvlink

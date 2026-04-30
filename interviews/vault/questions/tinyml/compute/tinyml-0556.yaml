@@ -1,0 +1,57 @@
+schema_version: '1.0'
+id: tinyml-0556
+track: tinyml
+level: L4
+zone: diagnosis
+topic: mcu-compute-constraints
+competency_area: compute
+bloom_level: analyze
+phase: inference
+title: The Branch Prediction Penalty on MCU
+scenario: Your colleague implements a ReLU activation function for an INT8 inference engine using an `if (x < 0) x = 0;` pattern. Profiling shows ReLU takes ~38% of total inference time. The model has 500,000 activations per inference.
+question: Why does a branch-based INT8 ReLU consume ~38% of Cortex-M4 inference time for 500,000 activations?
+details:
+  realistic_solution: 'The Cortex-M4 has no dynamic branch predictor — it uses a simple prefetch that always predicts ''not taken.'' With random activations (~50% negative), every taken branch flushes the 3-stage pipeline, costing 1-3 penalty cycles per element. For 500K activations: ~750K wasted cycles. Fix: replace the branch with a branchless conditional select (e.g., CMOV-style: y = x > 0 ? x : 0 using a single USAT instruction) or use CMSIS-NN''s vectorized ReLU which processes 4 INT8 values per cycle via SIMD. Speedup: up to 10x from branching to SIMD ReLU.'
+  common_mistake: |
+    **The Pitfall:** Assuming the Cortex-M4 has dynamic branch prediction.
+    **The Rationale:** Developers used to higher-end CPUs assume branch predictors will learn the data pattern.
+    **The Consequence:** They write branch-heavy code (like `if (x < 0)`) which constantly flushes the pipeline on pseudo-random data, drastically increasing inference time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Clock Speed: 100 MHz.
+    - Activations: 500,000.
+    - Branch Penalty: 1-3 cycles (avg 1.5) per taken branch.
+    
+    **Calculations:**
+    - Branching ReLU Cost: 500K * (2 cycles base + 1 cycle penalty * 50% mispredict) = 1.25M cycles = 12.5 ms.
+    - Branchless ReLU Cost: 500K * 2 cycles = 1M cycles = 10 ms.
+    - SIMD ReLU Cost: 4 INT8 values per cycle. 500K / 4 = 125K cycles = 1.25 ms.
+    
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Bound Pipeline Flush (Compute-Bound)**. SIMD ReLU provides a 10x speedup over branching, saving 11.25 ms per inference by avoiding pipeline flushes.
+  options:
+  - The Cortex-M4 has a branch predictor that mispredicts ReLU branches 50% of the time, causing 10-cycle pipeline flushes on each miss.
+  - 'The Cortex-M4 has no dynamic branch predictor. With ~50% negative activations, every taken branch flushes the 3-stage pipeline (1-3 penalty cycles per element). For 500K activations, this wastes ~750K cycles. Fix: use a branchless USAT instruction or CMSIS-NN''s vectorized SIMD ReLU for up to 10x speedup.'
+  - The compiler is generating floating-point comparison instructions for the INT8 values, triggering a software emulation trap on each comparison since the M4 has no FPU.
+  - The ReLU function is memory-bound because each activation requires a cache miss to load from SRAM, and the Cortex-M4's single-cycle SRAM interface cannot keep up.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: tinyml-chain-085
+  position: 3
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

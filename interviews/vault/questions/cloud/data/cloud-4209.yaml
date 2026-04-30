@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: 'cloud-4209'
+track: 'cloud'
+level: 'L5'
+zone: 'realization'
+topic: 'feature-store-management'
+competency_area: 'data'
+bloom_level: 'create'
+phase: 'both'
+title: 'Feature Store for Real-Time ML on A100 Inference'
+scenario: 'Your search ranking model on A100 GPUs processes 10K QPS. Each query retrieves 500 candidate documents with 100 features each from the feature store, then runs inference. GPU utilization is only 35% because the model waits for feature fetches. The feature fetch takes 8ms but inference takes only 3ms.'
+question: 'How would you design a prefetch architecture to overlap the 8ms feature fetch with 3ms GPU inference and raise utilization above 80%?'
+details:
+  realistic_solution: 'Implement a double-buffering pipeline: while the GPU processes batch N, the CPU prefetches features for batch N+1. Architecture: (1) request queue accumulates queries; (2) CPU thread pool fetches features for the next batch while GPU processes current batch; (3) feature tensors are written to pinned (page-locked) memory for zero-copy DMA to GPU. With micro-batching (batch size 32, ~3.2ms per micro-batch on A100), you overlap 3.2ms of compute with 3.2ms of next batch''s feature fetch. The remaining 4.8ms of feature fetch overlaps with subsequent batches. Pipeline fill time: 1 batch latency (8ms). Steady-state throughput: one batch every max(3.2ms, 8ms/3 overlapped) \approx 3.2ms. GPU utilization: 3.2/3.2 = ~100% in steady state, ~85% including pipeline bubbles.'
+  common_mistake: |
+    **The Pitfall:** Simply adding more CPU threads for feature fetching.
+    **The Rationale:** Engineers assume parallelizing the fetch will fix the stall.
+    **The Consequence:** This reduces average latency but fails to overlap fetch with compute, leaving the GPU idle during each request's fetch phase.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Current State: 8ms fetch + 3ms compute = 11ms/batch. GPU util = $3/11 \approx 27\%$.
+    - Pipelining: 3-stage pipeline.
+    
+    **Calculations:**
+    - Fetch divided: $8\text{ms} / 3 = 2.7\text{ms}$ per stage.
+    - Overlap: Throughput is limited by the longest stage (3ms compute). 
+    
+    **Conclusion & Interpretation:**
+    - **Result: ~83% Utilization (Compute-Bound)**. GPU utilization increases to $3/3.6 \approx 83\%$. Memory overhead for pinned buffers is $\approx 19.2\text{MB}$, negligible on an 80GB A100.
+status: 'published'
+provenance: 'imported'
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: 'OK'
+validation_date: '2026-04-02'
+validation_model: 'claude-opus-4-6'
+math_verified: true
+math_status: 'CORRECT'
+math_date: '2026-04-03'
+math_model: 'gemini-3.1-pro-preview'
+human_reviewed:
+  status: 'not-reviewed'
+  by: null
+  date: null
+  notes: null

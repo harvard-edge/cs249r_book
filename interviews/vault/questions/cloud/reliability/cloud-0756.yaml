@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0756
+track: cloud
+level: L5
+zone: optimization
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: evaluate
+phase: training
+title: The Failure Recovery Time
+scenario: 'You''re running a 70B model pretraining job on 10,000 H100 GPUs. Historical data shows each GPU has an MTBF of 20,000 hours (including NIC failures, ECC errors, thermal events). Your checkpoint-to-disk takes 45 seconds and you checkpoint every 10 minutes.'
+question: What are the expected failures per day and effective utilization, and what architecture gets the 10,000-GPU job above 90% utilization?
+details:
+  realistic_solution: '$\text{MTBF}_{\text{cluster}} = 20{,}000 / 10{,}000 = 2\text{ hours}$. That''s 12 failures per day. Each failure requires: (1) failure detection: ~30s, (2) job kill + cleanup: ~60s, (3) node replacement/exclusion: ~120s, (4) checkpoint reload from storage: 45s (write) but read is slower with 10K GPUs hitting storage simultaneously: ~90s, (5) data pipeline re-warm: ~30s. Total recovery: **~5.5 minutes per failure**. With 12 failures/day: 66 minutes of downtime + 12 × 5 min average lost compute (half a checkpoint interval) = 60 min lost work = **126 min/day = 8.75% overhead**. To hit >90% utilization: use **in-memory redundant checkpointing** (replicate state across 2-3 nodes, recovery in ~10 seconds), **hot spare nodes** (pre-loaded, ready to substitute in ~30 seconds), and **elastic training** (continue with N-1 GPUs while the failed node is replaced).'
+  common_mistake: '"MTBF of 20,000 hours per GPU means we get a failure every 2 hours at 10,000 GPUs. With 10-minute checkpoints, we lose at most 10 minutes per failure — that''s manageable." This underestimates the recovery cost: it''s not just lost compute, it''s the time to detect the failure, restart all processes, reload the checkpoint, and re-warm the pipeline.'
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Baseline: 45s checkpoint every 10 min, 5.5 min recovery per failure.
+    - Optimized: 2s in-memory checkpoint every 5 min, 30s recovery (hot spare).
+    - Expected failures: 12 per day.
+    - Daily time: 1440 minutes.
+    
+    **Calculations:**
+    - Baseline checkpoint overhead: 45s / 600s = 7.5%.
+    - Baseline failure overhead: 12 failures * (5.5m recovery + 5m lost compute) = 126m/day (8.75%).
+    - Baseline effective utilization: (1 - 0.075) * (1 - 0.0875) = 84.3%.
+    - Optimized checkpoint overhead: 2s / 300s = 0.67%.
+    - Optimized failure overhead: 12 failures * (0.5m recovery + 2.5m lost compute) = 36m/day (2.5%).
+    - Optimized effective utilization: (1 - 0.0067) * (1 - 0.025) = 96.8%.
+    
+    **Conclusion & Interpretation:**
+    - **Result: 96.8% Utilization (Reliability-Bound)**. In-memory checkpoints and hot spares slash the recovery and rework overhead, boosting effective utilization well above the 90% target.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

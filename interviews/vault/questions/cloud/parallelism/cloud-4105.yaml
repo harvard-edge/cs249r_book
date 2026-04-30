@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-4105
+track: cloud
+level: L4
+zone: optimization
+topic: model-tensor-parallelism
+competency_area: parallelism
+bloom_level: apply
+phase: training
+title: TP Communication Overlap with NVLink
+scenario: 'On an 8x A100 DGX node with NVLink providing 600 GB/s bidirectional per GPU, your TP=8 training achieves only 45% MFU. Profiling shows zero overlap between AllReduce and GEMM operations.'
+question: 'What CUDA stream setup is needed to overlap TP AllReduce and GEMM on the 8x A100 DGX node?'
+details:
+  realistic_solution: |
+    To enable overlap, you need separate CUDA streams for compute and communication. Create a dedicated NCCL stream for collective operations. After the row-parallel GEMM, launch the AllReduce on the NCCL stream. Meanwhile, on the default compute stream, begin the next layer's operations that don't depend on the AllReduce result. Synchronize only before the operation that actually needs the result.
+  common_mistake: |
+    **The Pitfall:** Assuming PyTorch automatically overlaps communication with compute.
+    **The Rationale:** Candidates believe the framework's distributed backend handles stream management implicitly.
+    **The Consequence:** NCCL operations and CUDA kernels run on the same default stream, serializing them and bottlenecking training.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 8x A100 DGX node with NVLink (600 GB/s bidirectional).
+    - TP=8 training, currently zero overlap between AllReduce and GEMM.
+
+    **Calculations:**
+    - Without overlap: GEMM=0.5ms + AllReduce=0.1ms = 0.6ms per block.
+    - With 70% overlap: 0.5ms + 0.03ms = 0.53ms per block.
+    - Over 80 blocks: 48ms (no overlap) vs 42.4ms (overlap).
+
+    **Conclusion & Interpretation:**
+    - **Result: Overlapping communication yields an MFU improvement of ~12%. (Compute-Bound Overlap)**. Proper CUDA stream orchestration reclaims wasted idle cycles.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

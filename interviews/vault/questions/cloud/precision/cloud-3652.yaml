@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: cloud-3652
+track: cloud
+level: L4
+zone: implement
+topic: flash-attention
+competency_area: precision
+bloom_level: apply
+phase: inference
+title: Flash Attention Numerical Stability with Long Sequences
+scenario: A model trained with standard attention is being converted to use FlashAttention-2 for inference on TPU v5e. At seq_len=32768, you observe NaN values in attention outputs that don't appear with standard attention. The model was trained in BF16.
+question: "How would you debug and fix NaNs from Flash Attention at seq_len=32768 on TPU v5e?"
+details:
+  realistic_solution: Enable Flash Attention's softmax scaling (divide QK by sqrt(d_head) before the attention kernel, which Flash Attention should handle internally). Check if the model uses ALiBi or RoPE positional encodings; very long sequences with ALiBi can produce large negative logits that cause exp(-large) = 0, leading to zero-division in softmax. Enforce FP32 accumulation in the attention kernel even with BF16 inputs.
+  common_mistake: |
+    **The Pitfall:** Assuming Flash Attention is perfectly mathematically equivalent to standard attention across all sequences and precisions.
+    **The Rationale:** Candidates trust the algorithm's memory benefits but forget that BF16's limited dynamic range causes overflow when combined with long sequences or ALiBi.
+    **The Consequence:** The model produces catastrophic NaN logits during long-context generation, silently crashing the inference service.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - BF16 format: 8-bit exponent, 7-bit mantissa, max representable value ~3.4e38.
+       - Sequence length: 32,768.
+    2. **Calculations:**
+       - Attention logits (after QK^T / sqrt(d)) can swing to ±100.
+       - Computing exp(100) inside softmax yields ~2.7e43.
+       - 2.7e43 > 3.4e38 (BF16 max).
+    3. **Conclusion & Interpretation:**
+       - **Result: Precision-Bound Overflow.** While FlashAttention's running max mitigates this, it strictly requires FP32 intermediate accumulation to prevent NaNs.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview

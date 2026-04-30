@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-2231
+track: cloud
+level: L6+
+zone: design
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: The Checkpoint Tiering Strategy
+scenario: 'You are designing the checkpoint system for a 100K-GPU training run of a 1 trillion parameter model. A full checkpoint is ~18 TB. The cluster has three storage tiers: Local NVMe (6 GB/s per node), Lustre parallel filesystem (2 TB/s aggregate), and S3-compatible object storage (100 GB/s aggregate). Using Young-Daly, your optimal checkpoint interval is 12 minutes.'
+question: 'How would you design a tiered checkpoint strategy for the 100K-GPU run with 18 TB checkpoints that keeps GPU idle time under 10 seconds?'
+details:
+  realistic_solution: 'Use a three-phase tiered checkpoint pipeline: Phase 1 (synchronous, <2 seconds): Each GPU writes its local shard to host DRAM via PCIe. This is the only phase that blocks training. Phase 2 (asynchronous, ~30 seconds): A background thread flushes the DRAM buffer to local NVMe. Phase 3 (asynchronous, ~3 minutes): A background daemon aggregates per-node NVMe checkpoints and streams them to Lustre, then to S3 for durability. The key insight is that only the PCIe DRAM copy must be synchronous.'
+  common_mistake: |
+    **The Pitfall:** Trying to write the full 18 TB synchronously to Lustre every 12 minutes.
+    **The Rationale:** Lustre is the standard shared filesystem, and synchronous writes are conceptually simpler to implement.
+    **The Consequence:** Writing to Lustre at 2 TB/s takes 9 seconds (barely under budget with no margin for jitter) and saturates the filesystem, blocking data loading for other jobs and causing cluster-wide stalls.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Checkpoint size: 18 TB over 100,000 GPUs (180 MB per GPU).
+    - PCIe bandwidth (GPU to DRAM): 32 GB/s.
+    - Local NVMe: 6 GB/s, Lustre: 2 TB/s.
+
+    **Calculations:**
+    - Phase 1 (Sync GPU -> DRAM): 180 MB / 32 GB/s = 5.6ms + barrier sync ≈ 2 seconds. (Training blocked).
+    - Phase 2 (Async DRAM -> NVMe): 180 MB * 8 GPUs/node / 6 GB/s ≈ 240ms.
+    - Phase 3 (Async NVMe -> Lustre): 18 TB / 2 TB/s = 9 seconds (runs in background).
+
+    **Conclusion & Interpretation:**
+    - **Result: I/O-Pipelined**. Training is only blocked for the ~2 seconds of Phase 1, well under the 10-second requirement.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+chains:
+- id: cloud-chain-463
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

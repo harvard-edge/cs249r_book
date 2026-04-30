@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-0958
+track: cloud
+level: L4
+zone: diagnosis
+topic: data-pipeline-engineering
+competency_area: data
+bloom_level: analyze
+phase: training
+title: Diagnosing Distributed Checkpoint IO Storm Bottlenecks
+scenario: 'You are training a 175B parameter LLM using 1,024 A100 GPUs. The training loop pauses to checkpoint every 500 steps. Recently, the cluster started experiencing massive latency spikes during checkpointing, taking over 5 minutes to save and occasionally triggering distributed collective timeouts that crash the run. The central NFS storage server reports 100% network link utilization on its 100 Gbps interface.'
+question: 'What causes the checkpoint-induced collective timeouts, and what checkpointing architecture should replace the central NFS path?'
+details:
+  realistic_solution: 'Implement a two-stage checkpointing strategy (write locally to node NVMe in seconds, then async transfer to object storage) or use PyTorch Distributed Checkpoint with a Parallel File System (like Lustre) to enable N-to-M writes, bypassing the single head node bottleneck.'
+  common_mistake: |
+    **The Pitfall:** Assuming the backend storage disks are too slow and proposing an upgrade to NVMe drives for the centralized NFS server.
+    **The Rationale:** Candidates focus on raw storage IOPS, completely missing the N-to-1 network funnel bottleneck caused by 1,024 discrete GPU workers simultaneously slamming a single network interface.
+    **The Consequence:** Expensive storage arrays are purchased, but the cluster continues to suffer from massive latency spikes and collective timeouts because the single 100 Gbps pipe remains violently saturated.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 175B params. Weights (FP16): 350GB. Optimizer (FP32 Adam): 1.4TB.
+    - Total Checkpoint Size: 1.75 TB.
+    - Network limit: Single NFS interface at 100 Gbps (12.5 GB/s).
+    - Workers: 1,024 concurrent writers.
+
+    **Calculations:**
+    - Theoretical minimum transfer time = 1,750 GB / 12.5 GB/s = 140 seconds.
+    - Massive TCP/RPC contention from 1,024 simultaneous streams severely degrades the 12.5 GB/s theoretical max.
+    - Degraded transfer time easily breaches the framework\'s 300s collective timeout, crashing the job.
+
+    **Conclusion & Interpretation:**
+    - **Result: N-to-1 Network Ingress Bound**. The architecture must shift to a two-stage asynchronous local NVMe write or a true Parallel File System (Lustre) to bypass the single-node network bottleneck.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-039
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: OK
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:16:37.654191'

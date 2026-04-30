@@ -1,0 +1,41 @@
+schema_version: '1.0'
+id: cloud-1912
+track: cloud
+level: L4
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Diagnosing Low Utilization in DLRM Lookups
+scenario: You are profiling a large-scale DLRM on a node with 8x NVIDIA A100 GPUs. The multi-hot embedding lookup layer consumes 70% of the total step time. Nsight Systems shows GPU SM utilization at 8% and achieved memory bandwidth at only 150 GB/s. The embedding vectors are 16-dimensional FP32.
+question: Why is the pipeline stalling, and what specific architectural constraint is causing this severe underutilization?
+details:
+  realistic_solution: |
+    Diagnose the issue as a 'sparse scatter/gather' bottleneck caused by uncoalesced, random memory accesses. The hardware is bottlenecked by transaction latency and cache line granularity, not theoretical bulk bandwidth. Mitigate by sorting queries by embedding ID to improve L2 cache locality, using frequency-aware placement (hot embeddings in HBM, cold in host memory), and leveraging optimized frameworks like NVIDIA HugeCTR.
+  common_mistake: |
+    **The Pitfall:** Blaming the low utilization on CPU-GPU PCIe transfer bottlenecks or lack of computational intensity.
+    **The Rationale:** Candidates propose unhelpful solutions like INT8 quantization or kernel fusion without recognizing the penalty of irregular memory access patterns.
+    **The Consequence:** Applying standard dense-compute optimizations that completely fail to resolve the sparse scatter/gather bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A100 L1/L2 cache line is 128 bytes.
+    - 16-dimensional FP32 embedding = 64 bytes.
+    - Access pattern is sparse scatter/gather.
+
+    **Calculations:**
+    - Reading a 64-byte vector forces a 128-byte transaction.
+    - 50% of the bandwidth is wasted fetching unused data.
+    - Random uncoalesced accesses incur ~200-300ns of latency each.
+
+    **Conclusion & Interpretation:**
+    - **Result: 150 GB/s (Transaction-Bound)**. The constraint is transaction rate limits and cache line granularity, not bulk bandwidth, causing the 150 GB/s bottleneck.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-382
+  position: 1
+validated: true
+math_verified: true

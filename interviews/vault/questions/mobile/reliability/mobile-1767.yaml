@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-1767
+track: mobile
+level: L3
+zone: analyze
+topic: adversarial-robustness
+competency_area: reliability
+bloom_level: apply
+phase: inference
+title: 'Token-Level Safety Classifier Bottleneck'
+scenario: 'To defend against prompt injection and model extraction, we deploy a continuous safety classifier alongside an on-device LLM (Gemini Nano, 3.2B parameters, 4-bit) on the Google Tensor G3. The G3 features a TPU with 7.5 TOPS and 12 GB of LPDDR5X memory. The safety classifier (200M parameters, 8-bit) evaluates every single generated token. When activated, the generation speed drops drastically from 20 tokens/sec to 5 tokens/sec, despite the TPU compute utilization remaining under 15%.'
+question: 'Why does a 200M INT8 safety classifier cut Gemini Nano generation from 20 to 5 tokens/sec on Tensor G3?'
+details:
+  realistic_solution: |
+    The severe drop in throughput is caused by memory cache thrashing and bandwidth contention. Autoregressive generation requires streaming the entire model's weights from RAM for every token. By forcing the system to also load the safety classifier's weights for every token, the TPU constantly context-switches, destroying memory locality and drastically reducing the effective bandwidth of the LPDDR5X memory.
+  common_mistake: |
+    **The Pitfall:** Blaming the TPU compute capacity (TOPS).
+    **The Rationale:** Candidates assume that running two models simultaneously exhausts the 7.5 TOPS.
+    **The Consequence:** They fail to recognize that autoregressive text generation and token-by-token classification are heavily memory-bandwidth bound, not compute bound.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - LLM size: 3.2B parameters, 4-bit quantization (0.5 bytes/param).
+    - Classifier size: 200M parameters, 8-bit quantization (1 byte/param).
+    - Maximum theoretical LPDDR5X bandwidth: ~60 GB/s.
+
+    **Calculations:**
+    - LLM footprint: 3.2B * 0.5 bytes = 1.6 GB.
+    - Classifier footprint: 200M * 1 byte = 0.2 GB.
+    - Total weights loaded per token: 1.6 GB + 0.2 GB = 1.8 GB.
+    - Required bandwidth for 20 tokens/sec: 1.8 GB * 20 = 36 GB/s.
+    - Effective bandwidth at 5 tokens/sec: 1.8 GB * 5 = 9.0 GB/s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 9.0 GB/s Effective (Memory-Bound).** Loading two models concurrently causes massive cache thrashing, dropping effective memory bandwidth drastically and severely curtailing generation speed.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

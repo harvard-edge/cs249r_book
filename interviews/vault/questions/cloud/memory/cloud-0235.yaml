@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-0235
+track: cloud
+level: L2
+zone: recall
+topic: vram-budgeting
+competency_area: memory
+bloom_level: understand
+phase: both
+title: Handling KV Cache Fragmentation
+scenario: When serving a large language model with multiple concurrent requests, we notice that memory utilization is poor despite having free memory available, leading to out-of-memory errors for new requests.
+question: How does PagedAttention specifically solve this issue in the KV cache?
+details:
+  realistic_solution: "PagedAttention partitions the KV cache into fixed-size blocks (pages) that can be non-contiguous in physical GPU memory, similar to how virtual memory works in operating systems. Without paging, the system must pre-allocate a contiguous block of memory for the maximum possible sequence length for each request. If a request only uses 512 of its allocated 2048 tokens, the remaining 1536 tokens of contiguous memory are wasted (internal fragmentation). Worse, as requests of different lengths start and finish, the freed memory becomes scattered in non-contiguous chunks too small for new allocations (external fragmentation). PagedAttention solves this by allocating memory in small, fixed-size pages on demand as each new token is generated. Pages need not be contiguous, so any free page can be used for any request, virtually eliminating both internal and external fragmentation."
+  common_mistake: |
+    **The Pitfall:** Thinking that PagedAttention compresses the KV cache to save memory.
+    **The Rationale:** "Paged" sounds like a compression or virtualization technique that reduces total footprint rather than just fixing allocation geometry.
+    **The Consequence:** Misunderstanding the performance tradeoffs\u2014PagedAttention eliminates fragmentation but doesn't change the underlying tensor size per token.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Setup: 13B model, 40 layers, 40 heads, head_dim=128, FP16.
+    - Workload: 50 concurrent requests.
+    - Max sequence length: 2048 tokens. Average used length: 512 tokens.
+
+    **Calculations:**
+    - KV Cache per Token: 40 layers \times 2 (K+V) \times 40 heads \times 128 dim \times 2B = 819.2 KB/token.
+    - Without Paging: Pre-allocate max_seq_len=2048 per request = 819.2 KB \times 2048 = 1.67 GB. For 50 requests = 83.5 GB.
+    - With PagedAttention: Allocate only for actual tokens used (512). 819.2 KB \times 512 = 0.42 GB/request. For 50 requests = 21 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: freeing 62.5 GB (Memory-Capacity-Bound)**. Memory waste drops from ~75% to negligible levels, freeing 62.5 GB for additional concurrent requests.
+  options:
+  - It compresses the key and value tensors using quantization before storing them in the cache.
+  - It partitions the KV cache into non-contiguous fixed-size blocks, eliminating external fragmentation and allowing dynamic memory allocation per token.
+  - It proactively evicts the least recently used KV cache tensors to free up contiguous memory blocks for new requests.
+  - It offloads the KV cache to CPU RAM when GPU memory is fragmented and prefetches it when needed.
+  correct_index: 1
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

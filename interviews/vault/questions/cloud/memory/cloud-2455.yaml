@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-2455
+track: cloud
+level: L5
+zone: mastery
+topic: vram-budgeting
+competency_area: memory
+bloom_level: create
+phase: both
+title: KV Cache PCIe Offloading
+scenario: To support long-context chat sessions (up to 100K tokens) on an 8x GPU node, you frequently hit KV cache OOM errors. You propose offloading inactive KV cache blocks to the host CPU's DDR5 RAM over PCIe Gen5 x16, fetching them back to the GPU only when the user sends a follow-up message.
+question: 'How would you design CPU KV-cache offload for 100K-token sessions, and what latency tradeoff must you manage?'
+details:
+  realistic_solution: 'The tradeoff here is between GPU memory capacity (supporting larger context/more users) and the massive latency penalty of PCIe bandwidth limits. PCIe Gen5 x16 has a theoretical bandwidth of 64 GB/s. Fetching a large KV cache from CPU to GPU will severely bottleneck the prefill/decode phases if not hidden via asynchronous prefetching. The solution requires a predictive swap-in mechanism. When a request arrives at the router, the system must trigger an asynchronous DMA transfer of the KV cache from CPU to GPU before scheduling the compute kernel. If done synchronously, the TTFT will be dominated by the PCIe transfer time rather than the compute.'
+  common_mistake: |
+    **The Pitfall:** Offloading synchronously during the attention computation phase.
+    **The Rationale:** Candidates often assume PCIe bandwidth is fast enough to not impact the decode latency and fail to architect an asynchronous prefetcher.
+    **The Consequence:** Severe degradation of Time To First Token (TTFT) due to blocking data transfers.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - KV cache size for 100K tokens (70B model, FP16): ~320 KB/token (2 * 8 KV heads * 128 head_dim * 80 layers * 2 bytes = 327,680 bytes).
+    - PCIe Gen5 x16 practical bandwidth = ~50 GB/s.
+
+    **Calculations:**
+    - Total size = 327,680 bytes * 100,000 = ~32.77 GB.
+    - Transfer time = 32.77 GB / 50 GB/s = 655 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 655ms transfer time (PCIe Bandwidth Bottleneck)**. If fetched synchronously upon request, TTFT incurs a guaranteed 655ms penalty just for data movement.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 18
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

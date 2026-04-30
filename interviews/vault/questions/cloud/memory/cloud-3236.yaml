@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3236
+track: cloud
+level: L5
+zone: realization
+topic: kv-cache-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: KV-Cache Pool Sizing for Throughput Optimization
+scenario: 'You are configuring a vLLM deployment of Llama 3 70B on 4×A100-80GB (TP=4). Model weights take 35 GB per GPU (70B BF16 / 4).'
+question: 'How much memory per GPU should be allocated to the KV-cache pool in the 4×A100 TP=4 deployment, and what throughput does it enable?'
+details:
+  realistic_solution: 'Per GPU: 80 GB total - 35 GB weights = 45 GB available. Memory breakdown: (1) Activation memory during prefill: for batch=1 prefill of 4K tokens, activations ≈ 2 GB per GPU (TP=4 splits activations). (2) CUDA workspace: ~2 GB for cuBLAS handles, Triton kernel buffers. (3) OS/driver overhead: ~1 GB. (4) Safety margin: ~2 GB (for memory spikes during prefix caching). Available for KV pool: 45 - 2 - 2 - 1 - 2 = 38 GB per GPU, 152 GB total across 4 GPUs. KV per token (TP=4, Llama 3 70B with 8 KV heads): KV heads are split across TP ranks → 2 KV heads per GPU × 128 dim × 2 (K+V) × 2B × 80 layers = 80 KB per token per GPU. Max tokens in pool: 38 GB / 80 KB = 475,000 tokens per GPU. At average 2K context: 475,000/2000 = 237 concurrent requests per GPU. At 8K context: 59 concurrent requests. Throughput: with batch=237 during decode, the model is compute-bound (large batch matmuls) → high GPU utilization ~70%. Setting --gpu-memory-utilization=0.92 in vLLM achieves this balance.'
+  common_mistake: |
+    **The Pitfall:** Allocating all remaining memory to KV-cache.
+    **The Rationale:** Candidates forget that CUDA kernels need workspace memory for intermediate computations.
+    **The Consequence:** Over-allocating to KV-cache causes CUDA Out-Of-Memory (OOM) errors during kernel execution, crashing the server.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 4×A100-80GB (TP=4) running Llama 3 70B.
+    - Weights take 35 GB per GPU (70B BF16 / 4).
+
+    **Calculations:**
+    - Available Memory: 80 GB - 35 GB (weights) - 2 GB (activations) - 2 GB (CUDA workspace) - 1 GB (OS) - 2 GB (Safety) = 38 GB available for KV.
+    - KV per token (TP=4): 2 KV heads per GPU * 128 dim * 2 (K+V) * 2B * 80 layers = 80 KB per token per GPU.
+    - Capacity: 38 GB / 80 KB = 475,000 tokens per GPU.
+    - Concurrency: At 2K avg context -> 475,000 / 2000 = 237 concurrent requests per GPU.
+
+    **Conclusion & Interpretation:**
+    - **Result: 237 concurrent requests per GPU (Memory Capacity-Bound)**. Proper allocation avoids CUDA OOM and maximizes decode concurrency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 13
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: mobile-0625
+track: mobile
+level: L5
+zone: diagnosis
+topic: graph-compilation
+competency_area: optimization
+bloom_level: evaluate
+phase: inference
+title: The Performance Cliff
+scenario: You are the tech lead for a real-time video effects app on iOS. The core feature, a segmentation model, runs at a stable 55 FPS (18ms latency) on an iPhone 16, with the entire model graph executing on the Apple Neural Engine (ANE). To improve segmentation quality, a data scientist proposes changing the model architecture slightly, which involves replacing a few dozen standard convolution blocks with a new, custom 'Dynamic Kernel' block. After recompiling the model with this change, the app's frame rate catastrophically collapses to 15 FPS. The model's total MACs only increased by 5%.
+question: Why can adding unsupported Dynamic Kernel blocks collapse ANE performance despite only a 5% MAC increase?
+details:
+  realistic_solution: This is a classic 'Hardware Delegation Failure'. The ANE, like most NPUs, has a fixed, immutable list of supported layer types it can accelerate. The standard convolution blocks were fully supported and ran efficiently on the ANE. The new 'Dynamic Kernel' block, however, is not on this list. When CoreML encounters this unsupported op, it is forced to break the execution graph. It runs the initial portion of the model on the ANE, then transfers the large, intermediate feature map tensor to the CPU or GPU to execute the custom block. Critically, in many cases, once the execution falls back from the ANE, *the rest of the graph continues on the slower CPU/GPU*. The system doesn't pay the overhead to transfer it back to the ANE. Therefore, instead of just one slow op, a large portion of the model is now running on a less efficient processor, causing the performance to collapse.
+  common_mistake: |
+    **The Pitfall:** Assuming performance scales linearly with MAC operations.
+    **The Rationale:** An engineer might predict a slight slowdown from a 5% MAC increase, ignoring hardware delegation and data locality.
+    **The Consequence:** They accidentally break the ANE execution graph, causing the entire remainder of the model to fall back to the slower CPU.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Original ANE latency: 18ms (55 FPS).
+    - Memory transfer cost (ANE to CPU): ~5ms for an 8MB intermediate tensor.
+    - Remainder model CPU execution (70% of graph): ~40ms.
+
+    **Calculations:**
+    - Total new latency: 18ms + 5ms + 40ms = 63ms.
+    - FPS: 1000ms / 63ms = ~15 FPS.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~15 FPS (Compute-Bound).** Graph fallback causes severe CPU bottlenecking for the remainder of the model.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

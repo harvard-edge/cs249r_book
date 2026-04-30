@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: cloud-4406
+track: cloud
+level: L4
+zone: optimization
+topic: rdma-transport
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: RDMA Write Throughput Saturation in MI300X AllReduce Rings
+scenario: 'You are tuning AllReduce performance for a 64-node MI300X cluster connected with 400 Gbps InfiniBand HDR2. Each node has 8 MI300X GPUs. A ring-AllReduce of a 4GB gradient tensor across all 512 GPUs achieves only 140 Gbps per rail, while the theoretical per-link throughput is 400 Gbps. Profiling shows 35% of RDMA operations are completing with retransmit counters incrementing.'
+question: Why is the 512-GPU ring AllReduce only achieving 140 Gbps with 35% RDMA retransmits, and what network tuning would you apply?
+details:
+  realistic_solution: |
+    Root cause: RoCEv2 congestion feedback loop. At 400 Gbps line rate with 512 GPU ring-AllReduce, the 64-node fat-tree switch fabric has 3:1 oversubscription at spine layer. During synchronized AllReduce phases, all nodes inject traffic simultaneously, causing head-of-line blocking and PFC storms. PFC storms trigger RDMA retransmits because paused senders time out. Diagnosis: check switch port PFC TX/RX counters (should be near zero for well-tuned networks). Fix: (1) Tune DCQCN: reduce initial rate (IR) from 1 Gbps to 400 Mbps, increase Alpha (ECN marking sensitivity). (2) Enable SHARP in-network computing to reduce AllReduce traffic by 2x. (3) Use tree-AllReduce instead of ring for fat-tree topology. Expected throughput: 140 -> 280-320 Gbps (70-80% of line rate) with proper DCQCN tuning.
+  common_mistake: |
+    **The Pitfall:** Assuming retransmits indicate faulty hardware and raising a datacenter ticket.
+    
+    **The Rationale:** In standard IT, a 35% retransmit rate indicates a dead link or bad optic. In high-performance RDMA clusters, retransmits often indicate RoCEv2 congestion due to misconfigured ECN thresholds or PFC storms.
+    
+    **The Consequence:** Wasted time debugging hardware while the network remains crippled by head-of-line blocking.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Data Sent: 4 GB * 2 * (511/512) = 7.984 GB.
+    - 400 Gbps network (50 GB/s).
+    - 35% retransmit rate = ~1.35x average packet delivery.
+
+    **Calculations:**
+    - Ideal Transfer Time: 7.984 GB / 50 GB/s = 159.7 ms.
+    - Measured Transfer Time: 7.984 GB / 17.5 GB/s (140 Gbps) = 456.2 ms (2.85x slowdown).
+    - Effective BW without Stalls: 400 Gbps / 1.35 = 296 Gbps.
+
+    **Conclusion & Interpretation:**
+    - **Result: 140 Gbps (Network-Bound)**. The gap from 296 Gbps to 140 Gbps represents an additional 53% loss caused by PFC-induced stalls.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 'Math error: 4GB * 2 * 511/512 is 7.984 GB, not 7.996 GB'
+- Text is truncated at the end
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

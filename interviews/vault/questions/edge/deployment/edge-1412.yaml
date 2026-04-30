@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: edge-1412
+track: edge
+level: L3
+zone: analyze
+topic: compound-ai-systems
+competency_area: deployment
+bloom_level: apply
+phase: both
+title: Edge TPU Pipeline Throughput Degradation Analysis
+scenario: You are deploying a two-stage compound AI vision pipeline on a Google Coral Edge TPU (4 TOPS INT8, 2W, USB form factor). Stage 1 is a 20 GOPs object detector, and Stage 2 is a 10 GOPs OCR model. When benchmarked purely on theoretical compute, they should execute in 5ms and 2.5ms respectively. However, in production, the end-to-end latency per frame jumps to ~40ms, and the host CPU utilization spikes to 90%. The Edge TPU requires strict INT8 quantization and has limited operator support.
+question: Why does the two-stage Edge TPU pipeline reach about 40 ms latency with 90% CPU utilization, and what is the true end-to-end latency?
+details:
+  realistic_solution: 'The degradation is caused by Edge TPU graph partitioning due to limited operator support in Stage 2. While the INT8 Stage 1 model is fully supported and executes entirely on the TPU, Stage 2 contains an unsupported operator. The Coral compiler splits Stage 2, forcing the system to transfer intermediate tensors from the Edge TPU back to the host CPU over the USB bus, execute the unsupported operations on the slower CPU, and incur massive context-switching penalties. This shatters the 4 TOPS hardware acceleration advantage.'
+  common_mistake: |
+    **The Pitfall:** Assuming pipeline latency is strictly additive.
+    **The Rationale:** Candidates often assume 5ms + 2.5ms = 7.5ms and attribute the remaining 32.5ms purely to generic USB polling or thermal throttling.
+    **The Consequence:** They fail to identify graph partitioning and host-CPU fallback caused by unsupported operators, ignoring the primary mechanism of failure for fixed-function accelerators.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Coral Edge TPU: 4 TOPS (4,000 GOPS) INT8, 2W, USB interface.
+       - Stage 1: 20 GOPS (fully supported).
+       - Stage 2: 10 GOPS (unsupported operator, partitioned).
+       - CPU compute rate = ~100 GOPS/sec.
+    2. **Calculations:**
+       - Stage 1 Execution (TPU) = 20 GOPS / 4000 GOPS/s = 5ms.
+       - Stage 2 Partition: 8 GOPS on TPU, 2 GOPS on CPU.
+       - Stage 2 TPU compute = 8 GOPS / 4000 GOPS/s = 2ms.
+       - Stage 2 CPU compute = 2 GOPS / 100 GOPS/s = 20ms.
+       - USB Transfer Overhead (TPU -> CPU -> TPU) = ~13ms.
+       - Total Latency = 5ms + 2ms + 20ms + 13ms = 40ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Latency Spikes to 40ms**. Due to graph partitioning from unsupported operators, massive context-switching and USB bus transfers shift the bottleneck, destroying the TPU's hardware acceleration advantage.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 5
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

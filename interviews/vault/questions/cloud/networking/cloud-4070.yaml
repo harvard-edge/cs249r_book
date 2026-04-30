@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: cloud-4070
+track: cloud
+level: L5
+zone: evaluation
+topic: rdma-transport
+competency_area: networking
+bloom_level: evaluate
+phase: both
+title: RDMA Reliable Connection vs Unreliable Datagram
+scenario: 'InfiniBand offers two transport modes: Reliable Connection (RC) with guaranteed delivery and ordering, and Unreliable Datagram (UD) with no delivery guarantees. NCCL uses both: RC for point-to-point transfers and UD for some collective operations. Evaluate the tradeoffs for AllReduce on a 512-GPU cluster, considering QP scalability, failure handling, and throughput.'
+question: For AllReduce on 512 GPUs, how do InfiniBand RC and UD transports trade off QP scalability, failures, and throughput?
+details:
+  realistic_solution: |
+    RC (Reliable Connection): (1) Guarantees in-order delivery and automatic retransmission. (2) QP scaling: 512 GPUs × 511 peers × 8 rails = 2,087,424 QPs per cluster. Per GPU: 511 × 8 = 4,088 QPs × ~1KB = 4MB of HCA memory. Feasible on ConnectX-7 (256MB HCA memory). (3) Failure: if one QP errors (e.g., remote GPU crash), only that QP is affected. (4) Throughput: 50 GB/s per QP (line rate). UD (Unreliable Datagram): (1) No delivery guarantee — NCCL must handle retransmission in software. (2) QP scaling: O(N) — one QP per GPU handles all peers via multicast. 512 × 8 = 4,096 QPs total. (3) Failure: lost packets silently dropped. NCCL detects via timeout and retransmits. Higher software complexity. (4) Throughput: same line rate but with software retransmission overhead. (5) Advantage: supports multicast, enabling one-to-many broadcast with single send. For AllReduce on 512 GPUs: Use RC for reduce-scatter/all-gather (data integrity critical, QP count manageable). Use UD+multicast for small broadcasts (parameter updates, control messages) where QP savings matter and occasional retransmission is tolerable. NCCL v2.18+ uses this hybrid approach.
+  common_mistake: |
+    **The Pitfall:** Choosing InfiniBand Reliable Connection (RC) for all operations.
+    **The Rationale:** SREs assume "reliable is always better," ignoring the O(N²) QP scaling requirements.
+    **The Consequence:** The network architecture fails to scale to thousands of GPUs due to HCA memory exhaustion from excessive Queue Pairs.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 512 GPUs, 8 rails, ~1KB HCA memory per QP.
+       - RC requires point-to-point (O(N²) scaling).
+    2. **Calculations:**
+       - RC QPs per GPU = 511 * 8 = 4,088 QPs.
+       - RC QP memory per GPU = 4,088 * 1KB = ~4MB.
+       - At 16,384 GPUs, RC requires ~131K QPs (128MB per GPU), hitting HCA limits.
+    3. **Conclusion & Interpretation:**
+       - **Result: Memory-Capacity-Bound (HCA)**. UD transport scales to 16K+ GPUs seamlessly because its O(N) scaling only requires 4MB across the entire cluster, making it critical for large-scale broadcasts.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

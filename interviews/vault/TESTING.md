@@ -122,7 +122,7 @@ Scope: end-to-end Typer CliRunner invocations.
 - `test_vault_rm.py`: default soft-delete sets `status: deprecated`; `--hard` without typed confirmation refuses; typed confirmation hard-deletes.
 - `test_vault_move.py`: reclassify via `git mv`; refuses on dirty tree; refuses chain-breaking move.
 - `test_vault_restore.py`: deprecated → published round-trip.
-- `test_vault_build.py`: builds vault.db with correct release_hash; `--legacy-json` emits corpus.json.
+- `test_vault_build.py`: builds vault.db with correct release_hash; `--local-json` emits corpus.json.
 - `test_vault_check.py`: fast-tier <1s, structural-tier <30s on fixture; `--json` emits LSP-diagnostic shapes.
 - `test_vault_publish.py`: composed product equivalent to primitive sequence; `.ship-journal.json` absent on pre-ship state.
 - `test_vault_ship_journal.py`: simulated sub-step failure populates journal; `--resume` continues; paper-leg failure pages (mock alerting).

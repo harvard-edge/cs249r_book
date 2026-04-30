@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: edge-1804
+track: edge
+level: L4
+zone: specification
+topic: dma-data-movement
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: Hailo-8 Multi-Stream Zero-Copy DMA Pipeline Design
+scenario: You are designing a smart intersection traffic monitoring system using an edge host connected to a Hailo-8 dataflow accelerator. The system ingests 4 independent 1080p (1920x1080) RGB video streams at 30 FPS. Since the Hailo-8 has no local DRAM and relies entirely on streaming data directly from host memory (operating at 2.5W), CPU overhead from data movement is a critical bottleneck.
+question: How would you build the host-to-Hailo-8 memory pipeline for four 1080p30 streams to avoid frame drops and minimize CPU copies?
+details:
+  realistic_solution: 'The optimal specification uses a zero-copy data pipeline based on dma_buf for buffer sharing between the camera interface (V4L2) and the Hailo-8 PCIe driver. Memory must be allocated as contiguous, pinned (page-locked) memory in kernel space. The camera writes directly into these pinned buffers via its own DMA, and the Hailo-8 reads from the exact same physical memory addresses via PCIe DMA, completely bypassing the CPU. A multi-buffer ring queue is specified to overlap capture, inference, and post-processing.'
+  common_mistake: |
+    **The Pitfall:** Standard user-space memory allocations.
+    **The Rationale:** Candidates often propose standard `malloc` or `cv::Mat` followed by a blocking PCIe transfer, familiar from standard desktop programming.
+    **The Consequence:** This incurs costly CPU page faults and user-to-kernel space copies, starving the dataflow architecture and thrashing the host CPU.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 4 cameras, 1080p (1920x1080) RGB at 30 FPS.
+       - Ring buffer requires 3-deep queue per stream.
+       - Zero-copy DMA pipeline bypasses CPU payload copying.
+    2. **Calculations:**
+       - Data Rate = 4 * 1920 * 1080 * 3 bytes * 30 FPS = 746.49 MB/s.
+       - Frame Size = 1920 * 1080 * 3 = 6.22 MB/frame.
+       - Ring Buffer Size = 4 streams * 3 frames * 6.22 MB = 74.64 MB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Zero-Copy Enabled**. The host must pin exactly 74.6 MB of contiguous memory to feed the Hailo-8 continuously without incurring the 2.2 GB/s CPU copy penalty.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

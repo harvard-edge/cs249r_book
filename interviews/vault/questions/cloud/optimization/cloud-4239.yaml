@@ -1,0 +1,44 @@
+schema_version: '1.0'
+id: cloud-4239
+track: cloud
+level: L3
+zone: recall
+topic: autograd-computational-graphs
+competency_area: optimization
+bloom_level: understand
+phase: training
+title: Understanding why torch.compile retraces after dynamic batch size changes
+scenario: A team trains a model on an accelerator (312 TFLOPS, 2TB/s) with variable batch sizes from a data loader that pads batches differently each step. After enabling `torch.compile`, they notice periodic 3-5 second stalls every few hundred steps, during which GPU utilization drops to 0%.
+question: "What causes the 3-5 second torch.compile stalls with variable padded batch sizes, and how would you eliminate them?"
+details:
+  realistic_solution: The stalls are caused by TorchDynamo recompiling the computation graph. `torch.compile` defaults to static shapes; every time the data loader yields a novel padded batch size, it triggers a cache miss and forces a synchronous re-tracing and recompilation of the execution graph via Triton/Inductor. Fix this by explicitly setting `torch.compile(model, dynamic=True)` to generate shape-agnostic symbolic kernels, or deliberately bucket/pad the data loader into 2-3 discrete fixed sizes to cap the total number of compilations.
+  common_mistake: |
+    **The Pitfall:** Assuming `torch.compile` is a "free" JIT that universally handles dynamic Python logic seamlessly.
+    **The Rationale:** Engineers treat the compiler like a black box, not understanding that underneath, it relies on strict static tensor shape hashing to emit optimized C++/PTX code.
+    **The Consequence:** The training loop spends more time blocked on the host CPU running the LLVM/Triton compiler stack than actually executing FLOPs on the GPU.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Compilation time: ~3 seconds per unique shape.
+       - Shape frequency: New batch size every 100 steps.
+       - Total training run: 10,000 steps.
+    2. **Calculations:**
+       - Number of unique shapes encountered: 10,000 / 100 = 100 recompiles.
+       - Total compilation overhead: 100 * 3 seconds = 300 seconds.
+       - If base step time is 50ms: 10,000 * 0.05s = 500 seconds.
+    3. **Conclusion & Interpretation:**
+       - **Result: 300s Compilation Overhead.** The pipeline is disastrously **Host-Compiler-Bound**, adding 60% overhead to the entire training run due to shape variability.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

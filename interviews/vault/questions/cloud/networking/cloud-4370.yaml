@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4370
+track: cloud
+level: L6+
+zone: mastery
+topic: collective-communication
+competency_area: networking
+bloom_level: create
+phase: both
+title: TPU v5e Pod AllReduce Topology for 1T Model Training
+scenario: Training a 1T MoE model requires 2,048 TPU v5e chips using 3D model parallelism (TP=8, PP=16, EP=16). Each dimension requires distinct collective communication patterns. The ICI topology is a 3D torus (16×16×8).
+question: How would you map TP=8, PP=16, and EP=16 for the 1T MoE model onto a 16×16×8 TPU torus, and how does it compare to H100?
+details:
+  realistic_solution: 'Torus mapping: TP=8 → 8-chip axis (lowest latency, highest bandwidth within node-equivalent group). PP=16 → one 16-chip axis (point-to-point pipeline sends, latency-tolerant). EP=16 → remaining 16-chip axis (all-to-all for expert routing). Communication per step: TP AllReduce: 2 × (8-1)/8 × (hidden=16384 × seq=2048 × 2 bytes) = 2 × 0.875 × 67MB = 117MB per layer × 128 layers = 15GB total. At ICI 1600 Gbps = 200 GB/s per chip: T_TP = 15GB/200 = 75ms (ring across 8 chips). PP bubble overhead: with PP=16, micro-batch pipeline has (PP-1)/PP = 93.75% efficiency with 1F1B. EP all-to-all: route to 16 experts, each forward/backward = 2 × MoE_input × top-k/16. H100 comparison: TP=8 via NVLink (900 GB/s per pair): T_TP = 15GB/450 = 33ms. PP and EP via 400Gbps InfiniBand: T_PP = point-to-point 100GB/50GB/s = 2s — catastrophically slow for pipeline. TPU v5e wins by using ICI (200 GB/s) for PP instead of InfiniBand (50 GB/s), making the H100 cluster ~4× slower for pipeline-parallel steps.'
+  common_mistake: |
+    **The Pitfall:** Mapping tensor parallelism to a long, high-latency torus dimension.
+    **The Rationale:** Engineers assume all dimensions are equal and arbitrarily assign parallelism strategies to torus axes.
+    **The Consequence:** The most latency-sensitive operation (TP AllReduce) becomes a massive bottleneck, crippling step time.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - MoE 1T Params: 1T * 2 bytes = 2TB (1GB/chip avg).
+    - TPU v5e ICI bandwidth: 200 GB/s.
+    - H100 bandwidths: NVLink 450 GB/s, IB 50 GB/s.
+
+    **Calculations:**
+    - TP AllReduce (TPU v5e): 15GB payload / 200 GB/s = 75ms.
+    - TP AllReduce (H100): 15GB payload / 450 GB/s = 33ms.
+    - PP Point-to-Point (TPU v5e): 67MB payload / 200 GB/s = 0.34ms * 16 stages = 5.4ms.
+    - PP Point-to-Point (H100): 67MB payload / 50 GB/s = 1.34ms * 16 stages = 21.4ms.
+    - PP Overhead for 2048 micro-batches: TPU = 11s, H100 = 43s.
+
+    **Conclusion & Interpretation:**
+    - **Result: 4x faster PP (Network-Bound)**. TPU v5e wins because its 200 GB/s ICI accelerates pipeline parallelism 4x faster than H100's 50 GB/s InfiniBand.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

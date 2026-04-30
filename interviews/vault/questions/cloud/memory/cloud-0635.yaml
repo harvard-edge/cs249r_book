@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-0635
+track: cloud
+level: L6+
+zone: mastery
+topic: memory-hierarchy-design
+competency_area: memory
+bloom_level: create
+phase: both
+title: The Gradient Checkpointing Boundary
+scenario: We need to train a 70B model on 8x 80 GB GPUs. The team enabled ZeRO-3 and claims it'll fit.
+question: With ZeRO-3 on 8x 80GB GPUs, what is the actual per-GPU memory budget for training a 70B model, and where does it break?
+details:
+  realistic_solution: 'With ZeRO-3, the model state (weights + gradients + optimizer) is sharded across all 8 GPUs. Peak resident model state is much lower (~20-25 GB). The real memory pressure comes from activations: without checkpointing, storing all intermediate activations for 80 transformer layers at reasonable batch sizes can consume 60+ GB. Gradient checkpointing trades 33% extra compute to store activations only at checkpoint boundaries (every $\sqrt{L}$ \approx 9 layers), reducing activation memory by ~9x.'
+  common_mistake: |
+    **The Pitfall:** Thinking "ZeRO-3 shards everything evenly — 70B x 16 bytes / 8 GPUs = 140 GB per GPU. It doesn't fit."
+    **The Rationale:** This calculation applies to the globally sharded state but misses that ZeRO-3 dynamically streams shards. It ignores activations entirely.
+    **The Consequence:** Over-provisioning hardware (buying more GPUs) to fit a model that could easily fit with proper activation checkpointing.
+  napkin_math: |
+    - **Sharded state (ZeRO-3):** Optimizer $\approx 70\text{B} \times 12\text{ bytes} / 8 = 105\text{ GB}$ (too much if materialized simultaneously, but ZeRO-3 streams shards).
+    - **Peak resident state:** $\approx 20\text{-}25\text{ GB}$.
+    - **Activations (no checkpointing):** $\approx 60\text{ GB}$ (at reasonable batch size).
+    - **Activations (with checkpointing every 9 layers):** $\approx 7\text{ GB}$.
+    - **Total per-GPU (with checkpointing):** $25 + 7 + \text{overhead} \approx \mathbf{35\text{-}40\text{ GB}}$.
+    - **Conclusion:** **It fits in 80 GB only if gradient checkpointing is enabled to control activation memory.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

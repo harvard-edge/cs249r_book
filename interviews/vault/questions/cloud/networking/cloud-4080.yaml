@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-4080
+track: cloud
+level: L3
+zone: fluency
+topic: rdma-transport
+competency_area: networking
+bloom_level: apply
+phase: both
+title: GDRCopy for Small RDMA Messages
+scenario: GDRCopy is a library that allows low-latency CPU access to GPU memory via a persistent BAR mapping. NCCL uses GDRCopy for small control messages (<8KB) instead of GPUDirect RDMA. For a 128-node cluster performing AllReduce, control messages include buffer pointers, ready flags, and completion signals (~64 bytes each).
+question: For 64-byte NCCL control messages, how do GDRCopy and GPUDirect RDMA latencies compare, and why use GDRCopy anyway?
+details:
+  realistic_solution: 'GDRCopy path for 64-byte control message: CPU reads from GPU VRAM via mapped BAR1 region → ~1µs (PCIe read). CPU copies data to host buffer → ~10ns (L1 cache). CPU posts RDMA Send with inline data (data embedded in WQE, no separate DMA) → ~300ns. HCA sends 64-byte message → serialization + network = ~100ns. Total: ~1.4µs. GPUDirect RDMA path for 64-byte message: Post WQE specifying GPU VRAM source → 200ns. HCA fetches WQE → 100ns. HCA reads 64 bytes from GPU VRAM via PCIe → 300ns. HCA sends packet → ~100ns. Total: ~700ns. Wait — GPUDirect RDMA is actually faster? Yes, for 64-byte messages, GPUDirect RDMA with inline data is competitive. But: GPUDirect RDMA requires memory registration (MR setup) which is expensive (~2ms per region). GDRCopy uses a pre-established BAR mapping and avoids MR management. The real advantage: GDRCopy allows the CPU to read/write GPU memory synchronously without posting RDMA work requests, which is critical for NCCL''s control plane where the CPU orchestrates buffer management. Latency comparison: GDRCopy = 1.4µs with CPU flexibility. GPUDirect RDMA = 0.7µs but requires async WR posting and CQ polling.'
+  common_mistake: |
+    **The Pitfall:** Assuming GDRCopy is always strictly faster than GPUDirect RDMA in sheer transfer latency.
+    **The Rationale:** Candidates misattribute the choice to pure latency rather than the overhead of RDMA work requests and memory registration.
+    **The Consequence:** Misunderstanding how the NCCL control plane leverages synchronous CPU reads for efficient orchestrating.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 128 nodes, 2 messages per node = 256 messages.
+    - GDRCopy latency: 1.4µs.
+    - GPUDirect RDMA latency: 0.7µs.
+
+    **Calculations:**
+    - Data Volume: 256 * 64 bytes = 16 KB.
+    - GDRCopy Latency: 256 * 1.4µs = 358µs (sequential).
+    - GPUDirect RDMA Latency: 256 * 0.7µs = 179µs (requires CQ polling).
+
+    **Conclusion & Interpretation:**
+    - **Result: 358µs (Latency-Hidden)**. GDRCopy avoids expensive memory registration and runs asynchronously on the CPU, perfectly hiding control plane latency.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

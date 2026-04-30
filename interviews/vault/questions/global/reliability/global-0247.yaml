@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: global-0247
+track: global
+level: L4
+zone: optimization
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: analyze
+phase: training
+title: Optimizing Checkpoint Strategy for 1000-GPU Training
+scenario: Your 1000-GPU training cluster has MTBF of 30 minutes. Full synchronous checkpoint of a 175B model takes 8 minutes and stalls all GPUs. Current wasted compute is estimated at 45%.
+question: How would you design a checkpointing strategy to reduce waste below 15%?
+details:
+  realistic_solution: 'Problem: synchronous checkpoint takes 8 min out of every 30-min MTBF = 27% overhead just from checkpointing, plus ~50% of inter-checkpoint work is lost on failure. Solution stack: (1) Asynchronous checkpointing: snapshot state to CPU/host memory (fast, <30s) then write to persistent storage in background. GPU stall drops from 8 min to 30s. (2) Reduce checkpoint size with ZeRO: each GPU only checkpoints its optimizer shard (175B / 1000 = 175M params \times 16 bytes = 2.8 GB per GPU vs 2.8 TB total). (3) Local SSD checkpoint first, then replicate to remote storage. (4) With t_ckpt=0.5 min, optimal interval = sqrt(2 \times 30 \times 0.5) = 5.5 min. Overhead: ckpt = 0.5/5.5 = 9%. Wasted work = 5.5/(2\times30) = 9.2%. Total = 18.2%. Add in-memory redundancy (buddy checkpointing): MTBF effectively doubles to 60 min. New overhead: sqrt(2\times60\times0.5) = 7.7 min interval. Waste = 6.5% (checkpointing) + 6.4% (wasted work) = 12.9%.'
+  common_mistake: |
+    **The Pitfall:** Simply checkpointing more frequently without reducing the stall time.
+    **The Rationale:** If failures are high, the naive response is to save more often, ignoring the catastrophic stall penalty.
+    **The Consequence:** The 8-minute synchronous stall destroys throughput; checkpointing more often pushes the cluster toward 0% effective utilization.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 1000-GPU cluster with 30-minute MTBF.
+    - Async checkpointing drops stall time to 0.5 min.
+    - ZeRO optimizer state = 2.8 GB/GPU.
+
+    **Calculations:**
+    - Optimal interval (Daly's formula) = sqrt(2 * 30 min * 0.5 min) = 5.5 min.
+    - Overhead = (0.5 / 5.5) + (5.5 / 60) = 9% + 9.2% = 18.2%.
+    - With in-memory buddy checkpointing, MTBF effectively doubles to 60 min.
+    - New optimal interval = sqrt(2 * 60 * 0.5) = ~7.7 min.
+    - New Waste = (0.5 / 7.7) + (7.7 / 120) = 6.5% + 6.4% = 12.9%.
+
+    **Conclusion & Interpretation:**
+    - **Result: 12.9% Waste (I/O-Bound)**. Total wasted compute is reduced to 12.9%, safely under the 15% target.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

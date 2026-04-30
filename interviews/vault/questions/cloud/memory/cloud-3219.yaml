@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-3219
+track: cloud
+level: L5
+zone: design
+topic: kv-cache-management
+competency_area: memory
+bloom_level: create
+phase: inference
+title: KV Cache Eviction Under Memory Pressure
+scenario: Your vLLM serving instance on a single GPU has 35 GB available for KV-cache after loading model weights. At peak traffic, 80 concurrent requests each need up to 8K context (2.56 GB KV-cache each). Total maximum demand is 204 GB, far exceeding the 35 GB budget.
+question: "What eviction and admission policy should you use to handle 80 requests requiring up to 204 GB of KV-cache with only a 35 GB budget?"
+details:
+  realistic_solution: 'Design a multi-level policy: (1) Admission control: limit concurrent requests to what fits in memory. At 35 GB / 2.56 GB max = 13 full-length requests. Accept up to 13 requests; queue the rest. (2) Preemption policy (when memory is exhausted mid-generation): Use ''swap'' — move preempted request''s KV blocks to CPU memory (host has >>35 GB). When GPU memory frees up, swap back without recomputing. Swap bandwidth: PCIe Gen5 at 64 GB/s, a 2.56 GB cache swaps in 40ms. (3) Preemption priority: preempt the request with the most remaining tokens to generate (longest remaining latency), preserving requests close to completion. This minimizes wasted compute. (4) For prefix-shared requests: never evict shared prefix blocks — they serve multiple requests. (5) Overcommit strategy: admit up to 40 requests assuming average context is 2K (not 8K max). Average KV = 640 MB × 40 = 25.6 GB (fits). Handle the 5% of requests that reach 8K by swapping. This achieves 3× higher throughput than conservative admission control.'
+  common_mistake: |
+    **The Pitfall:** Using simple LRU eviction on individual KV blocks.
+    **The Rationale:** Candidates treat the KV-cache like a standard web cache, not realizing that evicting random blocks of an active request corrupts its state.
+    **The Consequence:** The system preempts a nearly-complete long request to admit a new short request, permanently wasting all the compute already invested.
+  napkin_math: |
+    - Hard budget: 35 GB.
+    - Max KV per request (8K tokens): 8,192 * 320 KB ≈ 2.56 GB.
+    - Conservative Admission (Max Context): 35 GB / 2.56 GB = 13 concurrent requests.
+    - Overcommit Admission (Avg 2K Context): Average KV is 640 MB. 35 GB / 640 MB ≈ 54 concurrent requests.
+    - Swap penalty for the 5% hitting max: 2.56 GB / 64 GB/s (PCIe Gen5) ≈ 40ms.
+    - **Result: Overcommitting based on average context increases capacity by 4x, relying on fast PCIe swapping to handle tail outliers.**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

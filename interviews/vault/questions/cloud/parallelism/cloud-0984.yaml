@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-0984
+track: cloud
+level: L4
+zone: diagnosis
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: analyze
+phase: training
+title: Diagnosing High Communication-Computation Ratio in 3D Parallelism
+scenario: 'You are profiling a 3D-parallel training run for a 175B parameter LLM on a cluster of 128 nodes. Each node has 8 GPUs connected via NVLink (300 GB/s per direction), and nodes are networked via InfiniBand (25 GB/s per GPU). Profiling reveals GPU compute utilization is stuck at 25%, while inter-node network bandwidth is pegged at 98%. The configuration uses TP=16, PP=16, and DP=4.'
+question: 'What is causing the 25% SM utilization, and how would you change TP/PP placement to avoid inter-node tensor-parallel AllReduce?'
+details:
+  realistic_solution: 'The root cause is the TP=16 configuration, which forces high-frequency, synchronous AllReduce operations across the slow inter-node InfiniBand instead of confining them to the fast intra-node NVLink. Reducing TP to 8 (confined to one node) and compensating with PP=2 across nodes shifts the communication pattern from latency-critical AllReduce to pipeline-friendly point-to-point transfers.'
+  common_mistake: |
+    **The Pitfall:** Recommending gradient accumulation, sequence length reduction, or overlapping communication.
+    **The Rationale:** Candidates recognize a communication bottleneck but fail to map the parallel topology (TP=16) to the physical hardware boundaries (8 GPUs per node).
+    **The Consequence:** The structural flaw remains; TP continues to force massive, synchronous AllReduce operations across the slow inter-node IB links, permanently crippling MFU.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Hardware: 8 GPUs/node. NVLink = 300 GB/s, IB = 25 GB/s.
+       - Topology: TP=16 spans 2 nodes.
+       - Activation payload per layer: ~200MB (4 MB_size × 2048 seq × 12288 dim × 2 bytes).
+    2. **Calculations:**
+       - TP AllReduce Size: 2x data = ~400MB.
+       - Intra-node NVLink Time: 400MB / 300 GB/s = ~1.3ms.
+       - Inter-node IB Time: 400MB / 25 GB/s = 16ms.
+       - Layer Compute Time (assumed): ~5ms.
+       - Comm/Compute Ratio (TP=8 NVLink): 1.3ms / 5ms = 0.26.
+       - Comm/Compute Ratio (TP=16 IB): 16ms / 5ms = 3.2.
+    3. **Conclusion & Interpretation:**
+       - **Result: Interconnect-Bandwidth-Bound. TP=16 forces highly synchronous AllReduce across slow IB links, causing a 3.2x communication-to-compute ratio that crushes SM utilization.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

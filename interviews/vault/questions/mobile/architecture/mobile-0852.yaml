@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-0852
+track: mobile
+level: L4
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: analyze
+phase: inference
+title: Diagnose accuracy regression after Core ML conversion of EfficientNet-B0 for A17 Pro
+scenario: After converting EfficientNet-B0 from PyTorch FP32 to Core ML FP16 for a mobile NPU, top-1 accuracy drops from 77.1% to 74.8% on a 500-image test set. The model uses Swish (SiLU) activations and SE blocks.
+question: How would you diagnose the sources of the 2.3pp accuracy regression?
+details:
+  realistic_solution: |
+    Run the model in FP32 mode (`computeUnits=.cpuOnly`); if accuracy recovers, the issue is precision mapping, not conversion graph topology. Inspect the converted graph: Core ML's NPU mapper approximates the sigmoid component of Swish as a 4th-degree polynomial (`hardsigmoid`), and FP16 Global Average Pooling (GAP) in SE blocks on small spatial dimensions loses precision. Fix: upgrade the deployment target to support native SiLU or fine-tune with ReLU6.
+  common_mistake: |
+    **The Pitfall:** Assuming the entire accuracy drop stems strictly from FP16 weight truncation.
+    **The Rationale:** Candidates fail to realize that compiler toolchains introduce operator approximations (like polynomial replacements for transcendentals) to fit NPU kernels.
+    **The Consequence:** Endless attempts to re-train or QAT the weights without addressing the fundamental compiler-level operator mismatch.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - EfficientNet-B0: 16 MBConv blocks with Squeeze-and-Excitation (SE).
+    - Swish sigmoid approximation error: max error ~0.002.
+    - SE block involves sigmoid(FC(GAP(x))).
+
+    **Calculations:**
+    - Error per SE block accumulates through 2 FC layers and sigmoid.
+    - 16 blocks * 2 SE FC operations * 0.002 error ≈ 0.064 total propagated error.
+    - A 0.064 logit shift typically causes a ~1-2pp accuracy drop on ImageNet top-1.
+
+    **Conclusion & Interpretation:**
+    - **Result: 0.064 error (Compiler Approximation Error)**. Operator approximation accounts for the majority of the 2.3pp accuracy drop.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

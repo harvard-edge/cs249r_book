@@ -46,7 +46,7 @@ def main() -> int:
     cell_counts: Counter[tuple[str, str, str]] = Counter()  # (old_zone, bloom, new_zone)
     skipped_no_bloom = 0
 
-    for p in sorted(QUESTIONS_DIR.glob("*/*.yaml")):
+    for p in sorted(QUESTIONS_DIR.rglob('*.yaml')):
         try:
             d = yaml.safe_load(p.read_text(encoding="utf-8"))
         except Exception:

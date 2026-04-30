@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-4190
+track: cloud
+level: L4
+zone: optimization
+topic: gpu-compute-architecture
+competency_area: compute
+bloom_level: apply
+phase: both
+title: Memory Coalescing in Attention Kernels
+scenario: Your attention kernel on MI300X reads Q, K, V matrices. Q is row-major but accessed column-wise for the dot product with K^T. Profiling shows 4× lower HBM bandwidth utilization than expected.
+question: Why does column-wise access to row-major Q/K data destroy coalescing on MI300X, and how do you fix it?
+details:
+  realistic_solution: 'Row-major Q[batch][head][seq][dim=128]: consecutive elements in dim are contiguous. Thread i in a wavefront reads Q[b][h][s][i] — these are contiguous, so reading a row of Q is coalesced. But K^T requires reading K[b][h][:][d] — all sequence positions for a single dim value. These are 128 × 2 = 256 bytes apart. A 64-thread wavefront accesses 64 addresses each 256 bytes apart — spanning 16 KB, requiring 64 cache lines instead of 1. Fix: (1) Transpose K to K^T layout before the kernel. Cost: one-time transpose via shared memory (fast). (2) Use shared memory tiling: load a BK×D tile of K into shared memory (coalesced read), then access from shared memory (bank-conflict-free with padding). (3) Use the BHSD → BSHD layout for K so sequence-dimension access is contiguous. FlashAttention does (2) — loads tiles of Q, K, V into shared memory with coalesced reads, then computes from SRAM.'
+  common_mistake: |
+    **The Pitfall:** Ignoring hardware memory layout when writing custom CUDA/HIP kernels.
+    **The Rationale:** Developers write loops mathematically without considering that GPUs require adjacent threads to access adjacent memory addresses (coalescing).
+    **The Consequence:** The kernel suffers catastrophic memory bandwidth starvation, running an order of magnitude slower than a hardware-aware implementation.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 64-thread wavefront.
+       - Coalesced Read: 64 threads * 2 bytes = 128 bytes (1 cache line).
+       - Uncoalesced Read: 256-byte stride between elements.
+    2. **Calculations:**
+       - Uncoalesced Read fetches 64 separate cache lines (8,192 bytes total).
+       - Efficiency Drop: Only 128 bytes used out of 8,192 bytes loaded = 1.56% efficiency.
+       - HBM Bandwidth Degradation: 5.3 TB/s drops to ~82.7 GB/s effective.
+    3. **Conclusion & Interpretation:**
+       - Uncoalesced memory access starves the compute units. Tiling to shared memory restores >90% efficiency.
+       - **Result: Uncoalesced Memory Access (Memory Bound)**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

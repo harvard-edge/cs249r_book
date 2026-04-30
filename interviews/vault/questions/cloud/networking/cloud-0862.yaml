@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-0862
+track: cloud
+level: L4
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Diagnosing FSDP AllGather Topology Bottlenecks
+scenario: You are scaling a 70B parameter model using FSDP (ZeRO-3) across 16 nodes (128x GPUs). The nodes are connected via an 8-rail 400Gbps InfiniBand network. Profiling shows that `AllGather` operations take 3x longer than expected. NCCL logs indicate the AllGather bandwidth achieved is only ~12 GB/s per GPU instead of the expected ~45 GB/s over the IB rails.
+question: "How do you diagnose and root-cause this collective communication stall?"
+details:
+  realistic_solution: Analyze the output of `nvidia-smi topo -m` and NCCL debug logs (`NCCL_DEBUG=INFO`). The root cause is typically a misconfigured PCIe affinity where GPUs are communicating with NICs on a different CPU socket, forcing traffic over the slow QPI/UPI link and bypassing GPUDirect RDMA.
+  common_mistake: |
+    **The Pitfall:** Assuming the issue is standard network congestion or inefficient model chunking.
+    **The Rationale:** Engineers often blame the network switches or software implementation, failing to check the physical hardware topology inside the node.
+    **The Consequence:** Wasting time tuning FSDP parameters when the root cause is a hardware PCIe affinity mismatch disabling GPUDirect RDMA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Ideal 400Gbps IB yields ~50 GB/s raw bandwidth, ~45 GB/s practical.
+    - UPI link limit across CPU sockets is ~12-15 GB/s.
+    - Forward pass compute time is 40ms. Layer AllGather size is 1.5GB.
+
+    **Calculations:**
+    - Optimal AllGather: 1.5GB / 45GB/s = 33ms.
+    - Bottlenecked AllGather: 1.5GB / 12GB/s = 125ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: PCIe-Topology-Bound**. The compute stream starves for 85ms waiting for the bottlenecked AllGather because traffic is forced over the slow UPI link.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-007
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T20:55:24.149361'

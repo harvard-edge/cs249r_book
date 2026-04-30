@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0146
+track: cloud
+level: L4
+zone: diagnosis
+topic: batching-strategies
+competency_area: latency
+bloom_level: analyze
+phase: inference
+title: The Continuous Batching Tail Latency Paradox
+scenario: 'Your LLM inference service uses a continuous batching scheduler on H100s. Your average Time-to-First-Token (TTFT) is around 150ms. However, your P99 TTFT metric is failing its 500ms SLO, with frequent spikes into the 1.5-2 second range. Your manager suspects a hardware or network issue. You notice in the logs that these latency spikes correlate with the arrival of requests with very long prompts (e.g., 4000+ tokens) mixed in with normal, short-prompt requests.'
+question: 'Why are 4000-token prompts causing 1.5-2s P99 TTFT spikes in the continuous batching loop, and how would you mitigate them?'
+details:
+  realistic_solution: |
+    This is not a hardware fault, but a fundamental characteristic of how Transformer inference and batching schedulers work. The prefill phase is compute-bound and monopolizes the GPU for the entire prompt. The decode phase is memory-bound and can be batched efficiently. In a continuous batching loop, when a long-prompt prefill arrives, it blocks the entire GPU, stalling all decode-phase users. The fix is chunked prefill: break the long prefill into smaller chunks, interleaving decode steps between chunks.
+  common_mistake: |
+    **The Pitfall:** Blaming the hardware or assuming continuous batching provides perfect request isolation.
+    **The Rationale:** Candidates fail to understand that a single monolithic prefill operation blocks the shared execution resources of the GPU.
+    **The Consequence:** Misdiagnosing a fundamental scheduling bottleneck as a hardware fault.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B model on H100 (989 TFLOPS, 3.35 TB/s).
+    - 4,000-token prompt arrival.
+
+    **Calculations:**
+    - Decode step (memory-bound): (70B * 2 bytes) / 3.35 TB/s = ~42 ms/step.
+    - Prefill (compute-bound): 2 * 70B * 4,000 = 560 TFLOPS.
+    - Prefill time: 560 TFLOPS / 989 TFLOPS = ~566 ms (at 100% utilization). At ~50% real utilization, ~1.1 seconds.
+    - When a 4,000-token prefill arrives, it blocks the GPU for ~1.1 seconds, stalling all decode steps.
+
+    **Conclusion & Interpretation:**
+    - **Result: Worst-case TTFT is ~1.1s + queue wait, requiring chunked prefill to cap stall duration. (Compute-Bound Head-of-Line Blocking)**. Deep continuous batch queues require chunked scheduling to avoid stalling.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_status_pro: ERROR
+validation_issues_pro:
+- 'The napkin math states a per-token decode time of ~3ms for a 70B model on H100, but the correct memory-bound calculation is `(70B * 2B) / 3.35TB/s` which is ~42ms per batch step.'
+- 'The napkin math assumes prefill time per token is ~3ms, but a compute-bound calculation shows it is closer to ~0.3ms per token, making the assumption off by 10x.'
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-2894
+track: cloud
+level: L5
+zone: design
+topic: cnn-efficient-design
+competency_area: architecture
+bloom_level: create
+phase: both
+title: Design an efficient CNN serving pipeline for H100 multi-tenant inference
+scenario: You need to serve 10 different EfficientNet variants (B0–B7) simultaneously for a multi-tenant vision API. Each tenant sends sporadic bursts of 1–32 images.
+question: "How would you design a batching and memory management strategy that maximizes single-GPU utilization while keeping p99 latency under 50 ms?"
+details:
+  realistic_solution: Keep all 10 EfficientNet variants resident in High-Bandwidth Memory (HBM) simultaneously, as their combined parameter size is trivial (~240MB). Utilize a dynamic batching queue per model with tight 5–10ms wait windows to coalesce sporadic requests. Dispatch concurrent kernel execution across the models using independent CUDA streams. Compile the models with `torch.compile` and cuDNN benchmark mode to optimize kernel execution.
+  common_mistake: |
+    **The Pitfall:** Utilizing Multi-Instance GPU (MIG) partitioning or hot-swapping models.
+    **The Rationale:** Engineers overestimate the memory footprint of CNNs compared to LLMs, unnecessarily splitting the GPU via MIG (which fragments memory and isolates ALUs) or incurring severe PCIe transfer latencies by swapping weights.
+    **The Consequence:** Destroyed cross-tenant batching efficiency, starved compute units, and massively degraded p99 latency.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 10 EfficientNet models (B0=5.3M, B7=66M). Total params ~120M.
+       - Precision: BF16 (2 bytes/param).
+       - Compute limit: ~500 TFLOPS effective (50% of 989 TFLOPS peak).
+       - SLA: <50ms p99 latency.
+    2. **Calculations:**
+       - Total weights size: 120M * 2 bytes = 240 MB (fits easily in HBM).
+       - B0 compute (batch=32): 0.39 GFLOPs * 32 = 12.5 GFLOPs.
+       - B0 compute time: 12.5 GFLOPs / 500 TFLOPS = 0.025 ms.
+       - B7 compute (batch=8): 37 GFLOPs * 8 = 296 GFLOPs.
+       - B7 compute time: 296 GFLOPs / 500 TFLOPS = 0.6 ms.
+       - Total B7 latency: 10ms queue + 0.6ms compute + 2ms overhead = 12.6 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: 12.6ms p99 Latency.** The architecture is safely **Queue-Bound** and easily satisfies the 50ms SLA without structural partitioning.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 16
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

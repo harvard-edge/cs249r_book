@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: mobile-1862
+track: mobile
+level: L4
+zone: optimization
+topic: model-adaptation-systems
+competency_area: architecture
+bloom_level: apply
+phase: inference
+title: 'On-Device LoRA Training: Gradient Checkpointing on Mobile'
+scenario: A mobile application fine-tunes a 1B model on-device using LoRA. Training on an 8GB device causes OOM errors at batch size 1, sequence length 128.
+question: Why does LoRA training for a 1B model OOM at batch 1 on an 8GB phone, and how do you fix it?
+details:
+  realistic_solution: 'Memory breakdown for 1B model LoRA training (r=4, Q+V only): (1) Model weights FP16: 2GB. (2) LoRA adapter weights: ~0.78MB (negligible). (3) Optimizer states (Adam, only adapter params): ~1.56MB (negligible). (4) Activations for backward: 12 layers * 128 * 2048 * 7 (stored tensors per layer) * 2B = ~44MB. Not the issue. The real cause of OOM with 8GB available (OS reserves 2-3GB on mobile = 5-6GB usable): likely ML runtime loads 2-3x model copies during JIT compilation (TorchScript or CoreML compilation cache), plus gradient tape for all operators if base model requires_grad is not False. Fix: (1) Explicitly set requires_grad=False for all base model parameters; (2) Use gradient checkpointing for LoRA forward (torch.utils.checkpoint); (3) Use torch.compile with dynamic=True to avoid recompilation; (4) Delete JIT compilation cache after first run.'
+  common_mistake: |
+    **The Pitfall:** Immediately reducing model size or sequence length to save memory.
+    **The Rationale:** Assuming activation tensors or weights are the culprit, ignoring the massive memory overhead of ML runtime JIT compilation.
+    **The Consequence:** Degrading model quality unnecessarily while failing to address the actual framework-level memory leak.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Device RAM: 8GB (~6GB usable).
+    - Model Weights (BF16): 1B params = 2 GB.
+    - Activations (LoRA only): ~6 MB.
+    - Adapter + Optimizer state: ~2 MB.
+
+    **Calculations:**
+    - Memory before compilation: 2 GB + 6 MB + 2 MB = ~2.008 GB.
+    - JIT Compilation Cache Overhead: Tracing clones the model = 4-5 GB.
+    - Total Peak Memory: ~2.008 GB + 5 GB = ~7 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~7 GB peak memory (Memory-Bound)**. PyTorch JIT compilation tracing blows past the 6GB usable RAM, causing an OOM.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

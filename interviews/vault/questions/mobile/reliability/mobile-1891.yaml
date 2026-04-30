@@ -1,0 +1,59 @@
+schema_version: '1.0'
+id: mobile-1891
+track: mobile
+level: L6+
+zone: design
+topic: fault-tolerance-checkpointing
+competency_area: reliability
+bloom_level: create
+phase: both
+title: A17 OS Termination Grace
+scenario: An Apple A17 performs personalized on-device training. If the user minimizes the app, the OS grants a 1.5-second termination grace period. The model state is 300 MB across ~200 tensors. A naive estimate is 300 MB / 4 GB/s UFS = 75 ms. However, the realistic checkpoint path pays a per-tensor serialization tax of 8 ms per tensor on a single core, contends for UFS with a media-cache flush consuming ~1.5 GB/s, and uses async I/O.
+question: Starting from the figure's 75 ms naive estimate, design the realistic checkpoint budget by adding (a) the CPU serialization tax across ~200 tensors, (b) UFS contention with the concurrent media-cache flush, and (c) the overlap between CPU serialization and storage I/O. Identify the binding stage, propose a parallelization strategy across the A17's performance cores, and confirm whether the 1.5 s grace window holds.
+visual:
+  kind: svg
+  path: mobile-1891.svg
+  alt: Gantt showing 75ms save fitting easily within 1500ms grace period.
+  caption: State Save vs Grace Period.
+details:
+  realistic_solution: 'CPU serialization: 200 tensors * 8 ms = 1.6 s on a single perf core - already exceeds the 1.5 s budget. UFS contention: 4000 - 1500 = 2500 MB/s available, write time = 300/2500 = 120 ms. So the binding stage is CPU serialization, NOT storage. The fix is to (a) parallelize serialization across 4 perf cores (1.6 s / 4 = 400 ms), (b) overlap with writes via async I/O. With both, total time ~= max(400 ms, 120 ms) = 400 ms, well inside the 1.5 s grace period.'
+  common_mistake: |
+    **The Pitfall:** Looking only at raw UFS bandwidth and concluding 75 ms is fine.
+    **The Rationale:** Candidates miss the CPU-side serialization tax that scales with tensor count, and ignore UFS contention from background tasks.
+    **The Consequence:** The app fails to save its state within the grace period and is forcefully terminated by the OS, causing data loss.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 200 tensors, each taking 8 ms to serialize serially.
+    - UFS write bandwidth available: 4000 MB/s total, minus 1500 MB/s background = 2500 MB/s.
+    - Checkpoint size: 300 MB.
+    - OS grace period: 1500 ms.
+
+    **Calculations:**
+    - Serial CPU serialization: 200 tensors x 8 ms = 1600 ms.
+    - Parallel 4-core serialization: 1600 ms / 4 = 400 ms.
+    - UFS write under contention: 300 MB / 2500 MB/s = 120 ms.
+    - Async I/O overlap: total time = max(400 ms, 120 ms) = 400 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 400 ms (CPU Serialization-Bound)**. The parallelized 400 ms operation fits safely within the 1500 ms OS grace period.
+status: published
+provenance: llm-draft
+expected_time_minutes: 5
+requires_explanation: true
+validated: true
+math_verified: true
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-analyze-L6+
+created_at: '2026-04-25'
+math_status: CORRECT
+math_model: gemini-3.1-pro-preview
+validation_status: passed
+validation_model: pydantic-1.0
+math_date: '2026-04-25'
+validation_date: '2026-04-25'

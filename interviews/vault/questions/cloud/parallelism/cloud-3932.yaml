@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-3932
+track: cloud
+level: L5
+zone: design
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: apply
+phase: both
+title: ZeRO Stage 3 Communication-Computation Overlap Strategy
+scenario: You train a 13B model using ZeRO Stage 3 (DeepSpeed) across 64 GPUs. ZeRO-3 partitions parameters, gradients, and optimizer states across GPUs. Before each layer's forward pass, all parameters for that layer must be AllGathered. This adds communication to the forward pass (not just backward).
+question: How would you overlap ZeRO-3 parameter AllGathers with forward and backward computation across 64 GPUs?
+details:
+  realistic_solution: 'DeepSpeed''s ZeRO-3 prefetch strategy: (1) Forward pass: while computing layer L, issue AllGather for layer L+1''s parameters on a separate stream. When layer L finishes, L+1''s parameters are already gathered. After layer L''s forward pass, release layer L''s gathered parameters (keeping only the local shard). (2) Backward pass: same prefetch in reverse — while computing layer L''s backward, AllGather layer L-1''s parameters. (3) Tune prefetch_count: how many layers ahead to prefetch. Default: 1 layer ahead. For variable-size layers, prefetch 2+ for small layers. (4) Use NCCL''s async AllGather with CUDA events for synchronization. Result: communication is almost fully hidden if per-layer compute > AllGather time.'
+  common_mistake: |
+    **The Pitfall:** Only overlapping AllGather with computation for the current layer.
+    **The Rationale:** The real optimization is prefetching: AllGathering the NEXT layer's parameters while computing the current layer.
+    **The Consequence:** Leaving significant communication time unhidden and bottlenecking forward and backward passes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 13B parameters (40 layers).
+    - Per-layer parameters: 325M = 0.65 GB (BF16).
+    - Network: 64 GPUs at 50 GB/s effective IB.
+    - Per-layer forward compute: ~30 ms.
+
+    **Calculations:**
+    - AllGather time: 0.65 GB / 50 GB/s = 13 ms.
+    - Without prefetch: 30 ms + 13 ms = 43 ms/layer.
+    - With prefetch: max(30 ms, 13 ms) = 30 ms/layer.
+    - Speedup: 43 ms / 30 ms = 1.43x.
+
+    **Conclusion & Interpretation:**
+    - **Result: Communication-Bound Overlap**. Prefetching the next layer's weights fully hides the 13ms AllGather latency, achieving a 1.43x speedup.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

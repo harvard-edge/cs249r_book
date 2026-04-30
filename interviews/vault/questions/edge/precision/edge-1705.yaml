@@ -1,0 +1,40 @@
+schema_version: '1.0'
+id: edge-1705
+track: edge
+level: L4
+zone: optimization
+topic: mixed-precision-training
+competency_area: precision
+bloom_level: analyze
+phase: training
+title: 'Dataflow Pipeline Bottlenecks in Mixed-Precision'
+scenario: 'You are deploying an object detection model to a smart camera powered by a Hailo-8 accelerator. The Hailo-8 is a pure dataflow architecture with no local DRAM, streaming weights and activations directly from host memory via PCIe. Post-training quantization to INT8 causes an unacceptable drop in accuracy, so the team proposes running the sensitive attention layers in FP16 on the host CPU while the rest of the convolutions run on the Hailo-8.'
+question: 'What is the system-level cost of host FP16 fallback on Hailo-8, and how would you keep the whole model on the INT8 dataflow path?'
+details:
+  realistic_solution: 'The correct diagnosis is that context-switching between the host CPU (FP16) and Hailo-8 (INT8) destroys the dataflow efficiency. Instead of fallback, the solution is to apply Quantization-Aware Training (QAT) with learnable clipping parameters, or use per-channel quantization to keep the entire network in INT8 on the Hailo-8. This maintains a single continuous stream from host memory, maximizing the compute without latency-heavy pipeline breaks.'
+  common_mistake: |
+    **The Pitfall:** Assuming the only cost of fallback is the CPU computation time.
+    **The Rationale:** Engineers ignore the physical constraints of dataflow architectures lacking local DRAM.
+    **The Consequence:** Breaking the continuous dataflow pipeline, saturating the PCIe bus, and destroying real-time performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Intermediate activation: 128x128x256.
+    - Target FPS: 30 FPS (33ms budget).
+    - PCIe Gen2 x2 bus (~1 GB/s practical).
+
+    **Calculations:**
+    - Tensor Size: INT8 = 4MB, FP16 = 8MB.
+    - Transfer Cost per break: Write 4MB out, stream 4MB back = 8MB total transfer.
+    - Bus Latency per break: 8MB / 1 GB/s = 8ms.
+    - For 3 layer breaks: 3 * 8ms = 24ms transfer overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: 24ms transfer overhead (I/O Bound)**. To hit 30 FPS (33ms budget), only 9ms remains for compute, dropping accelerator utilization to under 30% and failing real-time requirements.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+math_verified: true
+math_status: CORRECT

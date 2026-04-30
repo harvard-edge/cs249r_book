@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-3813
+track: cloud
+level: L4
+zone: optimization
+topic: mixture-of-experts
+competency_area: architecture
+bloom_level: analyze
+phase: both
+title: 'Expert Offloading: CPU-GPU Expert Swapping for Inference'
+scenario: You want to serve Mixtral 8x7B (93.4 GB FP16) on a single 80 GB GPU (2 TB/s). The model doesn't fit in GPU memory. A colleague proposes keeping shared layers on GPU and swapping experts from CPU RAM over PCIe 4.0 (32 GB/s).
+question: Is CPU expert swapping over PCIe 4.0 viable for serving Mixtral 8x7B under a 50 ms/token interactive latency target?
+details:
+  realistic_solution: 'Shared attention layers: ~7B params = 14 GB FP16, stays on GPU. Each expert MLP: ~5.3B params = 10.6 GB FP16. At batch size 1, top-2: need to load 2 experts from CPU. Transfer time per expert: 10.6 GB / 32 GB/s = 331ms. Two experts: 662ms. This far exceeds the 50ms/token target — not viable for interactive serving with FP16. With INT4 quantization: each expert = 2.65 GB. Transfer: 2.65 / 32 = 83ms per expert. Two experts: 166ms. Still too slow. Viable approach: INT4 quantization (total = 23.4 GB) fits entirely on an 80 GB GPU. No swapping needed. Alternatively, use 2 GPUs with tensor parallelism. Expert offloading is only viable for throughput-oriented batch inference.'
+  common_mistake: |
+    **The Pitfall:** Assuming you can swap experts continuously in parallel with computation without stalling.
+    **The Rationale:** Engineers rely on theoretical pre-fetching, ignoring that routing is data-dependent and unpredictable token-to-token.
+    **The Consequence:** The GPU idles while waiting for the serial PCIe transfer of the exact required expert, completely blowing past latency SLAs.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - FP16 expert size: 10.6 GB.
+    - PCIe 4.0 transfer time: 32 GB/s.
+    - SLA target: 50 ms.
+
+    **Calculations:**
+    - Transfer time per expert: 10.6 GB / 32 GB/s = 331 ms.
+    - Loading 2 experts (top-2 routing): 331 ms * 2 = 662 ms/token.
+    - INT4 expert size: 2.65 GB.
+    - INT4 transfer: 2.65 GB / 32 GB/s = 83 ms * 2 = 166 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: PCIe Bottleneck (IO-Bound)**. Full INT4 model (23.4 GB) fits directly on an 80 GB GPU, eliminating the need to swap.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

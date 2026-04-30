@@ -1,0 +1,45 @@
+schema_version: '1.0'
+id: cloud-2152
+track: cloud
+level: L3
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: apply
+phase: training
+title: The FP16 Loss Scaling Dance
+scenario: You switch a training run from BF16 to FP16 to use Tensor Core optimizations on older V100 GPUs. Training appears to work for 1,000 steps, then the loss flatlines and stops decreasing. Gradient norms show zero.
+question: What happened, and what mechanism should have prevented this?
+details:
+  realistic_solution: 'FP16 has a much smaller dynamic range than BF16 (max ~65K, min ~6×10⁻⁸). Small gradient values — common in later training stages — underflow to zero in FP16. Dynamic loss scaling should prevent this: it multiplies the loss by a large factor (e.g., 2¹⁶ = 65536) before the backward pass, keeping gradients in FP16''s representable range. After backward, gradients are unscaled before the optimizer step. If loss scaling fails (e.g., the scale becomes too small after repeated overflows), gradients silently underflow. Check: is the loss scaler''s current scale very small? Has it been reducing after repeated Inf/NaN detection?'
+  common_mistake: |
+    **The Pitfall:** Assuming gradients are actually zero because the model converged.
+    **The Rationale:** Candidates see zero gradients and assume the training is complete or stuck in a local minimum.
+    **The Consequence:** They fail to realize that small gradients underflow to zero in FP16's limited dynamic range.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - FP16 smallest representable normal value: ~6e-8.
+       - Typical late-training gradient: ~1 * 10^-7.
+       - Loss scaling factor: 65,536 (2^16).
+    2. **Calculations:**
+       - Without scaling: 1e-7 approaches the subnormal limit and underflows to 0.
+       - With scaling: 1 * 10^-7 * 65,536 = 0.0065536 (6.5 * 10^-3).
+       - Value is safely within FP16 normal range.
+    3. **Conclusion & Interpretation:** **Zero gradients (Precision Underflow-Bound).**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

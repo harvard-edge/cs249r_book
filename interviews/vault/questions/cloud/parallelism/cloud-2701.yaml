@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: cloud-2701
+track: cloud
+level: L5
+zone: evaluation
+topic: data-parallelism
+competency_area: parallelism
+bloom_level: evaluate
+phase: training
+title: Synchronous FSDP Straggler Mitigation at 256 GPUs
+scenario: A 256-GPU training job for a 7B LLM is running synchronous PyTorch FSDP (ZeRO-3). p50 step time is 720 ms, but p99 step time is 1.4 s — a 30% per-step straggler tail caused by intermittent ECC retries and one slow rack. The team must keep AdamW convergence intact for the 7B run.
+question: For 256-GPU synchronous FSDP training of a 7B LLM, which mitigation strategy (pure sync, sync + backup workers, or bounded-staleness async) preserves convergence with the smallest throughput cost?
+details:
+  realistic_solution: Choose synchronous FSDP plus N+2 backup workers with infrastructure-level node remediation. AdamW at 7B scale is sensitive to even one-step gradient staleness once the run is past warmup; async risks the kind of silent loss-spike that has cost real teams entire runs. Pure sync lets the slowest rank dominate every collective, so step time stays at p99 = 1.4 s. With backup workers and a fast eviction policy, the AllReduce/ReduceScatter is run over a healthy 256-rank world while the stragglers are resharded to spares. Throughput recovers to roughly p50 = 720 ms with a 1-3% redundancy overhead.
+  common_mistake: |
+    **The Pitfall:** Reaching for stale-gradient asynchronous schemes (SSP/ASP) at LLM scale.
+    **The Rationale:** Async methods worked well for parameter-server CNN workloads on commodity Ethernet.
+    **The Consequence:** Adam's second-moment estimate amplifies stale-gradient noise, causing loss-curve degradation or divergence that completely wastes the multi-million dollar compute run.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Pure synchronous: step = p99 = 1.4 s. Throughput ratio = 1.0x (baseline).
+    - Backup workers: once slow rack is quarantined, step approaches p50 = 720 ms.
+
+    **Calculations:**
+    - Redundancy cost = (k_backup / 256) ≈ 1-3%.
+    - Effective throughput = 1.4 / 0.72 * (1 - 0.03) ≈ 1.88x speedup over pure sync.
+
+    **Conclusion & Interpretation:**
+    - **Result: Straggler Mitigation (Compute-Bound)**. Backup workers provide near 2x throughput recovery without the convergence risks of async training.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 12
+chains:
+- id: cloud-chain-517
+  position: 2
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

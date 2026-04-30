@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-4292
+track: cloud
+level: L4
+zone: fluency
+topic: disaggregated-serving
+competency_area: deployment
+bloom_level: apply
+phase: inference
+title: KV-Cache Transfer Bandwidth Budget
+scenario: After prefill finishes on a prefill GPU, the KV-cache for a 4096-token request (using a 70B model with 96 layers, GQA with 8 KV heads, head dim 128, FP16) must be transferred to a decode GPU over 400 Gbps InfiniBand HDR.
+question: What is the KV-cache transfer size and latency over 400 Gbps InfiniBand, and is it on the critical path for TTFT?
+details:
+  realistic_solution: 'KV-cache size = 2 (K+V) × num_kv_heads × head_dim × seq_len × num_layers × bytes_per_element. With GQA: 2 × 8 × 128 × 4096 × 96 × 2 bytes = 1.61 GB. At 400 Gbps (50 GB/s effective): 1.61 GB / 50 GB/s = ~32ms. Yes, this is on the critical path for TTFT since decode cannot start until the KV-cache arrives.'
+  common_mistake: |
+    **The Pitfall:** Overestimating the KV-cache size by forgetting GQA or the key/value duality.
+    **The Rationale:** Candidates often use the number of query heads (e.g., 96) instead of KV heads (8) or forget to multiply by 2 for both Key and Value tensors.
+    **The Consequence:** The calculated transfer size is off by a factor of 12x or 2x, leading to incorrect architectural decisions regarding network bandwidth.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 70B model, 96 layers, GQA with 8 KV heads, head dim 128, FP16.
+       - Seq_len: 4096 tokens.
+       - InfiniBand HDR: 400 Gbps (50 GB/s).
+    2. **Calculations:**
+       - Calculate elements per token: 2 (K+V) × 8 (KV heads) × 128 (head dim) × 96 (layers) = 196,608 elements.
+       - Calculate bytes per token: 196,608 × 2 bytes (FP16) = 393,216 bytes/token.
+       - Calculate total transfer size: 393,216 bytes/token × 4096 tokens = 1,610,612,736 bytes (~1.61 GB).
+       - Calculate transfer latency: 400 Gbps = 50 GB/s. 1.61 GB / 50 GB/s = ~32.2 ms.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound. Latency is ~32.2 ms, strictly blocking the start of the decode phase.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+- 2 * 8 * 128 * 4096 * 96 * 2 evaluates to 1,610,612,736 bytes (1.5 GB), not 402,653,184
+  bytes (384 MB)
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

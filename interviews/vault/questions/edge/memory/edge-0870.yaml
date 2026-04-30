@@ -1,0 +1,46 @@
+schema_version: '1.0'
+id: edge-0870
+track: edge
+level: L6+
+zone: diagnosis
+topic: vram-budgeting
+competency_area: memory
+bloom_level: analyze
+phase: both
+title: OOM from Implicit Runtime Layout Transposes
+scenario: An edge gateway (4GB unified RAM) runs a 200MB FP16 Transformer model via an edge inference runtime. Theoretical peak activation memory is 120MB, yet inference crashes with an OOM error. Profiling reveals peak memory spikes to 3.5GB during self-attention layers.
+question: What causes the 3.5GB attention memory spike despite 120MB theoretical activations, and how would you fix it?
+details:
+  realistic_solution: The failure stems from the interaction between dynamic tensor shapes, the runtime's memory arena, and implicit layout conversions. The model was exported from PyTorch in NCHW layout, but the edge runtime's optimized matrix multiplication kernels (e.g., using specific DSP intrinsics or Tensor Cores) strictly require NHWC or blocked layouts. Because the model uses dynamic sequence lengths, the runtime compiler cannot perform a static end-to-end layout optimization pass. Instead, it dynamically injects explicit `Transpose` nodes before and after *every* MatMul in the attention blocks. The framework's memory planner must allocate separate buffers for the input, the transposed input, the output, and the transposed output simultaneously. With dynamic shapes, the memory arena cannot safely reuse memory across these layers and defaults to worst-case eager allocations, leading to massive OOM due to quadratic attention tensors being copied multiple times. The fix is to run an offline graph optimization pass to convert the entire model to NHWC before deployment, and provide a fixed-bucket shape profile so the runtime can statically plan and reuse memory arenas.
+  common_mistake: |
+    **The Pitfall:** Assuming the OOM is caused by a memory leak or OS fragmentation.
+    **The Rationale:** Engineers trust the theoretical activation footprint and blame the host environment rather than inspecting the runtime execution graph.
+    **The Consequence:** Wasted effort tuning OS parameters or reducing batch sizes, failing to address the underlying graph layout mismatch.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 1024 tokens, 12 heads, FP16 (2 bytes). Attention matrix: ~25MB. Dynamic sequences force eager memory allocation.
+    2. **Calculations:**
+       - Implicit layout copies per attention block (NCHW->NHWC, NHWC->NCHW): 4 overlapping copies = 100MB per block.
+       - 24 layers dynamically planned (no reuse): 100MB * 24 = 2.4GB.
+       - Total usage with QKV and fragmentation = ~3.5GB.
+    3. **Conclusion & Interpretation:**
+       - **Result: Graph Transpose OOM.** Dynamic shapes prevent memory arena reuse. Static planning and an offline NHWC layout pass bound the memory to the expected ~120MB.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 18
+validated: true
+validation_status: WARN
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+validation_issues:
+- Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: cloud-1102
+track: cloud
+level: L4
+zone: diagnosis
+topic: graph-compilation
+competency_area: optimization
+bloom_level: analyze
+phase: inference
+title: Diagnosing GEMM Memory Bandwidth Bottlenecks
+scenario: Your team has written a custom Triton GEMM kernel for a linear layer (M=4096, N=4096, K=4096) on an NVIDIA A100 GPU. Despite a high theoretical arithmetic intensity, Nsight Compute reveals the kernel is memory-bound, achieving only 25% of peak TFLOPS. The kernel uses a naive tile-based nested loop that iterates over M (outer), then N, then K (inner), loading tiles of A and B to shared memory, computing the product, and writing the partial sum of C directly back to HBM in each inner step.
+question: How do you diagnose the root cause and optimize the dataflow?
+details:
+  realistic_solution: 'Adopt an Output Stationary dataflow. By keeping the K dimension in the innermost loop and accumulating the partial sums of C entirely in fast registers or SRAM, you only write the final computed tile of C back to HBM once the K loop finishes. The naive implementation causes massive redundant writes to HBM.'
+  common_mistake: |
+    **The Pitfall:** Suggesting increasing the tile size to maximize theoretical arithmetic intensity.
+    **The Rationale:** Candidates rely on standard cache-blocking advice without identifying the specific bottleneck of inner-loop accumulation writes.
+    **The Consequence:** The kernel remains memory-bound because the redundant HBM writes persist, and larger tiles might cause register spilling.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GEMM dimensions: 4096 x 4096 x 4096. Precision: FP16.
+    - K-loop tile size: 64.
+    - HBM Bandwidth: 2.0 TB/s.
+
+    **Calculations:**
+    - Output matrix C size: 4096 * 4096 * 2 bytes = 33.55 MB.
+    - K-loop iterations: 4096 / 64 = 64 steps.
+    - Naive implementation redundant writes: 33.55 MB * 64 = 2.14 GB.
+    - HBM penalty: 2.14 GB / 2.0 TB/s = 1.07 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: 2.14 GB redundant writes (Memory-Bandwidth Bound)**. The naive K-loop induces massive redundant HBM traffic. Switch to Output Stationary dataflow.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-23T21:48:28.500764'

@@ -1,0 +1,52 @@
+schema_version: '1.0'
+id: cloud-0475
+track: cloud
+level: L3
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: apply
+phase: both
+title: The Inter-Node Scaling Cliff
+scenario: You are a Staff ML Systems Engineer at a major cloud provider, tasked with optimizing a training job for a 175B parameter LLM. On a single H100 server (8 GPUs), you observe excellent 95% scaling efficiency for data parallelism. However, when you scale the job to two servers (16 GPUs total), the overall scaling efficiency plummets to 55%, and `nvidia-smi` shows GPU utilization is spiky. Your network monitoring tools confirm that the inter-server InfiniBand links are 100% saturated during the optimizer step.
+question: "What primary communication bottleneck explains the 55% scaling efficiency and saturated inter-server links?"
+details:
+  realistic_solution: The primary bottleneck is the InfiniBand network connecting the two servers. Within a single server, the 8 H100 GPUs communicate over the ultra-high-bandwidth NVLink fabric (~900 GB/s). When you scale to a second server, the all-reduce collective communication for gradient synchronization must cross the inter-server link, which is typically InfiniBand NDR. This fabric has a bandwidth of ~50 GB/s (400 Gbps), representing an ~18x drop in bandwidth compared to NVLink. This 'scaling cliff' means the GPUs on one node spend most of their time waiting for gradients to arrive from the other node, causing the observed drop in utilization and efficiency.
+  common_mistake: |
+    **The Pitfall:** Underestimating the massive bandwidth gap between on-server interconnects and scale-out networking fabrics.
+    **The Rationale:** Assuming the network is "just slow" without quantifying the physical bandwidth cliff between NVLink and InfiniBand.
+    **The Consequence:** GPUs stall and efficiency plummets because they spend the majority of their time waiting for gradients to cross the inter-node bottleneck.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 175B parameters.
+       - Inter-node Link: InfiniBand NDR. Intra-node Link: NVLink.
+    2. **Calculations:**
+       - Gradient Size: 175B params in FP16 = 350GB.
+       - Intra-node Bandwidth: NVLink ~900 GB/s.
+       - Inter-node Bandwidth: InfiniBand NDR ~50 GB/s.
+       - Bandwidth Cliff: 900 / 50 = 18x slower across nodes.
+    3. **Conclusion & Interpretation:**
+       - **Result: Network-Bound Synchronization.** The 18x bandwidth cliff severely starves GPUs, dropping efficiency from 95% to 55%.
+  options:
+  - The PCIe Gen5 bus is saturated from transferring gradients between the CPU and the GPUs.
+  - The NVLink switch within each server is overloaded by the 8-GPU all-reduce traffic.
+  - The InfiniBand network bandwidth between servers is insufficient for inter-node gradient synchronization.
+  - The server's CPU is unable to schedule the RDMA (Remote Direct Memory Access) operations fast enough.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 6
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

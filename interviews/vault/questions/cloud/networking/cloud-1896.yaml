@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: cloud-1896
+track: cloud
+level: L4
+zone: diagnosis
+topic: collective-communication
+competency_area: networking
+bloom_level: analyze
+phase: both
+title: Root-Causing 400GbE Bottlenecks in Virtualized GPU Nodes
+scenario: You are debugging a multi-node distributed training run of a 70B parameter model across 16 cloud VMs. Each VM is equipped with 8x H100 GPUs and a 400Gbps ConnectX-7 NIC. While single-node NVLink bandwidth hits expected limits, cross-node All-Reduce throughput is bottlenecked at barely 45 Gbps. System metrics show that the host hypervisor's CPU cores are pinned at 100% utilization, while the VM's internal vCPU utilization remains low. The network team has verified that RoCEv2 (RDMA) is correctly configured at the physical Top-of-Rack switch level.
+question: What architectural misconfiguration is causing this massive throughput collapse and forcing high host CPU utilization?
+details:
+  realistic_solution: |
+    The VMs are provisioned with paravirtualized network interfaces (like virtio-net) which route all network traffic through a software vSwitch in the hypervisor. This breaks RDMA and forces the host CPU to process every packet. The solution is to enable Single Root I/O Virtualization (SR-IOV) on the host and assign Virtual Functions (VFs) directly to the VMs via PCIe passthrough. This allows RoCEv2 traffic and GPUDirect to bypass the hypervisor entirely, offloading data transfer directly to the physical NIC hardware.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing as a physical network congestion issue (e.g., PFC/ECN buffers) or PCIe bottleneck.
+    **The Rationale:** Candidates ignore the hypervisor CPU pinning, which explicitly points to software-based packet processing overhead rather than hardware congestion.
+    **The Consequence:** Wasting time tuning switch buffers while the actual issue—a paravirtualized network interface lacking SR-IOV—continues to choke RDMA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Link speed: 400 Gbps. MTU: 4096-byte.
+    - vSwitch processing capacity per thread: ~1-2 Mpps.
+
+    **Calculations:**
+    - Packet Rate for 400 Gbps: 400e9 / 8 / 4096 ≈ 12.2 million packets per second (Mpps).
+    - Max vSwitch throughput: 1.5 Mpps * 4096 * 8 = ~49 Gbps.
+
+    **Conclusion & Interpretation:**
+    - **Result: Software CPU Bottleneck**. A single VM interface queue pinned to one host vCPU thread hits a hard bottleneck at ~45 Gbps, severely underutilizing the 400 Gbps link.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: cloud-chain-376
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+created_at: '2026-03-24T01:09:21.260861'

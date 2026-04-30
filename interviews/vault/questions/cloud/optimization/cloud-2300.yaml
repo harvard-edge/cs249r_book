@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-2300
+track: cloud
+level: L5
+zone: diagnosis
+topic: pruning-sparsity
+competency_area: optimization
+bloom_level: evaluate
+phase: training
+title: Hopper FP8 MoE Latency Regression
+scenario: You are serving an 8x7B Mixture of Experts (MoE) LLM on an 8x H100 node. To increase throughput, you convert the model to FP8. Instead of the expected speedup, P99 TPOT degrades from 45ms to 62ms, and GPU utilization drops.
+question: Why did FP8 make MoE decoding slower, and how would you fix the routing and GEMM kernels?
+details:
+  realistic_solution: 'The root cause is unaligned Tensor Core operations. MoE tokens route dynamically, creating skewed, small token counts. Hopper FP8 requires strict alignment (multiples of 16) and a dynamic scaling factor (amax) reduction kernel. For tiny batches, launch overhead and unaligned GEMM fallback paths dominate compute time. Fix: Pad routed tensors to multiples of 16 and fuse amax into the routing kernel.'
+  common_mistake: |
+    **The Pitfall:** Assuming FP8 compute is inherently slower due to downcasting overhead.
+    **The Rationale:** Engineers revert to FP16 instead of investigating the kernel execution profile to find memory alignment issues.
+    **The Consequence:** Missing the 2x theoretical throughput of FP8 Tensor Cores.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - FP16 GEMM kernel time: ~3 µs.
+    - FP8 unaligned fallback + Amax: ~64 µs.
+    - 32 layers * 8 experts = 256 expert calls/step.
+
+    **Calculations:**
+    - FP8 extra overhead per call = 64 µs - 3 µs = 61 µs.
+    - Total step overhead = 256 * 61 µs = ~15.6 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Kernel-Launch-Bound (15.6ms overhead perfectly explains the 17ms TPOT regression).**
+  options:
+  - 'Hopper does not support FP8 for MoE because expert routing requires FP16 precision.'
+  - 'FP8 runs at double clock speed, causing thermal throttling.'
+  - 'Skewed token counts cause unaligned FP8 GEMMs and high amax overhead; fix is padding and fusion.'
+  - 'Memory bandwidth for FP8 scaling factors exceeds savings.'
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

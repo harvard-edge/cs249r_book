@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: tinyml-0481
+track: tinyml
+level: L3
+zone: fluency
+topic: mcu-compute-constraints
+competency_area: precision
+bloom_level: apply
+phase: inference
+title: The Silent Mic Failure
+scenario: You are a TinyML engineer tasked with deploying a keyword spotting model on a Cortex-M4 microcontroller with 256KB of SRAM. Your initial FP16 model achieves 95% accuracy on a development board. To meet the memory budget, you apply post-training static quantization to convert the entire model to INT8. After deployment, the model's accuracy on your validation set plummets to less than 10%. You diagnose the issue and find that the failures only occur with audio clips recorded at high volume; normal and quiet clips work correctly. When you attach a debugger, you observe that the activation values in the first convolutional layer are frequently clamped at the INT8 maximum value of 127 during these loud segments.
+question: Why do loud clips collapse an INT8 KWS model to under 10% accuracy after quiet-audio calibration?
+details:
+  realistic_solution: The root cause is an unrepresentative calibration dataset. Post-training static quantization determines the scaling factor from FP16 to INT8 by observing the range of activation values while running calibration data through the model. Because your calibration set lacked loud audio samples, the calculated dynamic range was too narrow. When the model encounters loud real-world audio, the FP16 activation values exceed this calibrated range. The quantization formula then maps these high values to integers far beyond 127, forcing them to be 'clipped' or 'saturated' at the maximum INT8 value. This massive information loss in the first layer corrupts all downstream calculations, leading to incorrect predictions. The solution is to re-calibrate using a more representative dataset that includes high-volume audio clips to capture the true activation range.
+  common_mistake: Engineers often blame the hardware (e.g., 'the microcontroller can't handle the math') or memory constraints ('the SRAM is overflowing'). While memory is a critical constraint in TinyML, the specific symptom of values clamping at 127 points directly to a data range problem, not a memory addressing or hardware fault. The issue is almost always in the software and data layer, specifically the data used to teach the model about the world.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Quiet calibration range: [-4.0, 4.0].
+    - INT8 range: [-128, 127] or similar (using 255 steps).
+    - True activation of loud clip: 10.0.
+
+    **Calculations:**
+    - Quantization scale factor (S): (4.0 - (-4.0)) / 255 ≈ 0.031.
+    - Quantized loud value: 10.0 / 0.031 ≈ 322.
+    - Clipped INT8 value: 127 (max allowed).
+    - De-quantized value: 127 * 0.031 ≈ 3.94.
+    - Error magnitude: 10.0 - 3.94 = 6.06.
+
+    **Conclusion & Interpretation:**
+    - **Result: >60% Error (Representation-Bound)**. The clipping completely destroys the signal for loud inputs, showing calibration data was unrepresentative.
+  options:
+  - The activation memory required by the loud inputs is overflowing the device's 256KB SRAM, causing data corruption.
+  - The Cortex-M4's instruction set is failing to correctly execute the quantized operations, leading to arithmetic errors on loud inputs.
+  - The calibration dataset was not representative of real-world audio levels, causing activation values to clip at the INT8 maximum of 127.
+  - The model architecture is numerically unstable, and the smaller bit-width of INT8 magnifies pre-existing training issues.
+  correct_index: 2
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 4
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

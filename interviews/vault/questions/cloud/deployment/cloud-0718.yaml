@@ -1,0 +1,53 @@
+schema_version: '1.0'
+id: cloud-0718
+track: cloud
+level: L5
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: evaluate
+phase: inference
+title: 'The Straggler Log Rotation'
+scenario: 'Your 512-GPU training job occasionally stalls for exactly 60 seconds. The hardware is healthy, no preemptions occurred, and the network is uncongested. You eventually trace the stall to a cron job running on the Linux host OS of a single node.'
+question: 'What is the cron job doing that halts the entire cluster?'
+details:
+  realistic_solution: 'The cron job runs `logrotate` on one node, which calls `sync()` or `fsync()` to flush log files to disk. If the logging volume is large, this can stall the filesystem I/O for up to 60 seconds, blocking the NCCL daemon''s progress thread on that node. Since AllReduce is a collective operation requiring all 512 GPUs to participate, the other 511 GPUs reach the synchronization barrier and wait. The entire cluster is held hostage by one node''s disk I/O. The fix: move log rotation to a separate filesystem, use async I/O, or schedule logrotate outside training windows.'
+  common_mistake: |
+    **The Pitfall:** Claiming "The cron job is using all the CPU cores, starving the data loader."
+    **The Rationale:** Candidates know CPU starvation causes slowdowns, but fail to realize a strict 60-second complete halt is a characteristic of synchronization deadlocks.
+    **The Consequence:** Misdiagnosing the root cause, leading to ineffective solutions (like tweaking CPU quotas) instead of fixing the I/O block.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 512 GPUs, 60-second stall per GPU.
+    - $4.00/hr per H100.
+    - 989 TFLOPS peak compute.
+
+    **Calculations:**
+    - Compute lost: 512 GPUs * 60s = 30,720 GPU-seconds (8.53 GPU-hours).
+    - Cost: 8.53 hours * $4.00 = ~$34 wasted per stall.
+    - Wasted compute: 8.53 hours * 3600 seconds/hour * 989 TFLOPS = ~30 ExaFLOPs.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~30 ExaFLOPs wasted (I/O-Bound)**. The global all-reduce barrier forces all 512 GPUs to idle due to a single node's I/O stall.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 14
+chains:
+  - id: cloud-chain-433
+    position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECTED
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+math_issues:
+  - 'Compute lost calculation is off by 1000x: 8.5 GPU-hours * 989 TFLOPS is ~30 ExaFLOPs, not 30 PetaFLOPs.'
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

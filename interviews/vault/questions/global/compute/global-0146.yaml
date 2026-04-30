@@ -1,0 +1,54 @@
+schema_version: '1.0'
+id: global-0146
+track: global
+level: L4
+zone: diagnosis
+topic: roofline-analysis
+competency_area: compute
+bloom_level: analyze
+phase: both
+title: The Multi-LoRA Throughput Cliff
+scenario: You serve a base LLaMA-3-8B model with 500 user-specific LoRA adapters on a single L40S GPU. When 32 concurrent requests hit the same user adapter, throughput is an excellent 1500 tokens/sec. However, when 32 requests hit 32 different user adapters in the same batch, throughput plummets to 200 tokens/sec, despite GPU SM utilization showing 100%.
+question: "Why does throughput collapse when a batch contains 32 different LoRA adapters despite 100% GPU utilization?"
+details:
+  realistic_solution: 'The bottleneck is the degradation of the compute-bound Batched GEMM into multiple memory-bound GEMVs. In multi-LoRA serving (like Punica), the base model weights are shared and execute as a highly efficient Batched GEMM (Matrix-Matrix multiplication). However, the LoRA specific weights (A and B matrices) must be applied individually per request. When 32 requests use the same LoRA, the LoRA application is also a Batched GEMM. When they use 32 different LoRAs, the operation fractures into 32 separate GEMV (Matrix-Vector) operations. GEMVs are heavily memory-bandwidth bound. The GPU spends all its time loading the different LoRA weights from HBM into SRAM rather than computing, completely starving the SMs of data.'
+  common_mistake: |
+    **The Pitfall:** Assuming the performance drop is due to swapping LoRA weights in and out of GPU VRAM from host memory.
+    **The Rationale:** Host transfers (PCIe) are notoriously slow, making them a common suspect for sudden latency spikes.
+    **The Consequence:** Focusing on CPU-GPU data transfers instead of optimizing kernel dispatch and memory bandwidth bounds.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - L40S Memory Bandwidth: 864 GB/s.
+    - 32 different LoRAs (Rank 32, hidden 4096, 2 bytes).
+    - 3ms/token target.
+    
+    **Calculations:**
+    - Size per LoRA layer = 2 * (4096 * 32) * 2 bytes = 524 KB.
+    - Total memory read per layer = 32 * 524 KB = 16.7 MB.
+    - Required bandwidth for 3ms = 16.7 MB / 3ms = 5.5 GB/s.
+    
+    **Conclusion & Interpretation:**
+    - **Result: GEMV Fracturing (Memory-Bandwidth Bound)**. While total bandwidth fits, launching 32 un-fused GEMV kernels drops arithmetic intensity from ~100 FLOPs/byte to 1 FLOP/byte, heavily bottlenecking the system and increasing latency by 5-10x.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: global-chain-032
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemm
+- memory-bandwidth

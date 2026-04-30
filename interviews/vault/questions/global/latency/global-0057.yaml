@@ -1,0 +1,50 @@
+schema_version: '1.0'
+id: global-0057
+track: global
+level: L4
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: analyze
+phase: both
+title: 'The CPU Overhead Anomaly'
+scenario: 'You deploy a 7B LLM using a serving framework configured with CUDA graphs to minimize latency. Production traffic consists of heavily mixed sequence lengths. Profiling reveals that average token generation latency has unexpectedly spiked from 45ms to 120ms, CPU utilization on the inference worker is pinned at 100%, and GPU SM utilization has plummeted to 25%.'
+question: 'What is causing the 7B LLM latency spike with mixed sequence lengths under CUDA graphs, and how would you fix it?'
+details:
+  realistic_solution: 'The symptom (100% CPU, low GPU utilization, high latency) points directly to graph recompilation and framework dispatch overhead. CUDA graphs require fixed memory addresses and grid dimensions. When input tensor shapes change dynamically (e.g., varying sequence lengths), the graph capture mechanism cannot replay the existing graph. Instead, the framework either falls back to eager mode dispatch (incurring high CPU overhead per operation) or, worse, triggers a full recompilation of the computation graph for the new shape. The solution requires hardware-compiler-algorithm co-design: Algorithmically bucket incoming requests into fixed sequence length buckets (e.g., 128, 256, 512, 1024), pad the inputs to match the bucket size, and compile a separate, static CUDA graph for each bucket at startup.'
+  common_mistake: |
+    **The Pitfall:** Assuming the GPU is compute-bound by the varying sequence lengths and attempting to optimize the attention kernel.
+    **The Rationale:** Seeing high latency and assuming the bottleneck is mathematical rather than dispatch overhead.
+    **The Consequence:** Rewriting perfectly healthy GPU kernels while the CPU continues to choke on graph recompilations.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Mixed sequence lengths trigger CUDA graph recompilations.
+    - Eager dispatch overhead: ~15µs/layer.
+    - Recompilation cost: ~200ms. Graph replay: ~10µs.
+
+    **Calculations:**
+    - Eager fallback: 32 layers * 6 ops * 15µs = 2.88ms per token.
+    - If 50% of requests trigger recompilation: (0.5 * 200ms) + (0.5 * 10µs) ≈ 100ms average overhead added per request.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~100ms overhead (CPU-Dispatch-Bound)**. Due to dynamic graph recompilation.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+chains:
+- id: global-chain-050
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

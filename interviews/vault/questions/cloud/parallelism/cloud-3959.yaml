@@ -1,0 +1,41 @@
+schema_version: '1.0'
+id: cloud-3959
+track: cloud
+level: L4
+zone: fluency
+topic: communication-computation-overlap
+competency_area: parallelism
+bloom_level: understand
+phase: both
+title: Overlapping Parameter Server Pull with Forward Computation
+scenario: In a parameter server architecture (used for recommendation models with large embedding tables), workers pull updated embeddings from PS before each forward pass. The pull takes 15ms for a 10GB embedding table.
+question: Can this parameter server pull be overlapped with the forward pass of non-embedding layers?
+details:
+  realistic_solution: 'Partial overlap: (1) The model has two parts: embedding layer (needs PS pull) and MLP tower (needs embedding output). These are sequential — MLP depends on embedding. (2) However, if the model has multiple embedding tables (user embeddings, item embeddings, context embeddings), they can be pulled in parallel AND each embedding''s forward pass can start as soon as its pull completes, before other embeddings are ready. (3) Multi-table overlap: pull(user_emb) || pull(item_emb) || pull(context_emb). As user_emb arrives, start user feature processing while item_emb is still pulling. (4) Additional: overlap this step''s PS pull with the previous step''s PS push (gradient update). Two-phase PS protocol: push(step N gradients) || pull(step N+1 params).'
+  common_mistake: |
+    **The Pitfall:** Waiting for all embeddings to be pulled before starting any forward computation.
+    **The Rationale:** Engineers assume the entire model is strictly sequential, ignoring that parallel embedding lookups have independent paths into the MLP tower.
+    **The Consequence:** Leaving the compute resources idle while network I/O completes, drastically reducing throughput.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 3 embedding tables: 5 GB, 3 GB, 2 GB at 10 Gbps network.
+    2. **Calculations:**
+       - Sequential pull time: (5 + 3 + 2) GB / 1.25 GB/s = 8 seconds.
+       - Parallel pull with 10 PS shards: 5 GB / 12.5 GB/s = 0.4 seconds (limited by largest table).
+    3. **Conclusion & Interpretation:**
+       - **Result: I/O Overlapped. Overlapping pulls with subsequent MLP computation hides the latency of the smaller tables, dramatically improving throughput.**
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 8
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: UNCHECKED
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

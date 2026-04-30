@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-4546
+track: cloud
+level: L6+
+zone: optimization
+topic: queueing-theory
+competency_area: latency
+bloom_level: create
+phase: both
+title: Continuous Batching for LLM Queue Optimization
+scenario: 'An LLM service already uses continuous batching but suffers from prefix-cache collisions (50% of requests share a 4k-token system prompt and the cache evicts the shared prefix unpredictably) AND a chunked-prefill design decision.'
+question: 'Design a scheduling policy that handles prefix-cache collisions via reference-counted block sharing and chunked prefill, and identify the threshold where chunking pays off.'
+details:
+  realistic_solution: 'Implement PagedAttention with reference-counted prefix sharing to lock the 4k system prompt in the KV cache, preventing unpredictable evictions. For scheduling, use chunked prefill: instead of processing the entire 4k prefill atomically, split it into smaller chunks (e.g., 512 tokens). Interleave these prefill chunks with the decode steps of active requests. This converts a massive 100ms prefill latency spike into smaller ~12ms increments, slightly increasing average inter-token latency but completely eliminating the tail latency spike for ongoing generations.'
+  common_mistake: |
+    **The Pitfall:** Assuming that prefill must be atomic to maximize GPU saturation.
+    **The Rationale:** Candidates focus purely on prefill throughput without considering the tail latency of ongoing requests.
+    **The Consequence:** A new request forces existing decodes to wait, creating a severe head-of-line blocking spike that destroys P99 inter-token latency.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Shared prefix: 4k tokens.
+       - Atomic prefill latency: 100 ms per 4k tokens.
+       - Chunk size: 512 tokens.
+    2. **Calculations:**
+       - Chunks needed = 4096 / 512 = 8 chunks.
+       - Latency per chunk = 100 ms / 8 = 12.5 ms.
+    3. **Conclusion & Interpretation:** **Result: Latency-Bound (Tail)**. Interleaving 12.5 ms chunks increases average decode latency slightly but completely eliminates the severe 100 ms tail latency spike for active decodes caused by head-of-line blocking.
+status: draft
+provenance: llm-draft
+expected_time_minutes: 10
+requires_explanation: true
+validated: false
+math_verified: false
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
+tags:
+- gemini-generated
+- target-optimization-L6+
+created_at: '2026-04-25'

@@ -1,0 +1,47 @@
+schema_version: '1.0'
+id: cloud-2939
+track: cloud
+level: L6+
+zone: mastery
+topic: container-orchestration
+competency_area: deployment
+bloom_level: create
+phase: inference
+title: 'Mastery: Designing a Zero-Downtime GPU Cluster Upgrade Strategy'
+scenario: 'You must upgrade the NVIDIA GPU driver from 525 to 550 on a production 512-GPU H100 cluster (64 nodes, 8 GPUs each) running 24/7 ML inference and batch training workloads. The cluster cannot tolerate more than 5 minutes of total inference downtime and cannot lose training job progress.'
+question: 'How would you roll out the NVIDIA 525-to-550 driver upgrade across 64 H100 nodes without >5 minutes inference downtime or lost training progress?'
+details:
+  realistic_solution: |
+    Strategy: (1) Cordon and drain one node at a time using `kubectl drain --grace-period=300 --ignore-daemonsets`. (2) Inference pods: use PodDisruptionBudget with `minAvailable: 90%` to ensure 90% of inference capacity remains during drain. With 64 nodes, draining 1 node at a time leaves 63/64 = 98% capacity. (3) Training pods: configure elastic training (`torchrun` with fault tolerance) or checkpoint-and-preempt: save checkpoint, evict, relaunch on upgraded node. (4) Upgrade driver via GPU Operator's `ClusterPolicy` with rolling update strategy — set `maxUnavailable: 1` on the driver DaemonSet. (5) Validate each node: run `nvidia-smi` + NCCL bandwidth test before uncordoning. (6) Rollback: maintain previous driver image tag in GPU Operator config; redeploy DaemonSet with old tag if error rate increases.
+  common_mistake: |
+    **The Pitfall:** Cordoning all nodes at once or assuming driver upgrades are a hot-swap.
+    **The Rationale:** GPU driver upgrades require a kernel module reload, which strictly necessitates a node reboot and full pod eviction.
+    **The Consequence:** The entire cluster experiences a hard outage, violating the 5-minute maximum downtime SLA.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Time per Node: Drain (3m) + Reboot (5m) + Validate (2m) = 10 minutes.
+    - Inference Capacity: Rolling 1 node at a time maintains 63/64 = 98.4% capacity.
+
+    **Calculations:**
+    - Total Window: 64 nodes * 10 min = 640 min = 10.7 hours total upgrade window.
+    - Training Impact: 12.5% throughput reduction briefly per job.
+
+    **Conclusion & Interpretation:**
+    - **Result: 10.7 hours (Availability-Bound)**. Using DaemonSets and PodDisruptionBudgets ensures zero lost training progress and keeps inference capacity above 98%.
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: claude-sonnet-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
