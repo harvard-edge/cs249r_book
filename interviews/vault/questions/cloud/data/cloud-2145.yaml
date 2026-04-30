@@ -1,0 +1,88 @@
+schema_version: '1.0'
+id: cloud-2145
+track: cloud
+level: L6+
+zone: mastery
+topic: feature-store-management
+competency_area: data
+bloom_level: create
+phase: both
+title: The Embedding Serving at 10M QPS
+scenario: You need to serve embedding lookups for a search system at 10 million queries
+  per second. Each query requires lookups from 5 embedding tables, each with 1 billion
+  rows and 256-dimensional FP16 embeddings. Total embedding size is 2.56 TB. The P99
+  latency SLA for the embedding lookup service is 5ms.
+question: How would you design a 5ms-P99 embedding lookup service for 10M QPS over
+  2.56TB of embeddings?
+details:
+  realistic_solution: '**Architecture: Distributed embedding serving with hot-tier
+    caching.** **(1) Storage tier analysis:** 2.56 TB total. Power-law access: top
+    0.1% of rows (1M per table = 5M total) serve 80% of queries = ~2.56 GB hot tier.
+    Top 5% (50M per table = 250M total) serve 99% of queries = ~128 GB warm tier.
+    **(2) Hot tier (L1 — in-process memory):** Top 5M embeddings (2.56 GB) cached
+    in each serving node''s RAM. Latency: ~0.1ms. Handles 80% of lookups. **(3) Warm
+    tier (L2 — distributed cache):** Top 250M embeddings (128 GB) distributed across
+    a memcached/Redis cluster. Latency: ~1ms. Handles 19% of lookups. **(4) Cold tier
+    (L3 — SSD-backed store):** Full 2.56 TB on NVMe SSDs across a distributed KV store
+    (RocksDB/Cassandra). Latency: ~3ms. Handles 1% of lookups. **(5) Expected P99:**
+    With 80/19/1 hit rates: P99 ≈ max of cold-tier path = 3ms + 1ms network = 4ms
+    < 5ms SLA. **(6) Capacity planning:** At 10M QPS, each serving node handles ~50K
+    QPS (limited by network bandwidth). Need 10M/50K = 200 serving nodes. Each node
+    has 32 GB RAM (hot cache + headroom), 4-core CPU, 10 Gbps NIC. Warm tier: 16-node
+    Redis cluster (8 GB each). Cold tier: 32-node SSD cluster. **(7) Consistency:**
+    Embeddings update weekly via batch retraining. Cache invalidation via versioned
+    keys — deploy new version, warm caches, swap traffic.'
+  common_mistake: '**The Pitfall:** Trying to serve 2.56 TB of embeddings directly
+    from GPU HBM to meet latency requirements.
+
+    **The Rationale:** Candidates focus on the sub-millisecond latency requirement
+    and default to GPU memory, failing to recognize this is a distributed systems
+    throughput problem.
+
+    **The Consequence:** An infeasible or astronomically expensive design that ignores
+    the need for a tiered caching architecture.
+
+    '
+  napkin_math: "1. **Assumptions & Constraints:**\n   - 10M QPS, 5 lookups/query,\
+    \ 256-dim FP16 (512 bytes).\n   - Total embedding size: 2.56 TB. P99 SLA: 5ms.\n\
+    2. **Calculations:**\n   - Aggregate Read Bandwidth: 10M QPS * 5 lookups * 512\
+    \ bytes = 25.6 GB/s.\n   - L1 hit rate (80%): Serves 20.5 GB/s from local RAM.\
+    \ Distributed across 200 nodes = ~100 MB/s per node.\n   - L2 hit rate (19%):\
+    \ Serves 4.9 GB/s across 16 Redis nodes = ~306 MB/s per node.\n   - L3 hit rate\
+    \ (1%): Serves 256 MB/s across 32 SSD nodes = ~8 MB/s per node.\n   - Serving\
+    \ fleet cost: 200 nodes * $0.50/hr = $100/hr = $876K/yr.\n3. **Conclusion & Interpretation:**\n\
+    \   - **Result: Feasible Architecture. 5ms P99 SLA is achievable since 99% of\
+    \ lookups hit L1/L2 (< 1ms).**\n"
+  options:
+  - 'Use a 3-tier architecture: in-process hot cache (top 0.1% rows, ~2.56 GB, <0.1ms),
+    distributed warm cache (top 5% rows, ~128 GB Redis, ~1ms), and SSD-backed cold
+    store (full 2.56 TB, ~3ms); the 80/19/1 hit-rate split achieves P99 < 5ms across
+    200 serving nodes'
+  - Serve all 2.56 TB from GPU HBM across 32 A100s (80 GB each) for sub-millisecond
+    latency; GPU memory bandwidth of 2 TB/s can handle the 25.6 GB/s aggregate read
+    load easily
+  - Shard the 2.56 TB across 256 Redis nodes (10 GB each) with consistent hashing;
+    Redis provides ~0.5ms P99 per lookup, meeting the 5ms SLA without any tiered caching
+  - Use a single large NVMe SSD array with 2.56 TB capacity and SPDK for kernel-bypass
+    reads at ~10 microseconds per lookup, far exceeding the 5ms SLA requirement
+  correct_index: 0
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 20
+chains:
+- id: cloud-chain-455
+  position: 1
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
