@@ -1505,12 +1505,15 @@ class ModuleWorkflowCommand(BaseCommand):
         self.console.print(status_table)
         self.console.print()
 
-        # Milestones section (if any are unlocked)
+        # Milestones section (if any are unlocked or ready)
+        # Show every milestone with state — slicing to the first few hid later
+        # milestones once early ones were unlocked (issue #1615), so students
+        # never saw that milestones 04+ were ready to be unlocked.
         if completed_count >= 1:
             milestone_unlocks = self._check_milestone_readiness(completed)
             if milestone_unlocks:
                 self.console.print("[bold magenta]🏆 Milestones Unlocked:[/bold magenta]")
-                for milestone_id, milestone_name, ready in milestone_unlocks[:3]:  # Show first 3
+                for milestone_id, milestone_name, ready in milestone_unlocks:
                     if ready == "unlocked":
                         self.console.print(f"  [magenta]✅ {milestone_id} - {milestone_name}[/magenta]")
                     elif ready == "ready":
