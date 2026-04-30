@@ -21,6 +21,19 @@ Usage:
     python3 build_chains_with_gemini.py --bucket cloud:kv-cache  # one bucket
     python3 build_chains_with_gemini.py --all            # full corpus
     python3 build_chains_with_gemini.py --output proposed_chains.json --all
+
+Modes:
+    --mode strict (default): Δ ∈ {1, 2} between consecutive members. This is
+        the cleanest pedagogical shape and what we want for primary chains.
+    --mode lenient: Δ ∈ {0, 1, 2, 3}. Δ=0 only allowed when both members
+        share a scenario thread. Used for second-pass coverage on buckets
+        the strict pass missed; resulting chains are tagged tier=secondary.
+
+Bucket scoping:
+    --buckets-from <chain-coverage.json>: limit the run to the
+        ``uncovered_buckets`` list in a coverage report (output of
+        diagnose_chain_coverage.py). Use with --mode lenient for the
+        Phase 1.4 second-pass sweep.
 """
 
 from __future__ import annotations
@@ -119,7 +132,7 @@ def plan_batches(buckets: dict[tuple[str, str], list[str]],
     return batches
 
 
-PROMPT_TEMPLATE = """You are an expert ML systems educator helping curate pedagogical chains
+STRICT_PROMPT_TEMPLATE = """You are an expert ML systems educator helping curate pedagogical chains
 of interview questions. A "chain" is a sequence of 2-6 questions within a
 SINGLE topic that progress through Bloom levels (L1 → L2 → ... up to L6+),
 where each question naturally builds on its predecessor — same scenario or
@@ -192,8 +205,106 @@ INPUT (buckets to process):
 """
 
 
+# Lenient prompt for the second-pass coverage sweep (Phase 1.4 of
+# CHAIN_ROADMAP.md). Same structural envelope as STRICT, but with relaxed
+# Δ rules so we can wring at least one chain out of buckets the strict pass
+# rejected. Chains produced under this prompt are tagged tier=secondary.
+LENIENT_PROMPT_TEMPLATE = """You are an expert ML systems educator helping curate pedagogical chains
+of interview questions. A "chain" is a sequence of 2-6 questions within a
+SINGLE topic that progress through Bloom levels (L1 → L2 → ... up to L6+),
+where each question naturally builds on its predecessor — same scenario or
+concept, increasing in cognitive demand.
+
+You will be given several BUCKETS, each containing all published questions
+for one (track, topic) pair. These are buckets a stricter first pass was
+unable to chain — your job is to find at least one coherent progression
+per bucket if any pedagogical clustering exists at all. Only return zero
+chains for a bucket when its questions are genuinely unrelated even on
+the loosest reading.
+
+LEVEL PROGRESSION RULES (LENIENT MODE):
+  - Each consecutive pair of members satisfies: cand_level - prev_level ∈ {{0, 1, 2, 3}}
+  - STRONGLY PREFER strict +1 progression where it exists
+  - +2 jumps acceptable when no Δ=1 candidate is available
+  - +3 jumps allowed only when no smaller intermediate exists in the bucket
+  - Δ=0 (same-level pair) IS allowed when both questions clearly share the
+    same scenario thread but explore different angles of it (e.g.,
+    diagnosis vs design at the same Bloom level on the same setup,
+    debugging vs root-causing the same failure). Do NOT use Δ=0 for
+    same-level questions that just happen to share a topic.
+  - REJECT any backward step (Δ < 0)
+
+OTHER CONSTRAINTS:
+  - 2 ≤ chain size ≤ 6 members
+  - All members from the SAME (track, topic) bucket
+  - A question MAY appear in UP TO 2 different chains if and only if:
+      (a) The question is L1 or L2 (a foundational anchor)
+      (b) The two chains diverge into genuinely distinct sub-progressions
+          AFTER this anchor — not the same arc viewed twice
+      (c) Each chain is individually coherent and pedagogically valuable
+    Default to 1 chain per question; multi-membership is the exception.
+  - Prefer chains where Q[i+1] genuinely builds on Q[i] (shared scenario,
+    sequential reasoning) over loosely related same-topic questions
+  - Quality still matters — but err on the side of producing at least one
+    chain per bucket rather than rejecting the bucket entirely
+
+GAP DETECTION (free signal — emit alongside chains):
+For each bucket, also identify "missing-rung" gaps: pedagogical arcs that
+WOULD form a clean strict +1 chain if the bucket had a question at a
+specific Bloom level it currently lacks. Example: bucket has L1, L3, L5
+on the same scenario thread → propose a missing-L2 and missing-L4
+question that would link them. These gaps drive future authoring; we
+don't act on them in this pass.
+
+Return STRICT JSON in this exact shape, no prose:
+{{
+  "buckets": [
+    {{
+      "track": "<track>",
+      "topic": "<topic>",
+      "chains": [
+        {{
+          "questions": ["<qid1>", "<qid2>", ...],
+          "rationale": "<one sentence — what does this chain teach?>"
+        }}
+      ],
+      "gaps": [
+        {{
+          "missing_level": "L<N>",
+          "between": ["<qid_lower>", "<qid_higher>"],
+          "rationale": "<what concept the missing question should cover to bridge these two>"
+        }}
+      ]
+    }}
+  ]
+}}
+
+INPUT (buckets to process):
+{buckets_json}
+"""
+
+
+# Map mode -> prompt template + accepted Δ set. Single source of truth so
+# build_prompt and validate_chain stay in lockstep when modes are added.
+MODE_CONFIG = {
+    "strict": {
+        "prompt_template": STRICT_PROMPT_TEMPLATE,
+        "allowed_deltas": frozenset({1, 2}),
+    },
+    "lenient": {
+        "prompt_template": LENIENT_PROMPT_TEMPLATE,
+        "allowed_deltas": frozenset({0, 1, 2, 3}),
+    },
+}
+
+# Backwards-compatible alias for any external readers — strict was the
+# original (and only) prompt before Phase 1.2.
+PROMPT_TEMPLATE = STRICT_PROMPT_TEMPLATE
+
+
 def build_prompt(batch: list[tuple[tuple[str, str], list[str]]],
-                 corpus: dict[str, dict]) -> str:
+                 corpus: dict[str, dict],
+                 mode: str = "strict") -> str:
     payload = []
     for (track, topic), qids in batch:
         payload.append({
@@ -201,7 +312,8 @@ def build_prompt(batch: list[tuple[tuple[str, str], list[str]]],
             "topic": topic,
             "questions": [question_payload(corpus, qid) for qid in qids],
         })
-    return PROMPT_TEMPLATE.format(buckets_json=json.dumps(payload, indent=2))
+    template = MODE_CONFIG[mode]["prompt_template"]
+    return template.format(buckets_json=json.dumps(payload, indent=2))
 
 
 def call_gemini(prompt: str, model: str = GEMINI_MODEL, timeout: int = 600) -> dict | None:
@@ -241,7 +353,24 @@ def call_gemini(prompt: str, model: str = GEMINI_MODEL, timeout: int = 600) -> d
         return None
 
 
-def validate_chain(chain: dict, bucket_qids: set[str], corpus: dict[str, dict]) -> tuple[bool, str]:
+def validate_chain(
+    chain: dict,
+    bucket_qids: set[str],
+    corpus: dict[str, dict],
+    mode: str = "strict",
+) -> tuple[bool, str]:
+    """Structural validation of a Gemini-proposed chain.
+
+    Δ-rule depends on mode:
+      strict  → Δ ∈ {1, 2}        (clean +1 progression, +2 if no intermediate)
+      lenient → Δ ∈ {0, 1, 2, 3}  (Δ=0 only meaningful for shared-scenario pairs;
+                                   Δ=3 last-resort when no smaller rung exists)
+    Both modes reject backward steps and require the chain to be single-topic.
+    """
+    if mode not in MODE_CONFIG:
+        return False, f"unknown mode {mode!r}"
+    allowed_deltas = MODE_CONFIG[mode]["allowed_deltas"]
+
     qs = chain.get("questions", [])
     if len(qs) < 2 or len(qs) > 6:
         return False, f"size {len(qs)} out of [2, 6]"
@@ -257,12 +386,13 @@ def validate_chain(chain: dict, bucket_qids: set[str], corpus: dict[str, dict]) 
         d = corpus[qid]
         levels.append(LEVEL_RANK.get(d.get("level"), 0))
         topics.add(d.get("topic"))
-    # Strict-progression rule: consecutive Δ must be 1 or 2 (no 0, no negative,
-    # no ≥3). This is the structural promise the prompt asks for.
     deltas = [levels[i+1] - levels[i] for i in range(len(levels)-1)]
-    bad_deltas = [d for d in deltas if d not in (1, 2)]
+    bad_deltas = [d for d in deltas if d not in allowed_deltas]
     if bad_deltas:
-        return False, f"levels {levels} have Δ={deltas} (need each Δ ∈ {{1, 2}})"
+        return False, (
+            f"levels {levels} have Δ={deltas} "
+            f"(need each Δ ∈ {sorted(allowed_deltas)} under mode={mode!r})"
+        )
     if len(topics) != 1:
         return False, f"multi-topic: {topics}"
     return True, ""
@@ -270,12 +400,18 @@ def validate_chain(chain: dict, bucket_qids: set[str], corpus: dict[str, dict]) 
 
 def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
                   corpus: dict[str, dict],
-                  call_idx: int) -> tuple[list[dict], list[dict]]:
-    """Call Gemini on this batch. Returns (validated_chains, raw_gaps)."""
-    prompt = build_prompt(batch, corpus)
+                  call_idx: int,
+                  mode: str = "strict") -> tuple[list[dict], list[dict]]:
+    """Call Gemini on this batch. Returns (validated_chains, raw_gaps).
+
+    In lenient mode, accepted chains carry tier="secondary"; strict-mode
+    chains are emitted without a tier field (primary tagging is backfilled
+    in the merge step — see merge_chain_passes.py / Phase 1.5).
+    """
+    prompt = build_prompt(batch, corpus, mode=mode)
     n_questions = sum(len(qids) for _, qids in batch)
     print(f"  [call {call_idx}] {len(batch)} buckets, {n_questions} questions, "
-          f"{len(prompt)//1000}K char prompt")
+          f"{len(prompt)//1000}K char prompt (mode={mode})")
     response = call_gemini(prompt)
     if response is None:
         print(f"  [call {call_idx}] no response")
@@ -284,6 +420,7 @@ def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
     out_chains: list[dict] = []
     out_gaps: list[dict] = []
     chain_seq = 0
+    chain_id_suffix = "-secondary" if mode == "lenient" else ""
     for bucket_resp in response.get("buckets", []):
         track = bucket_resp.get("track")
         topic = bucket_resp.get("topic")
@@ -295,13 +432,13 @@ def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
             print(f"  [call {call_idx}] response references unknown bucket ({track},{topic})")
             continue
         for ch in bucket_resp.get("chains", []):
-            ok, why = validate_chain(ch, bucket_qids, corpus)
+            ok, why = validate_chain(ch, bucket_qids, corpus, mode=mode)
             if not ok:
                 print(f"  [call {call_idx}] dropped invalid chain in {track}/{topic}: {why}")
                 continue
             chain_seq += 1
-            chain_id = f"{track}-chain-auto-{call_idx:03d}-{chain_seq:02d}"
-            out_chains.append({
+            chain_id = f"{track}-chain-auto{chain_id_suffix}-{call_idx:03d}-{chain_seq:02d}"
+            entry = {
                 "chain_id": chain_id,
                 "track": track,
                 "topic": topic,
@@ -318,7 +455,10 @@ def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
                 ],
                 "rationale": ch.get("rationale", ""),
                 "_origin": "gemini-3.1-pro-preview",
-            })
+            }
+            if mode == "lenient":
+                entry["tier"] = "secondary"
+            out_chains.append(entry)
         # Capture gap recommendations as-is (not validated structurally —
         # they describe questions that DON'T exist yet). We store them for
         # a follow-up authoring pass.
@@ -338,12 +478,36 @@ def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
     return out_chains, out_gaps
 
 
+def load_buckets_filter(path: Path) -> list[tuple[str, str]]:
+    """Read uncovered_buckets from a chain-coverage.json report.
+
+    Output of diagnose_chain_coverage.py — we use the ``uncovered_buckets``
+    array (≥3 questions, 0 chains) as the input set for Phase 1.4.
+    """
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    rows = data.get("uncovered_buckets") or []
+    return [(b["track"], b["topic"]) for b in rows]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--all", action="store_true", help="Process every bucket")
     ap.add_argument("--bucket", help="Process one bucket: <track>:<topic>")
+    ap.add_argument(
+        "--buckets-from",
+        type=Path,
+        help="Restrict to uncovered_buckets in a chain-coverage.json report "
+             "(output of diagnose_chain_coverage.py). Pair with --mode lenient.",
+    )
     ap.add_argument("--dry-run", action="store_true", help="Show plan, don't call Gemini")
     ap.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    ap.add_argument(
+        "--mode",
+        choices=sorted(MODE_CONFIG.keys()),
+        default="strict",
+        help="strict (default): Δ ∈ {1,2}; lenient: Δ ∈ {0,1,2,3}, "
+             "tags chains tier=secondary",
+    )
     ap.add_argument("--max-calls", type=int, default=200,
                     help="Daily cap (Gemini Pro is 250 calls/day; reserve some buffer)")
     args = ap.parse_args()
@@ -351,6 +515,13 @@ def main() -> int:
     corpus = load_corpus()
     buckets = bucket_corpus(corpus)
     print(f"corpus: {len(corpus)} published questions in {len(buckets)} (track, topic) buckets")
+    print(f"mode: {args.mode}")
+
+    selectors = [bool(args.all), bool(args.bucket), bool(args.buckets_from)]
+    if sum(selectors) > 1:
+        ap.error("--all, --bucket, and --buckets-from are mutually exclusive")
+    if not any(selectors):
+        ap.error("specify --all, --bucket <track>:<topic>, or --buckets-from <path>")
 
     if args.bucket:
         track, topic = args.bucket.split(":", 1)
@@ -358,9 +529,15 @@ def main() -> int:
             print(f"unknown bucket: {args.bucket}")
             return 1
         buckets = {(track, topic): buckets[(track, topic)]}
-
-    if not args.all and not args.bucket:
-        ap.error("specify --all or --bucket <track>:<topic>")
+    elif args.buckets_from:
+        wanted = load_buckets_filter(args.buckets_from)
+        missing = [b for b in wanted if b not in buckets]
+        if missing:
+            print(f"WARNING: {len(missing)} buckets in coverage report not found in corpus "
+                  f"(skipping): {missing[:3]}{'...' if len(missing) > 3 else ''}")
+        buckets = {b: buckets[b] for b in wanted if b in buckets}
+        print(f"buckets-from filter: {len(buckets)} buckets selected from "
+              f"{args.buckets_from.name}")
 
     batches = plan_batches(buckets, corpus)
     sizes = [sum(len(qids) for _, qids in b) for b in batches]
@@ -383,7 +560,7 @@ def main() -> int:
     for i, batch in enumerate(batches, start=1):
         if i > 1:
             time.sleep(inter_call_delay_s)
-        chains, gaps = process_batch(batch, corpus, i)
+        chains, gaps = process_batch(batch, corpus, i, mode=args.mode)
         all_chains.extend(chains)
         all_gaps.extend(gaps)
         Path(args.output).write_text(json.dumps(all_chains, indent=2) + "\n")
