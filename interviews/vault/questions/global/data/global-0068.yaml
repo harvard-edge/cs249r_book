@@ -1,0 +1,49 @@
+schema_version: '1.0'
+id: global-0068
+track: global
+level: L6+
+zone: mastery
+topic: data-pipeline-engineering
+competency_area: data
+bloom_level: create
+phase: training
+title: Multi-PB Distributed Streaming Dataloader
+scenario: You are designing a streaming data loader for a 16,384 GPU cluster training on a 20 PB multimodal dataset stored in S3. Each GPU processes 50 MB/s of data. You must ensure global data shuffling every epoch without downloading the 20 PB to local NVMe drives.
+question: "How would you design the streaming data loader to globally shuffle 20 PB from S3 at 819 GB/s without local NVMe?"
+details:
+  realistic_solution: 'Implement a two-tiered hierarchical shuffle to trade perfect theoretical randomness for high-throughput IO. Step 1 (Offline): Pack the dataset into 256 MB coarse-grained chunks (tar/TFRecord files) stored sequentially in S3. Step 2 (Online/Coordinator): A central CPU coordinator maintains a globally shuffled list of chunk IDs and assigns them dynamically to GPU nodes using a work-stealing queue to prevent stragglers. Step 3 (Node-local): Each node''s CPU fetches assigned chunks via streaming GETs, maintaining a local memory buffer of fetched chunks. A background thread performs a fine-grained reservoir shuffle within this local buffer before yielding batches to the GPU. This minimizes S3 API calls, entirely hides the 80ms latency via large sequential reads, and provides pseudo-global randomness that has been empirically shown to maintain model convergence quality.'
+  common_mistake: |
+    **The Pitfall:** Attempting true global random sampling by having each GPU request individual items directly from S3.
+    **The Rationale:** Standard PyTorch dataloaders assume fast random access to local NVMe drives.
+    **The Consequence:** Generating billions of small GET requests, instantly rate-limiting S3 and tanking cluster throughput to near zero.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - 16,384 GPUs, each processing 50 MB/s.
+       - 20 PB dataset in S3 (~80ms TTFB).
+       - No local NVMe storage allowed.
+    2. **Calculations:**
+       - Global throughput: 16,384 GPUs * 50 MB/s = 819,200 MB/s (~819 GB/s).
+       - Chunk size: 256 MB.
+       - S3 Requests: 819,200 MB/s / 256 MB = 3,200 GETs/sec.
+       - S3 Limits: 5,500 GETs per prefix per sec. Using 16 prefixes yields 88,000 GETs/sec capacity.
+       - Local Buffer for 200s: 50 MB/s * 200s = 10 GB RAM per GPU.
+    3. **Conclusion & Interpretation:**
+       - **Streaming 256MB chunks handles the 819 GB/s throughput while respecting S3 limits and buffering in RAM.**
+       - **Result: Network-IO Bound**
+status: published
+provenance: imported
+requires_explanation: true
+expected_time_minutes: 22
+validated: true
+validation_status: OK
+validation_date: '2026-04-01'
+validation_model: gemini-2.5-flash
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

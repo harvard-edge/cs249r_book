@@ -1,0 +1,42 @@
+schema_version: '1.0'
+id: cloud-4220
+track: cloud
+level: L4
+zone: optimization
+topic: storage-format-selection
+competency_area: data
+bloom_level: analyze
+phase: both
+title: Parquet Row Group Sizing for ML Training
+scenario: Your Parquet files use the default 128 MB row group size. Training on an 8× H100 cluster reads 50 columns out of 2,000 (2.5% column selectivity). Each worker processes one row group at a time. You notice that workers spend 60% of time waiting for I/O despite S3 bandwidth being underutilized.
+question: What's wrong with the row group size, and what should it be to fix the I/O bottleneck?
+details:
+  realistic_solution: 'Parquet reads entire column chunks within a row group. With 128 MB row groups and 2,000 columns, each column chunk is ~64 KB. Reading 50 columns = 3.2 MB useful data per 128 MB row group. But the I/O pattern matters: Parquet issues separate S3 GET requests per column chunk (or coalesces nearby chunks). 50 column chunks × separate GET requests = 50 S3 round trips per row group (each ~20ms) = 1 second per row group in metadata + request overhead. Fix: reduce row group size to 8-16 MB. At 8 MB: each column chunk is ~4 KB, 50 columns = 200 KB per row group. More row groups but each is fast. Or: use Parquet''s column chunk coalescing (read contiguous byte ranges) with columns sorted by access frequency. Best: switch to Lance or Arrow IPC formats that support vectorized I/O for high column selectivity workloads.'
+  common_mistake: |
+    **The Pitfall:** Increasing row group size to reduce S3 GET requests.
+    **The Rationale:** Candidates know that larger files are generally better for S3 throughput, applying this logic blindly to row groups without considering column selectivity.
+    **The Consequence:** I/O bottleneck worsens because each request fetches massive amounts of unused column data, further starving the H100s.
+  napkin_math: |
+    *   **Useful data per row group:** 128 MB × 2.5% = 3.2 MB.
+    *   **Wasted I/O:** 97.5% of the read.
+    *   **S3 GETs per row group:** 50 columns × 20ms latency = 1s overhead per row group.
+    *   **Impact:** A worker reading 9,750 row groups spends ~2.7 hours just waiting on S3 GET metadata overhead.
+    *   **Fix at 16 MB row groups:** Coalescing reads reduces S3 requests to ~3 per group (60ms).
+    *   **Result:** Row groups are too large for sparse column reads; they should be reduced to **8-16 MB**, or columns pre-filtered.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null

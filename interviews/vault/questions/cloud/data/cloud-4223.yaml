@@ -1,0 +1,48 @@
+schema_version: '1.0'
+id: cloud-4223
+track: cloud
+level: L4
+zone: optimization
+topic: storage-format-selection
+competency_area: data
+bloom_level: apply
+phase: both
+title: Tokenized Dataset Storage Format
+scenario: 'You''re pre-tokenizing a 10 TB text corpus (200B tokens) for LLM training. Each token is a uint16 (50K vocab). The tokenized output will be read thousands of times during training.'
+question: 'Which token storage format—Parquet, raw memmap, or Arrow IPC—best optimizes 200B-token LLM training on 8x H100s?'
+details:
+  realistic_solution: 'For pre-tokenized LLM data, raw binary (numpy memmap) wins. The data is a single column of fixed-width uint16 values with no schema complexity. Memmap: zero deserialization, direct memory access, perfect sequential read patterns. File size: 200B × 2 bytes = 400 GB. With memmap, the OS page cache handles caching — repeated epochs hit warm pages. No compression because: (1) uint16 tokens have high entropy (50K vocab, roughly uniform), compressing poorly (~0.85× ratio); (2) decompression burns CPU cycles that add latency without meaningful size reduction. Parquet overhead: row group metadata, column chunk headers, Thrift encoding for each row group = 5-10% overhead for zero benefit on a single-column uint16 dataset. Arrow IPC: reasonable middle ground — flat binary with schema metadata, supports memory mapping. Slight overhead for the schema header but negligible at scale.'
+  common_mistake: |
+    **The Pitfall:** Using Parquet simply because "it's the industry standard for data."
+    **The Rationale:** Data engineers default to columnar formats with compression for all large datasets.
+    **The Consequence:** Introducing row group metadata overhead and CPU decompression latency for a single-column, fixed-width dataset that compresses poorly, slowing down high-throughput training.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Raw binary: 200B tokens * 2 bytes = 400 GB.
+    - NVMe Read speed: 7 GB/s. Parquet compression Snappy (0.85x).
+    - CPU Decompression: 1.5 GB/s per core * 16 cores = 24 GB/s.
+
+    **Calculations:**
+    - Raw binary read: 400 GB / 7 GB/s = ~57 seconds.
+    - Parquet stored: 400 GB + 5% metadata = 420 GB. With Snappy = 357 GB.
+    - Parquet read/decompression time: 357 GB / 24 GB/s = 15s CPU bottleneck + latency.
+
+    **Conclusion & Interpretation:**
+    - **Result: 400 GB (Raw Binary Superiority)**. Raw binary is optimal for simplicity and speed; compression burns CPU cycles with minimal storage benefit for high-entropy uint16 tokens.
+status: published
+provenance: imported
+requires_explanation: false
+expected_time_minutes: 10
+validated: true
+validation_status: OK
+validation_date: '2026-04-02'
+validation_model: claude-opus-4-6
+math_verified: true
+math_status: CORRECT
+math_date: '2026-04-03'
+math_model: gemini-3.1-pro-preview
+human_reviewed:
+  status: not-reviewed
+  by: null
+  date: null
+  notes: null
