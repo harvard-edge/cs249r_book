@@ -156,6 +156,14 @@ OTHER CONSTRAINTS:
   - Don't force chains — if questions are unrelated, return 0 chains for
     that bucket. Quality over coverage.
 
+GAP DETECTION (free signal — emit alongside chains):
+For each bucket, also identify "missing-rung" gaps: pedagogical arcs that
+WOULD form a clean strict +1 chain if the bucket had a question at a
+specific Bloom level it currently lacks. Example: bucket has L1, L3, L5
+on the same scenario thread → propose a missing-L2 and missing-L4
+question that would link them. These gaps drive future authoring; we
+don't act on them in this pass.
+
 Return STRICT JSON in this exact shape, no prose:
 {{
   "buckets": [
@@ -166,6 +174,13 @@ Return STRICT JSON in this exact shape, no prose:
         {{
           "questions": ["<qid1>", "<qid2>", ...],
           "rationale": "<one sentence — what does this chain teach?>"
+        }}
+      ],
+      "gaps": [
+        {{
+          "missing_level": "L<N>",
+          "between": ["<qid_lower>", "<qid_higher>"],
+          "rationale": "<what concept the missing question should cover to bridge these two>"
         }}
       ]
     }}
@@ -246,8 +261,8 @@ def validate_chain(chain: dict, bucket_qids: set[str], corpus: dict[str, dict]) 
 
 def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
                   corpus: dict[str, dict],
-                  call_idx: int) -> list[dict]:
-    """Call Gemini on this batch and return validated chain entries."""
+                  call_idx: int) -> tuple[list[dict], list[dict]]:
+    """Call Gemini on this batch. Returns (validated_chains, raw_gaps)."""
     prompt = build_prompt(batch, corpus)
     n_questions = sum(len(qids) for _, qids in batch)
     print(f"  [call {call_idx}] {len(batch)} buckets, {n_questions} questions, "
@@ -255,9 +270,10 @@ def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
     response = call_gemini(prompt)
     if response is None:
         print(f"  [call {call_idx}] no response")
-        return []
+        return [], []
 
-    out_chains = []
+    out_chains: list[dict] = []
+    out_gaps: list[dict] = []
     chain_seq = 0
     for bucket_resp in response.get("buckets", []):
         track = bucket_resp.get("track")
@@ -294,8 +310,23 @@ def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
                 "rationale": ch.get("rationale", ""),
                 "_origin": "gemini-3.1-pro-preview",
             })
-    print(f"  [call {call_idx}] accepted {len(out_chains)} chain(s)")
-    return out_chains
+        # Capture gap recommendations as-is (not validated structurally —
+        # they describe questions that DON'T exist yet). We store them for
+        # a follow-up authoring pass.
+        for gap in bucket_resp.get("gaps", []) or []:
+            gap_record = {
+                "track": track,
+                "topic": topic,
+                "missing_level": gap.get("missing_level"),
+                "between": gap.get("between") or [],
+                "rationale": gap.get("rationale", ""),
+                "_origin": "gemini-3.1-pro-preview",
+                "_source_call": call_idx,
+            }
+            out_gaps.append(gap_record)
+    print(f"  [call {call_idx}] accepted {len(out_chains)} chain(s), "
+          f"{len(out_gaps)} gap(s)")
+    return out_chains, out_gaps
 
 
 def main() -> int:
@@ -334,15 +365,23 @@ def main() -> int:
         print(f"\nWARNING: {len(batches)} batches exceeds max-calls {args.max_calls}")
         return 1
 
-    all_chains = []
+    all_chains: list[dict] = []
+    all_gaps: list[dict] = []
+    gaps_path = Path(args.output).with_name(
+        Path(args.output).stem.replace("chains.proposed", "gaps.proposed") + ".json"
+    )
     for i, batch in enumerate(batches, start=1):
-        chains = process_batch(batch, corpus, i)
+        chains, gaps = process_batch(batch, corpus, i)
         all_chains.extend(chains)
+        all_gaps.extend(gaps)
         # Persist incrementally so a crash mid-run preserves work
         Path(args.output).write_text(json.dumps(all_chains, indent=2) + "\n")
+        gaps_path.write_text(json.dumps(all_gaps, indent=2) + "\n")
 
-    print(f"\nDONE: {len(all_chains)} chains accepted across {len(batches)} calls")
+    print(f"\nDONE: {len(all_chains)} chains accepted across {len(batches)} calls; "
+          f"{len(all_gaps)} corpus gaps identified for future authoring")
     print(f"output: {args.output}")
+    print(f"gaps:   {gaps_path}")
     print("review the staging file before replacing interviews/vault/chains.json")
     return 0
 
