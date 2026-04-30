@@ -1,0 +1,247 @@
+name: '🔧 Infra · 🤖 All Contributors Auto-credit on Merge'
+
+# =============================================================================
+# 🤖 Auto-credit Contributors on PR Merge
+# =============================================================================
+#
+# When a PR is merged to dev, this workflow auto-posts an @all-contributors
+# trigger comment so the existing all-contributors-add.yml workflow processes
+# the credit. The maintainer no longer has to type the comment by hand.
+#
+# Flow:
+#   1. SKIP_CHECK   — skip maintainers, bots, and already-credited PRs
+#   2. DETECT       — project(s) from PR file paths, type(s) from title + files
+#   3. POST_COMMENT — either the @all-contributors trigger, or a "please clarify"
+#                     comment when detection couldn't pin down project or type
+#
+# The auto-posted trigger uses structured "for <types> in <projects>" syntax
+# so the existing add workflow's deterministic regex handles it without the
+# LLM stage running at all (no LLM hallucination on auto-posts).
+#
+# Triggers:
+#   - pull_request: closed (and merged == true)
+#
+# Related:
+#   - all-contributors-add.yml   — fires on the comment we post
+#   - update-contributors.yml    — regenerates root config from per-project
+#   - .github/workflows/contributors/auto_credit.py — detection logic
+#
+# =============================================================================
+
+on:
+  pull_request:
+    types: [closed]
+
+env:
+  TARGET_BRANCH: 'dev'
+  # GitHub logins to skip — maintainers don't auto-credit themselves.
+  # Comma-separated. Bots (login ending in '[bot]') are always skipped.
+  MAINTAINERS: 'profvjreddi'
+
+jobs:
+  auto-credit:
+    name: Auto-credit
+    if: |
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'dev'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      # =====================================================================
+      # STEP 0: Sparse-checkout the contributors helpers
+      # =====================================================================
+      - name: Checkout helpers (sparse)
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          sparse-checkout: |
+            .github/workflows/contributors/projects.json
+            .github/workflows/contributors/projects.py
+            .github/workflows/contributors/auto_credit.py
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      # =====================================================================
+      # STEP 1: Skip checks (maintainer, bot, already-credited)
+      # =====================================================================
+      - name: Skip checks
+        id: skip
+        uses: actions/github-script@v9
+        env:
+          MAINTAINERS: ${{ env.MAINTAINERS }}
+        with:
+          script: |
+            const author = context.payload.pull_request.user.login;
+            const userType = context.payload.pull_request.user.type || '';
+            const maintainers = (process.env.MAINTAINERS || '')
+              .split(',').map(s => s.trim()).filter(Boolean);
+
+            if (userType === 'Bot' || author.endsWith('[bot]')) {
+              console.log(`Skipping bot: ${author}`);
+              core.setOutput('skip', 'true');
+              core.setOutput('reason', 'bot');
+              return;
+            }
+
+            if (maintainers.includes(author)) {
+              console.log(`Skipping maintainer: ${author}`);
+              core.setOutput('skip', 'true');
+              core.setOutput('reason', 'maintainer');
+              return;
+            }
+
+            // Already credited? Look for any prior @all-contributors comment
+            // mentioning this author. The add workflow is idempotent (set-union)
+            // but we don't want to spam duplicate trigger comments.
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100
+            });
+
+            const triggerRe = new RegExp(
+              '@all-contributors\\s+(please add\\s+)?@' + author + '\\b',
+              'i'
+            );
+            const alreadyCredited = comments.some(c => triggerRe.test(c.body || ''));
+
+            if (alreadyCredited) {
+              console.log(`Already credited: @${author}`);
+              core.setOutput('skip', 'true');
+              core.setOutput('reason', 'already_credited');
+              return;
+            }
+
+            core.setOutput('skip', 'false');
+            core.setOutput('author', author);
+
+      # =====================================================================
+      # STEP 2: Detect project(s) and type(s) from PR metadata
+      # =====================================================================
+      - name: Detect project and type
+        if: steps.skip.outputs.skip != 'true'
+        id: detect
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { execFileSync } = require('child_process');
+            const fs = require('fs');
+
+            const prNum = context.payload.pull_request.number;
+            const title = context.payload.pull_request.title;
+
+            // Fetch all changed files (paginate)
+            let files = [];
+            let page = 1;
+            while (true) {
+              const { data } = await github.rest.pulls.listFiles({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNum,
+                per_page: 100,
+                page
+              });
+              files = files.concat(data.map(f => f.filename));
+              if (data.length < 100) break;
+              page += 1;
+            }
+
+            const inputPath = '/tmp/auto_credit_input.json';
+            fs.writeFileSync(inputPath, JSON.stringify({ title, files }));
+
+            const stdout = execFileSync('python3', [
+              '.github/workflows/contributors/auto_credit.py',
+              inputPath
+            ], { encoding: 'utf-8' });
+
+            const detected = JSON.parse(stdout);
+            console.log('Detection:', JSON.stringify(detected, null, 2));
+
+            core.setOutput('projects', detected.projects.join(', '));
+            core.setOutput('types', detected.types.join(', '));
+            core.setOutput('confidence', detected.confidence);
+
+      # =====================================================================
+      # STEP 3a: High confidence — post the @all-contributors trigger
+      # =====================================================================
+      - name: Post credit trigger
+        if: |
+          steps.skip.outputs.skip != 'true' &&
+          steps.detect.outputs.confidence == 'high'
+        uses: actions/github-script@v9
+        env:
+          AUTHOR: ${{ steps.skip.outputs.author }}
+          PROJECTS: ${{ steps.detect.outputs.projects }}
+          TYPES: ${{ steps.detect.outputs.types }}
+        with:
+          script: |
+            const author = process.env.AUTHOR;
+            const projects = process.env.PROJECTS;
+            const types = process.env.TYPES;
+
+            const body = [
+              `Thanks @${author}! 🎉`,
+              ``,
+              `@all-contributors please add @${author} for ${types} in ${projects}`
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+            console.log(`Posted credit trigger: @${author} for ${types} in ${projects}`);
+
+      # =====================================================================
+      # STEP 3b: Low confidence — ask the maintainer to specify
+      # =====================================================================
+      - name: Ask for clarification
+        if: |
+          steps.skip.outputs.skip != 'true' &&
+          steps.detect.outputs.confidence == 'low'
+        uses: actions/github-script@v9
+        env:
+          AUTHOR: ${{ steps.skip.outputs.author }}
+          PROJECTS: ${{ steps.detect.outputs.projects }}
+          TYPES: ${{ steps.detect.outputs.types }}
+        with:
+          script: |
+            const author = process.env.AUTHOR;
+            const projects = process.env.PROJECTS;
+            const types = process.env.TYPES;
+
+            const projectPart = projects ? projects : '<project>';
+            const typePart = types ? types : '<type>';
+
+            const body = [
+              `Thanks @${author} for the contribution! 🎉`,
+              ``,
+              `I couldn't auto-detect the credit for this PR (project: ${projects || 'unknown'}, type: ${types || 'unknown'}). To credit @${author}, reply with:`,
+              ``,
+              '```',
+              `@all-contributors please add @${author} for ${typePart} in ${projectPart}`,
+              '```',
+              ``,
+              `**Types**: bug, code, doc, design, ideas, review, test, tool (multi: \`bug, code\`)`,
+              `**Projects**: book, tinytorch, kits, labs, mlsysim, staffml, slides, instructors, periodictable (multi: \`kits, book\`)`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+            console.log('Posted clarification request');
