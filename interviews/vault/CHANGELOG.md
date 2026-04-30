@@ -77,7 +77,7 @@ generation passes.
 - `scripts/analyze_coverage_gaps.py`: `--include-areas <areas>` flag
   injects area-targeted cells into the recommended_plan. Closes the
   topic-priority-misses-area-gaps mismatch.
-- `vault build --legacy-json`: auto-emits `vault-manifest.json`
+- `vault build --local-json`: auto-emits `vault-manifest.json`
   alongside corpus.json. Eliminates the recurring stale-manifest
   pre-commit failure.
 - `vault doctor`: `registry-integrity` check split into `disk-coverage`

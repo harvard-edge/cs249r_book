@@ -394,11 +394,11 @@ vault move <id> --to <track>/<level>/<zone> [--edit] [--dry-run]
 ### 4.2 Build primitives
 
 ```
-vault build [--output <path>] [--legacy-json]
+vault build [--output <path>] [--local-json]
     Walks questions/**/*.yaml. Validates each. Compiles to vault.db.
     Target: < 10s for 10K files (parallelized across cores). Reports all errors,
         does not fast-fail on first error.
-    --legacy-json: additionally emits corpus.json for generators that haven't been
+    --local-json: additionally emits corpus.json for generators that haven't been
         migrated. Used during Phase 1–3 only; removed at cutover. (Fixes C-2.)
 
 vault check [--strict] [--tier fast|structural|slow]
@@ -953,9 +953,9 @@ If ANY of the three gates miss (p99 warm, p99 cold, cost), fall back to a Worker
 
 The moment the YAML split lands (Phase 1 milestone):
 - `vault/questions/**/*.yaml` is the **sole source of truth** for every question.
-- `vault/corpus.json` becomes a **generated artifact** (written by `vault build --legacy-json`). Read-only for humans.
+- `vault/corpus.json` becomes a **generated artifact** (written by `vault build --local-json`). Read-only for humans.
 - A **pre-commit hook** refuses any commit that touches `vault/corpus.json` directly (detects via `git diff --name-only` + rule). Override requires a one-line exception in a commit trailer (`Vault-Override: corpus-json-hand-edit` with justification) — used only if the author has to fix a build-time regeneration bug.
-- A **CI check** runs `vault build --legacy-json` and fails the PR if the committed `corpus.json` doesn't match the regenerated output byte-for-byte. This catches any drift immediately.
+- A **CI check** runs `vault build --local-json` and fails the PR if the committed `corpus.json` doesn't match the regenerated output byte-for-byte. This catches any drift immediately.
 
 ### 11.2 Downstream-consumer compatibility during phases 1–3
 
@@ -1306,10 +1306,10 @@ When resuming:
 |---|---|
 | `interviews/vault/corpus.json` (28 MB) | **Generated, not authored.** Pre-commit hook refuses direct edits. Retained as pre-split reference snapshot. |
 | `interviews/vault/questions/**/*.yaml` | Sole source of truth. 9,657 files. |
-| `interviews/staffml/src/data/corpus.json` | **Regenerated** by `vault build --legacy-json` from YAML. 9,199 published questions. CI diff-check enforces equivalence. Bundled in site until Phase-4 cutover; removed 2 releases post-cutover per §7.1 retention. |
+| `interviews/staffml/src/data/corpus.json` | **Regenerated** by `vault build --local-json` from YAML. 9,199 published questions. CI diff-check enforces equivalence. Bundled in site until Phase-4 cutover; removed 2 releases post-cutover per §7.1 retention. |
 | `interviews/vault/scripts/generate.py` | Phase-7 follow-up: `vault generate --topic X --zone Y --level Lz --count N` (see §12). |
-| `interviews/vault/scripts/export_to_staffml.py` | **DEPRECATED** (header added). Replaced by `vault build --legacy-json`. |
-| `interviews/staffml/scripts/sync-vault.py` | **DEPRECATED** (header added). Replaced by `vault build --legacy-json`. |
+| `interviews/vault/scripts/export_to_staffml.py` | **DEPRECATED** (header added). Replaced by `vault build --local-json`. |
+| `interviews/staffml/scripts/sync-vault.py` | **DEPRECATED** (header added). Replaced by `vault build --local-json`. |
 | `interviews/staffml/scripts/generate-manifest.py` | **DEPRECATED** (header added). Manifest emitted as release artifact by `vault publish`. |
 | `interviews/paper/scripts/analyze_corpus.py` | **DEPRECATED** (header added). Replaced by `vault export-paper <version>` (SQL over vault.db). |
 | `interviews/paper/scripts/generate_macros.py` | **Rewritten** as thin wrapper over `vault export-paper`. Paper.tex needs no edits — legacy `\num*` namespace preserved alongside new `\staffml*`. |
@@ -1320,7 +1320,7 @@ When resuming:
 **Migration complete** (in-repo): YAML is authoritative; all downstream
 artifacts (vault.db, corpus.json, macros.tex, corpus_stats.json) regenerate
 deterministically from it via `vault build` + `vault export-paper` +
-`vault build --legacy-json`. Phase-4 cutover (swap site's bundled JSON for
+`vault build --local-json`. Phase-4 cutover (swap site's bundled JSON for
 live D1 reads) is the remaining step, deploy-gated on user action.
 
 ---

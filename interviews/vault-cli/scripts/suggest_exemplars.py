@@ -109,7 +109,7 @@ def main() -> None:
         "\nNext steps:"
         "\n  1. Change provenance: imported → human in each YAML"
         "\n  2. Run: vault mark-exemplar <id> --vault-dir interviews/vault"
-        "\n  3. Run: vault build --legacy-json --vault-dir interviews/vault"
+        "\n  3. Run: vault build --local-json --vault-dir interviews/vault"
     )
 
 
