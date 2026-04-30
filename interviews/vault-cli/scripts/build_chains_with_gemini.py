@@ -205,7 +205,13 @@ def build_prompt(batch: list[tuple[tuple[str, str], list[str]]],
 
 
 def call_gemini(prompt: str, model: str = GEMINI_MODEL, timeout: int = 600) -> dict | None:
-    """Run gemini -p '...' --yolo and parse JSON response."""
+    """Run gemini -p '...' --yolo and parse JSON response.
+
+    Gemini CLI sometimes exits non-zero even when stdout contains a valid
+    JSON response (e.g., YOLO-mode info messages, transient 429s that the
+    CLI internally retries past). We try to parse stdout regardless and
+    only treat unparsable output as failure.
+    """
     try:
         result = subprocess.run(
             ["gemini", "-m", model, "-p", prompt, "--yolo"],
@@ -213,18 +219,21 @@ def call_gemini(prompt: str, model: str = GEMINI_MODEL, timeout: int = 600) -> d
         )
     except subprocess.TimeoutExpired:
         return None
-    if result.returncode != 0:
-        print(f"  gemini exited {result.returncode}: {result.stderr[:200]}", file=sys.stderr)
-        return None
-    out = result.stdout.strip()
-    # Gemini may wrap in code fences — strip them
+
+    out = (result.stdout or "").strip()
+    # Strip code fences if present
     if out.startswith("```"):
         out = out.strip("`")
         if out.startswith("json"): out = out[4:].lstrip()
     # Find first { ... } block
     i = out.find("{")
     j = out.rfind("}")
-    if i == -1 or j == -1: return None
+    if i == -1 or j == -1:
+        # No JSON in stdout — surface stderr so the operator sees what happened
+        if result.returncode != 0:
+            print(f"  gemini exit {result.returncode}, no JSON: {(result.stderr or '')[:200]}",
+                  file=sys.stderr)
+        return None
     try:
         return json.loads(out[i:j+1])
     except json.JSONDecodeError as e:
@@ -370,11 +379,13 @@ def main() -> int:
     gaps_path = Path(args.output).with_name(
         Path(args.output).stem.replace("chains.proposed", "gaps.proposed") + ".json"
     )
+    inter_call_delay_s = 8  # backoff: avoid Gemini-side 429 from rapid-fire calls
     for i, batch in enumerate(batches, start=1):
+        if i > 1:
+            time.sleep(inter_call_delay_s)
         chains, gaps = process_batch(batch, corpus, i)
         all_chains.extend(chains)
         all_gaps.extend(gaps)
-        # Persist incrementally so a crash mid-run preserves work
         Path(args.output).write_text(json.dumps(all_chains, indent=2) + "\n")
         gaps_path.write_text(json.dumps(all_gaps, indent=2) + "\n")
 
