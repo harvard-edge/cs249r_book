@@ -994,29 +994,55 @@ class ValidateCommand:
 
 
     def _run_manual_bracket_citation(self, root: Path) -> ValidationRunResult:
-        """Flag a hand-typed author/venue line before a bracket cite on the same run.
+        """Flag hand-typed author/year attributions in prose.
 
-        Citeproc already renders names and (usually) year from `[@key]`. Writing
-        "Jeon et al. (ATC 2019) [@jeon2019analysis]" or "Cohen & Welling (2016) [@c]"
-        duplicates the in-text citation. Prefer only [@key] / [@a; @b], or
-        narrative @key, without a parallel hand-typed attribution in front.
+        Two failure modes are caught here, both rooted in the same anti-pattern:
+        an author + year written by hand instead of letting citeproc render the
+        name from a `@key` / `[@key]` citation.
+
+        1. **Manual + bracket** (citeproc duplicate). Writing
+           "Jeon et al. (ATC 2019) [@jeon2019analysis]" or
+           "Cohen & Welling (2016) [@c]" duplicates the in-text citation —
+           citeproc already prints "Jeon et al. (2019)" / "Cohen and Welling
+           (2016)" from the key. Prefer `[@key]` / `[@a; @b]` alone, or
+           narrative `@key`.
+
+        2. **Bare attribution** (no bib citation at all). Writing
+           "Tri Dao et al. at Stanford (2022)" or "Coffman et al. (1971)"
+           with no accompanying `[@key]` or narrative `@bibkey` on the line
+           bypasses the bibliography entirely — the cited work is not in
+           references.bib and the rendered text reads as plain prose
+           rather than a verifiable citation. This pattern shows up most
+           often inside footnote definitions where authors hand-type a
+           provenance line. Fix with narrative `@key` (renders as
+           "Dao et al. (2022)") or restructure to drop the attribution
+           when no bib entry exists.
 
         Shapes we flag (prose, not code fences; inline backticks scrubbed first):
 
-        - *et al.* (…) … [@ — the common *venue/year* lead-in
-        - ``Surname & Surname (…)`` … [@ — two capitalized surnames joined by &
+        - `… et al. <opt-words> ( … YEAR … ) [@key]`  — manual + bracket; the
+          *opt-words* allowance ("at Stanford", "in their paper", etc.)
+          catches the pattern that the original adjacency-only regex missed.
+        - `Surname & Surname ( … ) [@key]`            — two-author manual + bracket.
+        - `… et al. <opt-words> ( … YEAR … )` with **no** `[@…]` or narrative
+          `@<bibkey>` anywhere on the line — bare attribution.
 
         We do **not** flag acronyms in parentheses that are not *author* lines, e.g.
         "DARTS (Differentiable …) [@liu2019darts]": that has no *et al.* and no
-        *Word & Word* before the paren. Fenced code and inline backtick docs
-        of anti-patterns are skipped.
+        *Word & Word* before the paren. The bare-attribution branch additionally
+        requires a 4-digit publication year (19xx/20xx) inside the parenthetical,
+        so "(5--10)% improvement" or "(in production)" do not trigger it. Fenced
+        code and inline backtick docs of anti-patterns are skipped.
         """
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
-        # "… et al. ( … ) [@"  — chains: "A et al. (x) [@a], B et al. (y) [@b]"
+        # "et al. <opt-words> ( … ) [@"
+        # The intermediate `[^.\n\[(]{0,80}` allows phrases like "at Stanford"
+        # or "in 2014" between `et al.` and the year-paren without crossing
+        # a sentence boundary, an opening bracket, or a nested paren.
         et_al_bracket = re.compile(
-            r"et al\.\s*\([^)\n]{0,500}\)\s*,?\s*\[@",
+            r"et al\.[^.\n\[(]{0,80}\([^)\n]{0,500}\)\s*,?\s*\[@",
             re.IGNORECASE,
         )
         # "Cohen & Welling (ReCOL 2016) [@"  — two Titlecase tokens and & (surname style)
@@ -1024,7 +1050,23 @@ class ValidateCommand:
             r"\b[A-Z][a-z][a-zA-Z'-]*\s+&\s+[A-Z][a-z][a-zA-Z'-]*\s*"
             r"\([^)\n]{0,500}\)\s*,?\s*\[@"
         )
-        # Same issue code: message differentiates
+        # "et al. <opt-words> ( … YEAR … )" — bare attribution.
+        # Requires a 4-digit publication year inside the paren so we don't
+        # flag unrelated parentheticals.
+        et_al_bare = re.compile(
+            r"et al\.[^.\n\[(]{0,100}"
+            r"\(\s*[^)\n]{0,60}\b(?:19|20)\d{2}\b[^)\n]{0,60}\)",
+            re.IGNORECASE,
+        )
+        # Cite detectors used to suppress the bare branch when the line
+        # already has a real citation. Excludes Quarto cross-ref prefixes
+        # (@sec-, @fig-, etc.) so those are not mistaken for bibkeys.
+        bracket_cite = re.compile(r"\[@[A-Za-z]")
+        narrative_cite = re.compile(
+            r"@(?!sec-|fig-|tbl-|eq-|lst-|exr-|exm-|thm-|cor-|cnj-|"
+            r"def-|prp-|rem-|prf-|alg-)[A-Za-z][\w:-]*"
+        )
+
         def issue_et_al(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
@@ -1057,6 +1099,23 @@ class ValidateCommand:
                 context=context,
             )
 
+        def issue_bare_attribution(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_manual_attribution",
+                message=(
+                    "Hand-typed *Author et al. (YEAR)* with no bibliography citation "
+                    "on this line. Use narrative @key (renders as 'Author et al. "
+                    "(YEAR)') so the work appears in references.bib, or restructure "
+                    "to drop the attribution when no bib entry exists."
+                ),
+                severity="error",
+                context=context,
+            )
+
         for file in files:
             lines = self._read_text(file).splitlines()
             in_code = False
@@ -1078,10 +1137,26 @@ class ValidateCommand:
                         max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
                     ].strip()
                     issues.append(issue_ampersand(file, idx, context))
+                # Bare attribution: only flag when the line carries no real
+                # citation. A bracket cite anywhere or a narrative @bibkey
+                # (i.e., @ followed by a non-cross-ref word) suppresses this.
+                line_has_cite = bool(
+                    bracket_cite.search(scrubbed)
+                    or narrative_cite.search(scrubbed)
+                )
+                if not line_has_cite:
+                    for m in et_al_bare.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_bare_attribution(file, idx, context))
 
         return ValidationRunResult(
             name="manual-bracket",
-            description="Flag hand-typed author (…) + [@key] on one line (citeproc duplicate)",
+            description=(
+                "Flag hand-typed Author et al. (YEAR) attributions: "
+                "manual+bracket duplicates and bare prose without [@key]"
+            ),
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
