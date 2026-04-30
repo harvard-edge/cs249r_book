@@ -393,6 +393,22 @@ function PracticePage() {
     setNapkinResult(null);
   }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly, chainsOnly, visualOnly]);
 
+  const pickRandom = useCallback((fromPool?: Question[]) => {
+    // Track skip if there was a current question that wasn't scored
+    if (current && !showAnswer) {
+      track({ type: 'question_skipped', topic: current.topic, level: current.level });
+    }
+    const p = fromPool || pool;
+    if (p.length === 0) return;
+    const idx = Math.floor(Math.random() * p.length);
+    setCurrent(p[idx]);
+    questionShownAt.current = Date.now();
+    setShowAnswer(false);
+    setUserAnswer("");
+    setNapkinResult(null);
+    setRubricItems([]);
+  }, [pool, current, showAnswer]);
+
   // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -413,23 +429,7 @@ function PracticePage() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [showAnswer, current]);
-
-  const pickRandom = useCallback((fromPool?: Question[]) => {
-    // Track skip if there was a current question that wasn't scored
-    if (current && !showAnswer) {
-      track({ type: 'question_skipped', topic: current.topic, level: current.level });
-    }
-    const p = fromPool || pool;
-    if (p.length === 0) return;
-    const idx = Math.floor(Math.random() * p.length);
-    setCurrent(p[idx]);
-    questionShownAt.current = Date.now();
-    setShowAnswer(false);
-    setUserAnswer("");
-    setNapkinResult(null);
-    setRubricItems([]);
-  }, [pool, current, showAnswer]);
+  }, [showAnswer, current, pickRandom]);
 
   // Submit-gradient guard: intercept reveals that look like
   // "didn't really try." The restructured layout puts the Reveal
@@ -578,7 +578,7 @@ function PracticePage() {
       setReviewMode(false);
     }
     pickRandom();
-  }, [reviewMode, pool]);
+  }, [reviewMode, pool, pickRandom]);
 
   if (!mounted) {
     return (
