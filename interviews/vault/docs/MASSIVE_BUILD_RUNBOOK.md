@@ -57,7 +57,7 @@ a clean baseline so new content is authored against valid data.
    anything outside the 13 canonical values at validation time.
    Codegen Pydantic from the updated LinkML schema.
 
-5. **Rebuild bundle** (`vault build --legacy-json`) and verify the
+5. **Rebuild bundle** (`vault build --local-json`) and verify the
    GUI's area filter shows exactly 13 entries plus "All".
 
 ### Acceptance
@@ -167,7 +167,7 @@ Before promoting, eyeball the generated content:
 ```bash
 python3 interviews/vault/scripts/promote_validated.py
 PYTHONPATH=interviews/vault-cli/src \
-  python3 -m vault_cli.main build --legacy-json
+  python3 -m vault_cli.main build --local-json
 PYTHONPATH=interviews/vault-cli/src \
   python3 -m vault_cli.main check --strict
 ```

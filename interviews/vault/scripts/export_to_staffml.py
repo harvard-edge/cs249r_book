@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ┌─── DEPRECATED ────────────────────────────────────────────────────────────┐
 # │ Pre-YAML-migration script. Replaced by:                                   │
-# │     vault build --legacy-json                                             │
+# │     vault build --local-json                                              │
 # │ See ./DEPRECATED.md for the full map.                                     │
 # └───────────────────────────────────────────────────────────────────────────┘
 """Export vault corpus to StaffML web app format.
