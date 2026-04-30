@@ -7,11 +7,17 @@ chain invariants, and on success replaces `interviews/vault/chains.json`.
 
 Validation:
   - Every member id exists in the YAML corpus and is published
-  - Levels in array order are non-decreasing (Bloom-monotonic)
+  - Levels in array order are non-decreasing (Bloom-monotonic) — Δ=0 IS
+    allowed at this layer; the strict Δ ∈ {1,2} rule is enforced upstream
+    in build_chains_with_gemini.py based on its --mode setting
   - 2 ≤ chain size ≤ 6
   - Single-topic
-  - No qid in 2+ chains (corpus-wide)
+  - No qid in more than 2 chains, and Δ=2 only allowed for L1/L2 anchors
   - chain_id unique
+
+The optional ``tier`` field on a chain entry (``primary``/``secondary``,
+added in Phase 1.3 of CHAIN_ROADMAP.md) is intentionally not validated
+here — it's a UI-routing hint, not a structural invariant.
 
 Always run `vault check --strict` after this script — that's the final gate.
 """
