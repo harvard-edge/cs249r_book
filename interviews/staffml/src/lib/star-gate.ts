@@ -1,18 +1,29 @@
 // ─── GitHub Star Gate ─────────────────────────────────────────
-// After FREE_LIMIT question reveals, users must star the GitHub repo.
-// Verification uses the GitHub API (unauthenticated, checks stargazers).
+// Once per user, after REVEAL_THRESHOLD lifetime reveals, we surface
+// a single non-blocking modal asking for a GitHub star — the project's
+// "only ask." Honor-system: any of star / "I already starred" / dismiss
+// retires the gate forever. No username verification, no daily cap.
 
 const STORAGE_KEY = "staffml_star_gate";
-const REVEALS_KEY = "staffml_reveals_today";
-const FREE_LIMIT = 20; // questions before gate appears
+const REVEALS_KEY = "staffml_lifetime_reveals";
+const STAR_COUNT_KEY = "staffml_star_count_cache";
+const REVEAL_THRESHOLD = 5;
 const REPO_OWNER = "harvard-edge";
 const REPO_NAME = "cs249r_book";
 const REPO_URL = `https://github.com/${REPO_OWNER}/${REPO_NAME}`;
+const STAR_COUNT_TTL_MS = 24 * 60 * 60 * 1000;
+
+type DismissMethod = "starred" | "honor" | "dismissed";
 
 interface StarGateData {
   verified: boolean;
   verifiedAt?: number;
-  githubUsername?: string;
+  method?: DismissMethod;
+}
+
+interface StarCountCache {
+  count: number;
+  fetchedAt: number;
 }
 
 function getGateData(): StarGateData {
@@ -30,102 +41,86 @@ function setGateData(data: StarGateData): void {
   } catch {}
 }
 
-/** Get today's reveal count */
+/** Lifetime reveal count across all sessions. */
 export function getRevealCount(): number {
   try {
     const raw = window.localStorage.getItem(REVEALS_KEY);
     if (!raw) return 0;
-    const data = JSON.parse(raw);
-    const today = new Date().toISOString().slice(0, 10);
-    return data.date === today ? data.count : 0;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) ? n : 0;
   } catch {
     return 0;
   }
 }
 
-/** Increment today's reveal count */
+/** Increment the lifetime reveal count. */
 export function incrementReveals(): void {
   try {
-    const today = new Date().toISOString().slice(0, 10);
-    const raw = window.localStorage.getItem(REVEALS_KEY);
-    const data = raw ? JSON.parse(raw) : { date: today, count: 0 };
-    if (data.date !== today) {
-      data.date = today;
-      data.count = 0;
-    }
-    data.count++;
-    window.localStorage.setItem(REVEALS_KEY, JSON.stringify(data));
+    window.localStorage.setItem(REVEALS_KEY, String(getRevealCount() + 1));
   } catch {}
 }
 
-/** Check if user has been verified as a stargazer */
+/** Has the user already retired the gate (starred or dismissed)? */
 export function isStarVerified(): boolean {
   return getGateData().verified;
 }
 
-/** Check if the gate should be shown */
+/** Should the gate be surfaced now? */
 export function shouldShowGate(): boolean {
   if (isStarVerified()) return false;
-  return getRevealCount() >= FREE_LIMIT;
+  return getRevealCount() >= REVEAL_THRESHOLD;
 }
 
-/** Get remaining free reveals */
-export function getRemainingReveals(): number {
-  if (isStarVerified()) return Infinity;
-  return Math.max(0, FREE_LIMIT - getRevealCount());
-}
-
-/** Get the repo URL for starring */
+/** Repo URL for the star CTA. */
 export function getStarUrl(): string {
   return REPO_URL;
 }
 
-/** Get the free limit */
-export function getFreeLimit(): number {
-  return FREE_LIMIT;
+/** Threshold of lifetime reveals before the gate first surfaces. */
+export function getRevealThreshold(): number {
+  return REVEAL_THRESHOLD;
 }
 
 /**
- * Verify that a GitHub user has starred the repo.
- * Uses the unauthenticated GitHub API — rate limited to 60 req/hour.
- * Returns true if the user is a stargazer.
+ * Mark the gate retired. Once called, shouldShowGate() returns false forever.
+ * Method is purely diagnostic — all three dismiss paths fully retire the gate.
  */
-export async function verifyGitHubStar(username: string): Promise<boolean> {
+export function markVerified(method: DismissMethod): void {
+  setGateData({ verified: true, verifiedAt: Date.now(), method });
+}
+
+/**
+ * Fetch the live stargazer count from the GitHub API, with a 24h
+ * localStorage cache so we don't burn the unauthenticated rate limit.
+ * Returns null on any failure — callers should fall back gracefully.
+ */
+export async function fetchStarCount(): Promise<number | null> {
   try {
-    // Check if user has starred the repo using the GitHub API
-    // GET /users/{username}/starred/{owner}/{repo} returns 204 if starred, 404 if not
-    const res = await fetch(
-      `https://api.github.com/users/${encodeURIComponent(username)}/starred/${REPO_OWNER}/${REPO_NAME}`,
-      {
-        headers: { Accept: "application/vnd.github.v3+json" },
+    const raw = window.localStorage.getItem(STAR_COUNT_KEY);
+    if (raw) {
+      const cache: StarCountCache = JSON.parse(raw);
+      if (Date.now() - cache.fetchedAt < STAR_COUNT_TTL_MS && typeof cache.count === "number") {
+        return cache.count;
       }
-    );
-
-    if (res.status === 204) {
-      // Verified! Save permanently
-      setGateData({
-        verified: true,
-        verifiedAt: Date.now(),
-        githubUsername: username,
-      });
-      return true;
     }
+  } catch {}
 
-    return false;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`, {
+      headers: { Accept: "application/vnd.github.v3+json" },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const count = data?.stargazers_count;
+    if (typeof count !== "number") return null;
+    try {
+      window.localStorage.setItem(
+        STAR_COUNT_KEY,
+        JSON.stringify({ count, fetchedAt: Date.now() } satisfies StarCountCache),
+      );
+    } catch {}
+    return count;
   } catch {
-    // Network error — give benefit of the doubt on first try
-    return false;
+    return null;
   }
-}
-
-/**
- * Bypass verification (honor system fallback).
- * Used when GitHub API is rate-limited or user doesn't want to share username.
- */
-export function bypassVerification(): void {
-  setGateData({
-    verified: true,
-    verifiedAt: Date.now(),
-    githubUsername: "_honor_system",
-  });
 }

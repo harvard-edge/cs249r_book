@@ -33,7 +33,7 @@ import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { getTopicById, getZoneDefinition } from "@/lib/taxonomy";
 import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
-import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
+import { shouldShowGate, incrementReveals } from "@/lib/star-gate";
 import StarGate from "@/components/StarGate";
 import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
 import ChainStrip from "@/components/ChainStrip";
