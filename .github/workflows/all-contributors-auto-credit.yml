@@ -6,17 +6,16 @@ name: '🔧 Infra · 🤖 All Contributors Auto-credit on Merge'
 #
 # When a PR is merged to dev, this workflow auto-posts an @all-contributors
 # trigger comment so the existing all-contributors-add.yml workflow processes
-# the credit. The maintainer no longer has to type the comment by hand.
+# the credit. Saves the maintainer from typing the comment by hand.
 #
 # Flow:
-#   1. SKIP_CHECK   — skip maintainers, bots, and already-credited PRs
-#   2. DETECT       — project(s) from PR file paths, type(s) from title + files
-#   3. POST_COMMENT — either the @all-contributors trigger, or a "please clarify"
-#                     comment when detection couldn't pin down project or type
-#
-# The auto-posted trigger uses structured "for <types> in <projects>" syntax
-# so the existing add workflow's deterministic regex handles it without the
-# LLM stage running at all (no LLM hallucination on auto-posts).
+#   1. SKIP_CHECK     — bots, maintainer allowlist, already-credited PRs
+#   2. DETECT_PROJECT — top-level dir of changed files → projects.json key
+#                       (deterministic — no LLM)
+#   3. CLASSIFY_TYPE  — LLM reads PR title + body + file list, returns types
+#                       (LLM because title prefixes alone aren't reliable)
+#   4. POST_COMMENT   — structured "for <types> in <projects>" trigger, or
+#                       a "please clarify" comment if either is unknown
 #
 # Triggers:
 #   - pull_request: closed (and merged == true)
@@ -24,7 +23,7 @@ name: '🔧 Infra · 🤖 All Contributors Auto-credit on Merge'
 # Related:
 #   - all-contributors-add.yml   — fires on the comment we post
 #   - update-contributors.yml    — regenerates root config from per-project
-#   - .github/workflows/contributors/auto_credit.py — detection logic
+#   - .github/workflows/contributors/auto_credit.py — project detection
 #
 # =============================================================================
 
@@ -37,6 +36,9 @@ env:
   # GitHub logins to skip — maintainers don't auto-credit themselves.
   # Comma-separated. Bots (login ending in '[bot]') are always skipped.
   MAINTAINERS: 'profvjreddi'
+  # LLM model. Kept in sync with all-contributors-add.yml — see also that
+  # workflow's LLM_MODEL env. Both should run the same model.
+  LLM_MODEL: 'gemma3:4b'
 
 jobs:
   auto-credit:
@@ -125,11 +127,11 @@ jobs:
             core.setOutput('author', author);
 
       # =====================================================================
-      # STEP 2: Detect project(s) and type(s) from PR metadata
+      # STEP 2: Detect project(s) from PR file paths (deterministic)
       # =====================================================================
-      - name: Detect project and type
+      - name: Detect project(s)
         if: steps.skip.outputs.skip != 'true'
-        id: detect
+        id: project
         uses: actions/github-script@v9
         with:
           script: |
@@ -137,7 +139,6 @@ jobs:
             const fs = require('fs');
 
             const prNum = context.payload.pull_request.number;
-            const title = context.payload.pull_request.title;
 
             // Fetch all changed files (paginate)
             let files = [];
@@ -155,8 +156,10 @@ jobs:
               page += 1;
             }
 
+            // Cap files passed to the LLM step (large PRs would blow the prompt).
+            // Project detection uses ALL files; the LLM gets a representative sample.
             const inputPath = '/tmp/auto_credit_input.json';
-            fs.writeFileSync(inputPath, JSON.stringify({ title, files }));
+            fs.writeFileSync(inputPath, JSON.stringify({ files }));
 
             const stdout = execFileSync('python3', [
               '.github/workflows/contributors/auto_credit.py',
@@ -164,77 +167,158 @@ jobs:
             ], { encoding: 'utf-8' });
 
             const detected = JSON.parse(stdout);
-            console.log('Detection:', JSON.stringify(detected, null, 2));
+            console.log('Project detection:', JSON.stringify(detected));
+
+            // Sample up to 30 files for the LLM prompt — enough to convey the
+            // file mix without bloating the context. Prefer files in detected
+            // project dirs so the LLM sees the substantive ones first.
+            const sampledFiles = files.slice(0, 30);
 
             core.setOutput('projects', detected.projects.join(', '));
-            core.setOutput('types', detected.types.join(', '));
             core.setOutput('confidence', detected.confidence);
+            core.setOutput('files_sample', sampledFiles.join('\n'));
 
       # =====================================================================
-      # STEP 3a: High confidence — post the @all-contributors trigger
+      # STEP 3: LLM classifies contribution type(s) from PR context
       # =====================================================================
-      - name: Post credit trigger
+      # The LLM looks at the PR title, body, and a sample of changed file
+      # paths. Title prefixes alone (fix:/feat:/docs:) aren't reliable — a
+      # "fix:" PR can be code, doc, or design depending on what was touched.
+      - name: Classify contribution types with LLM
         if: |
           steps.skip.outputs.skip != 'true' &&
-          steps.detect.outputs.confidence == 'high'
+          steps.project.outputs.confidence == 'high'
+        uses: ai-action/ollama-action@v2
+        id: llm
+        with:
+          model: ${{ env.LLM_MODEL }}
+          prompt: |
+            Classify the contribution type(s) for this merged pull request.
+
+            PR TITLE: ${{ github.event.pull_request.title }}
+
+            PR DESCRIPTION:
+            ${{ github.event.pull_request.body }}
+
+            CHANGED FILES (sample):
+            ${{ steps.project.outputs.files_sample }}
+
+            CONTRIBUTION TYPES (pick one or more):
+            - bug: Found, reported, or root-caused a bug
+            - code: Wrote code, implemented features or fixes (.py/.ts/.js/.sh/etc.)
+            - doc: Wrote or improved documentation, lab content, prose (.md/.qmd/.rst)
+            - design: UI/UX/visual design, CSS/SCSS styling, color/layout (.css/.scss/.svg)
+            - ideas: Suggested ideas, proposed features
+            - review: Reviewed code or PRs
+            - test: Wrote or improved tests, QA verification (test files / tests/ dirs)
+            - tool: Built tools, scripts, automation, CLI utilities
+
+            RULES:
+            - Return MULTIPLE types when both apply. A bug fix that changes
+              code is ["bug", "code"]. A bug fix that changes only .qmd/.md
+              prose is ["bug", "doc"]. A CSS-only fix is ["bug", "design"].
+            - Use the file paths as the primary evidence for what was changed.
+              The PR title prefix is a hint, not a rule.
+            - If the PR adds a new test file, include "test" in addition to
+              whatever the test covers ("code, test" or "doc, test").
+
+            EXAMPLES:
+            Title: "fix(kits): typo in raspi lab"
+            Files: kits/contents/raspi/foo.qmd
+            Output: {"types": ["bug", "doc"]}
+
+            Title: "feat(tinytorch): add tensor reshape op"
+            Files: tinytorch/src/01_tensor/reshape.py, tinytorch/tests/test_reshape.py
+            Output: {"types": ["code", "test"]}
+
+            Title: "fix(scss): scope dark-mode overrides"
+            Files: tinytorch/quarto/assets/styles/style.scss
+            Output: {"types": ["bug", "design"]}
+
+            Title: "docs: update install instructions"
+            Files: README.md, kits/README.md
+            Output: {"types": ["doc"]}
+
+            Return ONLY a JSON object: {"types": ["<type>", ...]}.
+            No explanation, no other text.
+
+      # =====================================================================
+      # STEP 4: Parse LLM output, post the appropriate comment
+      # =====================================================================
+      - name: Parse types and post comment
+        if: steps.skip.outputs.skip != 'true'
         uses: actions/github-script@v9
         env:
           AUTHOR: ${{ steps.skip.outputs.author }}
-          PROJECTS: ${{ steps.detect.outputs.projects }}
-          TYPES: ${{ steps.detect.outputs.types }}
+          PROJECTS: ${{ steps.project.outputs.projects }}
+          PROJECT_CONFIDENCE: ${{ steps.project.outputs.confidence }}
+          LLM_RESPONSE: ${{ steps.llm.outputs.response || '' }}
         with:
           script: |
             const author = process.env.AUTHOR;
             const projects = process.env.PROJECTS;
-            const types = process.env.TYPES;
+            const projectConf = process.env.PROJECT_CONFIDENCE;
+            const llmResponse = process.env.LLM_RESPONSE || '';
 
-            const body = [
-              `Thanks @${author}! 🎉`,
-              ``,
-              `@all-contributors please add @${author} for ${types} in ${projects}`
-            ].join('\n');
+            const VALID_TYPES = ['bug','code','doc','design','ideas','review','test','tool'];
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body
-            });
+            // --- Parse LLM types ---
+            let types = [];
+            try {
+              const m = llmResponse.match(/\{[\s\S]*?\}/);
+              if (m) {
+                const parsed = JSON.parse(m[0]);
+                if (Array.isArray(parsed.types)) {
+                  types = parsed.types
+                    .map(t => String(t).toLowerCase().trim())
+                    .filter(t => VALID_TYPES.includes(t));
+                }
+              }
+            } catch (e) {
+              console.log('LLM response parse failed:', e.message);
+            }
+            const typesStr = types.join(', ');
+            console.log(`LLM classified types: [${typesStr}]`);
 
-            console.log(`Posted credit trigger: @${author} for ${types} in ${projects}`);
+            const haveProject = projectConf === 'high' && projects;
+            const haveTypes = types.length > 0;
 
-      # =====================================================================
-      # STEP 3b: Low confidence — ask the maintainer to specify
-      # =====================================================================
-      - name: Ask for clarification
-        if: |
-          steps.skip.outputs.skip != 'true' &&
-          steps.detect.outputs.confidence == 'low'
-        uses: actions/github-script@v9
-        env:
-          AUTHOR: ${{ steps.skip.outputs.author }}
-          PROJECTS: ${{ steps.detect.outputs.projects }}
-          TYPES: ${{ steps.detect.outputs.types }}
-        with:
-          script: |
-            const author = process.env.AUTHOR;
-            const projects = process.env.PROJECTS;
-            const types = process.env.TYPES;
+            // --- Both detected: post structured trigger ---
+            if (haveProject && haveTypes) {
+              const body = [
+                `Thanks @${author}! 🎉`,
+                ``,
+                `@all-contributors please add @${author} for ${typesStr} in ${projects}`
+              ].join('\n');
 
-            const projectPart = projects ? projects : '<project>';
-            const typePart = types ? types : '<type>';
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+              console.log(`Posted credit trigger: @${author} for ${typesStr} in ${projects}`);
+              return;
+            }
+
+            // --- Otherwise: ask the maintainer to specify the missing piece ---
+            const projectPart = haveProject ? projects : '<project>';
+            const typePart = haveTypes ? typesStr : '<type>';
+            const missing = [];
+            if (!haveProject) missing.push('project');
+            if (!haveTypes) missing.push('contribution type');
 
             const body = [
               `Thanks @${author} for the contribution! 🎉`,
               ``,
-              `I couldn't auto-detect the credit for this PR (project: ${projects || 'unknown'}, type: ${types || 'unknown'}). To credit @${author}, reply with:`,
+              `I couldn't auto-detect the ${missing.join(' and ')} for this PR. To credit @${author}, reply with:`,
               ``,
               '```',
               `@all-contributors please add @${author} for ${typePart} in ${projectPart}`,
               '```',
               ``,
-              `**Types**: bug, code, doc, design, ideas, review, test, tool (multi: \`bug, code\`)`,
-              `**Projects**: book, tinytorch, kits, labs, mlsysim, staffml, slides, instructors, periodictable (multi: \`kits, book\`)`,
+              `**Types:** bug, code, doc, design, ideas, review, test, tool _(multi: \`bug, code\`)_`,
+              `**Projects:** book, tinytorch, kits, labs, mlsysim, staffml, slides, instructors, periodictable _(multi: \`kits, book\`)_`,
             ].join('\n');
 
             await github.rest.issues.createComment({
@@ -243,5 +327,4 @@ jobs:
               issue_number: context.issue.number,
               body
             });
-
-            console.log('Posted clarification request');
+            console.log(`Posted clarification (missing: ${missing.join(', ')})`);
