@@ -749,7 +749,7 @@ function PracticePage() {
                 key={t}
                 onClick={() => setSelectedTrack(t)}
                 className={clsx(
-                  "px-3 py-1.5 lg:py-2 lg:w-full rounded-md text-sm font-medium capitalize transition-all flex items-center gap-1.5",
+                  "px-3 py-1.5 lg:w-full rounded text-xs font-medium capitalize transition-all flex items-center gap-1.5",
                   "lg:text-left",
                   selectedTrack === t
                     ? "bg-accentBlue/10 text-accentBlue"
