@@ -130,11 +130,27 @@ for one (track, topic) pair. For each bucket, identify the BEST natural
 chains. A bucket may yield 0 chains (no good progressions), 1 chain (one
 arc through the topic), or several chains (multiple distinct arcs).
 
-CONSTRAINTS for each proposed chain:
+LEVEL PROGRESSION RULES (HARD):
+  - Each consecutive pair of members MUST satisfy: cand_level - prev_level ∈ {{1, 2}}
+  - PREFER strict +1 progression (L1→L2→L3→L4→L5→L6+) — this is the cleanest
+    pedagogical shape and should account for the majority of chains
+  - ACCEPT a +2 jump (e.g., L1→L3 or L3→L5) ONLY when no Δ=1 candidate is
+    available within the bucket and the conceptual progression is genuinely
+    natural — i.e., the harder question still meaningfully builds on the
+    easier one even with one Bloom step skipped
+  - REJECT Δ=0 (same-level pairs) — same Bloom level isn't a progression
+  - REJECT Δ ≥ 3 (e.g., L1→L4) and any backward step — too large to be a
+    coherent single-step pedagogical move
+
+OTHER CONSTRAINTS:
   - 2 ≤ chain size ≤ 6 members
-  - Levels MUST be non-decreasing across positions (Bloom-monotonic)
   - All members from the SAME (track, topic) bucket
-  - A given question id may appear in AT MOST ONE chain
+  - A question MAY appear in UP TO 2 different chains if and only if:
+      (a) The question is L1 or L2 (a foundational anchor)
+      (b) The two chains diverge into genuinely distinct sub-progressions
+          AFTER this anchor — not the same arc viewed twice
+      (c) Each chain is individually coherent and pedagogically valuable
+    Default to 1 chain per question; multi-membership is the exception.
   - Prefer chains where Q[i+1] genuinely builds on Q[i] (shared scenario,
     sequential reasoning) over loosely related same-topic questions
   - Don't force chains — if questions are unrelated, return 0 chains for
@@ -217,8 +233,12 @@ def validate_chain(chain: dict, bucket_qids: set[str], corpus: dict[str, dict]) 
         d = corpus[qid]
         levels.append(LEVEL_RANK.get(d.get("level"), 0))
         topics.add(d.get("topic"))
-    if levels != sorted(levels):
-        return False, f"levels not monotonic: {levels}"
+    # Strict-progression rule: consecutive Δ must be 1 or 2 (no 0, no negative,
+    # no ≥3). This is the structural promise the prompt asks for.
+    deltas = [levels[i+1] - levels[i] for i in range(len(levels)-1)]
+    bad_deltas = [d for d in deltas if d not in (1, 2)]
+    if bad_deltas:
+        return False, f"levels {levels} have Δ={deltas} (need each Δ ∈ {{1, 2}})"
     if len(topics) != 1:
         return False, f"multi-topic: {topics}"
     return True, ""

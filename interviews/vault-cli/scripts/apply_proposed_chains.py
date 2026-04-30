@@ -84,9 +84,19 @@ def validate(proposed: list[dict], corpus: dict[str, dict]) -> list[str]:
         if n > 1:
             errors.append(f"chain_id {cid!r} appears {n} times")
 
-    for qid, chains in qid_to_chains.items():
-        if len(chains) > 1:
-            errors.append(f"{qid} appears in multiple chains: {chains}")
+    # Multi-chain membership cap: a question can be in at most 2 chains, and
+    # only if it's L1 or L2 (foundational anchor pattern). Anything beyond
+    # that is over-stuffing — likely a generic question reused too widely.
+    for qid, chain_list in qid_to_chains.items():
+        if len(chain_list) > 2:
+            errors.append(f"{qid} appears in {len(chain_list)} chains; cap is 2")
+        elif len(chain_list) == 2:
+            level = corpus.get(qid, {}).get("level")
+            if level not in ("L1", "L2"):
+                errors.append(
+                    f"{qid} (level={level}) is in 2 chains but multi-membership "
+                    f"is only allowed for L1/L2 anchors"
+                )
 
     return errors
 
