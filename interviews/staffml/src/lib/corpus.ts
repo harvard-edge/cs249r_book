@@ -397,13 +397,25 @@ _chainIndex.forEach((qs) => {
   qs.sort((a, b) => a.position - b.position);
 });
 
-/** Get chain info for a question, or null if not in a chain */
-export function getChainForQuestion(questionId: string): ChainInfo | null {
+/** Get chain info for a question, or null if not in a chain.
+ *
+ * When a question belongs to multiple chains (multi-membership pattern —
+ * a foundational L1/L2 question anchoring two distinct progressions),
+ * caller can disambiguate by passing `preferredChainId`. If omitted or
+ * not a match, falls back to the first chain.
+ */
+export function getChainForQuestion(
+  questionId: string,
+  preferredChainId?: string,
+): ChainInfo | null {
   const q = questions.find(x => x.id === questionId);
   if (!q || !q.chain_ids || !q.chain_positions) return null;
 
-  // Use the first chain this question belongs to
-  const chainId = q.chain_ids[0];
+  // Pick preferred if it's actually one of this question's chains; else first.
+  const chainId =
+    (preferredChainId && q.chain_ids.includes(preferredChainId))
+      ? preferredChainId
+      : q.chain_ids[0];
   if (!chainId) return null;
   const pos = q.chain_positions[chainId];
   if (pos === undefined) return null;
@@ -417,6 +429,21 @@ export function getChainForQuestion(questionId: string): ChainInfo | null {
     total: chain.length,
     questions: chain,
   };
+}
+
+/** Return ALL chains a question is in (size ≥ 2 only). Empty array if none. */
+export function getAllChainsForQuestion(questionId: string): ChainInfo[] {
+  const q = questions.find(x => x.id === questionId);
+  if (!q || !q.chain_ids || !q.chain_positions) return [];
+  const out: ChainInfo[] = [];
+  for (const chainId of q.chain_ids) {
+    const pos = q.chain_positions[chainId];
+    if (pos === undefined) continue;
+    const chain = _chainIndex.get(chainId);
+    if (!chain || chain.length <= 1) continue;
+    out.push({ chainId, position: pos, total: chain.length, questions: chain });
+  }
+  return out;
 }
 
 // ─── Async worker fetchers (for scenario/details, post-bundle-shrink) ──────

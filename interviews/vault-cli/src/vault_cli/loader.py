@@ -1,11 +1,16 @@
-"""Walk ``vault/questions/`` -> in-memory Question records (schema v1.0).
+"""Walk ``vault/questions/`` -> in-memory Question records (schema v1.1).
 
 Classification comes from the YAML body, not the path. The loader enforces
 one cheap structural invariant: filename prefix must match yaml.track.
+
+v1.1: chains.json is the authoritative chain registry. The loader joins
+sidecar chain data onto each LoadedQuestion at load time so all existing
+readers (q.chains) continue to work without per-call sidecar lookups.
 """
 
 from __future__ import annotations
 
+import json as _json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +25,22 @@ from vault_cli.paths import (
     vault_questions_root,
 )
 from vault_cli.yaml_io import load_file
+
+
+def _load_chain_index(vault_dir: Path) -> dict[str, list[tuple[str, int]]]:
+    """qid -> [(chain_id, position), ...] from chains.json."""
+    chains_path = vault_dir / "chains.json"
+    if not chains_path.exists():
+        return {}
+    out: dict[str, list[tuple[str, int]]] = {}
+    for ch in _json.loads(chains_path.read_text(encoding="utf-8")):
+        cid = ch.get("chain_id") or ch.get("id")
+        if not cid: continue
+        for pos, member in enumerate(ch.get("questions", [])):
+            qid = member.get("id")
+            if not qid: continue
+            out.setdefault(qid, []).append((cid, pos))
+    return out
 
 
 @dataclass(frozen=True)
@@ -57,9 +78,15 @@ def iter_question_files(vault_dir: Path) -> Iterator[Path]:
 
 
 def load_all(vault_dir: Path) -> tuple[list[LoadedQuestion], list[LoadError]]:
-    """Load every YAML under vault/questions/. Returns loaded + errors (never raises)."""
+    """Load every YAML under vault/questions/. Returns loaded + errors (never raises).
+
+    v1.1: chains are joined from chains.json after parsing. Question YAMLs
+    no longer carry a chains: field; if one is present (transitional) it is
+    overwritten by sidecar data so chains.json wins consistently.
+    """
     loaded: list[LoadedQuestion] = []
     errors: list[LoadError] = []
+    chain_index = _load_chain_index(vault_dir)
 
     for path in iter_question_files(vault_dir):
         filename = path.name
@@ -73,6 +100,11 @@ def load_all(vault_dir: Path) -> tuple[list[LoadedQuestion], list[LoadError]]:
             errors.append(LoadError(path, f"YAML load failed: {exc}"))
             continue
 
+        # Inject chains from sidecar BEFORE schema validation. Anything in the
+        # YAML's chains: field (transitional) is overwritten — sidecar wins.
+        sidecar_chains = chain_index.get(data.get("id", ""), [])
+        data["chains"] = [{"id": cid, "position": pos} for cid, pos in sidecar_chains]
+
         try:
             q = Question.model_validate(data)
         except ValidationError as exc:
@@ -80,9 +112,6 @@ def load_all(vault_dir: Path) -> tuple[list[LoadedQuestion], list[LoadError]]:
             continue
 
         # Structural invariant: directory under questions/ must match yaml.track.
-        # The filename prefix is a naming convention but not authoritative —
-        # some corpus IDs have prefix mismatches from historical renames
-        # (e.g. cloud-fill2-32021.yaml but track=edge).
         try:
             path_track = track_from_path(path, vault_dir)
         except ValueError as exc:
