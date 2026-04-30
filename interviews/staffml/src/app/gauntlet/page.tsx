@@ -25,6 +25,8 @@ import HardwareRef from "@/components/HardwareRef";
 import NapkinCalc from "@/components/NapkinCalc";
 import AskInterviewer from "@/components/AskInterviewer";
 import FirstRunExplainer from "@/components/FirstRunExplainer";
+import StarGate from "@/components/StarGate";
+import { shouldShowGate, incrementReveals } from "@/lib/star-gate";
 
 type Phase = "setup" | "active" | "review" | "results";
 
@@ -70,6 +72,7 @@ export default function GauntletPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [showAnswer, setShowAnswer] = useState(false);
+  const [showStarGate, setShowStarGate] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -205,6 +208,12 @@ export default function GauntletPage() {
   }, [selectedTrack, selectedLevel, selectedDuration]);
 
   const revealAnswer = () => {
+    if (shouldShowGate()) {
+      setShowStarGate(true);
+      track({ type: 'star_gate_shown' });
+      return;
+    }
+    incrementReveals();
     const q = questions[currentIdx];
     if (q) {
       const items = extractRubric(
@@ -680,6 +689,9 @@ export default function GauntletPage() {
             </div>
           </div>
         </div>
+        {showStarGate && (
+          <StarGate onVerified={() => { setShowStarGate(false); track({ type: 'star_gate_verified' }); }} />
+        )}
       </div>
     );
   }
