@@ -1,12 +1,16 @@
-"""Legacy-JSON exporter (v1.0-aware).
+"""Legacy-JSON exporter (v1.1: chains as sidecar metadata).
 
 Regenerates the ``corpus.json`` artifact in the shape the Next.js frontend
-expects (field set + array-of-items). Driven from the v1.0 YAML source,
-producing a deterministic, byte-stable JSON.
+expects (field set + array-of-items). Driven from the v1.0 YAML source
+plus the ``chains.json`` sidecar (authoritative chain registry), producing
+a deterministic, byte-stable JSON.
 
-v1.0 source of truth: classification is on the YAML body. The `scope`
-field (dead in GUI) is no longer emitted. `chain_ids` and `chain_positions`
-are rebuilt from the plural `chains: [{id, position}]` YAML list.
+v1.1 architecture: chain membership is a SIDECAR — chains.json is the
+authoritative source. Question YAMLs no longer carry a ``chains:`` field.
+The exporter joins YAML + chains.json to produce per-question chain_ids
+and chain_positions in the runtime corpus.json. This means rebuilding
+chains (e.g., via the Gemini chain-builder) only touches one file, not
+2k+ YAMLs.
 """
 
 from __future__ import annotations
@@ -20,7 +24,27 @@ from vault_cli.loader import LoadedQuestion
 from vault_cli.policy import filter_questions, load_policy
 
 
-def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
+def _build_chain_index(vault_dir: Path) -> dict[str, dict[str, int]]:
+    """Map qid -> {chain_id: position} from chains.json sidecar.
+
+    Position is derived from the array index inside chains.json — chains
+    are listed in pedagogical order, so position 0 is the first member.
+    """
+    chains_path = vault_dir / "chains.json"
+    if not chains_path.exists():
+        return {}
+    out: dict[str, dict[str, int]] = {}
+    for ch in json.loads(chains_path.read_text(encoding="utf-8")):
+        cid = ch.get("chain_id") or ch.get("id")
+        if not cid: continue
+        for pos, member in enumerate(ch.get("questions", [])):
+            qid = member.get("id")
+            if not qid: continue
+            out.setdefault(qid, {})[cid] = pos
+    return out
+
+
+def _adapt(lq: LoadedQuestion, chain_index: dict[str, dict[str, int]]) -> dict[str, Any]:
     """YAML question → legacy-JSON item in the shape corpus.ts expects."""
     q = lq.question
 
@@ -38,17 +62,8 @@ def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
     }
     if q.phase:
         legacy["phase"] = q.phase
-    # Explicit prompt (optional during backfill). Preserved in the
-    # summary bundle too — it's ≤200 chars and the practice page
-    # renders it synchronously, so lazy-hydration would be a regression.
     if q.question:
         legacy["question"] = q.question
-    # Visual metadata. The SVG file itself lives under
-    # interviews/vault/visuals/<track>/ and is copied to
-    # interviews/staffml/public/question-visuals/ by `copy_visual_assets`
-    # below; this JSON only carries the metadata the frontend needs
-    # (kind + filename + alt + optional caption) to build the asset
-    # URL at /question-visuals/<track>/<path>.
     if q.visual is not None:
         visual_out: dict[str, Any] = {
             "kind": q.visual.kind,
@@ -59,16 +74,13 @@ def _adapt(lq: LoadedQuestion) -> dict[str, Any]:
             visual_out["caption"] = q.visual.caption
         legacy["visual"] = visual_out
 
-    # Chain — legacy shape: chain_ids (list) + chain_positions (dict).
-    # v1.0 schema already carries multi-chain membership natively.
-    chain_ids: list[str] = []
-    chain_positions: dict[str, int] = {}
-    for c in q.chains or []:
-        chain_ids.append(c.id)
-        chain_positions[c.id] = c.position
-    if chain_ids:
-        legacy["chain_ids"] = chain_ids
-        legacy["chain_positions"] = chain_positions
+    # Chain — sidecar-driven. chain_ids/chain_positions are computed by
+    # joining the YAML's id with chains.json. The YAML's chains: field
+    # (if still present during transition) is ignored — chains.json wins.
+    member_of = chain_index.get(q.id, {})
+    if member_of:
+        legacy["chain_ids"] = sorted(member_of.keys())
+        legacy["chain_positions"] = dict(member_of)
 
     # Details.
     details: dict[str, Any] = {
@@ -108,7 +120,7 @@ def emit_legacy_corpus(
     *,
     publish_only: bool = True,
 ) -> dict[str, Any]:
-    """Emit legacy-shape corpus.json from YAML source."""
+    """Emit legacy-shape corpus.json from YAML source + chains.json sidecar."""
     if publish_only:
         policy = load_policy(vault_dir / "release-policy.yaml")
         published_dicts = filter_questions(
@@ -120,8 +132,9 @@ def emit_legacy_corpus(
     else:
         items = loaded
 
+    chain_index = _build_chain_index(vault_dir)
     items_sorted = sorted(items, key=lambda lq: lq.id)
-    legacy_items = [_adapt(lq) for lq in items_sorted]
+    legacy_items = [_adapt(lq, chain_index) for lq in items_sorted]
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
