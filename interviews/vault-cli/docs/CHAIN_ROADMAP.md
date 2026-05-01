@@ -1,9 +1,9 @@
 # Vault Chain Coverage Roadmap
 
-**Status:** active workstream
+**Status:** Phase 1 + 2 complete · Phase 3 pilot landed (4 drafts pending review) · Phase 4 housekeeping mostly shipped
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-05-01 (Phase 3.c pilot run + 3.d promotion shipped; 4 new draft questions in corpus, awaiting human review)
+**Last updated:** 2026-05-01 (B-track autonomous queue shipped — Phase 4.1/4.6/4.7/4.9 + 2.3-deferred filter + promote_drafts.py + review guide)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -512,9 +512,13 @@ Repeat 3c-3e weekly, tracking metrics:
 These can slot between major phases. Order roughly:
 
 ### 4.1 — Chain audit CI gate
-**When:** before Phase 3 (gates corpus growth)
-**Files:** `.github/workflows/staffml-validate-vault.yml`
-**Change:** add `vault chains audit --strict --max-orphan-rate 0.02 --max-drift-regression 0.05`
+**Status:** complete 2026-05-01 — `476e9b146`. Two CI steps in
+`staffml-validate-vault.yml`: structural audit via
+`apply_proposed_chains.py --dry-run` on `chains.json`, plus a
+per-track count regression guard (cloud ≥ 100 / edge ≥ 25 /
+mobile ≥ 25 / tinyml ≥ 25 / global ≥ 0). The roadmap originally
+suggested a `vault chains audit` subcommand; the existing validator
+covers it without new CLI surface.
 
 ### 4.2 — Multi-chain UI verification
 **Status:** audited 2026-05-01 — `0` qids in >1 chain (lenient sweep
@@ -537,14 +541,21 @@ propose chain memberships for the new question.
 on a beefier machine; OOM'd on 16GB.
 
 ### 4.6 — Periodic chain rebuild automation
-**When:** after Phase 1 + 2 stabilize
-**Deliverable:** weekly cron action that runs `build_chains_with_gemini.py`
-on incremental corpus changes; opens auto-PR with proposed delta.
+**Status:** complete 2026-05-01 — `03ea7da6b`. New workflow at
+`.github/workflows/staffml-chain-rebuild.yml`. Currently
+`workflow_dispatch`-only (cron commented out); flip the cron on once
+the rebuild has demonstrated stable diffs against small corpus deltas.
+PR body includes per-track delta + proposed/live counts. Apply step
+intentionally manual.
 
 ### 4.7 — Chain decay detection
-**When:** after Phase 2
-**Deliverable:** pre-commit hook recomputes embedding for changed YAMLs;
-flags chain mate cosine drops below threshold.
+**Status:** complete 2026-05-01 — `09c04224f`. New script
+`scripts/check_chain_decay.py`. Default invocation diffs against
+`origin/dev`, re-embeds changed YAMLs with the same model the corpus
+uses, and reports min mate-cosine per chain membership. Threshold 0.40
+default; advisory (exit 0) by default; `--strict` makes it a CI gate.
+Intentionally not auto-wired into pre-commit on first ship — model
+load is heavy (~135MB first-run download), opt-in is right.
 
 ### 4.8 — Update docs
 **Status:** complete 2026-05-01 — `f086b6f42`. ARCHITECTURE.md §3.6
@@ -552,9 +563,11 @@ captures sidecar + hierarchy + tier; README.md gains a "Chain build
 pipeline" section + updated layout/status.
 
 ### 4.9 — gitignore CI guard
-**When:** anytime, low effort
-**Deliverable:** CI check that every YAML under `interviews/vault/questions/`
-is git-tracked (catches the `data/` regression class).
+**Status:** complete 2026-05-01 — `dbd3d9458`. New step in
+`staffml-validate-vault.yml` that hard-fails if any YAML under
+`interviews/vault/questions/` is gitignored. Implementation: `git
+ls-files --others --ignored --exclude-standard` on the questions
+tree; non-empty output → fail.
 
 ### 4.10 — Merge yaml-audit → dev (re-merge with chain rebuild)
 **When:** after Phase 1
