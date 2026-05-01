@@ -25,7 +25,7 @@ relevant Phase section for the step you're picking up.**
 2. **Run baseline validators** to confirm tree is in known-good state:
    ```bash
    vault check --strict           # expect: 10,701 loaded, 0 invariant failures
-   vault build --legacy-json      # expect: clean build, releaseId=dev, 9438 published
+   vault build --local-json      # expect: clean build, releaseId=dev, 9438 published
    ```
 3. **Read the most recent entry in the Progress Log section below** to see
    what step was last completed, what was decided, and what's next.
@@ -241,7 +241,7 @@ against the merged file as final structural gate.
 
 **Steps:**
 1. `vault check --strict` → expect 0 invariant failures
-2. `vault build --legacy-json` → clean, chainCount jumps from 373 to ~700
+2. `vault build --local-json` → clean, chainCount jumps from 373 to ~700
 3. Restart staffml dev server, run playwright suite → expect 13/13 (or
    add tier-related test if scope justifies it)
 4. Commit Phase 1 work as a single conceptual commit:
@@ -490,7 +490,7 @@ python3 interviews/vault-cli/scripts/build_chains_with_gemini.py --all \
   --output interviews/vault/chains.proposed.json
 python3 interviews/vault-cli/scripts/apply_proposed_chains.py
 vault check --strict
-vault build --legacy-json
+vault build --local-json
 ```
 
 **Expected:** chain count grows by ~50% of newly authored questions
@@ -673,7 +673,7 @@ tinyml           45       1202      36          0.80     34         0
 
 **Validators (re-run as a sanity gate on the unmodified corpus):**
 - `vault check --strict` → 10,701 loaded, 0 invariant failures ✓
-- `vault build --legacy-json` → releaseId=dev, 9438 published, chainCount=373 ✓
+- `vault build --local-json` → releaseId=dev, 9438 published, chainCount=373 ✓
 
 **Files committed:**
 - `interviews/vault-cli/scripts/diagnose_chain_coverage.py` (new)
@@ -756,7 +756,7 @@ pairs).
   - `apply_proposed_chains.py --proposed chains.json --dry-run` →
     validation clean (879 chains).
   - `vault check --strict` → 10,701 loaded, 0 invariant failures.
-  - `vault build --legacy-json` → releaseId=dev, published_count=9438,
+  - `vault build --local-json` → releaseId=dev, published_count=9438,
     **chainCount=879** (was 373); release_hash changes to `04ee8a23…`.
   - Started `next dev` server; ran
     `node interviews/staffml/tests/chain-and-vault-smoke.mjs` →
@@ -896,7 +896,7 @@ entries, `chain_tiers` derived in `legacy_export.py`).
 
 **Validators (re-confirmed end of Phase 2):**
 - `vault check --strict`: 10,701 loaded, 0 invariant failures
-- `vault build --legacy-json`: 9438 published, chainCount=879
+- `vault build --local-json`: 9438 published, chainCount=879
 - `pytest interviews/vault-cli/tests/`: 74/74 pass
 - `npx tsc --noEmit`: 0 errors
 - `node interviews/staffml/tests/chain-and-vault-smoke.mjs`: 17/17
@@ -1127,7 +1127,7 @@ intermediate. The gate filtered it.
 **Validation post-promotion:**
 - `vault check --strict` → 10,705 loaded (was 10,701; +4 ✓), 0 invariant
   failures.
-- `vault build --legacy-json` → released set unchanged: 9438 published,
+- `vault build --local-json` → released set unchanged: 9438 published,
   chainCount=879, releaseHash=04ee8a23… (drafts have status=draft, so
   the publishing filter excludes them — by design).
 
@@ -1163,7 +1163,7 @@ fit chains, so they should land in their bridge slots).
    and `human_reviewed.status → verified`, set `human_reviewed.by`, then:
    ```bash
    vault check --strict
-   vault build --legacy-json    # released question count goes up by N
+   vault build --local-json    # released question count goes up by N
    python3 interviews/vault-cli/scripts/build_chains_with_gemini.py --all \
      --output interviews/vault/chains.proposed.json
    python3 interviews/vault-cli/scripts/apply_proposed_chains.py

@@ -105,7 +105,7 @@ python3 scripts/merge_chain_passes.py
 Both `apply_proposed_chains.py` and the validator tolerate a missing
 `tier` field on chain entries (defaulting to "primary"); chains
 produced by `--mode lenient` are tagged `tier: "secondary"`. After any
-change, run `vault check --strict` and `vault build --legacy-json`.
+change, run `vault check --strict` and `vault build --local-json`.
 
 ## Run tests
 
