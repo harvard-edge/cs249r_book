@@ -2,7 +2,7 @@
 """Generate LaTeX macros — Phase-2 thin wrapper over ``vault export-paper``.
 
 The figures pipeline (unchanged) still uses a **generated** monolithic JSON from
-``vault build --legacy-json`` (see ``analyze_corpus.py``) for
+``vault build --local-json`` (see ``analyze_corpus.py``) for
 ``corpus_stats.json``. This entry point is **not** the stats sidecar.
 
 The Phase-2 pipeline is a single command::

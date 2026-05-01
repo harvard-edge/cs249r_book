@@ -1,3 +1,4 @@
+import pytest
 from mlsysim.core.evaluation import SystemEvaluator
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
@@ -53,6 +54,7 @@ def test_infeasible_single_node_marks_performance_failed():
 
 def test_scorecard_plot_accepts_scenario_evaluation_quantities():
     """Scenario evaluations expose Pint quantities; plots normalize them."""
+    pytest.importorskip("matplotlib")
     evaluation = Applications.Doorbell.evaluate()
     fig, ax = plot_evaluation_scorecard(evaluation)
     try:

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { ECOSYSTEM_BASE as BASE } from "../lib/env";
 import { useTheme } from "@/components/ThemeProvider";
 
@@ -197,14 +198,34 @@ const S = {
   },
 };
 
+type DropdownPosition = { top: number; left?: number; right?: number };
+
+const ALL_MENUS = [...LEFT_MENUS, ...RIGHT_MENUS];
+
+// `useLayoutEffect` warns under SSR (Next.js renders client components on
+// the server for the initial HTML). Fall back to `useEffect` server-side
+// so the warning is silenced; the layout pass happens after hydration
+// either way, which is exactly when the dropdown can first open.
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 export default function EcosystemBar() {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [hoveredLink, setHoveredLink] = useState<string | null>(null);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [dropdownPos, setDropdownPos] = useState<DropdownPosition | null>(null);
   const barRef = useRef<HTMLDivElement>(null);
+  // Trigger refs keyed by menu id — each dropdown's portalled menu is
+  // positioned from its trigger's bounding rect, so we need a stable
+  // handle to each trigger button across renders.
+  const triggerRefs = useRef<Map<string, HTMLButtonElement | null>>(new Map());
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
+
+  // Defer portal rendering until after mount — `createPortal(..., document.body)`
+  // would crash during SSR / first render where `document` is undefined.
+  useEffect(() => { setMounted(true); }, []);
 
   // Theme-aware colors (matches shared/_navbar.scss light/dark).
   // Light bg is Bootstrap's `--bs-tertiary-bg` (#f8f9fa) — Quarto navbars
@@ -231,16 +252,65 @@ export default function EcosystemBar() {
     document.head.appendChild(link);
   }, []);
 
-  // Close on outside click
+  // Close on outside click. Treat clicks inside `barRef` (triggers) AND
+  // inside any portalled dropdown (tagged with `data-ecosystem-dropdown`)
+  // as inside — without the data-attribute check, clicking a dropdown
+  // item would close the menu before the link click registered.
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (barRef.current && !barRef.current.contains(e.target as Node)) {
-        setOpenMenu(null);
-      }
+      const target = e.target as Element | null;
+      if (!target) return;
+      if (barRef.current?.contains(target)) return;
+      if (target.closest?.('[data-ecosystem-dropdown="true"]')) return;
+      setOpenMenu(null);
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
+
+  // Escape closes the open dropdown — standard a11y behavior.
+  useEffect(() => {
+    if (!openMenu) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenMenu(null);
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [openMenu]);
+
+  // Position the portalled dropdown from the open trigger's rect, and
+  // keep it pinned during scroll/resize. `useLayoutEffect` runs before
+  // paint so the dropdown is never visible at top:0/left:0 on open.
+  // Scroll listener uses capture so it catches scrolls on any ancestor
+  // (the page, a sidebar, an embedded scroller), keeping the menu glued
+  // to its trigger no matter what scrolls.
+  useIsoLayoutEffect(() => {
+    if (!openMenu) {
+      setDropdownPos(null);
+      return;
+    }
+    const trigger = triggerRefs.current.get(openMenu);
+    if (!trigger) return;
+    const menu = ALL_MENUS.find((m) => m.id === openMenu);
+    if (!menu) return;
+
+    const compute = () => {
+      const rect = trigger.getBoundingClientRect();
+      if (menu.alignEnd) {
+        setDropdownPos({ top: rect.bottom, right: window.innerWidth - rect.right });
+      } else {
+        setDropdownPos({ top: rect.bottom, left: rect.left });
+      }
+    };
+
+    compute();
+    window.addEventListener("resize", compute);
+    window.addEventListener("scroll", compute, true);
+    return () => {
+      window.removeEventListener("resize", compute);
+      window.removeEventListener("scroll", compute, true);
+    };
+  }, [openMenu]);
 
   const linkStyle = (id: string) => ({
     ...S.navLink,
@@ -257,6 +327,7 @@ export default function EcosystemBar() {
   const renderDropdown = (menu: MenuGroup) => (
     <div key={menu.id} style={{ position: 'relative' }}>
       <button
+        ref={(el) => { triggerRefs.current.set(menu.id, el); }}
         style={linkStyle(menu.id)}
         onClick={() => setOpenMenu(openMenu === menu.id ? null : menu.id)}
         onMouseEnter={() => setHoveredLink(menu.id)}
@@ -270,9 +341,39 @@ export default function EcosystemBar() {
           opacity: 0.6, verticalAlign: '1px',
         }} />
       </button>
-      {openMenu === menu.id && (
-        <div style={{ ...S.dropdown, ...(menu.alignEnd ? S.dropdownEnd : {}), backgroundColor: dropdownBg, border: `1px solid ${dropdownBorder}` }}>
-          {menu.items.map((item, i) =>
+      {/* Dropdown menu is rendered via React portal at the bottom of the
+          component (see `portalledDropdown`) so it escapes this bar's
+          `overflow-x: clip` + sticky compositor layer. Inlining it here
+          caused the menu to render behind the StaffML `Nav` (z-50 with
+          backdrop-blur creates its own stacking context) regardless of
+          z-index, because WebKit composites `overflow:clip` sticky
+          parents into a layer that does not extend past their box. */}
+    </div>
+  );
+
+  const openMenuDef = openMenu ? ALL_MENUS.find((m) => m.id === openMenu) : null;
+  const portalledDropdown = mounted && openMenuDef && dropdownPos
+    ? createPortal(
+        <div
+          data-ecosystem-dropdown="true"
+          style={{
+            position: 'fixed',
+            top: dropdownPos.top,
+            left: dropdownPos.left,
+            right: dropdownPos.right,
+            // Sits above every in-page sticky/fixed element. Bumped well
+            // past the StaffML `Nav` (z-50) and Bootstrap modal backdrop
+            // (1040) so the menu paints unconditionally on top.
+            zIndex: 2000,
+            minWidth: 160,
+            padding: '4px 0',
+            backgroundColor: dropdownBg,
+            border: `1px solid ${dropdownBorder}`,
+            borderRadius: 4,
+            boxShadow: '0 6px 12px rgba(0,0,0,0.08)',
+          }}
+        >
+          {openMenuDef.items.map((item, i) =>
             item.divider ? (
               <div key={i} style={{ ...S.divider, borderTopColor: dividerColor }} />
             ) : (
@@ -280,8 +381,8 @@ export default function EcosystemBar() {
                 key={i}
                 href={item.href}
                 onClick={() => setOpenMenu(null)}
-                style={itemStyle(`${menu.id}-${i}`, item.active)}
-                onMouseEnter={() => setHoveredItem(`${menu.id}-${i}`)}
+                style={itemStyle(`${openMenuDef.id}-${i}`, item.active)}
+                onMouseEnter={() => setHoveredItem(`${openMenuDef.id}-${i}`)}
                 onMouseLeave={() => setHoveredItem(null)}
                 {...(item.external ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
               >
@@ -290,12 +391,13 @@ export default function EcosystemBar() {
               </a>
             )
           )}
-        </div>
-      )}
-    </div>
-  );
+        </div>,
+        document.body
+      )
+    : null;
 
   return (
+    <>
     <div ref={barRef} style={{
       position: 'sticky' as const, top: 0,
       // z-index 1100: the StaffML internal Nav (`Nav.tsx`) sticks at
@@ -507,6 +609,8 @@ export default function EcosystemBar() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+      {portalledDropdown}
+    </>
   );
 }

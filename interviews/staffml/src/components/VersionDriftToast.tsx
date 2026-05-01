@@ -20,6 +20,21 @@ import { RELEASE_ID } from "@/lib/stats";
 
 const SESSION_KEY = "staffml:driftToastDismissed";
 
+// Strict semver compare: only fire on a real upgrade (remote > local). A
+// rollback or a dev-build leading prod (suffix difference at the same
+// numeric version) must not trigger an "upgrade available" toast.
+function parseVer(v: string): [number, number, number] {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
+  return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0];
+}
+function isRemoteNewer(remote: string, local: string): boolean {
+  const r = parseVer(remote), l = parseVer(local);
+  for (let i = 0; i < 3; i++) {
+    if (r[i] !== l[i]) return r[i] > l[i];
+  }
+  return false;
+}
+
 export default function VersionDriftToast() {
   const [liveReleaseId, setLiveReleaseId] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
@@ -45,7 +60,7 @@ export default function VersionDriftToast() {
     fetch(`${api.replace(/\/+$/, "")}/manifest`, { signal: ctrl.signal })
       .then(res => (res.ok ? res.json() : null))
       .then((m: { release_id?: string } | null) => {
-        if (m?.release_id && m.release_id !== RELEASE_ID) {
+        if (m?.release_id && isRemoteNewer(m.release_id, RELEASE_ID)) {
           setLiveReleaseId(m.release_id);
         }
       })
