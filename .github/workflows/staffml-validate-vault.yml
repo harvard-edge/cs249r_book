@@ -90,6 +90,39 @@ jobs:
       - name: vault check --strict (corpus invariants)
         run: vault check --strict --vault-dir "$VAULT_DIR"
 
+      - name: chains.json structural audit
+        # Structural gate on the live chain registry — runs the same
+        # validation apply_proposed_chains.py does before promoting a
+        # staging file (member ids exist + are published, levels
+        # non-decreasing, single-topic, multi-membership cap ≤ 2,
+        # L1/L2 anchor rule). Phase 4.1 of CHAIN_ROADMAP.md.
+        run: |
+          python3 "$VAULT_CLI_DIR/scripts/apply_proposed_chains.py" \
+            --proposed "$VAULT_DIR/chains.json" \
+            --dry-run
+
+      - name: chain coverage regression guard (per-track)
+        # Soft regression check: no track may drop to 0 chains. Hard
+        # floor at edge/mobile/tinyml ≥ 25 chains each (post-Phase 1
+        # baseline 49/46/36). If this trips on a real edit, raise the
+        # floor to the new baseline rather than weakening the guard.
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          from collections import Counter
+          chains = json.load(open(f"{os.environ['VAULT_DIR']}/chains.json"))
+          per_track = Counter(c["track"] for c in chains)
+          floors = {"cloud": 100, "edge": 25, "mobile": 25, "tinyml": 25, "global": 0}
+          fails = [(t, per_track.get(t, 0), f) for t, f in floors.items()
+                   if per_track.get(t, 0) < f]
+          print(f"per-track chain count: {dict(per_track)}")
+          if fails:
+              for t, n, f in fails:
+                  print(f"::error::track {t!r} has {n} chains; floor is {f}")
+              sys.exit(1)
+          print(f"all tracks above floor")
+          PY
+
       - name: vault build (reproducibility smoke test)
         # Historically this step also compared release_hash against a pinned
         # value in corpus-equivalence-hash.txt. That pin was load-bearing
