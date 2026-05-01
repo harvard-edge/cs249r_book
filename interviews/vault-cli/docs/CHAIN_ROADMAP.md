@@ -3,7 +3,7 @@
 **Status:** active workstream
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-05-01 (Phase 1 + 2 + 4.2/4.8 shipped — 879 chains, tier in UI, docs current)
+**Last updated:** 2026-05-01 (Phase 3.a + 3.b tooling shipped; 3.c pilot deferred for review)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -368,7 +368,7 @@ primary chains in default surfaces, exposes secondary in "more paths."
 
 ## Phase 3 — Gap-driven question authoring
 
-**Status:** `not started`
+**Status:** `tooling complete (3.a + 3.b); pilot 3.c deferred for review`
 **Goal:** Use the 138+ entries in `gaps.proposed.json` to author new
 questions filling missing rungs, validated independently before commit.
 This is the durable corpus growth strategy.
@@ -963,6 +963,104 @@ first of the gap-driven authoring tools. The roadmap budgets it at "1
 day" because it's the substantive new capability of Phase 3 (Gemini
 authoring vs. just chain construction). Best done with the user
 available to review the first few generated drafts.
+
+---
+
+### 2026-05-01 — Phase 3.a + 3.b: authoring + validation tooling
+
+**What was done:**
+
+**Phase 3.a — `generate_question_for_gap.py`:**
+- Reads a gap entry (`{track, topic, missing_level, between, rationale}`)
+  from gaps.proposed.json (or .lenient.json), loads the between-questions
+  in full + up to 3 same-bucket exemplars at the target level, prompts
+  Gemini-3.1-pro-preview with the schema summary + bridge context, and
+  writes a candidate question to
+  `interviews/vault/questions/<track>/<area>/<id>.yaml.draft`.
+- ID allocator scans the existing corpus + already-written drafts so a
+  batch run gets distinct fresh IDs without touching `id-registry.yaml`
+  (registry append happens at promotion time, not generation).
+- Authoring metadata stamped under a private `_authoring` block:
+  origin model, tool name, timestamp, and the source gap entry. The
+  Pydantic Question model has `extra="allow"`, so this passes schema.
+- Modes: `--gap-index <N>` (single gap), `--gaps-from <path> --limit N`
+  (batch), `--dry-run` (build prompts without calling Gemini).
+- Smoke checks:
+  - `--dry-run --gap-index 0` resolves the first gap, finds 3 exemplars,
+    builds the prompt, allocates `cloud-4579`. ✓
+  - Synthetic Gemini response → `assemble_draft` → `Question.model_validate`
+    passes; YAML preview looks right (12-field body, sensible details). ✓
+
+**Phase 3.b — `validate_drafts.py`:**
+- Five-gate scorecard per draft:
+  1. **schema** — Pydantic Question (mandatory; downstream gates skip
+     on schema fail to avoid spurious LLM calls)
+  2. **originality** — embeds `title + scenario + question` with
+     `BAAI/bge-small-en-v1.5` (matches the corpus embeddings.npz model
+     so cosines are directly comparable), compares against in-bucket
+     neighbors, flags any `cosine ≥ 0.92`
+  3. **level_fit** — Gemini-judge against ≤5 published exemplars at the
+     target level in the same (track, topic)
+  4. **coherence** — Gemini-judge: scenario / question /
+     realistic_solution mutually consistent
+  5. **bridge** — Gemini-judge: candidate genuinely chains between the
+     two `between` questions named in `_authoring.gap`
+- Skips: `--no-originality` (skip embed model load),
+  `--no-llm-judge` (skip Gemini gates). Schema gate is unconditional.
+- Output: `interviews/vault/draft-validation-scorecard.json` with per-row
+  detail + final verdict (`pass | fail | error`).
+- Smoke check: synthetic draft in /tmp passed schema + originality
+  (top-neighbor cosine 0.73 vs 0.92 threshold). End-to-end runner
+  produced a well-formed scorecard. ✓
+
+**What was deliberately not done tonight:**
+- **Phase 3.c (pilot run on 30 highest-value gaps):** This generates
+  new YAML question content that needs human review *before* promotion.
+  Running 30 unsupervised generations and 30×4 LLM-judge calls without
+  the user available to spot-check the first few outputs is the wrong
+  shape of work for an overnight slot. The tooling is ready when the
+  user is.
+- **Phase 3.d–3.f:** Promotion + re-chain are downstream of 3.c
+  acceptance.
+
+**Recommended pilot when the user is back:**
+1. Pick 30 gaps from `gaps.proposed.lenient.json` where the bucket has
+   ≥4 questions already (just missing the bridge):
+   ```bash
+   python3 interviews/vault-cli/scripts/generate_question_for_gap.py \
+     --gaps-from interviews/vault/gaps.proposed.lenient.json \
+     --limit 30
+   ```
+2. Validate:
+   ```bash
+   python3 interviews/vault-cli/scripts/validate_drafts.py
+   ```
+3. Manually review the passing drafts (~20-25 expected).
+4. Promote: rename `.yaml.draft` → `.yaml`, append to id-registry.
+5. Re-run `build_chains_with_gemini.py --all` so the new questions get
+   absorbed into chains.
+
+**Files committed:**
+- `interviews/vault-cli/scripts/generate_question_for_gap.py` (new)
+- `interviews/vault-cli/scripts/validate_drafts.py` (new)
+- `interviews/vault-cli/docs/CHAIN_ROADMAP.md` (this Progress Log entry +
+  status flips)
+
+**Notes for next session:**
+- Both scripts assume `gemini` CLI on PATH (gemini-3.1-pro-preview) and,
+  for originality, the corpus's `embeddings.npz` (gitignored, regenerable
+  by the existing embedding scripts). `validate_drafts --no-llm-judge`
+  is a fast first cut that only exercises schema + originality if you
+  want to triage drafts before paying for the LLM-judge calls.
+- Heads up: each draft in 3.b consumes ~3 Gemini calls (level_fit +
+  coherence + bridge). 30 drafts → ~90 calls. Daily cap is 250.
+- `id-registry.yaml` is append-only and CI-enforced. Promotion (3.d)
+  needs to add new IDs to it; that's not yet wired into a script —
+  manual append for the pilot, then we can extract a `vault promote`
+  helper from the pattern.
+
+**Next step:** Phase 3.c — pilot run on 30 high-value gaps (best done
+with the user available to spot-check the first few outputs).
 
 ---
 
