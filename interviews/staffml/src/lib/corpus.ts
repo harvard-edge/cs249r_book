@@ -47,6 +47,15 @@ export interface Question {
   status?: string;          // draft | published | flagged | archived | deleted
   chain_ids?: string[];
   chain_positions?: Record<string, number>;
+  /**
+   * Per-membership tier label. "primary" chains came out of the strict
+   * Bloom-progression sweep and are surfaced by default; "secondary"
+   * chains came out of the lenient second-pass coverage build and are
+   * deprioritized in default UI surfaces. Mirrors chain_positions in
+   * shape — one entry per chain_id this question is in. See
+   * CHAIN_ROADMAP.md Phase 1/2 for the mechanism.
+   */
+  chain_tiers?: Record<string, "primary" | "secondary">;
 
   // ── Heavy fields (bundled as empty stubs; hydrated from worker) ──
   // The summary bundle ships scenario: "" and details with empty strings
@@ -369,15 +378,26 @@ export function extractFinalNumber(text: string): number | null {
 // ─── Chain helpers ──────────────────────────────────────────
 // Chains are deepening question sequences on a topic (L1 → L6+)
 
+export type ChainTier = "primary" | "secondary";
+
 export interface ChainInfo {
   chainId: string;
   position: number;       // 0-indexed position of current question
   total: number;          // total questions in chain
+  /**
+   * "primary" — surface by default (clean Bloom progression).
+   * "secondary" — deprioritized in default surfaces; reachable via the
+   * "more paths" UI or explicit ?chain= URL routing.
+   */
+  tier: ChainTier;
   questions: { id: string; title: string; level: string; position: number }[];
 }
 
-// Build chain index once
+// Build chain index once. Tier is a chain-level attribute (every member
+// of a chain shares the same tier), so we keep it in a sibling map rather
+// than embedding it in each question record.
 const _chainIndex = new Map<string, { id: string; title: string; level: string; position: number }[]>();
+const _chainTier = new Map<string, ChainTier>();
 for (const q of questions) {
   if (!q.chain_ids || !q.chain_positions) continue;
   for (const chainId of q.chain_ids) {
@@ -390,6 +410,10 @@ for (const q of questions) {
       level: q.level,
       position: pos,
     });
+    if (!_chainTier.has(chainId)) {
+      const t = q.chain_tiers?.[chainId];
+      _chainTier.set(chainId, t === "secondary" ? "secondary" : "primary");
+    }
   }
 }
 // Sort each chain by position
@@ -397,12 +421,17 @@ _chainIndex.forEach((qs) => {
   qs.sort((a, b) => a.position - b.position);
 });
 
+function _tierOf(chainId: string): ChainTier {
+  return _chainTier.get(chainId) ?? "primary";
+}
+
 /** Get chain info for a question, or null if not in a chain.
  *
  * When a question belongs to multiple chains (multi-membership pattern —
  * a foundational L1/L2 question anchoring two distinct progressions),
  * caller can disambiguate by passing `preferredChainId`. If omitted or
- * not a match, falls back to the first chain.
+ * not a match, falls back to the first chain. Tier-aware callers should
+ * prefer ``getPrimaryChainForQuestion`` for the default surface.
  */
 export function getChainForQuestion(
   questionId: string,
@@ -427,11 +456,17 @@ export function getChainForQuestion(
     chainId,
     position: pos,
     total: chain.length,
+    tier: _tierOf(chainId),
     questions: chain,
   };
 }
 
-/** Return ALL chains a question is in (size ≥ 2 only). Empty array if none. */
+/** Return ALL chains a question is in (size ≥ 2 only). Empty array if none.
+ *
+ * Order: primary chains first (in their original chain_ids order), then
+ * secondary chains. Callers that want primary-only should filter the
+ * result on ``c.tier === "primary"``.
+ */
 export function getAllChainsForQuestion(questionId: string): ChainInfo[] {
   const q = questions.find(x => x.id === questionId);
   if (!q || !q.chain_ids || !q.chain_positions) return [];
@@ -441,9 +476,30 @@ export function getAllChainsForQuestion(questionId: string): ChainInfo[] {
     if (pos === undefined) continue;
     const chain = _chainIndex.get(chainId);
     if (!chain || chain.length <= 1) continue;
-    out.push({ chainId, position: pos, total: chain.length, questions: chain });
+    out.push({
+      chainId,
+      position: pos,
+      total: chain.length,
+      tier: _tierOf(chainId),
+      questions: chain,
+    });
   }
+  // Stable: primary first, then secondary; preserves intra-tier order.
+  out.sort((a, b) => {
+    if (a.tier === b.tier) return 0;
+    return a.tier === "primary" ? -1 : 1;
+  });
   return out;
+}
+
+/** Return the question's primary chain if it has one; otherwise the
+ * first secondary; otherwise null. The default-surface helper for UI
+ * components that want to render one chain badge / one strip per question.
+ */
+export function getPrimaryChainForQuestion(questionId: string): ChainInfo | null {
+  const all = getAllChainsForQuestion(questionId);
+  if (all.length === 0) return null;
+  return all.find(c => c.tier === "primary") ?? all[0];
 }
 
 // ─── Async worker fetchers (for scenario/details, post-bundle-shrink) ──────

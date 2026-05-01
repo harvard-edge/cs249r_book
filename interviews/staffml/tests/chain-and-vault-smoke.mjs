@@ -12,6 +12,8 @@
  *   6. Hierarchical layout migration: question pages still render
  *      (the hierarchy change is invisible to the runtime — paths are
  *      a build-time concern, the corpus.json is path-agnostic)
+ *   7. Tier-aware UI: alt-path badge surfaces secondary chains and
+ *      primary chains render without it
  *
  * Reports pass/fail per scenario and exits non-zero on any failure.
  */
@@ -126,6 +128,43 @@ async function test6_hierarchy_doesnt_break_runtime(page) {
   }
 }
 
+async function test7_tier_aware_chain_routing(page) {
+  console.log("\n[7] tier-aware chain routing (Phase 2 — primary default, secondary opt-in)");
+
+  // (a) Secondary chain: ?chain=<id> deep-link surfaces the chain AND
+  // the "alt path" badge. Fixtures pinned from corpus.json — qid is
+  // secondary-only so this also exercises the implicit lookup path.
+  const SEC_QID = "cloud-0231";
+  const SEC_CHAIN = "cloud-chain-auto-secondary-013-04";
+  await page.goto(`${BASE}/practice?q=${SEC_QID}&chain=${SEC_CHAIN}`,
+    { waitUntil: "networkidle", timeout: 15000 });
+  await page.waitForTimeout(1500);
+  const errSec = await page.getByText(/Question not found|404/i).first()
+    .isVisible().catch(() => false);
+  record(`secondary chain reachable via ?chain= URL param`, !errSec);
+
+  // The "alt path" badge is rendered by ChainStrip when chain.tier === "secondary".
+  // The chain may be inside a collapsible preview pane — search the DOM
+  // text rather than waiting for a click affordance to settle.
+  const altBadgeSec = await page.locator("text=/alt path/i").count();
+  record(`alt-path badge visible on secondary chain`, altBadgeSec > 0,
+    `${altBadgeSec} match(es)`);
+
+  // (b) Primary chain: same UI flow, but the badge MUST NOT appear —
+  // primary is the unmarked default.
+  const PRI_QID = "cloud-0001";
+  await page.goto(`${BASE}/practice?q=${PRI_QID}`,
+    { waitUntil: "networkidle", timeout: 15000 });
+  await page.waitForTimeout(1500);
+  const errPri = await page.getByText(/Question not found|404/i).first()
+    .isVisible().catch(() => false);
+  record(`primary-chain question still loads (regression check)`, !errPri);
+
+  const altBadgePri = await page.locator("text=/alt path/i").count();
+  record(`alt-path badge absent on primary chain`, altBadgePri === 0,
+    `${altBadgePri} match(es)`);
+}
+
 async function main() {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: VIEWPORT });
@@ -138,6 +177,7 @@ async function main() {
     await test4_practice_loads_chain_member(page);
     await test5_chain_badge_or_indicator(page);
     await test6_hierarchy_doesnt_break_runtime(page);
+    await test7_tier_aware_chain_routing(page);
   } finally {
     await browser.close();
   }

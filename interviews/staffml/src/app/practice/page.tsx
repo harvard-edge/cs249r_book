@@ -35,7 +35,7 @@ import { getLevelDef } from "@/lib/levels";
 import { getDailyQuestions, isDailyCompleted, markDailyCompleted } from "@/lib/daily";
 import { shouldShowGate, incrementReveals, getRemainingReveals, isStarVerified } from "@/lib/star-gate";
 import StarGate from "@/components/StarGate";
-import { getChainForQuestion, ChainInfo } from "@/lib/corpus";
+import { getChainForQuestion, getPrimaryChainForQuestion, ChainInfo } from "@/lib/corpus";
 import ChainStrip from "@/components/ChainStrip";
 import ChainBadge from "@/components/ChainBadge";
 import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
@@ -217,8 +217,15 @@ function PracticePage() {
   // the fold on long scenarios.
   const modelAnswerRef = useRef<HTMLDivElement>(null);
 
-  // Chain tracking — update when current question changes
-  const chainInfo = current ? getChainForQuestion(current.id) : null;
+  // Chain tracking — primary-first by default; ?chain=<id> URL param can
+  // pin a specific chain (used by "more paths" deep-links into secondary
+  // chains). Updates when current question changes.
+  const chainParam = searchParams.get('chain');
+  const chainInfo = current
+    ? (chainParam
+        ? getChainForQuestion(current.id, chainParam)
+        : getPrimaryChainForQuestion(current.id))
+    : null;
 
   // Pre-reveal chain sibling preview. Off by default; toggled open by
   // ChainBadge so the badge's "view chain siblings" affordance does
@@ -1048,6 +1055,7 @@ function PracticePage() {
                             chainId={chainInfo.chainId}
                             position={chainInfo.position + 1}
                             total={chainInfo.total}
+                            tier={chainInfo.tier}
                             onClick={() => setChainPreviewOpen((v) => !v)}
                           />
                         </div>

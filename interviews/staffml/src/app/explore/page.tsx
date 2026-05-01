@@ -830,7 +830,13 @@ function QuestionPanel({
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
-  const activeChainId = question.chain_ids?.[0] ?? null;
+  // Prefer primary chain when the question has both — secondary chains
+  // are an alternative path the user can deep-link into (?chain=<id>) but
+  // shouldn't be the default explorer surface.
+  const activeChainId =
+    question.chain_ids?.find((id) => question.chain_tiers?.[id] !== "secondary")
+    ?? question.chain_ids?.[0]
+    ?? null;
   const chainPath = activeChainId
     ? [question, ...related.filter((item) => item.chain_ids?.includes(activeChainId))]
         .sort((a, b) =>
