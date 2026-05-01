@@ -4,26 +4,37 @@ name: '🎯 StaffML · 👁️ Preview (Dev)'
 # StaffML — Dev Preview Deploy
 # =============================================================================
 #
-# Builds the StaffML Next.js interview prep app and deploys to the dev
-# preview site via SSH. Includes vault validation and smoke tests.
+# Builds the StaffML Next.js interview-prep app and deploys to the dev
+# preview site via SSH. Validation is delegated to the reusable workflows
+# staffml-validate-dev.yml + staffml-validate-vault.yml — they run as
+# `uses:` jobs in this workflow, and the deploy job blocks on `needs:`
+# both passing. This closes the race window where Preview could deploy
+# on a SHA the parallel Validate workflows had already failed on.
 #
-# Flow:
-#   1. BUILD       — npm ci + Next.js static export
-#   2. VALIDATE    — Build output + vault integrity + smoke tests
-#   3. DEPLOY      — Push to dev preview repo via SSH
+# Job graph (parallel where possible):
+#   ┌── validate-dev    (uses: staffml-validate-dev.yml)
+#   ├── validate-vault  (uses: staffml-validate-vault.yml)
+#   ├── build           (Preview-specific Next.js static export)
+#   └── deploy          (needs: validate-dev + validate-vault + build)
+#
+# The validate jobs and build run in parallel — wall-clock for the typical
+# push is max(validate, build) + ~1 min for SSH deploy, basically
+# unchanged from the previous single-job design.
 #
 # Triggers:
-#   - push: dev branch, interviews/staffml/** paths
+#   - push: dev branch, interviews/staffml/** + vault questions/chains/schema
 #   - workflow_dispatch: manual
 #
 # Deploys to: harvard-edge.github.io/{DEV_REPO}/staffml/
-# Secrets:    SSH_DEPLOY_KEY
+# Secrets:    SSH_DEPLOY_KEY (deploy job only)
 # Vars:       DEV_REPO_URL
 #
 # Related:
-#   - staffml-publish-live.yml — Production deploy to mlsysbook.ai/staffml/
-#   - staffml-auto-pr.yml     — Auto-PR from community question issues
-#   - staffml-welcome.yml     — Welcome comment on contributor PRs
+#   - staffml-validate-dev.yml   — Reusable site validate (called above)
+#   - staffml-validate-vault.yml — Reusable vault validate (called above)
+#   - staffml-publish-live.yml   — Production deploy to mlsysbook.ai/staffml/
+#   - staffml-auto-pr.yml        — Auto-PR from community question issues
+#   - staffml-welcome.yml        — Welcome comment on contributor PRs
 #
 # =============================================================================
 
@@ -33,7 +44,7 @@ on:
     branches: [dev]
     paths:
       - 'interviews/staffml/**'
-      # Also redeploy when YAMLs or chains change — the workflow
+      # Also redeploy when YAMLs or chains change — the build job
       # regenerates corpus.json + corpus-summary.json from YAMLs before
       # building, so the dev site always reflects current vault state.
       - 'interviews/vault/questions/**'
@@ -48,23 +59,46 @@ concurrency:
   group: staffml-dev-deploy
   cancel-in-progress: true
 
-jobs:
-  build-and-deploy:
-    name: '🎯 Build & Deploy StaffML (Dev)'
-    runs-on: ubuntu-latest
-    env:
-      # Single source for paths and versions — see docs/CI-VARIABLES.md.
-      # The `paths:` trigger filter at the top of this file is intentionally
-      # NOT vars-ified (GitHub Actions evaluates triggers at workflow-load
-      # time, before vars are resolved). If STAFFML_ROOT moves, update the
-      # paths filter manually.
-      STAFFML_ROOT:    ${{ vars.STAFFML_ROOT    || 'interviews/staffml' }}
-      VAULT_DIR:       ${{ vars.VAULT_DIR       || 'interviews/vault' }}
-      VAULT_CLI_DIR:   ${{ vars.VAULT_CLI_DIR   || 'interviews/vault-cli' }}
-      DEV_STAFFML_PATH: ${{ vars.DEV_STAFFML_PATH || 'staffml' }}
-      NODE_VERSION:    ${{ vars.NODE_VERSION    || '20' }}
-      PYTHON_VERSION:  ${{ vars.PYTHON_VERSION  || '3.12' }}
+env:
+  # Single source for paths and versions — see docs/CI-VARIABLES.md.
+  # The `paths:` trigger filter at the top of this file is intentionally
+  # NOT vars-ified (GitHub Actions evaluates triggers at workflow-load
+  # time, before vars are resolved). If STAFFML_ROOT moves, update the
+  # paths filter manually.
+  STAFFML_ROOT:    ${{ vars.STAFFML_ROOT    || 'interviews/staffml' }}
+  VAULT_DIR:       ${{ vars.VAULT_DIR       || 'interviews/vault' }}
+  VAULT_CLI_DIR:   ${{ vars.VAULT_CLI_DIR   || 'interviews/vault-cli' }}
+  DEV_STAFFML_PATH: ${{ vars.DEV_STAFFML_PATH || 'staffml' }}
+  NODE_VERSION:    ${{ vars.NODE_VERSION    || '20' }}
+  PYTHON_VERSION:  ${{ vars.PYTHON_VERSION  || '3.12' }}
 
+jobs:
+  # ===========================================================================
+  # Validate — reusable workflows, run in parallel with build.
+  # ===========================================================================
+  # Site validate: tsc + tests + build + Playwright E2E + vault smoke + links.
+  validate-dev:
+    name: '✅ Validate (Dev)'
+    uses: ./.github/workflows/staffml-validate-dev.yml
+
+  # Vault validate: vault-cli ruff/mypy/pytest + vault check --strict +
+  # codegen drift + registry append-only + exemplar coverage + worker vitest.
+  validate-vault:
+    name: '✅ Validate (Vault)'
+    uses: ./.github/workflows/staffml-validate-vault.yml
+
+  # ===========================================================================
+  # Build — Preview-specific Next.js static export, runs in parallel.
+  # ===========================================================================
+  # Uses Preview-specific env (BASE_PATH for the dev subdirectory, hosted
+  # interviewer endpoint, hosted vault API) so the artifact is exactly
+  # what gets shipped. The validate-dev job builds with its own validation
+  # env vars and throws away the artifact — that build proves the code
+  # compiles, this build produces the deployable bytes.
+  build:
+    name: '🔨 Build StaffML'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v6
@@ -94,14 +128,6 @@ jobs:
         # Guarantees the built site reflects current vault state even if
         # the committed JSON artifacts drift from YAMLs.
         run: vault build --vault-dir "$VAULT_DIR" --release-id preview-dev --local-json
-
-      - name: 🔍 Type check
-        working-directory: ${{ env.STAFFML_ROOT }}
-        run: npx tsc --noEmit
-
-      - name: 🧪 Run tests
-        working-directory: ${{ env.STAFFML_ROOT }}
-        run: npm test
 
       - name: 🔨 Build StaffML
         working-directory: ${{ env.STAFFML_ROOT }}
@@ -139,7 +165,12 @@ jobs:
       - name: 🔗 Rewrite URLs for dev site
         run: bash .github/scripts/rewrite-dev-urls.sh "$DEV_STAFFML_PATH" "$STAFFML_ROOT/out"
 
-      - name: 🔍 Validate build
+      - name: 🔍 Validate build output
+        # Light sanity check on the artifact about to be uploaded. Heavier
+        # checks (corpus invariants, vault integrity, E2E smoke, link
+        # check, schema drift) live in the called validate workflows;
+        # this just confirms the critical pages were emitted by the
+        # build before we hand it to the deploy job.
         run: |
           if [ ! -f "$STAFFML_ROOT/out/index.html" ]; then
             echo "❌ CRITICAL: index.html missing. Aborting deployment."
@@ -177,69 +208,33 @@ jobs:
             echo "📋 Vault release: v$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['releaseId'])" "$MANIFEST")"
           fi
 
-      - name: 🔐 Validate vault integrity
-        run: python3 "$STAFFML_ROOT/scripts/validate-vault.py"
+      - name: 📤 Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: staffml-dev-build
+          path: ${{ env.STAFFML_ROOT }}/out
+          retention-days: 1
+          if-no-files-found: error
 
-      - name: 🧪 Smoke tests
-        run: |
-          STAFFML_ROOT="$STAFFML_ROOT" python3 - <<'PY'
-          import json, os, sys
-
-          root = os.environ["STAFFML_ROOT"]
-
-          # Test 1: Corpus integrity
-          with open(f"{root}/src/data/corpus.json") as f:
-              corpus = json.load(f)
-          assert len(corpus) >= 4000, f"Corpus too small: {len(corpus)} questions"
-          print(f"✅ Corpus: {len(corpus)} questions")
-
-          # Test 2: Every question has required fields
-          required = ["id", "title", "level", "track", "scenario", "competency_area", "topic", "zone", "details"]
-          missing = []
-          for q in corpus:
-              for field in required:
-                  if not q.get(field):
-                      missing.append(f"{q.get('id', '???')} missing {field}")
-          if missing:
-              print(f"⚠️ {len(missing)} questions with missing fields")
-              for m in missing[:5]:
-                  print(f"   {m}")
-              if len(missing) > 5:
-                  print(f"   ... and {len(missing) - 5} more")
-          else:
-              print("✅ All questions have required fields")
-
-          # Test 3: Every question has a valid level
-          valid_levels = {"L1", "L2", "L3", "L4", "L5", "L6", "L6+"}
-          bad_levels = [q["id"] for q in corpus if q.get("level") not in valid_levels]
-          assert len(bad_levels) == 0, f"{len(bad_levels)} questions with invalid levels: {bad_levels[:3]}"
-          print("✅ All levels valid (L1-L6+)")
-
-          # Test 4: Taxonomy loads and has concepts
-          with open(f"{root}/src/data/taxonomy.json") as f:
-              taxonomy = json.load(f)
-          concepts = taxonomy.get("concepts", [])
-          assert len(concepts) >= 70, f"Taxonomy too small: {len(concepts)} topics"
-          print(f"✅ Taxonomy: {len(concepts)} topics")
-
-          # Test 5: Manifest exists and is valid (single source of truth)
-          with open(f"{root}/src/data/vault-manifest.json") as f:
-              manifest = json.load(f)
-          assert "releaseId" in manifest, "Manifest missing releaseId"
-          assert "releaseHash" in manifest and len(manifest["releaseHash"]) >= 16, \
-              "Manifest missing or truncated releaseHash"
-          assert manifest["questionCount"] == len(corpus), \
-              f"Manifest count mismatch: {manifest['questionCount']} vs {len(corpus)}"
-          print(f"✅ Manifest: v{manifest['releaseId']} ({manifest['questionCount']} Qs, hash {manifest['releaseHash'][:7]})")
-
-          # Test 6: Build output has static assets
-          js_files = [f for f in os.listdir(f"{root}/out/_next/static") if not f.startswith(".")]
-          assert len(js_files) > 0, "No static JS chunks found"
-          print(f"✅ Static assets: {len(js_files)} chunks")
-
-          print()
-          print("🎯 All smoke tests passed")
-          PY
+  # ===========================================================================
+  # Deploy — gated on validates + build all succeeding.
+  # ===========================================================================
+  # The job graph means this never starts unless every validate workflow
+  # and the Preview-specific build all reached `success`. The screenshot
+  # case "Preview ✅ but Validate ❌ on the same SHA" can no longer occur:
+  # if either validate fails, this job is skipped and Preview as a whole
+  # reports failure.
+  deploy:
+    name: '🚀 Deploy StaffML to Dev Site'
+    runs-on: ubuntu-latest
+    needs: [validate-dev, validate-vault, build]
+    timeout-minutes: 10
+    steps:
+      - name: 📥 Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: staffml-dev-build
+          path: staffml-out
 
       - name: 🚀 Deploy to Dev Site via SSH
         env:
@@ -264,7 +259,7 @@ jobs:
           mkdir -p staffml
 
           echo "🚚 Copying StaffML build..."
-          cp -r "${{ github.workspace }}/interviews/staffml/out/." staffml/
+          cp -r "${{ github.workspace }}/staffml-out/." staffml/
 
           if [ ! -f "staffml/index.html" ]; then
             echo "❌ CRITICAL: staffml/index.html missing. Aborting."
