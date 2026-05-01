@@ -3,7 +3,7 @@
 **Status:** active workstream
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-04-30 (Phase 1.1 complete)
+**Last updated:** 2026-04-30 (Phase 1 complete — chains 373 → 879)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -42,8 +42,9 @@ relevant Phase section for the step you're picking up.**
 - **Sidecar architecture:** active. `chains.json` is authoritative; YAML
   `chains:` field stripped from all 10,701 question YAMLs.
 - **Hierarchy:** all questions at `interviews/vault/questions/<track>/<area>/<id>.yaml`.
-- **Live chain count:** 373 (post-Gemini-rebuild), tier field NOT yet added.
-- **Gap backlog:** 138 entries in `interviews/vault/gaps.proposed.json`.
+- **Live chain count:** 879 (post Phase 1: 373 primary + 506 secondary, tier field tagged).
+- **Gap backlog:** 138 (strict) + 269 (lenient) = 407 entries across
+  `gaps.proposed.json` and `gaps.proposed.lenient.json`.
 - **Pre-Gemini chains backed up:** `interviews/vault/chains.json.bak` (726 chains).
 - **Validators:** all green as of last commit `1ac7d4c56`.
 - **UI tests:** `interviews/staffml/tests/chain-and-vault-smoke.mjs` — 13/13 pass.
@@ -70,7 +71,7 @@ Target: 700-900 chains (~30-40% of corpus chained).
 
 ## Phase 1 — Second-pass coverage build
 
-**Status:** `not started`
+**Status:** `complete` (2026-04-30)
 **Goal:** double chain count from 373 → 700-800 by relaxing the prompt for
 the ~150 buckets that produced 0 chains in the strict pass. Tag these as
 `tier: secondary` so the UI can deprioritize them.
@@ -693,6 +694,136 @@ tinyml           45       1202      36          0.80     34         0
 **Next step:** Phase 1.2 — add `--mode lenient` to
 `build_chains_with_gemini.py` (relaxed Δ rules + Δ=0 for shared-scenario
 pairs).
+
+---
+
+### 2026-04-30 — Phase 1.2 + 1.3: --mode lenient + tier field
+
+**What was done:**
+- `build_chains_with_gemini.py`: split `PROMPT_TEMPLATE` into
+  `STRICT_PROMPT_TEMPLATE` and `LENIENT_PROMPT_TEMPLATE`. The lenient
+  template tells Gemini to accept Δ ∈ {0, 1, 2, 3} where Δ=0 is
+  shared-scenario only and Δ=3 is last-resort. Single `MODE_CONFIG`
+  dict maps mode → (template, allowed Δ set) so `build_prompt` and
+  `validate_chain` stay in lockstep.
+- `validate_chain` now takes `mode=`; rejects Δ=0 / Δ=3 in strict,
+  accepts them in lenient. Both modes still reject backward Δ,
+  multi-topic, and out-of-range size.
+- `process_batch` tags lenient-mode chains with `tier: "secondary"` and
+  uses chain_id suffix `-secondary` so primary/secondary IDs never collide.
+- New CLI flags: `--mode {strict,lenient}` (default strict);
+  `--buckets-from <chain-coverage.json>` to restrict the run to the
+  uncovered_buckets list from `diagnose_chain_coverage.py`.
+- `apply_proposed_chains.py`: docstring note acknowledging tier is
+  intentionally unvalidated (UI hint, not a structural invariant).
+  No logic change — its existing non-strict monotonicity check already
+  accepts Δ=0.
+- `tests/test_chain_validation.py`: 19 cases covering both modes.
+  Loads the script via `importlib` (it's not in the importable
+  `vault_cli` package). All 19 pass.
+
+**Smoke check:**
+- `--dry-run --buckets-from chain-coverage.json --mode lenient` →
+  17 calls planned, 211 buckets selected, well under the 200/day cap.
+- Direct call to `validate_chain` on 12 hand-built cases (Δ=0/Δ=3
+  accept-in-lenient/reject-in-strict, backward, multi-topic, sizes 1
+  and 7) → 12/12 pass.
+
+**Commit:** `6cef27ea2 feat(chains): --mode lenient + tier field for second-pass coverage`
+
+---
+
+### 2026-04-30 — Phase 1.4 + 1.5 + 1.6: lenient sweep, merge, validate
+
+**What was done:**
+- **Phase 1.4 — lenient sweep:** Ran
+  `build_chains_with_gemini.py --mode lenient --buckets-from chain-coverage.json`
+  against the 211 uncovered buckets. 17 Gemini-3.1-pro-preview calls,
+  ~22 min wall time. Output: `chains.proposed.lenient.json` with
+  **506 chains** (above the 200-400 estimate) and
+  `gaps.proposed.lenient.json` with **269 new gaps**. The validator
+  caught a few cross-bucket and Δ=4 hallucinations in calls 15 + 16
+  and rejected them inline.
+- **Phase 1.5 — merge:** Wrote
+  `interviews/vault-cli/scripts/merge_chain_passes.py`. Backfills
+  `tier=primary` on existing chains, layers in `tier=secondary` chains,
+  and rejects any secondary that would violate the multi-membership
+  cap (max 2 chains per qid; non-L1/L2 capped at 1). Smoke-tested on
+  5 synthetic cases — caps enforce as designed.
+- **Phase 1.5 — merge run:** 0 cap rejections (expected — the lenient
+  sweep was scoped to *uncovered* buckets, so secondary qids are by
+  definition fresh). Final merged count: **373 + 506 = 879 chains**.
+- **Phase 1.6 — validate:**
+  - `apply_proposed_chains.py --proposed chains.json --dry-run` →
+    validation clean (879 chains).
+  - `vault check --strict` → 10,701 loaded, 0 invariant failures.
+  - `vault build --legacy-json` → releaseId=dev, published_count=9438,
+    **chainCount=879** (was 373); release_hash changes to `04ee8a23…`.
+  - Started `next dev` server; ran
+    `node interviews/staffml/tests/chain-and-vault-smoke.mjs` →
+    **13/13 pass**. Server stopped post-run.
+
+**Distribution & quality checks (lenient pass):**
+| Δ | count | %    | (note) |
+|---|------:|-----:|---|
+| 0 |    55 |  5.2 | shared-scenario pairs |
+| 1 |   736 | 69.1 | preferred shape |
+| 2 |   225 | 21.1 | one-rung skip |
+| 3 |    49 |  4.6 | last-resort |
+
+- Chains with at least one Δ=0: **55 / 506 (10.9%)** — within the
+  roadmap's expected 10-20% band.
+- Random spot-check of 5 Δ=0 chains: all show genuine shared-scenario
+  threads (DMA optimization on nRF5340; SRAM OOM on Cortex-M4
+  residual blocks; CMSIS-NN performance variations; on-device vs
+  cloud routing; PB-scale data pipelines). No "two unrelated L3s
+  glued together" hits in the sample.
+
+**Coverage gains:**
+
+| track  | primary | secondary | total | chains/topic before → after |
+|--------|--------:|----------:|------:|---|
+| cloud  |     242 |       116 |   358 | 2.95 → 4.37 |
+| edge   |      49 |       148 |   197 | 0.64 → 2.59 |
+| mobile |      46 |       113 |   159 | 0.74 → 2.56 |
+| tinyml |      36 |        83 |   119 | 0.80 → 2.64 |
+| global |       0 |        46 |    46 | 0.00 → 0.96 |
+| **all**|     373 |       506 |   879 | **1.19 → 2.81** |
+
+Buckets with ≥1 chain: **285 / 313 (91%)** — was 102 / 313 (33%)
+before the lenient pass. The 28 remaining un-chained buckets are
+either tiny (≤2 questions) or the lenient sweep judged them genuinely
+unrelated.
+
+**Files committed in the Phase 1 commit:**
+- `interviews/vault-cli/scripts/merge_chain_passes.py` (new)
+- `interviews/vault/chains.json` (373 → 879)
+- `interviews/vault/chains.proposed.lenient.json` (durable record of the
+  lenient pass)
+- `interviews/vault/gaps.proposed.lenient.json` (269 new gaps for Phase 3)
+- `interviews/staffml/src/data/vault-manifest.json` (chainCount + releaseHash)
+- `interviews/staffml/src/data/corpus-summary.json` (chain memberships
+  per question — derived by `vault build`)
+- `interviews/vault-cli/docs/CHAIN_ROADMAP.md` (this Progress Log entry,
+  + status flips: Phase 1 complete, snapshot updated)
+
+**Notes for next session:**
+- Phase 1 done. Phase 2 (tier surfacing in UI) is now unblocked. Start
+  at 2.1 — schema migration: every chain entry needs `tier`, validator
+  should default missing-tier to `"primary"`, `legacy_export.py` needs
+  to emit `chain_tiers` per question (mirrors `chain_positions`).
+- Phase 3 (gap-driven authoring) inherits a much bigger backlog now:
+  407 gaps total (138 strict + 269 lenient). Prioritize buckets where
+  the bucket already has 4+ questions and just needs the bridge.
+- Consider running 4.1 (CI gate) before Phase 2 so any tier-related
+  regressions during 2.x get caught in CI. Roadmap says "before
+  Phase 3 (gates corpus growth)" — could pull it forward.
+- Pre-merge backup `chains.json.pre-merge.bak` was deleted; canonical
+  pre-Gemini backup remains at `chains.json.bak` (the original 726-chain
+  pre-rebuild snapshot).
+
+**Next step:** Phase 2.1 — schema migration (tier required on chain
+entries, `chain_tiers` derived in `legacy_export.py`).
 
 ---
 
