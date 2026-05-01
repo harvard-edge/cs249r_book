@@ -24,8 +24,6 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-import numpy as np
-
 from vault_cli.chains.audit import build_chain_view, load_corpus
 from vault_cli.chains.embeddings import EmbeddingStore
 
@@ -89,8 +87,10 @@ def suggest_rescues(
             continue
         orphan_qid, _ = members[0]
         orphan_doc = corpus.get(orphan_qid)
-        if not orphan_doc: continue
-        if store.get(orphan_qid) is None: continue
+        if not orphan_doc:
+            continue
+        if store.get(orphan_qid) is None:
+            continue
 
         track = orphan_doc.get("track")
         topic = orphan_doc.get("topic")
@@ -101,12 +101,16 @@ def suggest_rescues(
         bucket = by_bucket.get((track, topic), [])
         cands: list[RescueCandidate] = []
         for cqid in bucket:
-            if cqid == orphan_qid: continue
-            if cqid in chained: continue
+            if cqid == orphan_qid:
+                continue
+            if cqid in chained:
+                continue
             cdoc = corpus.get(cqid)
-            if not cdoc: continue
+            if not cdoc:
+                continue
             cvec = store.get(cqid)
-            if cvec is None: continue
+            if cvec is None:
+                continue
             cand_level = cdoc.get("level", "?")
             cand_rank = LEVEL_RANK.get(cand_level, 0)
             signed_delta = cand_rank - orphan_rank
@@ -114,7 +118,8 @@ def suggest_rescues(
 
             # Hard filter: level delta must match observed chain patterns.
             # 92% of edges are Δ ∈ {1, 2}; 3% are Δ=0; 5% are Δ≥3.
-            if level_delta > 2: continue
+            if level_delta > 2:
+                continue
 
             cosine = float(orphan_vec @ cvec)
 

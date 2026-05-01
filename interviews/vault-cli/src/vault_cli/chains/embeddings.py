@@ -117,7 +117,7 @@ def load_or_build(
             batch_size=64,
             show_progress_bar=progress,
         )
-        for (qid, _), vec in zip(to_embed, new_vecs):
+        for (qid, _), vec in zip(to_embed, new_vecs, strict=False):
             valid_cached[qid] = np.asarray(vec, dtype=np.float32)
     elif progress:
         print(f"  all {len(target)} embeddings cached — no re-compute")
