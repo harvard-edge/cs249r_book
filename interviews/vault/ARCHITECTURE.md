@@ -348,6 +348,55 @@ release_hash = sha256(b"\n".join(f"{id}:{h}".encode() for id, h in leaves))
 
 ---
 
+### 3.6 v1.1 architecture updates (post-Phase-1/2 — chain build)
+
+After the v1.0 design doc above was written, three deltas landed during
+the corpus growth workstream tracked in
+[`vault-cli/docs/CHAIN_ROADMAP.md`](../vault-cli/docs/CHAIN_ROADMAP.md).
+They are additive to the v1 invariants, not replacements:
+
+**1. Hierarchical question layout.** Questions live at
+`interviews/vault/questions/<track>/<area>/<id>.yaml` (the v1 design
+above sketched `<track>/L<N>/<zone>/`; the actual landed layout is
+`<track>/<area>/`). The hierarchy is a build-time concern — `corpus.json`
+is path-agnostic, so site/runtime code is unaffected. `vault check
+--strict` enforces a path-vs-body invariant: the directory shards
+(track/area) must match the YAML body's `track`/`competency_area` fields.
+
+**2. Sidecar chain architecture.** `interviews/vault/chains.json` is the
+authoritative chain registry. Per-question YAMLs no longer carry a
+`chains:` field — that field was retired in v1.1 to keep chain rebuilds
+to a single-file edit instead of touching 2k+ YAMLs. The exporter
+(`vault_cli.legacy_export._build_chain_index`) joins YAML + chains.json
+to produce per-question `chain_ids` / `chain_positions` in the runtime
+`corpus.json`. §3.3's chain-reference rules still hold for the
+**runtime artifact** (multi-chain membership, position monotonic, etc.);
+they no longer apply to YAML source.
+
+**3. Chain tier model.** Each entry in `chains.json` carries a
+`tier: "primary" | "secondary"` field:
+  - **primary** — the strict Bloom-progression sweep (Δ ∈ {1, 2}).
+    Rendered by default in practice/explore.
+  - **secondary** — the lenient second-pass coverage sweep
+    (Δ ∈ {0, 1, 2, 3}; Δ=0 only for shared-scenario pairs). Reachable
+    via `?chain=<id>` URL deep-links and the "more paths" UI; the
+    `ChainBadge` shows an inline "alt path" pill when rendering one.
+  - The legacy exporter emits `chain_tiers` per question alongside
+    `chain_positions`. Missing tier defaults to "primary" everywhere
+    on read (validator + TS runtime + UI), which keeps the v1.0
+    chains.json shape forward-compatible.
+
+Tooling that produced these: `diagnose_chain_coverage.py`,
+`build_chains_with_gemini.py` (with `--mode {strict,lenient}`),
+`merge_chain_passes.py`. See the README's "Chain build pipeline"
+section for invocation, and CHAIN_ROADMAP.md for the running log.
+
+The v1 release-pipeline invariants (§3.5 hashing, §5 validators)
+absorb these without modification — `chains.json` is a Merkle leaf,
+and the new `tier` field flows into that leaf transparently.
+
+---
+
 ## 4. CLI Specification (v2)
 
 Framework: **Typer** (declarative, type-hint-driven). Output: **Rich** (tables, progress, panels).
