@@ -3,7 +3,7 @@
 **Status:** active workstream
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-05-01 (Phase 3.a + 3.b tooling shipped; 3.c pilot deferred for review)
+**Last updated:** 2026-05-01 (Phase 3.c pilot run + 3.d promotion shipped; 4 new draft questions in corpus, awaiting human review)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -368,7 +368,7 @@ primary chains in default surfaces, exposes secondary in "more paths."
 
 ## Phase 3 — Gap-driven question authoring
 
-**Status:** `tooling complete (3.a + 3.b); pilot 3.c deferred for review`
+**Status:** `pilot run shipped (3.c + 3.d); 3.e gated on human review of drafts`
 **Goal:** Use the 138+ entries in `gaps.proposed.json` to author new
 questions filling missing rungs, validated independently before commit.
 This is the durable corpus growth strategy.
@@ -1061,6 +1061,124 @@ available to review the first few generated drafts.
 
 **Next step:** Phase 3.c — pilot run on 30 high-value gaps (best done
 with the user available to spot-check the first few outputs).
+
+---
+
+### 2026-05-01 — Phase 3.c + 3.d: pilot run + promotion (5 gaps)
+
+**Pilot scope (sized down from the roadmap's 30):** 5 high-value gaps,
+selected from `gaps.proposed.lenient.json` favoring (track, topic)
+buckets with ≥4 published questions and biased toward low-density
+tracks. All 5 picks landed in edge/mobile (the densities the lenient
+sweep most needed help on).
+
+**Phase 3.c — generate (`generate_question_for_gap.py`):**
+| target | gap | result |
+|---|---|---|
+| edge-2535 | edge/latency-decomposition L?→L3 between=[edge-1883, edge-1701] | written |
+| edge-2536 | edge/pruning-sparsity L?→L4 between=[edge-1960, edge-1957] | written |
+| edge-2537 | edge/tco-cost-modeling L?→L3 between=[edge-0731, edge-1154] | written |
+| mobile-2146 | mobile/duty-cycling L?→L3 between=[mobile-0367, mobile-2034] | written |
+| mobile-2147 | mobile/model-format-conversion L?→L2 between=[mobile-0984, mobile-1022] | written |
+
+5/5 generated cleanly. Each draft passed Pydantic schema validation
+inline (the `assemble_draft` → `Question.model_validate` gate); none
+were rejected at the file-write step.
+
+Spot-checking `edge-2535`: realistic ML-systems scenario (Coral USB
+TPU + MobileNetV2-SSD + INT8), concrete numbers, calculation-driven
+question consistent with L3/apply, solution gets at the actual
+insight (host-side bottleneck). Other 4 are similarly competent.
+
+**Phase 3.b run — `validate_drafts.py`:**
+
+| draft | originality | level_fit | coherence | bridge | verdict |
+|---|---|---|---|---|---|
+| edge-2535 | **fail** (cos=0.933 vs edge-1883) | pass | pass | pass | **fail** |
+| edge-2536 | pass | pass | pass | pass | **pass** |
+| edge-2537 | pass | pass | pass | pass | **pass** |
+| mobile-2146 | pass | pass | pass | pass | **pass** |
+| mobile-2147 | pass | pass | pass | pass | **pass** |
+
+**4/5 pass = 80% pass rate** (above the roadmap's 60-75% estimate).
+The one fail was correctly caught — `edge-2535`'s draft scenario
+turned out too similar to one of its between-questions
+(`edge-1883`), cosine 0.933 over the 0.92 threshold. This is the
+gate working as designed: Gemini occasionally drafts a "bridge" that's
+just a paraphrase of one of its anchors instead of a true L3
+intermediate. The gate filtered it.
+
+**Phase 3.d — promotion (4 passing drafts):**
+- `.yaml.draft` → `.yaml` rename for the 4 passes.
+- `_authoring` private metadata stripped at promotion; replaced with:
+  - `provenance: llm-draft`
+  - `status: draft` (not `published` — gating on human review)
+  - `authors: ["gemini-3.1-pro-preview"]`
+  - `human_reviewed: { status: not-reviewed, ... }` so the
+    not-yet-reviewed state is honest and machine-checkable.
+  - `tags`: original tags preserved + a new `gap-bridge:<from>-<to>`
+    tag so these can be queried later.
+- IDs appended to `id-registry.yaml`: `edge-2536`, `edge-2537`,
+  `mobile-2146`, `mobile-2147` — created_by `generate_question_for_gap.py`.
+- `edge-2535.yaml.draft` was **kept in place** (still .yaml.draft).
+  Decision for the human reviewer when they triage: rewrite + retry,
+  or delete.
+
+**Validation post-promotion:**
+- `vault check --strict` → 10,705 loaded (was 10,701; +4 ✓), 0 invariant
+  failures.
+- `vault build --legacy-json` → released set unchanged: 9438 published,
+  chainCount=879, releaseHash=04ee8a23… (drafts have status=draft, so
+  the publishing filter excludes them — by design).
+
+**Phase 3.e — chain rebuild (deferred):**
+Skipped tonight. The new questions are `status: draft` and the
+chain-builder filters on published, so a rebuild wouldn't pick them
+up. The right sequence is: human reviews the 4 drafts → flips status
+to `published` (and `human_reviewed.status` to `verified`) → then
+re-runs `build_chains_with_gemini.py --all`. At that point chainCount
+is expected to grow modestly (the 4 new questions were authored TO
+fit chains, so they should land in their bridge slots).
+
+**Files changed in the Phase 3 pilot commit:**
+- `interviews/vault/questions/edge/cross-cutting/edge-2537.yaml` (new)
+- `interviews/vault/questions/edge/optimization/edge-2536.yaml` (new)
+- `interviews/vault/questions/mobile/deployment/mobile-2147.yaml` (new)
+- `interviews/vault/questions/mobile/power/mobile-2146.yaml` (new)
+- `interviews/vault/questions/edge/latency/edge-2535.yaml.draft` (new — failed validation, awaiting reviewer disposition)
+- `interviews/vault/draft-validation-scorecard.json` (new — per-row record)
+- `interviews/vault/id-registry.yaml` (4 appended entries)
+- `interviews/vault-cli/docs/CHAIN_ROADMAP.md` (this entry)
+
+**Notes for next session — review checklist:**
+1. Read each of the 4 promoted drafts. Spot-checks suggest they're
+   competent but cognitive-load calibration is the place where Gemini
+   drift is most likely. Each scorecard row has the `level_fit` rationale
+   from the LLM judge — those are first-cut signals, not authoritative.
+2. For the failed `edge-2535`: read it next to its high-cosine
+   neighbour (`edge-1883`). If it's too duplicative as the originality
+   gate suggests, delete; if it's actually distinct enough, edit and
+   re-validate (you can re-run `validate_drafts.py` after editing).
+3. Once you're happy with N drafts, flip their `status: draft → published`
+   and `human_reviewed.status → verified`, set `human_reviewed.by`, then:
+   ```bash
+   vault check --strict
+   vault build --legacy-json    # released question count goes up by N
+   python3 interviews/vault-cli/scripts/build_chains_with_gemini.py --all \
+     --output interviews/vault/chains.proposed.json
+   python3 interviews/vault-cli/scripts/apply_proposed_chains.py
+   ```
+4. If the pilot's 80% rate holds at scale, a 30-gap batch would land
+   ~24 promotable drafts and absorb ~12-15 of them into chains
+   (chain rebuild typically picks up ~50% of new questions per the
+   roadmap).
+
+**Cost note:** This pilot used 5 generation calls + 5 × 3 judge calls = 20 Gemini
+calls. A 30-gap batch would be ~120 calls (still under the 250/day cap but
+worth budgeting around).
+
+**Next step:** Phase 3.e — chain rebuild. Gated on human review of the
+4 drafts now in the tree.
 
 ---
 
