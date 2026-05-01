@@ -3,7 +3,7 @@
 **Status:** active workstream
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-05-01 (Phase 2 complete — tier surfaced through to UI)
+**Last updated:** 2026-05-01 (Phase 1 + 2 + 4.2/4.8 shipped — 879 chains, tier in UI, docs current)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -517,9 +517,9 @@ These can slot between major phases. Order roughly:
 **Change:** add `vault chains audit --strict --max-orphan-rate 0.02 --max-drift-regression 0.05`
 
 ### 4.2 — Multi-chain UI verification
-**When:** end of Phase 1
-**Action:** Audit current chains.json for qids with 2-chain memberships.
-If non-zero (likely after lenient pass), add focused playwright test.
+**Status:** audited 2026-05-01 — `0` qids in >1 chain (lenient sweep
+was scoped to uncovered buckets, so no overlap with primary). Becomes
+live once Phase 3 authoring lands; deferred until then.
 
 ### 4.3 — Authoring UX integration
 **When:** after Phase 3
@@ -547,10 +547,9 @@ on incremental corpus changes; opens auto-PR with proposed delta.
 flags chain mate cosine drops below threshold.
 
 ### 4.8 — Update docs
-**When:** end of Phase 2
-**Files:**
-- `interviews/vault/ARCHITECTURE.md` (sidecar architecture, hierarchy, tier model)
-- `interviews/vault-cli/README.md` (command list)
+**Status:** complete 2026-05-01 — `f086b6f42`. ARCHITECTURE.md §3.6
+captures sidecar + hierarchy + tier; README.md gains a "Chain build
+pipeline" section + updated layout/status.
 
 ### 4.9 — gitignore CI guard
 **When:** anytime, low effort
@@ -919,6 +918,51 @@ entries, `chain_tiers` derived in `legacy_export.py`).
 **Next step:** Phase 3.a — `generate_question_for_gap.py` (Gemini
 authoring tool that takes a gap entry and drafts a candidate question
 fitting the bridge requirement).
+
+---
+
+### 2026-05-01 — Phase 4.8 docs + Phase 4.2 audit
+
+**Phase 4.8 — docs (shipped):**
+- `interviews/vault/ARCHITECTURE.md` gains a new §3.6 capturing the
+  three v1.1 deltas: hierarchy, sidecar chain registry, tier model.
+  Additive to v1, not replacements; cross-refs CHAIN_ROADMAP.md.
+- `interviews/vault-cli/README.md`: status line bumped from "Phase 0
+  scaffolding" to v1.1; new "Chain build pipeline" section with
+  invocation examples for diagnose / build / apply / merge; layout
+  block reflects scripts/ + actual src/ contents.
+- Commit: `f086b6f42 docs(vault): document v1.1 sidecar + hierarchy + tier model`
+
+**Phase 4.2 — multi-chain UI audit (no-op for now):**
+- Audited `chains.json`: **0 qids in >1 chain.** Reason: the strict
+  pass already enforces the multi-membership cap within-tier, and the
+  lenient pass was scoped to *uncovered* buckets, so no qid in any
+  primary chain was reachable for a secondary chain to bind to. The
+  merge step's cap rules consequently never fired (0 rejections).
+- Action: **defer the focused playwright test**. The case becomes
+  exercisable when Phase 3 authoring fills bucket gaps and a re-run
+  of `build_chains_with_gemini.py --all` (which will see those new
+  questions in already-chained buckets) produces a multi-chain qid.
+- No commit needed — zero state change.
+
+**Notes for next session:**
+- Phase 1, Phase 2, and Phase 4.8 are all shipped on
+  `origin/yaml-audit`. Local `dev` worktree has Phase 1 only (Phase 2
+  + docs not re-merged) — the user has been doing parallel workflow
+  refactoring on dev, so I held off on a second yaml-audit → dev
+  merge to avoid colliding with their `.github/workflows/` edits.
+  When the user is ready, the merge can be done from a clean dev
+  worktree state with `git merge --no-ff yaml-audit`.
+- Phase 4.1 (CI gate), 4.4 (deploy lockstep), 4.6 (periodic rebuild
+  automation), and 4.9 (gitignore CI guard) all touch
+  `.github/workflows/` — the user has uncommitted changes there, so
+  these were intentionally skipped this session.
+
+**Next step:** Phase 3.a — `generate_question_for_gap.py`. This is the
+first of the gap-driven authoring tools. The roadmap budgets it at "1
+day" because it's the substantive new capability of Phase 3 (Gemini
+authoring vs. just chain construction). Best done with the user
+available to review the first few generated drafts.
 
 ---
 
