@@ -156,6 +156,12 @@ export default function ExplorePage() {
   const [focus, setFocus] = useState<Focus>({ kind: "root" });
   const [query, setQuery] = useState("");
   const [selectedLevel, setSelectedLevel] = useState("all");
+  // Phase 2.3 tier filter. "primary" (default): hide questions whose
+  // ONLY chain memberships are secondary — secondary-only questions
+  // came out of the lenient coverage sweep and are deprioritised by
+  // default. "all": show everything regardless of tier. Questions not
+  // in any chain are unaffected by either setting.
+  const [selectedTier, setSelectedTier] = useState<"primary" | "all">("primary");
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
 
@@ -168,9 +174,18 @@ export default function ExplorePage() {
     return questions.filter((question) => {
       if (selectedLevel !== "all" && question.level !== selectedLevel) return false;
       if (!questionMatches(question, query)) return false;
+      // Tier filter: when "primary", drop questions whose chain memberships
+      // are *all* secondary. Questions not in any chain pass through.
+      if (selectedTier === "primary" && question.chain_ids?.length) {
+        const tiers = question.chain_tiers ?? {};
+        const hasPrimary = question.chain_ids.some(
+          (id) => (tiers[id] ?? "primary") === "primary"
+        );
+        if (!hasPrimary) return false;
+      }
       return true;
     });
-  }, [questions, query, selectedLevel]);
+  }, [questions, query, selectedLevel, selectedTier]);
 
   const focusQuestions = useMemo(() => {
     return filteredQuestions.filter((question) => {
@@ -351,6 +366,15 @@ export default function ExplorePage() {
               {LEVELS.map((level) => (
                 <option key={level.id} value={level.id}>{level.id}</option>
               ))}
+            </FilterSelect>
+
+            <FilterSelect
+              label="Tier"
+              value={selectedTier}
+              onChange={(v) => setSelectedTier(v as "primary" | "all")}
+            >
+              <option value="primary">Primary chains only</option>
+              <option value="all">All chains</option>
             </FilterSelect>
 
             <button
