@@ -3,7 +3,7 @@
 **Status:** Phase 1 + 2 complete · Phase 3 pilot landed (4 drafts pending review) · Phase 4 housekeeping mostly shipped
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-05-01 (B-track autonomous queue shipped — Phase 4.1/4.6/4.7/4.9 + 2.3-deferred filter + promote_drafts.py + review guide)
+**Last updated:** 2026-05-01 (independent Gemini audit landed; 3 critical findings filed for review — Δ=0 chains, gap hallucination rate, draft quality)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -1192,6 +1192,110 @@ worth budgeting around).
 
 **Next step:** Phase 3.e — chain rebuild. Gated on human review of the
 4 drafts now in the tree.
+
+---
+
+### 2026-05-01 — B-track autonomous queue + independent Gemini audit
+
+**B-track shipped (7 items + D cleanups):**
+
+| commit | what |
+|---|---|
+| `188c92b10` | B1: `promote_drafts.py` — one-command Phase 3.d helper |
+| `c3a9dfff7` | B7: `PHASE_3_REVIEW_GUIDE.md` — review handoff doc |
+| `476e9b146` | B2 / Phase 4.1 — chain audit + per-track regression guard in `staffml-validate-vault.yml` |
+| `dbd3d9458` | B6 / Phase 4.9 — gitignore CI guard for question YAMLs |
+| `03ea7da6b` | B5 / Phase 4.6 — periodic chain rebuild workflow (`workflow_dispatch` only initially) |
+| `46a02e890` | B3 / Phase 2.3 deferred — explore-page "Primary chains only / All" filter; playwright 19/19 |
+| `09c04224f` | B4 / Phase 4.7 — `check_chain_decay.py` advisory script |
+| `6fb1692eb` | D-cleanups — roadmap status header + Phase 3 authoring conventions in ARCHITECTURE.md §3.6.1 |
+
+**Independent Gemini audit (`5a1cb3d3b` script + run results):**
+
+Ran `audit_chains_with_gemini.py` — 18 calls (well under the 250/day Pro
+cap), each sized to ~80-336K char prompts (within the attention sweet
+spot at 80-100K input tokens). Per-call traces under
+`interviews/vault/audit-runs/20260501T213817Z/`; rollup at
+`interviews/vault/audit-runs/AUDIT_REPORT.md`.
+
+**Three critical findings the pipeline's own gates missed:**
+
+1. **Δ=0 chains are ~98% bad.** Of 55 Δ=0 chains in `chains.json`, 54
+   were judged `bad` by the independent auditor and 54/55 were judged
+   "shared_scenario_for_d0_pair: no". The lenient prompt was supposed
+   to allow Δ=0 ONLY for shared-scenario pairs, but in practice the
+   constraint didn't bind. **Recommended action:** demote / drop the
+   Δ=0 chains from chains.json, OR rewrite the lenient prompt to make
+   shared-scenario more rigorously enforced before re-running the
+   lenient sweep on these buckets.
+
+2. **Gap detection is ~50% noise.** Of 40 sampled gaps (across both
+   strict + lenient gap files), 21 (52.5%) were judged "hallucinated"
+   — the two anchor questions don't share a scenario thread for a
+   bridge to make sense. **Recommended action:** add a pre-filter to
+   `generate_question_for_gap.py` that rejects gaps whose anchors fail
+   a coherence check before issuing a generation call. Saves ~half the
+   Phase 3 generation cost.
+
+3. **The pilot drafts' pass rate was inflated.** Of the 4 promoted
+   drafts (which all passed `validate_drafts.py`'s LLM judges):
+   - `mobile-2147`: accept ✓
+   - `edge-2536`: edit (scenario truncation)
+   - `edge-2537`: reject (cognitive load too low for L3)
+   - `mobile-2146`: reject (physically absurd 0.5s/4W wake-up)
+   - **Action:** the existing 4 drafts in the corpus need human review
+     against this audit (see `AUDIT_REPORT.md` for the specific
+     issues per draft). Consider rewriting `validate_drafts.py`'s
+     coherence judge to specifically look for physical-realism /
+     fabrication failure modes.
+
+**Calibrating findings:**
+
+- Primary chains (sample of 100): 64% good, 22% weak, 14% bad. Higher
+  "bad" rate than secondary's 6% — partly explained by primary samples
+  skewing higher-level (where the auditor applied stricter judgement),
+  but worth a deliberate split-by-level follow-up.
+- Secondary chains (sample of 100): 61% good, 33% weak, 6% bad. The
+  tier delta vs primary at the "good" level is small (61% vs 64%) —
+  the secondary tier isn't dramatically worse, but the lenient sweep's
+  Δ=0 expansion is where the actual quality cliff is.
+
+**No autonomous fixes filed** — per agreement, audit produces findings
+only. The user reviews findings and decides which to act on.
+
+**Files changed in this entry:**
+- 8 commits (`188c92b10` through `6fb1692eb`) listed above
+- `interviews/vault-cli/scripts/audit_chains_with_gemini.py` (new — `5a1cb3d3b`)
+- `interviews/vault/audit-runs/AUDIT_REPORT.md` (new)
+- `interviews/vault/audit-runs/20260501T213817Z/*.json` (per-call traces, 7 files)
+- this Progress Log entry
+
+**Notes for next session — review checklist:**
+1. **Read `AUDIT_REPORT.md`** start-to-finish (it's ~3KB, ~5 min).
+2. **Decide what to do with Δ=0 chains.** They're 55 of 879 chains
+   (~6% of the corpus). Three options:
+   a. Drop them entirely from `chains.json` (simplest)
+   b. Demote them to a `tier=experimental` (preserves the audit
+      trail) and surface them only via explicit URL
+   c. Re-run the lenient sweep on the 55 source buckets with a
+      tighter prompt (highest cost, but might keep the good ones)
+3. **Decide what to do with the 4 pilot drafts.** Two reject, one
+   edit, one accept. Disposition them per `PHASE_3_REVIEW_GUIDE.md`'s
+   decision tree.
+4. **Decide what to do with `generate_question_for_gap.py`.** The
+   ~50% gap hallucination rate means Phase 3.c at scale (30 gaps)
+   would waste ~15 generation calls + ~45 judge calls. Adding a
+   pre-filter before scaling is high-ROI.
+
+**Cost ledger (this whole session):**
+- Phase 1.4 lenient sweep: 17 calls
+- Phase 3 pilot generation + validation: 5 + 15 = 20 calls
+- Audit run: 18 calls
+- **Total: 55 Gemini calls** across the session
+
+**Next step:** *user review* — three concrete decisions enumerated
+above. After those land, scaling Phase 3 is the natural next tooling
+push.
 
 ---
 
