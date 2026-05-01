@@ -44,7 +44,33 @@ def _build_chain_index(vault_dir: Path) -> dict[str, dict[str, int]]:
     return out
 
 
-def _adapt(lq: LoadedQuestion, chain_index: dict[str, dict[str, int]]) -> dict[str, Any]:
+def _build_chain_tier_index(vault_dir: Path) -> dict[str, dict[str, str]]:
+    """Map qid -> {chain_id: tier} from chains.json sidecar.
+
+    Mirrors the shape of _build_chain_index so the runtime can join on
+    chain_id. Missing tier defaults to "primary" — the v1 corpus had no
+    tier field, so any untagged chain is treated as primary by definition.
+    """
+    chains_path = vault_dir / "chains.json"
+    if not chains_path.exists():
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for ch in json.loads(chains_path.read_text(encoding="utf-8")):
+        cid = ch.get("chain_id") or ch.get("id")
+        if not cid: continue
+        tier = ch.get("tier") or "primary"
+        for member in ch.get("questions", []):
+            qid = member.get("id")
+            if not qid: continue
+            out.setdefault(qid, {})[cid] = tier
+    return out
+
+
+def _adapt(
+    lq: LoadedQuestion,
+    chain_index: dict[str, dict[str, int]],
+    chain_tier_index: dict[str, dict[str, str]],
+) -> dict[str, Any]:
     """YAML question → legacy-JSON item in the shape corpus.ts expects."""
     q = lq.question
 
@@ -74,13 +100,18 @@ def _adapt(lq: LoadedQuestion, chain_index: dict[str, dict[str, int]]) -> dict[s
             visual_out["caption"] = q.visual.caption
         legacy["visual"] = visual_out
 
-    # Chain — sidecar-driven. chain_ids/chain_positions are computed by
-    # joining the YAML's id with chains.json. The YAML's chains: field
-    # (if still present during transition) is ignored — chains.json wins.
+    # Chain — sidecar-driven. chain_ids/chain_positions/chain_tiers are
+    # computed by joining the YAML's id with chains.json. The YAML's
+    # chains: field (if still present during transition) is ignored —
+    # chains.json wins.
     member_of = chain_index.get(q.id, {})
     if member_of:
         legacy["chain_ids"] = sorted(member_of.keys())
         legacy["chain_positions"] = dict(member_of)
+        tiers = chain_tier_index.get(q.id, {})
+        # Always emit chain_tiers when chain_ids is set so the UI can
+        # rely on its presence; default any missing tier to "primary".
+        legacy["chain_tiers"] = {cid: tiers.get(cid, "primary") for cid in member_of}
 
     # Details.
     details: dict[str, Any] = {
@@ -133,8 +164,9 @@ def emit_legacy_corpus(
         items = loaded
 
     chain_index = _build_chain_index(vault_dir)
+    chain_tier_index = _build_chain_tier_index(vault_dir)
     items_sorted = sorted(items, key=lambda lq: lq.id)
-    legacy_items = [_adapt(lq, chain_index) for lq in items_sorted]
+    legacy_items = [_adapt(lq, chain_index, chain_tier_index) for lq in items_sorted]
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
