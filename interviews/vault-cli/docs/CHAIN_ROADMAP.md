@@ -3,7 +3,7 @@
 **Status:** active workstream
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-04-30 (Phase 1 complete — chains 373 → 879)
+**Last updated:** 2026-05-01 (Phase 2 complete — tier surfaced through to UI)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -287,7 +287,7 @@ playwright UI suite 13/13 pass.
 
 ## Phase 2 — Tier surfacing (schema + UI)
 
-**Status:** `not started`
+**Status:** `complete` (2026-05-01)
 **Goal:** chains carry their tier as authoritative metadata; UI prefers
 primary chains in default surfaces, exposes secondary in "more paths."
 
@@ -824,6 +824,101 @@ unrelated.
 
 **Next step:** Phase 2.1 — schema migration (tier required on chain
 entries, `chain_tiers` derived in `legacy_export.py`).
+
+---
+
+### 2026-05-01 — Phase 2: tier surfacing schema → TS → UI
+
+**What was done:**
+
+**Phase 2.1 — backend / schema:**
+- `legacy_export.py`: added `_build_chain_tier_index` (qid → {chain_id: tier})
+  parallel to the existing `_build_chain_index`. `_adapt` emits a new
+  `chain_tiers` field on every legacy item that has `chain_ids`,
+  defaulting any missing chain-tier to `"primary"`.
+- `vault build` re-run: 2953 chained questions, 2953 carry `chain_tiers`
+  (100% coverage). releaseHash unchanged from Phase 1 (`04ee8a23…`) since
+  the new field doesn't perturb the manifest hash inputs.
+- No validator changes — tier is a UI-routing hint, not a structural
+  invariant. Missing tier defaults to "primary" everywhere.
+- Test fixes: existing `test_chain_positions_plural_preserved` and
+  `test_multi_chain_membership` were stale (still asserted on the v1.0
+  YAML `chains:` field path; v1.1 made chains.json the sidecar source
+  so the tests were silently broken). Rewrote to write a chains.json
+  fixture into `tmp_path` and added `chain_tiers` assertions, plus a
+  new `test_chain_tiers_emitted_per_membership` covering primary +
+  secondary + missing-tier cases.
+
+**Phase 2.2 — TypeScript types:**
+- `staffml/src/lib/corpus.ts`: `Question.chain_tiers?` added (optional
+  `Record<string, "primary" | "secondary">`). New `ChainTier` exported
+  type. `ChainInfo` gains a required `tier` field.
+- Internal `_chainTier: Map<chainId, ChainTier>` built alongside
+  `_chainIndex` so the runtime can answer "what tier is this chain?"
+  in O(1) without re-scanning questions.
+- `getChainForQuestion` and `getAllChainsForQuestion` populate `tier`
+  on returned ChainInfo objects. `getAllChainsForQuestion` now sorts
+  primary chains first.
+- New `getPrimaryChainForQuestion(qid)`: returns the first primary
+  chain, falling back to the first secondary, falling back to null.
+  This is the default-surface helper for UI components.
+- `npx tsc --noEmit`: 0 errors after the change.
+
+**Phase 2.3 — UI:**
+- `practice/page.tsx`: reads `?chain=<id>` URL param. Uses
+  `getChainForQuestion(qid, chainParam)` when set, otherwise
+  `getPrimaryChainForQuestion(qid)`. Existing pre-reveal ChainBadge
+  + collapsible ChainStrip rendering paths preserved.
+- `ChainBadge.tsx`: added optional `tier` prop. When `tier === "secondary"`,
+  the badge renders an "alt path" pill inline (always-visible — no
+  click required to discover the tier). Default is `"primary"` so
+  existing call sites don't need updating.
+- `ChainStrip.tsx`: same "alt path" pill in the progress-dot row when
+  the rendered chain is secondary, for users who do click in.
+- `explore/page.tsx`: when a question is in multiple chains, the
+  explorer prefers the first non-secondary chain when picking
+  `activeChainId` for the related-questions panel.
+- **Deferred from the roadmap's Phase 2.3 scope (tracked for a follow-up):**
+  - "Primary only / All" filter dropdown on the explore page
+  - Daily-challenge / mock-interview routing changes (those flows
+    don't currently key on chain tier; punted to a focused later commit)
+
+**Phase 2.4 — playwright tests:**
+- Added `test7_tier_aware_chain_routing` to
+  `chain-and-vault-smoke.mjs`. Covers four assertions:
+  1. Secondary chain reachable via `?chain=<id>` URL param
+  2. "alt path" badge visible on the secondary chain
+  3. Primary-chain question still loads (regression check)
+  4. "alt path" badge ABSENT on primary chain (negative check)
+- Full suite: **17/17 pass** (was 13/13). Roadmap target was 15/15;
+  added one more sub-assertion than planned for the negative check.
+- Test fixtures pinned to `cloud-0231` (secondary-only) +
+  `cloud-chain-auto-secondary-013-04` and `cloud-0001` (primary).
+
+**Validators (re-confirmed end of Phase 2):**
+- `vault check --strict`: 10,701 loaded, 0 invariant failures
+- `vault build --legacy-json`: 9438 published, chainCount=879
+- `pytest interviews/vault-cli/tests/`: 74/74 pass
+- `npx tsc --noEmit`: 0 errors
+- `node interviews/staffml/tests/chain-and-vault-smoke.mjs`: 17/17
+
+**Notes for next session:**
+- Phase 2 done. Phase 3 (gap-driven authoring) is unblocked. Backlog
+  for authoring is now **407 gaps** (138 strict + 269 lenient).
+- The deferred explore-page filter is not load-bearing — secondary
+  chains are reachable via `?chain=` and don't pollute the default
+  surfaces. Worth picking up before Phase 4.x scaffolding.
+- 0 questions currently belong to BOTH a primary and secondary chain
+  (because the lenient sweep was scoped to uncovered buckets). When
+  Phase 3 authors new questions into already-chained buckets, the
+  cap rules in `merge_chain_passes.py` will start mattering for real.
+- Consider scheduling a one-time agent to merge `yaml-audit` → `dev`
+  again now that Phase 2 is shipped (the local `dev` worktree has
+  Phase 1 only — Phase 2 + the CHAIN_ROADMAP updates are not in dev).
+
+**Next step:** Phase 3.a — `generate_question_for_gap.py` (Gemini
+authoring tool that takes a gap entry and drafts a candidate question
+fitting the bridge requirement).
 
 ---
 
