@@ -14,10 +14,10 @@ cp site/newsletter/cli/.env.example site/newsletter/cli/.env
 # edit .env with your key from buttondown.com/settings/programming
 ```
 
-Optional alias if you did not do the editable install:
+Optional alias if you did not do the editable install (run from your clone root; adjust the path if your repo lives elsewhere):
 
 ```bash
-echo 'alias news=/Users/VJ/GitHub/MLSysBook-newsletter/site/newsletter/bin/news' >> ~/.zshrc
+echo "alias news=$(pwd)/site/newsletter/bin/news" >> ~/.zshrc
 ```
 
 ## Commands
