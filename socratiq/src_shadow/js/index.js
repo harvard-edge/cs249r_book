@@ -112,7 +112,7 @@ import {
 } from "./components/quiz/navParser.js";
 import { highlight_click } from "./components/highlight_menu/send_text_highlight.js";
 import { insertContextButton } from "./components/highlight_menu/context-button.js";
-// import {initiate_clear_chats} from './components/settings/clear_chats_temp.js'
+// import {initiate_clear_chats} from './components/settings/clear_chats.js'
 import {
   initializeMenuSlide,
   shortcutKeys,
