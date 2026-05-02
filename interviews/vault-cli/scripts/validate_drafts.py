@@ -255,6 +255,23 @@ matches that level's typical cognitive demand.
 Bloom mapping: L1=remember, L2=understand, L3=apply, L4=analyze,
 L5=evaluate, L6+=create.
 
+REJECT (verdict=no) on any of these failure modes:
+  - "Level inflation": the level field claims L3+ (apply / analyze /
+    evaluate / create) but the question is actually a recall or simple
+    multiplication problem. A common pattern: L3 stamped on a
+    word-problem where every input is given upfront and the candidate
+    only multiplies. That's L1 or L2, not L3.
+  - "Verb mismatch": the question's actual verb (calculate, identify,
+    explain, decompose, evaluate, design) is more than one Bloom step
+    away from the level field's expected verb.
+  - "No real judgement required": L4 (analyze) and above must require
+    decomposition, root-cause reasoning, or a trade-off decision. If
+    the candidate is mechanical computation with all inputs provided,
+    it's not L4.
+
+ACCEPT (verdict=yes) when the question's cognitive operation matches
+the exemplars' typical demand at this level.
+
 EXEMPLARS at level={target_level}:
 {json.dumps([question_payload(q) for q in exemplars], indent=2)}
 
@@ -262,7 +279,7 @@ CANDIDATE:
 {_judge_block(draft)}
 
 Return STRICT JSON with no prose or fences:
-{{"verdict": "yes" | "no", "rationale": "<one sentence>"}}
+{{"verdict": "yes" | "no", "rationale": "<one sentence pointing to the SPECIFIC failure mode if no>"}}
 """
     resp = call_gemini_judge(prompt)
     if resp is None:
@@ -274,18 +291,53 @@ Return STRICT JSON with no prose or fences:
 
 
 def gate_coherence(draft: dict) -> tuple[bool, str, dict]:
-    prompt = f"""Judge whether the scenario, question, and realistic_solution
-are MUTUALLY CONSISTENT. Specifically:
-  - Does the question logically follow from the scenario?
-  - Does the realistic_solution actually answer the question (not adjacent)?
-  - Are the numbers / system parameters internally consistent across all
-    three fields (no contradictions)?
+    prompt = f"""You are doing physical-realism + coherence review on an ML
+systems interview question. REJECT (verdict=no) on any of these failure
+modes — these are the patterns that previous coherence judges have let
+through and that the 2026-05-02 audit caught:
+
+  1. PHYSICAL ABSURDITY: numbers in the scenario violate real-world
+     hardware/software bounds. Examples that should be REJECTED:
+       - Mobile/edge NPU wake-up time > ~50ms (real NPUs wake in
+         single-digit ms; 0.5s wake-up is fiction)
+       - Power figures inconsistent with the device class (e.g., 50W
+         for a "smartphone NPU"; 0.05W for a "datacenter accelerator")
+       - Latency or throughput figures off by >5× from realistic for
+         the named hardware (MobileNetV2 on Coral USB TPU at 80ms is
+         high; 10-20ms is typical)
+       - Memory or model-size claims that don't fit the device's
+         capacity envelope
+       - Duty-cycling patterns that defeat the use-case (a dashcam
+         that idles 75% of the time misses accidents)
+
+  2. VENDOR-NAME FABRICATION: hardware, accelerators, frameworks, or
+     benchmarks named in the scenario that don't actually exist or are
+     misattributed. (E.g., "Coral Edge TPU XL" — there's no XL variant.)
+     If unsure, treat ambiguous-but-plausible as ok; only flag clearly
+     invented names.
+
+  3. SCENARIO/QUESTION/SOLUTION MISMATCH:
+       - Question doesn't logically follow from the scenario
+       - realistic_solution doesn't actually answer the question (e.g.,
+         restates the question, gives generic advice, or answers a
+         related-but-different question)
+       - Numbers contradict across the three fields
+
+  4. ARITHMETIC ERRORS in napkin_math: the calculations don't add up,
+     unit conversions are wrong, or the conclusion doesn't follow from
+     the calculations.
+
+ACCEPT (verdict=yes) only when scenario, question, solution, and any
+napkin math are mutually consistent AND the scenario is physically
+realistic for the named hardware AND no vendor names are fabricated.
 
 CANDIDATE:
 {_judge_block(draft)}
 
 Return STRICT JSON with no prose or fences:
-{{"verdict": "yes" | "no", "rationale": "<one sentence>"}}
+{{"verdict": "yes" | "no",
+  "failure_mode": "physical_absurdity" | "vendor_fabrication" | "mismatch" | "arithmetic" | "none",
+  "rationale": "<one sentence pointing to the SPECIFIC issue if no>"}}
 """
     resp = call_gemini_judge(prompt)
     if resp is None:
