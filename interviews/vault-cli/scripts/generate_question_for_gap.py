@@ -27,10 +27,18 @@ Usage:
   python3 generate_question_for_gap.py --gaps-from interviews/vault/gaps.proposed.json --limit 5
   python3 generate_question_for_gap.py --gaps-from <path> --limit 30 --output-dir <dir>
 
-This is the Phase 3.a tool. Validation (originality / level-fit /
-coherence / bridge) is a separate concern handled by validate_drafts.py.
-The only validation done here is structural Pydantic-schema acceptance,
-which is the gate that prevents writing a malformed YAML to disk.
+Pipeline:
+  1. Pre-filter (1 Gemini call) — judges whether the gap's two anchors
+     actually share a scenario thread. Drops hallucinated gaps (per the
+     2026-05-02 audit, ~70% of detected gaps fail this check) BEFORE
+     spending the full generation + downstream-judge budget. Skip with
+     --skip-prefilter.
+  2. Generation (1 Gemini call) — drafts the question with bridge
+     context.
+  3. Pydantic schema validation — gates the file write.
+
+Quality gates beyond schema (originality / level-fit / coherence /
+bridge) are a separate concern handled by validate_drafts.py.
 """
 
 from __future__ import annotations
@@ -254,6 +262,64 @@ def build_prompt(gap: dict, between: list[dict], exemplars: list[dict]) -> str:
 # ─── Gemini call ──────────────────────────────────────────────────────────
 
 
+PREFILTER_PROMPT_TEMPLATE = """You are pre-screening a chain-gap entry to decide
+whether it's worth issuing an expensive question-generation call. The gap
+claims that two existing questions could be bridged by a NEW question at
+a specific Bloom level. Your job: judge whether the two anchors actually
+share a scenario thread (so a real bridge is even possible) or whether
+the gap is a hallucination — two unrelated same-topic questions that
+shouldn't be chained at all.
+
+Return STRICT JSON, no prose, no fences:
+
+{{
+  "verdict": "real" | "hallucinated",
+  "anchors_share_scenario": "yes" | "no",
+  "level_makes_sense": "yes" | "no",
+  "rationale": "<one sentence>"
+}}
+
+GAP:
+  track:           {track}
+  topic:           {topic}
+  missing_level:   {missing_level}
+  rationale:       {rationale}
+
+ANCHOR[lower]:
+{anchor_lower}
+
+ANCHOR[higher]:
+{anchor_higher}
+"""
+
+
+def call_gemini_prefilter(gap: dict, between: list[dict], timeout: int = 240) -> dict | None:
+    """Single Gemini-judge call to gate gap-bridge generation.
+
+    Returns the parsed verdict dict, or None if the call failed. The
+    background motivation: the 2026-05-02 audit found ~70% of gap
+    detections were anchor-mismatched hallucinations. Issuing a full
+    generation + 3-judge sequence on those wastes 4 calls per bad gap.
+    A 1-call pre-filter catches them before the spend.
+    """
+    if len(between) < 2:
+        # Fewer than 2 resolvable anchors — can't pre-judge a bridge
+        # meaningfully. Default to allowing through; the schema/level
+        # gates downstream still apply.
+        return {"verdict": "real", "anchors_share_scenario": "unclear",
+                "level_makes_sense": "unclear",
+                "rationale": "fewer than 2 anchors resolvable; skipping pre-filter"}
+    prompt = PREFILTER_PROMPT_TEMPLATE.format(
+        track=gap.get("track"),
+        topic=gap.get("topic"),
+        missing_level=gap.get("missing_level"),
+        rationale=gap.get("rationale", ""),
+        anchor_lower=json.dumps(question_payload(between[0]), indent=2),
+        anchor_higher=json.dumps(question_payload(between[1]), indent=2),
+    )
+    return call_gemini(prompt, timeout=timeout)
+
+
 def call_gemini(prompt: str, model: str = GEMINI_MODEL, timeout: int = 600) -> dict | None:
     try:
         result = subprocess.run(
@@ -386,6 +452,7 @@ def process_gap(
     output_dir: Path,
     *,
     dry_run: bool = False,
+    skip_prefilter: bool = False,
 ) -> dict[str, Any]:
     """Returns a one-row report describing the outcome."""
     track = gap.get("track")
@@ -404,6 +471,23 @@ def process_gap(
     if not competency:
         return {"qid": qid, "ok": False, "why": "could not resolve competency_area",
                 "gap": gap}
+
+    # Gap pre-filter (one cheap Gemini-judge call to catch hallucinated
+    # gaps before spending the full generation + downstream-judge budget).
+    # Audit 2026-05-02 found ~70% of gaps had anchor-mismatch; this
+    # gate drops those at 1 call rather than wasting 4 per bad gap.
+    if not (dry_run or skip_prefilter):
+        prefilter = call_gemini_prefilter(gap, between)
+        if prefilter is None:
+            return {"qid": qid, "ok": False, "why": "pre-filter: no judge response",
+                    "gap": gap}
+        if prefilter.get("verdict") == "hallucinated":
+            return {"qid": qid, "ok": False,
+                    "why": f"pre-filter: hallucinated gap "
+                           f"(anchors_share_scenario={prefilter.get('anchors_share_scenario')}, "
+                           f"level_makes_sense={prefilter.get('level_makes_sense')}): "
+                           f"{prefilter.get('rationale','')[:160]}",
+                    "gap": gap, "prefilter": prefilter}
 
     exemplars = find_exemplars(
         corpus,
@@ -462,6 +546,11 @@ def main() -> int:
                     help=f"target tree (default {QUESTIONS_DIR})")
     ap.add_argument("--dry-run", action="store_true",
                     help="resolve gaps + build prompts, but don't call Gemini")
+    ap.add_argument("--skip-prefilter", action="store_true",
+                    help="skip the gap pre-filter (a 1-call Gemini-judge "
+                         "that drops hallucinated gaps before generation). "
+                         "Default: pre-filter ON. Skip only when re-validating "
+                         "an already-filtered gap list, or for cost-debugging.")
     args = ap.parse_args()
 
     corpus = load_corpus_index()
@@ -480,7 +569,8 @@ def main() -> int:
               f"L?→{gap.get('missing_level')} between={gap.get('between')}")
         if i > 0 and not args.dry_run:
             time.sleep(INTER_CALL_DELAY_S)
-        r = process_gap(gap, corpus, next_ids, args.output_dir, dry_run=args.dry_run)
+        r = process_gap(gap, corpus, next_ids, args.output_dir,
+                         dry_run=args.dry_run, skip_prefilter=args.skip_prefilter)
         results.append(r)
         if r.get("ok"):
             print(f"  ✓ {r['qid']}: {r.get('path') or '(dry-run)'}")
