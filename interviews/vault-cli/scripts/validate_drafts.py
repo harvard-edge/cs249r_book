@@ -38,11 +38,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
-import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -160,7 +158,6 @@ def gate_originality(
     state = _load_embedding_model_and_corpus()
     model = state["model"]
     vectors = state["vectors"]
-    qids = state["qids"]
     qid_to_row = state["qid_to_row"]
 
     # Embed the draft (concat title + scenario + question — what the v1
@@ -472,7 +469,7 @@ def main() -> int:
         out_display = args.output
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps({
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "originality_threshold": args.threshold,
         "drafts_evaluated": len(rows),
         "passes": sum(1 for r in rows if r.get("verdict") == "pass"),

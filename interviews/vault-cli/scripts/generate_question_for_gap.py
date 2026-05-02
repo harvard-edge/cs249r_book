@@ -41,7 +41,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -212,7 +212,7 @@ def build_prompt(gap: dict, between: list[dict], exemplars: list[dict]) -> str:
         "",
         SCHEMA_SUMMARY,
         "",
-        f"GAP TO FILL:",
+        "GAP TO FILL:",
         f"  track:           {gap['track']}",
         f"  topic:           {gap['topic']}",
         f"  target level:    {gap['missing_level']}",
@@ -288,7 +288,7 @@ def assemble_draft(
     qid: str,
 ) -> dict[str, Any]:
     """Build the full YAML body from Gemini's response + gap-derived fields."""
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = datetime.now(UTC).isoformat(timespec="seconds")
     details_in = response.get("details") or {}
     return {
         "schema_version": "1.0",
