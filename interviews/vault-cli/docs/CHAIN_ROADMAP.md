@@ -3,7 +3,7 @@
 **Status:** Phase 1 + 2 complete · Phase 3 pilot landed (4 drafts pending review) · Phase 4 housekeeping mostly shipped
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-05-02 (audit finding #1 actioned — 55 Δ=0 chains dropped; lenient mode no longer permits Δ=0)
+**Last updated:** 2026-05-02 (Phase 3 batch landed; corpus-wide release audit plan in `RELEASE_AUDIT_PLAN.md` — fresh session executes)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -1358,6 +1358,59 @@ the lenient mode entirely.
 **Next step:** *user disposition of the 4 drafts.* After that,
 either tighten `validate_drafts.py` and pre-filter gaps before
 scaling Phase 3, or pause the corpus-growth track and pivot.
+
+---
+
+### 2026-05-02 — Phase 3 batch + corpus health survey + release audit plan
+
+**Phase 3 batch (committed in `924363e2b`):**
+- 30 gaps fed to `generate_question_for_gap.py` with the new pre-filter
+- Pre-filter caught 21 hallucinated gaps (70% — exactly matching audit-2's measurement)
+- 9 drafts generated, 6 promoted (status: published, human_reviewed: verified by vj), 3 rejected (level inflation)
+- 5 buckets re-chained in parallel via `--bucket` rebuilds
+- Net: chainCount 824 → **843** (+19), published 9,440 → **9,446** (+6)
+- Drive-by: 24 chain_ids renumbered to bucket-tagged form to resolve collisions across `--bucket` runs
+
+**Merge of origin/dev (`a74c98576`):**
+- Brought 73 commits in including dev's CI security fixes, ruff hook for vault-cli, dark-mode kit polish
+- Resolved 20 conflicts (vault/* + vault-cli/scripts/* kept ours; .github/workflows/* + tinytorch/* kept theirs)
+- Drive-by ruff cleanup: ~40 E701/E702/B007/E722/N806 violations across `scripts/` (dev's `b602aa961` only cleaned `src/+tests/`)
+
+**Corpus health survey (no Gemini cost — regex + structural):**
+- 9,446 published questions audited
+- **90.9% pass format compliance**; **9.1% fail** (861 questions)
+- 134 placeholder titles (`Global New 0006` etc., all in `global/`)
+- 407 with `provenance: None`
+- 447 napkin_math missing one or more bold markers
+- 414 common_mistake missing one or more markers (164 missing both)
+- 42 solutions read like rubrics
+- 100% pass schema (Pydantic)
+- Full data: `interviews/vault/_pipeline/format-audit-full.json` (gitignored)
+
+**Template gap discovered:**
+- `vault new` scaffolds only `scenario: <TODO>` and `realistic_solution: <TODO>` — does NOT include the Pitfall/Rationale/Consequence or Assumptions/Calculations/Conclusion templates
+- The format conventions are codified ONLY in:
+  1. The `generate_question_for_gap.py` SCHEMA_SUMMARY prompt
+  2. The `validate_drafts.py` `gate_format_compliance` regex
+- **There is no human-readable AUTHORING.md.** Authors learn the format by osmosis or by reading rejected validations. New session should ship one.
+
+**Release audit plan (NEW — `interviews/vault-cli/docs/RELEASE_AUDIT_PLAN.md`):**
+Stratified-sample audit (1,000 questions, 33 per (track, level) cell) with
+math + coherence + level_fit + bridge gates. Total: ~2,900 Gemini calls
+across ~12 days at the 250/day cap. Designed for a fresh session to
+execute end-to-end. Includes resume instructions, daily cost ledger
+format, and post-audit cleanup → `paper.tech` update path.
+
+**Deliberately NOT shipped this session:**
+- Full-corpus audit (would be ~27,400 calls / ~110 days — infeasible)
+- Re-authoring `edge-2543` (content unrecoverable from disk)
+- Multi-day quota-aware audit script (build it in the new session — recommended extension of `audit_math.py`)
+
+**Files committed in this entry:**
+- `interviews/vault-cli/docs/RELEASE_AUDIT_PLAN.md` (new)
+- This Progress Log entry
+
+**Next step:** *new session* — read `RELEASE_AUDIT_PLAN.md` top-to-bottom, then execute "Resume instructions for the new session" §.
 
 ---
 
