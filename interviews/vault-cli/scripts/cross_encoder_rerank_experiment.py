@@ -22,10 +22,13 @@ def load_corpus():
     corpus = {}
     for path in (VAULT_DIR / "questions").rglob("*.yaml"):
         try:
-            with open(path) as f: d = yaml.safe_load(f)
-            if d.get("status") not in ("published", None): continue
+            with open(path) as f:
+                d = yaml.safe_load(f)
+            if d.get("status") not in ("published", None):
+                continue
             corpus[d["id"]] = d
-        except: pass
+        except Exception:
+            pass
     return corpus
 
 
@@ -76,18 +79,22 @@ def main():
     print("building eval set...")
     rng = random.Random(42)
     eval_items = []  # (held_qid, true_siblings, bucket_qids)
-    for cid, members in chains.items():
-        if len(members) < 2: continue
+    for _cid, members in chains.items():
+        if len(members) < 2:
+            continue
         held = rng.choice(members)
-        if held not in bi_store: continue
+        if held not in bi_store:
+            continue
         d = corpus[held]
         bucket = [q for q in by_bucket[(d.get("track"), d.get("topic"))]
                   if q != held and q in bi_store]
-        if not bucket: continue
+        if not bucket:
+            continue
         true_siblings = set()
         for shared in qid_chain_set[held]:
             for m in chains[shared]:
-                if m != held: true_siblings.add(m)
+                if m != held:
+                    true_siblings.add(m)
         eval_items.append((held, true_siblings, bucket))
     print(f"  eval items: {len(eval_items)}")
 
@@ -101,8 +108,10 @@ def main():
         sims = np.array([float(h_vec @ bi_store[q]) for q in bucket])
         order = np.argsort(-sims)
         ranked = [bucket[i] for i in order]
-        if ranked[0] in true_sibs: p_at_1_bi += 1
-        if any(r in true_sibs for r in ranked[:3]): r_at_3_bi += 1
+        if ranked[0] in true_sibs:
+            p_at_1_bi += 1
+        if any(r in true_sibs for r in ranked[:3]):
+            r_at_3_bi += 1
         candidates_for_rerank.append((held, true_sibs, ranked[:10]))
     print(f"  bge-small P@1: {p_at_1_bi/len(eval_items):.3f}")
     print(f"  bge-small R@3: {r_at_3_bi/len(eval_items):.3f}")
@@ -124,8 +133,10 @@ def main():
         scores = ce.predict(pairs, batch_size=16, show_progress_bar=False)
         order = np.argsort(-np.asarray(scores))
         reranked = [top10[i] for i in order]
-        if reranked[0] in true_sibs: p_at_1_ce += 1
-        if any(r in true_sibs for r in reranked[:3]): r_at_3_ce += 1
+        if reranked[0] in true_sibs:
+            p_at_1_ce += 1
+        if any(r in true_sibs for r in reranked[:3]):
+            r_at_3_ce += 1
     print(f"  rerank time: {time.time()-t0:.1f}s ({len(candidates_for_rerank)} items)")
     print(f"  cross-encoder P@1: {p_at_1_ce/len(eval_items):.3f}")
     print(f"  cross-encoder R@3: {r_at_3_ce/len(eval_items):.3f}")

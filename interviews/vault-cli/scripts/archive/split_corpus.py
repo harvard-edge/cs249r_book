@@ -20,7 +20,7 @@ import argparse
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -29,7 +29,6 @@ _REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO / "interviews" / "vault-cli" / "src"))
 
 from vault_cli.yaml_io import dump_str  # noqa: E402
-
 
 INTERVIEWS = _REPO / "interviews"
 VAULT = INTERVIEWS / "vault"
@@ -233,7 +232,7 @@ def main(argv: list[str]) -> int:
     if args.limit:
         corpus = corpus[: args.limit]
 
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = datetime.now(UTC).isoformat(timespec="seconds")
     created_by = "split-corpus.py"
 
     written = 0
