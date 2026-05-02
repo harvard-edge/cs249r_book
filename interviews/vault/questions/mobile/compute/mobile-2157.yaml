@@ -1,0 +1,65 @@
+schema_version: '1.0'
+id: mobile-2157
+track: mobile
+level: L4
+zone: analyze
+topic: roofline-analysis
+competency_area: compute
+bloom_level: analyze
+phase: inference
+title: The Depthwise Cache Collapse
+scenario: You are profiling a mobile vision model on an Adreno GPU. A standard 3x3 convolution layer shows
+  an L1 cache hit rate of 88% and sits near the compute roof. However, a 3x3 depthwise convolution layer
+  with the exact same input and output dimensions shows an L1 hit rate of 14% and is strictly constrained
+  by DRAM memory bandwidth.
+question: Structurally, why does a depthwise convolution eliminate the L1 cache reuse present in a standard
+  convolution, causing its arithmetic intensity to plummet into the memory-bound region of the Roofline
+  model?
+details:
+  realistic_solution: In a standard convolution, an input patch is loaded into the L1 cache and reused
+    repeatedly to compute dot products against the weights of every output channel, yielding high arithmetic
+    intensity. A depthwise convolution applies a single, distinct spatial filter to each input channel
+    independently. Because each input patch is read for its specific channel and never reused across the
+    depth dimension, it bypasses the primary cross-channel reuse mechanism of the L1 cache, shifting the
+    operation far left on the Roofline into continuous DRAM fetches.
+  common_mistake: '**The Pitfall:** Assuming the cache hit rate drops because depthwise convolutions have
+    unaligned memory accesses or smaller total memory footprints.
+
+    **The Rationale:** Candidates often assume that the 3x3 spatial window guarantees sufficient spatial
+    cache reuse, failing to realize that the dominant source of data reuse in a convolution is the output
+    channel depth ($K$).
+
+    **The Consequence:** Engineers might waste time attempting to pad tensors, change memory layouts,
+    or tune workgroup sizes, none of which will solve the fundamental mathematical lack of cross-channel
+    arithmetic intensity.'
+  napkin_math: '**Assumptions & Constraints:** Input tensor $H \times W \times C$. $K$ output channels.
+    $3 \times 3$ kernel. Assume 1 byte per activation/weight.
+
+
+    **Calculations:** For a standard convolution, each fetched input activation is involved in $K$ different
+    dot products (one for each output channel filter), yielding an arithmetic intensity proportional to
+    $K$ MACs/Byte. For a depthwise convolution, an input activation is only involved in 1 dot product
+    (for its one corresponding output channel filter), yielding an arithmetic intensity proportional to
+    $1$ MAC/Byte.
+
+
+    **Conclusion:** The arithmetic intensity drops by a factor of $K$ (e.g., $256\times$ to $512\times$
+    depending on the layer width). This massive reduction shifts the operational point horizontally to
+    the left on the Roofline model, slamming the workload into the memory bandwidth wall.'
+status: published
+provenance: llm-draft
+requires_explanation: false
+expected_time_minutes: 10
+tags:
+- roofline
+- mobile-gpu
+- depthwise
+- memory-bandwidth
+- gap-bridge:mobile-0537-mobile-0617
+authors:
+- gemini-3.1-pro-preview
+human_reviewed:
+  status: verified
+  by: vj
+  date: '2026-05-02T14:47:29+00:00'
+created_at: '2026-05-02T14:20:55+00:00'
