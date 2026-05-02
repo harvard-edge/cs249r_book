@@ -56,7 +56,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VAULT_DIR = REPO_ROOT / "interviews" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 ID_REGISTRY = VAULT_DIR / "id-registry.yaml"
-DEFAULT_SCORECARD = VAULT_DIR / "draft-validation-scorecard.json"
+# AI-pipeline scorecard lives under _pipeline/ (gitignored).
+# See interviews/CLAUDE.md.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
+DEFAULT_SCORECARD = PIPELINE_DIR / "draft-validation-scorecard.json"
 
 
 def find_draft(qid: str) -> Path | None:

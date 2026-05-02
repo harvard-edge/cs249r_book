@@ -51,7 +51,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VAULT_DIR = REPO_ROOT / "interviews" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 ID_REGISTRY = VAULT_DIR / "id-registry.yaml"
-DEFAULT_GAPS = VAULT_DIR / "gaps.proposed.json"
+# AI-pipeline staging lives under _pipeline/ (gitignored).
+# See interviews/CLAUDE.md.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
+DEFAULT_GAPS = PIPELINE_DIR / "gaps.proposed.json"
 
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 INTER_CALL_DELAY_S = 6  # be polite to the Gemini CLI's rate limiter

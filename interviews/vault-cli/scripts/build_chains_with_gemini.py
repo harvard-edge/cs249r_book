@@ -54,7 +54,10 @@ import yaml
 
 VAULT_DIR = Path(__file__).resolve().parents[2] / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
-DEFAULT_OUTPUT = VAULT_DIR / "chains.proposed.json"
+# AI-pipeline intermediate artifacts live under _pipeline/ (gitignored).
+# See interviews/CLAUDE.md for the convention.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
+DEFAULT_OUTPUT = PIPELINE_DIR / "chains.proposed.json"
 
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 TOKENS_PER_CHAR = 0.25

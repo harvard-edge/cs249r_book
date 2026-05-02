@@ -29,10 +29,13 @@ relevant Phase section for the step you're picking up.**
    ```
 3. **Read the most recent entry in the Progress Log section below** to see
    what step was last completed, what was decided, and what's next.
-4. **Check for in-flight artifacts:**
+4. **Check for in-flight artifacts** (all gitignored under `_pipeline/`,
+   see [`interviews/vault/README.md`](../../vault/README.md) §"Pipeline
+   artifacts" for the convention):
    ```bash
-   ls -la interviews/vault/chains.proposed*.json 2>/dev/null
-   ls -la interviews/vault/gaps.proposed.json 2>/dev/null
+   ls -la interviews/vault/_pipeline/chains.proposed*.json 2>/dev/null
+   ls -la interviews/vault/_pipeline/gaps.proposed*.json   2>/dev/null
+   ls -la interviews/vault/_pipeline/runs/                 2>/dev/null
    ```
 5. **Pick up at the next step** in the relevant Phase section, follow its
    detailed substeps, then **append a new Progress Log entry** when done.
@@ -44,7 +47,9 @@ relevant Phase section for the step you're picking up.**
 - **Hierarchy:** all questions at `interviews/vault/questions/<track>/<area>/<id>.yaml`.
 - **Live chain count:** 824 (373 primary + 451 secondary; 55 Δ=0 secondary chains dropped 2026-05-02 per audit finding).
 - **Gap backlog:** 138 (strict) + 269 (lenient) = 407 entries across
-  `gaps.proposed.json` and `gaps.proposed.lenient.json`.
+  `_pipeline/gaps.proposed.json` and `_pipeline/gaps.proposed.lenient.json`
+  (gitignored — see [`interviews/vault/README.md`](../../vault/README.md)
+  §"Pipeline artifacts").
 - **Pre-Gemini chains backed up:** `interviews/vault/chains.json.bak` (726 chains).
 - **Validators:** all green as of last commit `1ac7d4c56`.
 - **UI tests:** `interviews/staffml/tests/chain-and-vault-smoke.mjs` — 13/13 pass.

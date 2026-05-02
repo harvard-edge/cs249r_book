@@ -32,7 +32,7 @@ Categories audited:
   inferred from categories 2 and 4 by the synthesis call.)
 
 Outputs:
-  interviews/vault/audit-runs/<UTC-timestamp>/
+  interviews/vault/_pipeline/runs/<UTC-timestamp>/
     config.json            — what was run, with what samples
     01_drafts.json         — per-call traces (prompt, response, parsed verdict)
     02_secondary.json
@@ -71,10 +71,13 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VAULT_DIR = REPO_ROOT / "interviews" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 CHAINS_PATH = VAULT_DIR / "chains.json"
-GAPS_PRIMARY_PATH = VAULT_DIR / "gaps.proposed.json"
-GAPS_LENIENT_PATH = VAULT_DIR / "gaps.proposed.lenient.json"
-AUDIT_RUNS = VAULT_DIR / "audit-runs"
-SCORECARD = VAULT_DIR / "draft-validation-scorecard.json"
+# AI-pipeline staging artifacts live under _pipeline/ (gitignored).
+# See interviews/CLAUDE.md.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
+GAPS_PRIMARY_PATH = PIPELINE_DIR / "gaps.proposed.json"
+GAPS_LENIENT_PATH = PIPELINE_DIR / "gaps.proposed.lenient.json"
+AUDIT_RUNS = PIPELINE_DIR / "runs"
+SCORECARD = PIPELINE_DIR / "draft-validation-scorecard.json"
 
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 INTER_CALL_DELAY_S = 4

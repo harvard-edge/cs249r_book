@@ -13,7 +13,10 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 VAULT_DIR = Path(__file__).resolve().parents[2] / "vault"
-DEFAULT = VAULT_DIR / "chains.proposed.json"
+# AI-pipeline staging lives under _pipeline/ (gitignored).
+# See interviews/CLAUDE.md.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
+DEFAULT = PIPELINE_DIR / "chains.proposed.json"
 LEVEL_RANK = {"L1": 1, "L2": 2, "L3": 3, "L4": 4, "L5": 5, "L6+": 6}
 
 

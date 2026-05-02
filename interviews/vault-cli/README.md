@@ -79,23 +79,30 @@ one (track, topic) bucket. `interviews/vault/chains.json` is the
 authoritative registry; YAMLs no longer carry a `chains:` field. The
 build tooling lives in `scripts/`:
 
+All intermediate artifacts (`chains.proposed*.json`, `gaps.proposed*.json`,
+audit traces, etc.) live under `interviews/vault/_pipeline/` and are
+gitignored as a unit — only the durable registry (`chains.json`) gets
+committed. See [`../vault/README.md`](../vault/README.md) §"Pipeline
+artifacts" for the convention.
+
 ```bash
 # 1. Surface (track, topic) buckets that need chains. Writes
 #    interviews/vault/chain-coverage.json (gitignored — regeneratable).
 python3 scripts/diagnose_chain_coverage.py
 
 # 2. Strict pass: Δ ∈ {1, 2}, primary chains. Default mode.
-python3 scripts/build_chains_with_gemini.py --all \
-  --output ../vault/chains.proposed.json
+#    Defaults write to _pipeline/chains.proposed.json.
+python3 scripts/build_chains_with_gemini.py --all
 
-# 3. Lenient pass: Δ ∈ {0, 1, 2, 3}, secondary chains.
+# 3. Lenient pass: Δ ∈ {1, 2, 3}, secondary chains.
 #    Use --buckets-from to scope the run to uncovered buckets only.
 python3 scripts/build_chains_with_gemini.py --mode lenient \
   --buckets-from ../vault/chain-coverage.json \
-  --output ../vault/chains.proposed.lenient.json
+  --output ../vault/_pipeline/chains.proposed.lenient.json
 
 # 4. Apply a single proposed file (replaces chains.json after validation).
-python3 scripts/apply_proposed_chains.py --proposed ../vault/chains.proposed.json
+python3 scripts/apply_proposed_chains.py \
+  --proposed ../vault/_pipeline/chains.proposed.json
 
 # 5. Merge primary + secondary into chains.json with cap enforcement
 #    (each qid in ≤ 2 chains; non-L1/L2 qids capped at 1 membership).

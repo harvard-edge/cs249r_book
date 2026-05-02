@@ -52,7 +52,10 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VAULT_DIR = REPO_ROOT / "interviews" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 EMBEDDINGS_PATH = VAULT_DIR / "embeddings.npz"
-DEFAULT_OUTPUT = VAULT_DIR / "draft-validation-scorecard.json"
+# AI-pipeline scorecard lives under _pipeline/ (gitignored).
+# See interviews/CLAUDE.md.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
+DEFAULT_OUTPUT = PIPELINE_DIR / "draft-validation-scorecard.json"
 
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 ORIGINALITY_THRESHOLD = 0.92  # cosine; >= this is "too duplicative"
