@@ -121,6 +121,58 @@ def gate_schema(draft: dict[str, Any]) -> tuple[bool, str]:
         return False, str(e)[:300]
 
 
+# ─── Gate 1.5: format compliance ──────────────────────────────────────────
+
+
+# Markers required by the StaffML question conventions (see ARCHITECTURE.md
+# §3.6.1). common_mistake follows Pitfall / Rationale / Consequence;
+# napkin_math follows Assumptions / Calculations / Conclusion. Cheap
+# regex check — no Gemini call needed; runs on every draft.
+COMMON_MISTAKE_MARKERS = (
+    "**The Pitfall:**",
+    "**The Rationale:**",
+    "**The Consequence:**",
+)
+NAPKIN_MATH_MARKERS = (
+    "**Assumptions",   # "Assumptions & Constraints:" — match prefix only
+    "**Calculations:**",
+    "**Conclusion",    # "Conclusion:" or "Conclusion & Interpretation:"
+)
+
+
+def gate_format_compliance(draft: dict[str, Any]) -> tuple[bool, str, dict]:
+    """Verify the prose-block conventions our schema doesn't enforce.
+
+    Cheap, deterministic, no LLM call. Detects drafts that look fine to
+    Pydantic but skip one of the structured-block markers — usually a
+    one-line edit to fix.
+    """
+    details = draft.get("details") or {}
+    issues: list[str] = []
+
+    cm = (details.get("common_mistake") or "").strip()
+    if cm:
+        missing = [m for m in COMMON_MISTAKE_MARKERS if m not in cm]
+        if missing:
+            issues.append(f"common_mistake missing {missing!r}")
+    # common_mistake is optional in the schema; only flag if present-and-malformed.
+
+    nm = (details.get("napkin_math") or "").strip()
+    if nm:
+        missing = [m for m in NAPKIN_MATH_MARKERS if m not in nm]
+        if missing:
+            issues.append(f"napkin_math missing {missing!r}")
+    # napkin_math is optional; only flag if present-and-malformed.
+
+    detail = {
+        "common_mistake_present": bool(cm),
+        "napkin_math_present": bool(nm),
+    }
+    if issues:
+        return False, "; ".join(issues), detail
+    return True, "", detail
+
+
 # ─── Gate 2: originality (cosine vs neighbours) ───────────────────────────
 
 
@@ -420,6 +472,14 @@ def evaluate_draft(
         rec["verdict"] = "fail"
         return rec  # downstream gates assume a structurally valid YAML
 
+    # Gate 1.5 — format compliance (Pitfall/Rationale/Consequence;
+    # Assumptions/Calculations/Conclusion). Cheap, no Gemini call.
+    ok, why, detail = gate_format_compliance(draft)
+    rec["format_compliance"] = "pass" if ok else "fail"
+    rec["format_compliance_detail"] = detail
+    if not ok:
+        rec["format_compliance_reason"] = why
+
     # Gate 2 — originality
     if args.no_originality:
         rec["originality"] = "skipped"
@@ -460,6 +520,7 @@ def evaluate_draft(
 
     # Final verdict: pass iff every non-skipped gate is pass.
     gate_results = [
+        rec.get("format_compliance"),
         rec.get("originality"),
         rec.get("level_fit"),
         rec.get("coherence"),
