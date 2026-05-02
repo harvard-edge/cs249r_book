@@ -4,12 +4,17 @@ Phase 1.3 of CHAIN_ROADMAP.md added a ``mode`` parameter that toggles the
 allowed Bloom-level deltas:
 
     strict  → Δ ∈ {1, 2}
-    lenient → Δ ∈ {0, 1, 2, 3}
+    lenient → Δ ∈ {1, 2, 3}
 
-These tests pin both directions: that lenient mode accepts shapes strict
-mode rejects (Δ=0 same-scenario pairs, Δ=3 missing-rung jumps) and that
-both modes still reject backward deltas, multi-topic chains, and
+These tests pin both directions: that lenient mode accepts a Δ=3
+missing-rung jump strict mode rejects, and that both modes still reject
+Δ=0 same-level edges, backward deltas, multi-topic chains, and
 out-of-range chain sizes.
+
+(Δ=0 was originally allowed under lenient for "shared scenario,
+different angle" pairs. The 2026-05-01 audit found 54/55 such chains
+had no shared scenario in practice, so Δ=0 was removed from lenient
+on 2026-05-02.)
 
 The script lives outside the importable ``vault_cli`` package, so we load
 it via ``importlib.util`` rather than a normal import.
@@ -103,12 +108,15 @@ def test_strict_rejects_backward_step(chain_module, bucket, corpus):
 
 # --- lenient mode -------------------------------------------------------
 
-def test_lenient_accepts_same_level_pair(chain_module, bucket, corpus):
-    """Δ=0 is allowed under lenient (shared-scenario assumption per prompt)."""
+def test_lenient_rejects_same_level_pair(chain_module, bucket, corpus):
+    """Δ=0 is rejected under lenient as of 2026-05-02. The previous "shared
+    scenario / different angle" carve-out was removed after the audit
+    found 54/55 Δ=0 chains in chains.json had no actual shared scenario."""
     ok, why = chain_module.validate_chain(
         _chain("x-3a", "x-3b"), bucket, corpus, mode="lenient"
     )
-    assert ok, why
+    assert not ok
+    assert "Δ=" in why
 
 
 def test_lenient_accepts_three_step_jump(chain_module, bucket, corpus):

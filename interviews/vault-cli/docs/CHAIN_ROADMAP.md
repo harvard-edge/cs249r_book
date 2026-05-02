@@ -3,7 +3,7 @@
 **Status:** Phase 1 + 2 complete · Phase 3 pilot landed (4 drafts pending review) · Phase 4 housekeeping mostly shipped
 **Branch:** `yaml-audit` (off `dev`)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-05-01 (independent Gemini audit landed; 3 critical findings filed for review — Δ=0 chains, gap hallucination rate, draft quality)
+**Last updated:** 2026-05-02 (audit finding #1 actioned — 55 Δ=0 chains dropped; lenient mode no longer permits Δ=0)
 
 This document is the canonical resumable plan for the vault chain rebuild
 + corpus growth work. **Future Claude sessions: read the "Resume Here"
@@ -42,7 +42,7 @@ relevant Phase section for the step you're picking up.**
 - **Sidecar architecture:** active. `chains.json` is authoritative; YAML
   `chains:` field stripped from all 10,701 question YAMLs.
 - **Hierarchy:** all questions at `interviews/vault/questions/<track>/<area>/<id>.yaml`.
-- **Live chain count:** 879 (post Phase 1: 373 primary + 506 secondary, tier field tagged).
+- **Live chain count:** 824 (373 primary + 451 secondary; 55 Δ=0 secondary chains dropped 2026-05-02 per audit finding).
 - **Gap backlog:** 138 (strict) + 269 (lenient) = 407 entries across
   `gaps.proposed.json` and `gaps.proposed.lenient.json`.
 - **Pre-Gemini chains backed up:** `interviews/vault/chains.json.bak` (726 chains).
@@ -1296,6 +1296,63 @@ only. The user reviews findings and decides which to act on.
 **Next step:** *user review* — three concrete decisions enumerated
 above. After those land, scaling Phase 3 is the natural next tooling
 push.
+
+---
+
+### 2026-05-02 — Audit finding #1 actioned: dropped Δ=0 chains
+
+**What was done:**
+
+The 2026-05-01 independent audit's strongest finding was that 54 of 55
+Δ=0 chains in `chains.json` had no shared scenario thread (the
+constraint the lenient prompt was supposed to enforce). The conclusion
+on second look was that Δ=0 was a flawed design choice, not a bug to
+fix:
+
+- The chain definition is "pedagogical progression through Bloom
+  levels"; same-level edges contradict the definition.
+- The "shared scenario / different angle" carve-out was unenforceable
+  by an LLM at scale.
+- Same-scenario same-level pairs are more honestly modeled as siblings
+  of a chain anchor than as members of a chain.
+
+So this commit doesn't just drop the bad chains — it removes Δ=0 from
+the lenient mode entirely.
+
+**Changes:**
+- `interviews/vault/chains.json`: 879 → 824 chains. The 55 dropped
+  chains are all `tier=secondary` (since Δ=0 was only ever produced by
+  the lenient sweep). Per-track impact: edge -19, tinyml -12,
+  mobile -10, cloud -7, global -7.
+- `build_chains_with_gemini.py`:
+  - `MODE_CONFIG["lenient"]["allowed_deltas"]`: `{0,1,2,3}` → `{1,2,3}`
+  - `LENIENT_PROMPT_TEMPLATE`: Δ=0 paragraph rewritten to explicitly
+    REJECT same-level pairs, with a one-line note about why
+    (scenario-thread constraint didn't bind in practice).
+  - docstring + `--mode` help text updated.
+- `tests/test_chain_validation.py`: `test_lenient_accepts_same_level_pair`
+  flipped to `test_lenient_rejects_same_level_pair`.
+- Header docstring on test file updated to reflect the new lenient
+  rule, with a 1-line rationale citing the audit.
+
+**Validation:**
+- `vault check --strict`: 10,705 loaded, 0 invariant failures
+- `vault build --local-json`: chainCount 879 → 824, releaseHash rolls
+  to `479811040b…` (was `04ee8a23…`)
+- `pytest interviews/vault-cli/tests/`: 74/74 pass
+- playwright `chain-and-vault-smoke`: 19/19 (test fixtures
+  `cloud-0001` and `cloud-0231` are still in their respective chains
+  post-drop, so the suite required no changes)
+
+**What this leaves on the table (audit findings #2 and #3):**
+- **#2 — Gap detection ~50% noise.** Still pending. Worth building
+  the gap pre-filter only when scaling Phase 3, which depends on:
+- **#3 — 4 pilot drafts disposition.** 1 accept, 1 edit, 2 reject per
+  the audit. Needs human review against `PHASE_3_REVIEW_GUIDE.md`.
+
+**Next step:** *user disposition of the 4 drafts.* After that,
+either tighten `validate_drafts.py` and pre-filter gaps before
+scaling Phase 3, or pause the corpus-growth track and pivot.
 
 ---
 
