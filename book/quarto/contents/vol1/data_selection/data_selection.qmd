@@ -731,7 +731,7 @@ The Information-Compute Ratio is not constant; it follows a law of diminishing r
 Mathematically, let $I(D)$ be the information content of a dataset of size $D$. In a redundant dataset, $I(D)$ often scales logarithmically ($\log D$) while the compute cost $C(D)$ scales linearly ($O \cdot D$). The resulting ICR follows @eq-icr-decay:
 $$\text{ICR}(D) = \frac{\frac{d}{dD} I(D)}{\frac{d}{dD} C(D)} \approx \frac{1/D}{O} = \frac{1}{O \cdot D}$$ {#eq-icr-decay}
 
-The $1/(O \cdot D)$ decay creates what we call **The Data Wall**\index{Data Wall!zero learning signal}. Beyond the frontier, adding more data yields near-zero learning but still costs linear compute. In this regime, data is no longer an asset; it is a **Data Tax**\index{Data Tax!redundant compute cost} that inflates the $O$ term of the **iron law** without improving the accuracy numerator of the **RoC** (Return on Compute, see @sec-introduction-roc-invariant). A systems engineer's goal is to keep the system operating at the "Knee" of the ICR curve, where the learning signal per FLOP is maximized. The static and dynamic selection techniques that follow are designed to achieve exactly that.
+The $1/(O \cdot D)$ decay creates what we call **The Data Wall**\index{Data Wall!zero learning signal}. Beyond the frontier, adding more data yields near-zero learning but still costs linear compute. In this regime, data is no longer an asset; it is a **Data Tax**\index{Data!tax, redundant compute cost} that inflates the $O$ term of the **iron law** without improving the accuracy numerator of the **RoC** (Return on Compute, see @sec-introduction-roc-invariant). A systems engineer's goal is to keep the system operating at the "Knee" of the ICR curve, where the learning signal per FLOP is maximized. The static and dynamic selection techniques that follow are designed to achieve exactly that.
 
 \index{Information-Compute Ratio!equivalence to hardware speedup}
 As detailed in the preceding "Data Selection and the iron law" callout, data selection turns the Total Operations ($O$) term from a fixed constant into a variable. By maximizing ICR, we reduce the total FLOPs required to reach a target performance level. A 2$\times$ improvement in ICR is mathematically equivalent to a 2$\times$ improvement in hardware Peak Throughput ($R_{\text{peak}}$), but often much cheaper to achieve. ICR focuses specifically on the compute component of the broader Selection Efficiency metric defined earlier, which also accounts for acquisition, labeling, and storage costs.
@@ -1073,7 +1073,7 @@ Before a single gradient is computed, significant efficiency gains are available
 
 ### The case for smaller datasets {#sec-data-selection-case-smaller-datasets-215e}
 
-\index{Data Redundancy!empirical evidence}
+\index{Data!redundancy, empirical evidence}
 The most counterintuitive finding in data selection is that training on *less* data often produces models just as accurate as training on the full dataset. Practitioners have long assumed that more data yields better performance, and while this holds in many scenarios, it obscures a critical reality: typical large-scale datasets contain massive redundancy. Empirical studies on coreset selection and data pruning have consistently demonstrated this redundancy across standard benchmarks.
 
 On CIFAR-10, gradient-based selection methods (EL2N, GraNd) [@paul2021deep] have shown that training on 50 percent of carefully selected samples matches the accuracy of the full dataset, with aggressive pruning reaching 10--30 percent of samples while retaining 90 percent+ of original performance. ImageNet-1K presents a harder challenge because it is less redundant, yet researchers have demonstrated that 20--30 percent of ImageNet can be pruned with negligible loss, and up to 50 percent reduction is possible with a small accuracy trade-off (~1 percentage point), yielding 2$\times$ fewer training FLOPs [@paul2021deep; @sorscher2022beyond]. The pattern extends to language modeling: web-scraped corpora like The Pile[^fn-the-pile-diversity] and C4[^fn-c4-filtering] contain substantial exact and near-duplicate content, and deduplication studies [@lee2022deduplicating] report 10--30 percent redundancy ratios, with deduplicated training yielding *better* downstream performance through less memorization and more generalization.
@@ -1085,7 +1085,7 @@ On CIFAR-10, gradient-based selection methods (EL2N, GraNd) [@paul2021deep] have
 The reported gains are benchmark-specific. Pruning effectiveness depends on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture; always validate on the specific task before deploying aggressive pruning in production. The key insight remains: *not all data points provide equal value for training.*
 
 \index{Data Quality!noise penalty on convergence}
-\index{Convergence Rate!clean vs. noisy data}
+\index{Convergence!rate, clean vs. noisy data}
 Why does this heterogeneity exist? The answer lies in how neural networks learn decision boundaries. Most samples fall far from any class boundary: a picture of a dog in good lighting is obviously a dog. These "easy" examples provide diminishing returns after the first few epochs because the model has already mastered them. The informative samples cluster near boundaries where classes become ambiguous. Beyond sample redundancy, label quality also dramatically affects data requirements. The following analysis quantifies *the data quality multiplier*: *how* label noise penalizes convergence.
 
 ```{python}
@@ -1392,7 +1392,7 @@ train_full_model(model, coreset)  # 10x faster training
 \index{Deduplication!definition}
 While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets what to remove: exact and near-duplicates. Deduplication provides immediate efficiency gains with no accuracy penalty and requires no model training. This makes it the most accessible optimization in data selection, offering guaranteed compute savings with zero risk of degrading model quality.
 
-\index{Hash-based Deduplication!exact matching}
+\index{Deduplication!hash-based, exact matching}
 The simplest form of deduplication (introduced as a data engineering pipeline stage in @sec-data-engineering-systematic-data-processing-aebc, and here elevated to an optimization lever) uses hash-based methods for exact matches. By computing a cryptographic hash (MD5 or SHA-256) for each sample and removing those with identical hashes, practitioners can eliminate byte-for-byte duplicates that inevitably accumulate in large web-scraped corpora. This process is computationally cheap, scaling linearly with dataset size, and can be parallelized trivially.
 
 \index{MinHash!near-duplicate detection}
@@ -1427,12 +1427,12 @@ Data selection for DLRM focuses on **interaction deduplication** (removing redun
 
 Deduplication removes redundant samples, but a third category of problematic data remains: samples that actively harm learning. Quality-based pruning eliminates samples that either contribute no meaningful signal or introduce contradictory information that confuses the optimization process.
 
-\index{Quality Pruning!label error detection}
+\index{Pruning!quality, label error detection}
 Label error detection represents the most impactful form of quality pruning. Tools like Cleanlab identify samples where the assigned label is likely incorrect based on model confidence patterns across training. A sample that the model consistently predicts as class A but is labeled class B either represents a hard case near the decision boundary or, more commonly, an annotation mistake. Removing or correcting these mislabeled samples prevents the model from learning contradictory signals that degrade its decision boundary.
 
 Outlier removal addresses a different pathology: samples far from any cluster center in feature space. While outliers might represent valuable edge cases, they more often indicate noise, annotation errors, or data corruption. The key is distinguishing between informative outliers (rare but valid examples of a class) and noise (samples that do not belong to any class). Conservative thresholds help avoid discarding genuinely rare examples.
 
-\index{Perplexity Filtering!low-information text removal}
+\index{Perplexity!filtering, low-information text removal}
 Low-information filtering applies domain-specific heuristics to remove samples that lack sufficient signal for learning. For text corpora, this means removing documents below a perplexity threshold or with low semantic coherence, often indicative of machine-generated spam or garbled content. For image datasets, filtering targets blurry, corrupted, or near-uniform samples that provide little visual information.
 
 Together, these three static pruning techniques, coreset selection, deduplication, and quality filtering, show that careful curation before training yields significant efficiency gains. The compute savings are multiplicative across the entire training process: a 50 percent dataset reduction means 50 percent fewer forward passes, backward passes, and gradient updates across all training epochs. For a model trained for 100 epochs, this translates to 50 epochs worth of saved compute, yielding substantial reductions in both training time and energy consumption.
@@ -2514,7 +2514,7 @@ The preceding techniques create new input samples, but there is another form of 
 [^fn-distillation-dark-knowledge]: **Knowledge Distillation**: Hinton coined "dark knowledge" for the information in soft probability distributions: the teacher reveals not just which class is correct but which incorrect classes are most plausible. The temperature parameter controls how much dark knowledge is exposed: higher temperatures produce softer distributions that transfer more nuanced inter-class relationships. From a data selection perspective, distillation increases the *information density per sample* without changing the dataset, effectively boosting ICR by replacing low-entropy hard labels with high-entropy soft labels that carry richer gradient signal per forward pass. \index{Knowledge Distillation!information density}
 
 \index{Dark Knowledge!soft probability distributions}
-\index{Temperature Parameter!softmax for distillation}
+\index{Parameter!temperature, softmax for distillation}
 The key insight is that the teacher's soft predictions contain more information than hard labels: a teacher predicting [0.7, 0.2, 0.1] for three classes reveals inter-class relationships (classes one and two are more similar) that a hard label [1, 0, 0] obscures entirely.
 
 The richer supervision signal enables student models to learn more efficiently from the same data. From a systems perspective, distillation is particularly effective for creating synthetic labels at scale: run a large model (such as GPT-4) on unlabeled data to generate high-quality annotations, then train a smaller model on these synthetic labels. The smaller model inherits much of the teacher's capability at a fraction of the inference cost, amortizing the expensive teacher computation across many student deployments.
@@ -2664,7 +2664,7 @@ Choosing the right data selection technique is necessary but not sufficient. The
 
 ### The selection bottleneck {#sec-data-selection-selection-bottleneck-4d00}
 
-\index{Selection Latency!dynamic selection bottleneck}
+\index{Latency!selection, dynamic selection bottleneck}
 Dynamic data selection introduces a new bottleneck: *selection latency*. In standard training, the data loader reads the next batch sequentially. In active learning or curriculum learning, the system must evaluate a selection function $f(x)$ over a large candidate pool to determine the next batch. Concretely, scoring a 1M image dataset with a large model can take `{python} SelectionEconomicsAnchor.scoring_time_str`, potentially negating the savings from a `{python} IcrCoresetComparison.coreset_pct_str` coreset if not performed with a smaller proxy model.
 
 \index{Selection Inequality!definition}
@@ -3432,7 +3432,7 @@ Broadcast: final_indices → all workers
 
 Shard-local selection reduces coordinator load substantially but introduces a quality trade-off: the system may miss globally important samples that appear unimportant within their local shard. A sample that is only moderately difficult on one worker might be the hardest example in the entire dataset when considered globally.
 
-\index{Distributed MinHash!cross-shard deduplication}
+\index{MinHash!distributed, cross-shard deduplication}
 When even hierarchical approaches prove too expensive, approximate global selection offers a fallback. These methods trade exactness for scalability through distributed approximate algorithms. Distributed MinHash enables deduplication by having each worker compute MinHash signatures independently; signatures are then aggregated to find near-duplicates across shards without requiring any single node to see all the data. Similarly, federated uncertainty sampling allows workers to compute local uncertainty scores, with a global threshold determined by score distribution statistics rather than exact ranking.
 
 ### Consistency challenges in active learning {#sec-data-selection-consistency-challenges-active-learning-59c9}
@@ -3616,7 +3616,7 @@ The benefits must be weighed against the distributed selection challenges discus
 
 ### The optimization stack {#sec-data-selection-optimization-stack-ba66}
 
-\index{Optimization Stack!multiplicative effects}
+\index{Optimization!stack, multiplicative effects}
 The preceding sections examined pairwise interactions, but production systems apply all these optimizations together. Trace the full optimization stack in @fig-optimization-stack, from data to deployment: each stage in this pipeline amplifies or attenuates the effects of others.
 
 ::: {#fig-optimization-stack fig-env="figure" fig-pos="htb" fig-cap="**The optimization stack**: The complete pipeline from raw data to deployed system, showing how optimizations at each stage propagate downstream. Data artifacts flow through processing stages indicated by the arrows. Optimizations early in the pipeline, particularly data selection, have multiplicative effects because they reduce the workload for all subsequent stages." fig-alt="Two-row pipeline. Top: Raw Data -> Data Selection -> Curated Data -> Training -> Model. Bottom: Model -> Compression -> Compact Model -> Hardware -> Deployed System. Green-outlined boxes mark data artifacts; orange-outlined boxes mark processing stages."}
