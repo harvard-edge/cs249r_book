@@ -304,7 +304,11 @@ def main() -> int:
     n_skip = sum(1 for r in results if r.get("verdict") == "skip")
     print(f"\nelapsed: {elapsed:.1f}s  pass={n_pass}  fail={n_fail}  "
           f"error={n_err}  skip={n_skip}")
-    print(f"wrote {args.output.relative_to(REPO_ROOT)}")
+    try:
+        out_display = args.output.relative_to(REPO_ROOT)
+    except ValueError:
+        out_display = args.output
+    print(f"wrote {out_display}")
     return 0
 
 
