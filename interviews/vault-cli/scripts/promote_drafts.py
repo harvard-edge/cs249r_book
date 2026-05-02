@@ -44,9 +44,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -196,7 +195,7 @@ def main() -> int:
           f"{f' (reviewed_by={args.reviewed_by})' if args.reviewed_by else ''}:")
     print()
 
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now = datetime.now(UTC).isoformat(timespec="seconds")
     promoted_qids: list[str] = []
     for p in drafts:
         try:
@@ -211,7 +210,7 @@ def main() -> int:
         print(f"\nappended {len(promoted_qids)} entries to "
               f"{ID_REGISTRY.relative_to(REPO_ROOT)}")
 
-    print(f"\nNow run: vault check --strict && vault build --local-json")
+    print("\nNow run: vault check --strict && vault build --local-json")
     if any(args.publish for _ in promoted_qids):
         print("(promoted as published — chainCount may grow on next "
               "build_chains_with_gemini.py --all run)")

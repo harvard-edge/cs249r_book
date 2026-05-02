@@ -62,10 +62,12 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 #| export
 
 import numpy as np
-# Module-level RNG is intentionally UNSEEDED so freshly-constructed layers
-# (e.g., Linear) produce different weights on every run. Tests/demos that
-# need determinism create their own seeded RNG locally (see below).
-rng = np.random.default_rng()
+# Module-level RNG is seeded so Linear weight init is deterministic by default.
+# This is what the integration test suite (and any cross-run reproducibility)
+# relies on. Demo scripts that want fresh weights every run rebind this name
+# to an unseeded RNG locally before constructing their model — see
+# milestones/01_1958_perceptron/01_rosenblatt_forward.py for the pattern.
+rng = np.random.default_rng(7)
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor

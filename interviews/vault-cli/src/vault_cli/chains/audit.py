@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from vault_cli.chains.embeddings import EmbeddingStore, load_or_build
+from vault_cli.chains.embeddings import EmbeddingStore
 
 
 @dataclass
@@ -50,8 +50,10 @@ def load_corpus(vault_dir: Path) -> dict[str, dict]:
     corpus = {}
     for path in (vault_dir / "questions").rglob("*.yaml"):
         try:
-            with open(path) as f: d = yaml.safe_load(f)
-            if d.get("status") not in ("published", None): continue
+            with open(path) as f:
+                d = yaml.safe_load(f)
+            if d.get("status") not in ("published", None):
+                continue
             corpus[d["id"]] = d
         except Exception:
             continue
@@ -70,7 +72,8 @@ def build_chain_view(corpus: dict[str, dict]) -> dict[str, list[tuple[str, int]]
 def load_registry(vault_dir: Path) -> set[str]:
     """chain_ids declared in chains.json."""
     path = vault_dir / "chains.json"
-    if not path.exists(): return set()
+    if not path.exists():
+        return set()
     return {ch.get("chain_id") for ch in json.loads(path.read_text())}
 
 
@@ -95,7 +98,8 @@ def run_audit(vault_dir: Path, store: EmbeddingStore | None = None) -> AuditRepo
 
         # First-pass health record
         first_member_doc = corpus.get(members[0][0])
-        if first_member_doc is None: continue
+        if first_member_doc is None:
+            continue
         ch = ChainHealth(
             chain_id=cid,
             track=first_member_doc.get("track"),
@@ -117,9 +121,11 @@ def run_audit(vault_dir: Path, store: EmbeddingStore | None = None) -> AuditRepo
     quality_scores: list[float] = []
     if store is not None:
         for ch in chain_healths:
-            if ch.member_count < 2: continue
+            if ch.member_count < 2:
+                continue
             vecs = [store.get(m) for m in ch.members]
-            if any(v is None for v in vecs): continue
+            if any(v is None for v in vecs):
+                continue
             arr = np.stack(vecs)
             sim = arr @ arr.T  # symmetric, diag = 1
             n = len(vecs)

@@ -36,10 +36,12 @@ def _build_chain_index(vault_dir: Path) -> dict[str, dict[str, int]]:
     out: dict[str, dict[str, int]] = {}
     for ch in json.loads(chains_path.read_text(encoding="utf-8")):
         cid = ch.get("chain_id") or ch.get("id")
-        if not cid: continue
+        if not cid:
+            continue
         for pos, member in enumerate(ch.get("questions", [])):
             qid = member.get("id")
-            if not qid: continue
+            if not qid:
+                continue
             out.setdefault(qid, {})[cid] = pos
     return out
 
@@ -57,11 +59,13 @@ def _build_chain_tier_index(vault_dir: Path) -> dict[str, dict[str, str]]:
     out: dict[str, dict[str, str]] = {}
     for ch in json.loads(chains_path.read_text(encoding="utf-8")):
         cid = ch.get("chain_id") or ch.get("id")
-        if not cid: continue
+        if not cid:
+            continue
         tier = ch.get("tier") or "primary"
         for member in ch.get("questions", []):
             qid = member.get("id")
-            if not qid: continue
+            if not qid:
+                continue
             out.setdefault(qid, {})[cid] = tier
     return out
 

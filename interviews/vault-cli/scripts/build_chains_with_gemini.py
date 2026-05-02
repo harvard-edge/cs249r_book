@@ -45,7 +45,6 @@ import argparse
 import json
 import subprocess
 import sys
-import textwrap
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -72,8 +71,10 @@ def load_corpus() -> dict[str, dict]:
     corpus = {}
     for path in QUESTIONS_DIR.rglob("*.yaml"):
         try:
-            with open(path) as f: d = yaml.safe_load(f)
-            if d.get("status") not in ("published", None): continue
+            with open(path) as f:
+                d = yaml.safe_load(f)
+            if d.get("status") not in ("published", None):
+                continue
             corpus[d["id"]] = d
         except Exception:
             continue
@@ -134,7 +135,8 @@ def plan_batches(buckets: dict[tuple[str, str], list[str]],
         cur.append((k, qids))
         cur_chars += item_chars
         cur_count += len(qids)
-    if cur: batches.append(cur)
+    if cur:
+        batches.append(cur)
     return batches
 
 
@@ -344,7 +346,8 @@ def call_gemini(prompt: str, model: str = GEMINI_MODEL, timeout: int = 600) -> d
     # Strip code fences if present
     if out.startswith("```"):
         out = out.strip("`")
-        if out.startswith("json"): out = out[4:].lstrip()
+        if out.startswith("json"):
+            out = out[4:].lstrip()
     # Find first { ... } block
     i = out.find("{")
     j = out.rfind("}")
@@ -435,7 +438,8 @@ def process_batch(batch: list[tuple[tuple[str, str], list[str]]],
         bucket_qids = set()
         for (t, p), qids in batch:
             if t == track and p == topic:
-                bucket_qids = set(qids); break
+                bucket_qids = set(qids)
+                break
         if not bucket_qids:
             print(f"  [call {call_idx}] response references unknown bucket ({track},{topic})")
             continue

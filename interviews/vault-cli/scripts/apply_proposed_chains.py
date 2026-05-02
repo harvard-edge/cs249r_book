@@ -48,8 +48,10 @@ def load_yaml_corpus() -> dict[str, dict]:
     out = {}
     for p in (VAULT_DIR / "questions").rglob("*.yaml"):
         try:
-            with open(p) as f: d = yaml.safe_load(f)
-            if d.get("status") not in ("published", None): continue
+            with open(p) as f:
+                d = yaml.safe_load(f)
+            if d.get("status") not in ("published", None):
+                continue
             out[d["id"]] = d
         except Exception:
             pass
@@ -64,20 +66,23 @@ def validate(proposed: list[dict], corpus: dict[str, dict]) -> list[str]:
     for ch in proposed:
         cid = ch.get("chain_id")
         if not cid:
-            errors.append(f"chain missing chain_id: {ch}"); continue
+            errors.append(f"chain missing chain_id: {ch}")
+            continue
         seen_chain_ids[cid] += 1
 
         topic = ch.get("topic")
         track = ch.get("track")
         members = ch.get("questions", [])
         if not (2 <= len(members) <= 6):
-            errors.append(f"{cid}: size {len(members)} not in [2,6]"); continue
+            errors.append(f"{cid}: size {len(members)} not in [2,6]")
+            continue
 
         levels = []
         for m in members:
             qid = m.get("id")
             if qid not in corpus:
-                errors.append(f"{cid}: member {qid!r} not in published corpus"); continue
+                errors.append(f"{cid}: member {qid!r} not in published corpus")
+                continue
             d = corpus[qid]
             levels.append(LEVEL_RANK.get(d.get("level"), 0))
             if d.get("topic") != topic:

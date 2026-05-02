@@ -302,6 +302,13 @@ def main():
     console.print("   [yellow]⚠️  No training yet - you haven't learned Modules 05-07![/yellow]")
     console.print("   🧠 Assembling perceptron with YOUR Tiny🔥Torch modules...")
 
+    # Locally rebind the layers module's RNG to an unseeded one so this demo's
+    # Linear weights differ on every run (the on-screen promise above). The
+    # default in tinytorch.core.layers is seeded for test reproducibility;
+    # we only override here, in this milestone script.
+    import tinytorch.core.layers as _layers
+    _layers.rng = np.random.default_rng()
+
     model = Perceptron(input_size=2, output_size=1)
 
     console.print(f"      [green]✓[/green] Linear layer: 2 → 1 [dim](YOUR Module 03!)[/dim]")

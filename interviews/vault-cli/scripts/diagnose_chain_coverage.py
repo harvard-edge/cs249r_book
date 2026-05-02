@@ -173,13 +173,13 @@ def print_summary(report: dict) -> None:
               f"{density:>13.2f} {t['uncovered']:>6} {t['under_covered']:>9}")
 
     print()
-    print(f"Top 10 uncovered buckets by question count:")
+    print("Top 10 uncovered buckets by question count:")
     for b in report["uncovered_buckets"][:10]:
         print(f"  {b['track']:<8} {b['topic']:<40} q={b['question_count']}")
 
     if report["under_covered_buckets"]:
         print()
-        print(f"Top 10 under-covered buckets:")
+        print("Top 10 under-covered buckets:")
         for b in report["under_covered_buckets"][:10]:
             print(f"  {b['track']:<8} {b['topic']:<40} "
                   f"q={b['question_count']} chains={b['chain_count']}")

@@ -60,8 +60,8 @@ import random
 import subprocess
 import sys
 import time
-from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -532,20 +532,20 @@ def write_report(outdir: Path) -> Path:
     s = (syn.get("response") or {})
 
     lines: list[str] = [
-        f"# Vault chain pipeline — independent audit report",
-        f"",
-        f"**Generated:** {datetime.now(timezone.utc).isoformat(timespec='seconds')}",
+        "# Vault chain pipeline — independent audit report",
+        "",
+        f"**Generated:** {datetime.now(UTC).isoformat(timespec='seconds')}",
         f"**Auditor:** {GEMINI_MODEL} (independent of the pipeline's own judges)",
         f"**Audit run dir:** `{outdir.relative_to(REPO_ROOT)}`",
-        f"",
+        "",
         "---",
-        f"",
-        f"## Summary",
-        f"",
+        "",
+        "## Summary",
+        "",
         s.get("summary", "*(synthesis call failed; see per-category JSON)*"),
-        f"",
-        f"## Headline findings",
-        f"",
+        "",
+        "## Headline findings",
+        "",
     ]
     for f in s.get("headline_findings", []) or []:
         lines.append(f"- {f}")
@@ -557,12 +557,12 @@ def write_report(outdir: Path) -> Path:
         rate = cat_data.get("pass_rate")
         rate_str = f"{rate*100:.0f}%" if isinstance(rate, (int, float)) else "n/a"
         lines.append(f"### {cat}")
-        lines.append(f"")
+        lines.append("")
         lines.append(f"- pass rate: **{rate_str}**")
         lines.append(f"- key issue: {cat_data.get('key_issue', '*(none reported)*')}")
         lines.append("")
     if s.get("tier_quality_delta"):
-        lines.append(f"### Tier quality delta (primary vs secondary)\n")
+        lines.append("### Tier quality delta (primary vs secondary)\n")
         lines.append(s["tier_quality_delta"])
         lines.append("")
     lines.append("## Recommendations\n")
@@ -626,7 +626,7 @@ def main() -> int:
     secondary_sample = rng.sample(secondary_chains,
                                    min(args.secondary_sample, len(secondary_chains)))
 
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     outdir = AUDIT_RUNS / timestamp
     outdir.mkdir(parents=True, exist_ok=True)
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 VAULT_DIR = Path(__file__).resolve().parents[2] / "vault"
@@ -28,17 +28,17 @@ def main() -> int:
 
     chains = json.loads(Path(args.input).read_text())
     n = len(chains)
-    print(f"=" * 60)
+    print("=" * 60)
     print(f"PROPOSED CHAINS — {n} total")
-    print(f"=" * 60)
+    print("=" * 60)
 
     sizes = Counter(len(ch["questions"]) for ch in chains)
-    print(f"\nchain size distribution:")
+    print("\nchain size distribution:")
     for size in sorted(sizes):
         print(f"  size {size}: {sizes[size]} chains")
 
     track_counts = Counter(ch["track"] for ch in chains)
-    print(f"\nchains per track:")
+    print("\nchains per track:")
     for t, c in track_counts.most_common():
         print(f"  {t}: {c}")
 
@@ -51,12 +51,12 @@ def main() -> int:
         for i in range(len(levels) - 1):
             deltas[levels[i+1] - levels[i]] += 1
 
-    print(f"\nstart-level distribution:")
-    for L in ("L1", "L2", "L3", "L4", "L5", "L6+"):
-        if L in starts:
-            print(f"  {L}: {starts[L]}")
+    print("\nstart-level distribution:")
+    for lvl in ("L1", "L2", "L3", "L4", "L5", "L6+"):
+        if lvl in starts:
+            print(f"  {lvl}: {starts[lvl]}")
 
-    print(f"\nconsecutive-member level Δ:")
+    print("\nconsecutive-member level Δ:")
     for d, c in sorted(deltas.items()):
         bar = "█" * min(c // 10, 60)
         print(f"  Δ={d:+d}  {c:>4}  {bar}")
@@ -68,15 +68,16 @@ def main() -> int:
             qid_count[q["id"]] += 1
     multi = Counter(qid_count.values())
     total_chained_qids = len(qid_count)
-    print(f"\nmulti-chain membership:")
+    print("\nmulti-chain membership:")
     print(f"  total questions in any chain: {total_chained_qids}")
     for n_chains, count in sorted(multi.items()):
-        if n_chains == 1: continue
+        if n_chains == 1:
+            continue
         print(f"  in {n_chains} chains: {count} questions")
 
     # Topic coverage
     topics = Counter(ch["topic"] for ch in chains)
-    print(f"\ntopic coverage:")
+    print("\ntopic coverage:")
     print(f"  topics with at least 1 chain: {len(topics)}")
     print(f"  most-chained topic: {topics.most_common(1)[0]}")
 
@@ -84,7 +85,7 @@ def main() -> int:
     if args.samples and chains:
         print(f"\n{'=' * 60}")
         print(f"SAMPLE CHAINS (first {args.samples})")
-        print(f"=" * 60)
+        print("=" * 60)
         for ch in chains[:args.samples]:
             levels_str = " → ".join(q["level"] for q in ch["questions"])
             print(f"\n{ch['chain_id']} | {ch['track']} | {ch['topic']}")

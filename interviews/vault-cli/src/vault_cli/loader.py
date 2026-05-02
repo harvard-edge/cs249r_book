@@ -35,10 +35,12 @@ def _load_chain_index(vault_dir: Path) -> dict[str, list[tuple[str, int]]]:
     out: dict[str, list[tuple[str, int]]] = {}
     for ch in _json.loads(chains_path.read_text(encoding="utf-8")):
         cid = ch.get("chain_id") or ch.get("id")
-        if not cid: continue
+        if not cid:
+            continue
         for pos, member in enumerate(ch.get("questions", [])):
             qid = member.get("id")
-            if not qid: continue
+            if not qid:
+                continue
             out.setdefault(qid, []).append((cid, pos))
     return out
 

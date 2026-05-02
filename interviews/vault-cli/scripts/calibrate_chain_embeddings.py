@@ -54,8 +54,10 @@ def load_corpus() -> dict[str, dict]:
     corpus = {}
     for path in QUESTIONS_DIR.rglob("*.yaml"):
         try:
-            with open(path) as f: d = yaml.safe_load(f)
-            if d.get("status") not in ("published", None): continue
+            with open(path) as f:
+                d = yaml.safe_load(f)
+            if d.get("status") not in ("published", None):
+                continue
             corpus[d["id"]] = d
         except Exception:
             continue
@@ -81,8 +83,9 @@ def build_pair_set(
 
     # Positives: every same-chain pair within chains of size ≥ 2
     positives = []
-    for cid, members in chains.items():
-        if len(members) < 2: continue
+    for _cid, members in chains.items():
+        if len(members) < 2:
+            continue
         for i in range(len(members)):
             for j in range(i + 1, len(members)):
                 positives.append((members[i], members[j]))
@@ -101,7 +104,8 @@ def build_pair_set(
     while len(negatives) < target_neg and attempts < target_neg * 20:
         attempts += 1
         bucket_qids = rng.choice(list(by_bucket.values()))
-        if len(bucket_qids) < 2: continue
+        if len(bucket_qids) < 2:
+            continue
         a, b = rng.sample(bucket_qids, 2)
         # Negative if: their chain sets are disjoint
         if qid_to_chains[a] & qid_to_chains[b]:
@@ -183,14 +187,17 @@ def evaluate(
     p_at_1_hits = p_at_1_total = 0
     r_at_3_hits = r_at_3_total = 0
 
-    for cid, members in chains.items():
-        if len(members) < 2: continue
+    for _cid, members in chains.items():
+        if len(members) < 2:
+            continue
         for held in members:
-            if held not in store: continue
+            if held not in store:
+                continue
             held_doc = corpus[held]
             bucket = by_bucket[(held_doc.get("track"), held_doc.get("topic"))]
             other_in_bucket = [q for q in bucket if q != held and q in store]
-            if not other_in_bucket: continue
+            if not other_in_bucket:
+                continue
             held_vec = store[held]
             sims = np.array([float(held_vec @ store[q]) for q in other_in_bucket])
             order = np.argsort(-sims)
@@ -200,13 +207,17 @@ def evaluate(
             true_siblings = set()
             for shared_chain in qid_chains[held]:
                 for m in chains[shared_chain]:
-                    if m != held: true_siblings.add(m)
-            if not true_siblings: continue
+                    if m != held:
+                        true_siblings.add(m)
+            if not true_siblings:
+                continue
 
             p_at_1_total += 1
             r_at_3_total += 1
-            if ranked[0] in true_siblings: p_at_1_hits += 1
-            if any(r in true_siblings for r in ranked[:3]): r_at_3_hits += 1
+            if ranked[0] in true_siblings:
+                p_at_1_hits += 1
+            if any(r in true_siblings for r in ranked[:3]):
+                r_at_3_hits += 1
 
     # 3. Threshold ROC: at each cosine cutoff τ, what fraction of pairs ≥ τ are positives?
     all_sims = list(pos_sims) + list(neg_sims)

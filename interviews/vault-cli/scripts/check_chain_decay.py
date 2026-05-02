@@ -133,7 +133,6 @@ def _load_embeddings():
 def embed_text_for_question(yaml_body: dict) -> Any:
     """Embed the same way the corpus's embeddings.npz did:
     title + scenario + question concatenated, normalised."""
-    import numpy as np
     state = _load_embeddings()
     text = "\n".join([
         yaml_body.get("title", "") or "",
