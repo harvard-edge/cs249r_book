@@ -63,6 +63,19 @@ def pct(n: int, total: int) -> str:
     return f"{100 * n / total:.1f}%"
 
 
+def truncate_words(text: str, max_chars: int) -> str:
+    """Truncate at the last word boundary before max_chars to avoid
+    mid-word truncations like 'claimin' (which would otherwise trip
+    spell-checkers). Adds an ellipsis when truncated."""
+    if not text or len(text) <= max_chars:
+        return text or ""
+    cut = text[:max_chars]
+    last_space = cut.rfind(" ")
+    if last_space > max_chars // 2:  # don't cut too aggressively
+        cut = cut[:last_space]
+    return cut + "..."
+
+
 # ─── markdown builders ───────────────────────────────────────────────────
 
 
@@ -173,7 +186,7 @@ def build_priority_lists(
         for r in math_fails[:qid_limit]:
             qid = r.get("qid")
             errs = r.get("math_errors") or []
-            err = (errs[0] if errs else "")[:80]
+            err = truncate_words(errs[0] if errs else "", 80)
             out.append(f"| `{qid}` | {track_index.get(qid, '?')} | {err} |")
         if len(math_fails) > qid_limit:
             out.append(f"\n_…and {len(math_fails) - qid_limit} more._")
@@ -199,7 +212,7 @@ def build_priority_lists(
             out.append("|---|---|---|")
             for r in items[:qid_limit]:
                 qid = r.get("qid")
-                rat = (r.get("coherence_rationale") or "")[:100]
+                rat = truncate_words(r.get("coherence_rationale") or "", 100)
                 out.append(f"| `{qid}` | {track_index.get(qid, '?')} | "
                            f"{rat} |")
             if len(items) > qid_limit:
@@ -219,7 +232,7 @@ def build_priority_lists(
         out.append("|---|---|---|---|")
         for r in level_fails[:qid_limit]:
             qid = r.get("qid")
-            rat = (r.get("level_fit_rationale") or "")[:80]
+            rat = truncate_words(r.get("level_fit_rationale") or "", 80)
             out.append(f"| `{qid}` | {track_index.get(qid, '?')} | ? | "
                        f"{rat} |")
         if len(level_fails) > qid_limit:
@@ -259,7 +272,7 @@ def build_format_disagreements(rows: list[dict]) -> str:
         out.append("|---|---|---|---|")
         for r in disagreements[:20]:
             issues = (r.get("format_regex_issues") or [None])[0]
-            issues = (issues or "")[:80]
+            issues = truncate_words(issues or "", 80)
             out.append(f"| `{r.get('qid')}` | {r.get('format_compliance')} | "
                        f"{r.get('format_regex')} | {issues} |")
         if len(disagreements) > 20:
