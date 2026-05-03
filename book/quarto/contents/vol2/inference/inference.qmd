@@ -763,7 +763,7 @@ For **recommendation systems**\index{Recommendation Systems}, the bottleneck is 
 
 ### The physics of batching: The efficiency curve {#sec-inference-scale-physics-batching-efficiency-curve-021c}
 
-Batching is not merely a heuristic; it is a trade-off governed by the physics of hardware utilization. We can model the relationship between Batch Size ($B$), Latency ($L$), and Throughput ($X$) to identify the optimal operating point for any inference system.
+Batching is not merely a heuristic; it is a trade-off governed by the physics of hardware utilization. We can model the relationship between Batch Size ($B$), Latency ($L_{\text{lat}}$), and Throughput ($X$) to identify the optimal operating point for any inference system.
 
 The **Latency Equation** decomposes per-request latency into fixed overheads (kernel launch, memory loading) and variable costs (compute per sample):
 
@@ -782,7 +782,7 @@ The resulting curve is the **Batching Efficiency Curve**\index{Batching!efficien
 2.  **Large $B$**: As $B \to \infty$, the $T_{\text{fixed}}$ term becomes negligible. Throughput asymptotically approaches the hardware limit $1/T_{\text{variable}}$. The system becomes **compute-bound**\index{Compute-Bound} (or bandwidth-bound for LLMs).
 3.  **The Knee**: The optimal batch size is the point where throughput gains diminish while latency continues to grow linearly.
 
-The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{\text{variable}}$) saturate at smaller batches than LLMs (high $T_{\text{fixed}}$ due to weight loading), requiring different tuning strategies.
+The engineering goal is to find the maximum $B$ such that $L_{\text{lat}}(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{\text{variable}}$) saturate at smaller batches than LLMs (high $T_{\text{fixed}}$ due to weight loading), requiring different tuning strategies.
 
 ```{python}
 #| label: batching-efficiency-notebook
@@ -849,7 +849,7 @@ The knee occurs where the variable compute cost ($B \times T_{\text{var}}$) star
 
 Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: **Little's Law**[^fn-littles-law], which relates concurrency, throughput, and latency in any stable system. @tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
 
-[^fn-littles-law]: **Little's Law**: From queuing theory ($L = \lambda W$): Concurrency = Arrival Rate $\times$ Latency. For a serving fleet, this defines the **Capacity Envelope**: if a GPU can handle 32 concurrent requests and each takes 100 ms, the maximum arrival rate is 320 req/s. Beyond this, queues build up exponentially, and tail latency ($L_{\text{lat}}$) collapses. \index{Little's Law!capacity planning}
+[^fn-littles-law]: **Little's Law**: From queuing theory ($N_{req} = \lambda T_{lat}$): Concurrency = Arrival Rate $\times$ Latency. For a serving fleet, this defines the **Capacity Envelope**: if a GPU can handle 32 concurrent requests and each takes 100 ms, the maximum arrival rate is 320 req/s. Beyond this, queues build up exponentially, and tail latency ($L_{\text{lat}}$) collapses. \index{Little's Law!capacity planning}
 
 | **Model Type**    | **Batching Strategy** | **Typical Batch Size** | **Key Constraint** | **Throughput Scaling** |
 |:------------------|:----------------------|-----------------------:|:-------------------|:-----------------------|
@@ -889,7 +889,7 @@ class LittlesLawExample:
 
 ::: {.callout-theorem title="Little's Law for Inference"}
 
-**Concept**: In any stable queuing system, the average number of requests in the system ($L$) equals the arrival rate ($\lambda$) multiplied by the average time a request spends in the system ($W$).
+**Concept**: In any stable queuing system, the average number of requests in the system ($N_{req}$) equals the arrival rate ($\lambda$) multiplied by the average time a request spends in the system ($T_{lat}$).
 
 $$ L = \lambda \times W $$
 
@@ -898,7 +898,7 @@ $$ L = \lambda \times W $$
 - **Target Throughput ($\lambda$)**: 1,000 requests/sec
 - **Latency SLO ($W$)**: 100 ms (0.1 s)
 
-**Required Concurrency ($L$)**: $L = 1000 \times 0.1 =$ **`{python} LittlesLawExample.required_concurrency_str`** concurrent requests
+**Required Concurrency ($N_{req}$)**: $N_{req} = 1000 \times 0.1 =$ **`{python} LittlesLawExample.required_concurrency_str`** concurrent requests
 
 **Capacity Planning**\index{Capacity Planning}:
 If a single GPU replica handles batch size 8 with 80 ms latency:
@@ -1314,7 +1314,7 @@ The Autoregressive Bottleneck (Principle \ref{nte-autoregressive-bottleneck}) go
 
 ***Continuous Batching***\index{Continuous Batching!definition} is a serving strategy that decouples batch membership from iteration boundaries, allowing new requests to enter and completed ones to exit at every decode step.
 
-1.  **Significance (Quantitative):** It maximizes the **System Throughput ($\eta$)** by eliminating the padding waste and head-of-line blocking inherent in static batching. It ensures the GPU remains saturated even when requests have widely varying sequence lengths.
+1.  **Significance (Quantitative):** It maximizes the **System Throughput ($\eta_{\text{hw}}$)** by eliminating the padding waste and head-of-line blocking inherent in static batching. It ensures the GPU remains saturated even when requests have widely varying sequence lengths.
 2.  **Distinction (Durable):** Unlike **Static or Dynamic Batching** (which group requests at the *request* level), Continuous Batching operates at the **Iteration Level**\index{Iteration Level}, dynamically reshaping the compute tensor at each clock cycle.
 3.  **Common Pitfall:** A frequent misconception is that Continuous Batching is "purely a scheduler change." In reality, it requires a **Dynamic Memory Manager** (like PagedAttention) because the KV caches for different requests grow and shrink at different rates, preventing static memory pre-allocation.
 
@@ -2183,7 +2183,7 @@ Production systems report 60--80 percent memory waste from fragmentation under r
 
 ***PagedAttention**\index{PagedAttention!block table}*\index{PagedAttention!definition} is a memory management technique that applies virtual memory principles to **KV Cache**\index{KV Cache!quantization} allocation, storing attention states in non-contiguous, fixed-size physical blocks.
 
-1.  **Significance (Quantitative):** It eliminates **Internal and External Fragmentation**\index{Internal and External Fragmentation}, which can waste up to 80 percent of GPU memory. By allowing sequences to grow dynamically, it enables 2$\times$ to 4$\times$ higher **Concurrent Throughput ($\eta$)** on the same hardware.
+1.  **Significance (Quantitative):** It eliminates **Internal and External Fragmentation**\index{Internal and External Fragmentation}, which can waste up to 80 percent of GPU memory. By allowing sequences to grow dynamically, it enables 2$\times$ to 4$\times$ higher **Concurrent Throughput ($\eta_{\text{hw}}$)** on the same hardware.
 2.  **Distinction (Durable):** Unlike **Contiguous Allocation** (which requires pre-reserving the maximum context length), PagedAttention uses a **Block Table** to map logical sequence indices to physical memory pages, allocating only what is currently used.
 3.  **Common Pitfall:** A frequent misconception is that PagedAttention speeds up individual token math. In reality, it is a **Capacity Optimization**\index{Optimization!capacity}: it improves *system-level* efficiency by allowing larger batch sizes, though it adds a small **Indirection Overhead ($L_{\text{lat}}$)** for the pointer lookups.
 
@@ -2854,7 +2854,7 @@ LLM inference consists of two distinct phases with different computational chara
 
 ***Prefill and Decode Phases***\index{Prefill and Decode!definition} are the two distinct computational regimes of transformer-based LLM inference.
 
-1.  **Significance (Quantitative):** The **Prefill Phase** (processing the prompt) is **Compute-Bound ($R_{\text{peak}}$)** with high arithmetic intensity, while the **Decode Phase** (generating tokens) is **Bandwidth-Bound ($\text{BW}$)**\index{Bandwidth-Bound} with extremely low arithmetic intensity. This mismatch means a single request's efficiency ($\eta$) varies wildly during its lifecycle.
+1.  **Significance (Quantitative):** The **Prefill Phase** (processing the prompt) is **Compute-Bound ($R_{\text{peak}}$)** with high arithmetic intensity, while the **Decode Phase** (generating tokens) is **Bandwidth-Bound ($\text{BW}$)**\index{Bandwidth-Bound} with extremely low arithmetic intensity. This mismatch means a single request's efficiency ($\eta_{\text{hw}}$) varies wildly during its lifecycle.
 2.  **Distinction (Durable):** Unlike **Single-Pass Inference** (for example, ImageNet), where the resource bottleneck is constant, LLM inference switches between these regimes at every request, requiring **Iteration-Level Scheduling** to maintain utilization.
 3.  **Common Pitfall:** A frequent misconception is that both phases should be batched together naively. In reality, because they have opposing hardware requirements, mixing them in the same batch without **Chunked Prefill** or similar techniques can lead to significant queuing delays ($L_{\text{lat}}$) for decoding tokens.
 
@@ -3612,13 +3612,13 @@ where $N$ is the number of devices, $M$ is the message size, and $\text{BW}$ is 
 
 $$T_{\text{p2p}} = L + \frac{M}{\text{BW}}$$ {#eq-p2p-time}
 
-where $L$ is the network latency and $M/\text{BW}$ is the transfer time.
+where $\alpha$ is the network latency and $M/\text{BW}$ is the transfer time.
 
 @eq-alltoall-time captures the more complex AllToAll communication\index{AllToAll!alltoall communication} for expert parallelism, where each device exchanges distinct data with every other device.
 
 $$T_{\text{alltoall}} = (N-1) \times \left(L + \frac{M/N}{\text{BW}}\right)$$ {#eq-alltoall-time}
 
-Both equations make clear that the achievable bandwidth $\text{BW}$ and latency $L$ of the underlying interconnect determine real-world sharding performance. The following *interconnect technology comparison* quantifies these differences across production hardware.
+Both equations make clear that the achievable bandwidth $\text{BW}$ and latency $\alpha$ of the underlying interconnect determine real-world sharding performance. The following *interconnect technology comparison* quantifies these differences across production hardware.
 
 ::: {.callout-notebook title="Interconnect Technology Comparison"}
 
