@@ -8,26 +8,53 @@ competency_area: data
 bloom_level: analyze
 phase: inference
 title: NPU Frame Drops During Real-Time Sensor Ingestion
-scenario: Your team deployed a real-time object detection model on a mobile NPU to process high-resolution video streams directly from the camera. During testing, the pipeline experiences severe stuttering and drops frames, failing to maintain 30 FPS. Profiling shows that the NPU is only operating at 30% of its maximum capacity, but system memory access times have skyrocketed.
-question: Why does NPU frame processing stutter at 30 FPS with only 30% NPU utilization but high memory latency?
+scenario: Your team deployed a real-time object detection model on a mobile NPU to process high-resolution
+  video streams directly from the camera. During testing, the pipeline experiences severe stuttering and
+  drops frames, failing to maintain 30 FPS. Profiling shows that the NPU is only operating at 30% of its
+  maximum capacity, but system memory access times have skyrocketed.
+question: Why does NPU frame processing stutter at 30 FPS with only 30% NPU utilization but high memory
+  latency?
 details:
-  realistic_solution: 'The root cause is memory bandwidth saturation and bus contention across the shared LPDDR5X memory, which serves the CPU, GPU, ISP, and NPU. Because the Image Signal Processor (ISP) and NPU share the same physical memory, inefficient ingestion—such as copying frames between CPU buffers and NPU buffers instead of using zero-copy hardware buffers—saturates the memory bus and starves the NPU.'
-  common_mistake: |
-    **The Pitfall:** Assuming compute capacity is the bottleneck.
-    **The Rationale:** Candidates incorrectly guess the NPU lacks TOPS or needs further quantization, failing to recognize memory bandwidth saturation from unoptimized data ingestion.
-    **The Consequence:** Unnecessary model compression that degrades accuracy without fixing the underlying memory bus contention.
-  napkin_math: |
-    **Assumptions & Constraints:**
+  realistic_solution: The root cause is memory bandwidth contention. While the redundant copies themselves
+    (4.5 GB/s) do not saturate the LPDDR5X bus in isolation, when added to the massive bandwidth already
+    consumed by the ISP operating at 4K60, the GPU rendering the display, and OS background tasks, the
+    extra unoptimized hops (ISP to CPU to NPU instead of zero-copy) create enough peak contention to stall
+    the NPU. Using zero-copy hardware buffers eliminates these redundant memory transactions, freeing
+    up critical bandwidth to eliminate NPU starvation.
+  common_mistake: '**The Pitfall:** Assuming compute capacity is the bottleneck.
+
+    **The Rationale:** Candidates incorrectly guess the NPU lacks TOPS or needs further quantization,
+    failing to recognize memory bandwidth saturation from unoptimized data ingestion.
+
+    **The Consequence:** Unnecessary model compression that degrades accuracy without fixing the underlying
+    memory bus contention.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
     - Video Stream = 4K (3840 x 2160) at 60 FPS, 3 bytes/pixel (RGB).
+
     - NPU utilization = 30%.
+
     - Pipeline copies memory from ISP to CPU to NPU instead of zero-copy.
 
+    - Background ISP/GPU/OS tasks consume ~60 GB/s of the ~68 GB/s LPDDR5X budget.
+
+
     **Calculations:**
-    - Base Bandwidth = 3840 * 2160 * 3 bytes * 60 = 1.49 GB/s.
+
+    - Base Frame Bandwidth = 3840 * 2160 * 3 bytes * 60 = 1.49 GB/s.
+
     - Unoptimized Memory Copies (ISP -> CPU -> NPU) = 1.49 GB/s * 3 = 4.47 GB/s raw data movement overhead.
 
+    - Total Memory Demand = 60 GB/s + 4.47 GB/s = 64.47 GB/s (with bursts exceeding 68 GB/s).
+
+
     **Conclusion & Interpretation:**
-    - **Result: LPDDR5X bus saturated (Memory-bandwidth-bound starvation)**. Heavy redundant memory traffic completely starves the NPU despite its low 30% compute utilization.
+
+    - **Result: Burst memory bandwidth starvation.** The unoptimized 4.47 GB/s redundant memory traffic
+    pushes the total system bandwidth over the edge during bursts, starving the NPU despite its low 30%
+    compute utilization.'
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,27 +8,44 @@ competency_area: networking
 bloom_level: evaluate
 phase: both
 title: Flat vs Hierarchical AllGather
-scenario: You are deploying a 175B parameter model (350GB) using FSDP on a 64-node cluster (8x GPUs per node, 512 GPUs total). Intra-node NVLink bandwidth is 600 GB/s per GPU, while the available inter-node InfiniBand bandwidth is 25 GB/s per node.
-question: "Should you use flat or hierarchical AllGather for FSDP weight reconstruction across 512 GPUs, and what latency difference drives that choice?"
+scenario: You are deploying a 175B parameter model (350GB) using FSDP on a 64-node cluster (8x GPUs per
+  node, 512 GPUs total). Intra-node NVLink bandwidth is 600 GB/s per GPU, while the available inter-node
+  InfiniBand bandwidth is 25 GB/s per node.
+question: Should you use flat or hierarchical AllGather for FSDP weight reconstruction across 512 GPUs,
+  and what latency difference drives that choice?
 details:
-  realistic_solution: 'A hierarchical AllGather isolates network tiers. By first performing an inter-node AllGather across the 64 nodes, followed by an intra-node AllGather over ultra-fast NVLink, the volume of data crossing the slow boundary is drastically reduced.'
-  common_mistake: |
-    **The Pitfall:** Assuming a flat Ring AllGather is globally optimal for bandwidth utilization.
-    **The Rationale:** Candidates fail to recognize that in heterogeneous network topologies (NVLink vs IB), the majority of ring steps in a flat topology will be bottlenecked by the slowest inter-node link.
-    **The Consequence:** Wasting fast intra-node NVLink bandwidth and increasing critical path latency by 60x.
-  napkin_math: |
-    **Assumptions & Constraints:**
+  realistic_solution: A hierarchical AllGather isolates network tiers but does NOT reduce the total data
+    volume across the slowest link for a full AllGather. Both flat and hierarchical topologies must transfer
+    the full model size (350 GB) across the inter-node bottleneck (25 GB/s), taking ~14 seconds. The main
+    benefit of hierarchical is reducing latency and network contention by having fewer participants in
+    the inter-node ring, not magically reducing the required bandwidth by 64x.
+  common_mistake: '**The Pitfall:** Assuming a flat Ring AllGather is globally optimal for bandwidth utilization.
+
+    **The Rationale:** Candidates fail to recognize that in heterogeneous network topologies (NVLink vs
+    IB), the majority of ring steps in a flat topology will be bottlenecked by the slowest inter-node
+    link.
+
+    **The Consequence:** Wasting fast intra-node NVLink bandwidth and increasing critical path latency
+    by 60x.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
     - 175B model (350GB). 64 nodes, 8 GPUs/node (512 total).
+
     - NVLink = 600 GB/s. IB = 25 GB/s per node.
 
     **Calculations:**
-    - Flat Ring: Step time = 0.68GB / 3.125 GB/s = 0.21s. Total ≈ 14s.
-    - Hierarchical: Step 1 (Inter-node) = 5.47GB * 63/64 ≈ 5.38GB. 5.38GB / 25 GB/s = 0.22s.
-    - Step 2 (Intra-node) = 5.47GB / 600 GB/s = 0.009s.
-    - Total Hierarchical = 0.22s + 0.009s = 0.23s.
+
+    - Flat Ring: Bottleneck is inter-node IB. To gather 350GB at 25 GB/s takes 350 / 25 = 14s.
+
+    - Hierarchical: Step 1 (Intra-node) gathers 1/64th chunk (5.47GB) taking 5.47 / 600 = 0.009s. Step
+    2 (Inter-node) must gather the remaining 63/64 of the 350GB model (344 GB). 344 GB / 25 GB/s = 13.8s.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.23s (Network-Bound mitigation)**. Hierarchical is roughly 60x faster than flat.
+
+    - **Result: ~14s for both (Network-Bandwidth-Bound)**. Hierarchical AllGather does not bypass the
+    fundamental requirement to move 344GB across the slow 25 GB/s link.'
 status: published
 provenance: imported
 requires_explanation: true

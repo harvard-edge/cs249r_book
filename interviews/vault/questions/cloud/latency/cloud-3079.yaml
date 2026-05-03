@@ -1,40 +1,64 @@
 schema_version: '1.0'
 id: cloud-3079
 track: cloud
-level: L5
+level: L3
 zone: design
 topic: queueing-theory
 competency_area: latency
 bloom_level: apply
 phase: inference
-title: 'Queueing Theory Realization: Size an H100 Inference Queue for Black Friday
-  Traffic'
-scenario: 'Concretely size an H100 inference cluster for a retail AI assistant expected
-  to handle Black Friday peak: 2000 req/s with 30-minute burst, P99<2s SLO. Normal
-  load is 200 req/s. Each request: 1500 input + 300 output tokens on LLaMA-3-70B.
-  Calculate fleet size for peak, cost for the 30-min burst, and whether pre-warming
-  is needed.'
-question: How many H100s are needed for the 2000 req/s Black Friday burst, what does
-  the 30-minute burst cost, and should you pre-warm capacity?
+title: 'Queueing Theory Realization: Size an H100 Inference Queue for Black Friday Traffic'
+scenario: 'Concretely size an H100 inference cluster for a retail AI assistant expected to handle Black
+  Friday peak: 2000 req/s with 30-minute burst, P99<2s SLO. Normal load is 200 req/s. Each request: 1500
+  input + 300 output tokens on LLaMA-3-70B. Calculate fleet size for peak, cost for the 30-min burst,
+  and whether pre-warming is needed.'
+question: How many H100s are needed for the 2000 req/s Black Friday burst, what does the 30-minute burst
+  cost, and should you pre-warm capacity?
 details:
-  realistic_solution: 'Service time: prefill 1500 tok + decode 300 tok. On H100: prefill
-    throughput ~10K tok/s (compute bound), decode ~2K tok/s (memory bound per batch).
-    For batch 32: prefill = 1500/10000 = 0.15s, decode = 300 tok * (1/2000*32) = 4.8s.
-    W = 5s. μ_per_H100 = 1/5 = 0.2 req/s. At ρ=0.7: capacity per H100 = 0.14 req/s.
-    For 2000 req/s: 2000/0.14 = 14,286 H100s. Even at 2000 req/s this is enormous
-    — real systems use speculative decoding and higher batching. More realistically
-    with batch=256: decode time = 1.2s, μ=0.6/s, ρ=0.7 → need 2000/(0.7*0.6) = 4762
-    H100s.'
-  common_mistake: Sizing only for average load and not accounting for autoscaling
-    lag, or forgetting that pre-warming H100 instances takes 3-5 minutes (can't scale
-    fast enough for sudden burst).
-  napkin_math: 'H100 decode bandwidth: 3.35TB/s. 70B params at BF16 = 140GB. Bandwidth
-    per token per batch: 140GB / (batch * 3350GB/s) per sequence. At batch=64: 140/3350
-    = 0.042s/tok. Decode 300 tok: 300*0.042/64... no: 140GB/3350GB/s = 41.8ms to load
-    all weights per decode step. Each step generates 64 tokens (one per sequence in
-    batch). Time per token per sequence = 41.8ms/64 = 0.65ms/tok. 300 output tokens:
-    195ms decode. Prefill 1500 tok: ~150ms. W = 345ms. μ = 2.9 req/s per H100 at batch=64.
-    Fleet: 2000/(0.7*2.9) = 984 H100s peak.'
+  realistic_solution: Meeting the 2s SLO for 300 tokens requires <6.6ms per token. A single H100's memory
+    bandwidth (3.35 TB/s) takes 42ms to load the 140GB model, so single-GPU decoding is impossible. We
+    must use Tensor Parallelism (TP=8) to aggregate bandwidth to 26.8 TB/s, reducing step time to ~5.2ms
+    (1.56s for 300 tokens). With a batch size of 128 on a TP=8 node, throughput is ~82 req/s. At 70% utilization
+    (57 req/s), we need 35 TP=8 nodes (280 H100s) to handle 2000 req/s. A 30-minute burst at $3/hr per
+    GPU costs $420. Pre-warming is mandatory as booting instances and loading weights takes minutes, which
+    would completely miss the 30-minute traffic spike.
+  common_mistake: '**The Pitfall:** Sizing only for average load and not accounting for autoscaling lag.
+
+    **The Rationale:** Engineers often assume auto-scaling can instantly provision hardware to meet traffic
+    spikes.
+
+    **The Consequence:** Forgetting that pre-warming H100 instances takes 3-5 minutes means the system
+    can''t scale fast enough for a sudden burst, resulting in severe SLO violations.'
+  napkin_math: '**Assumptions & Constraints:**
+
+    - 70B model in BF16 = 140GB.
+
+    - H100 bandwidth = 3.35 TB/s. Cost = $3/hr.
+
+    - SLO: 2s max for 300 tokens (<6.6ms/tok).
+
+
+    **Calculations:**
+
+    - Single GPU step time: 140GB / 3.35 TB/s = 41.8ms (Fails SLO).
+
+    - TP=8 step time: 140GB / (8 * 3.35 TB/s) = 5.2ms.
+
+    - Decode time (300 tok) = 1.56s. Total time with prefill < 2s.
+
+    - TP=8 node throughput at batch 128 = 128 / 1.56s = 82 req/s.
+
+    - Safe capacity (70%) = 57.4 req/s per 8 GPUs.
+
+    - Required nodes = 2000 / 57.4 = 34.8 -> 35 nodes (280 H100s).
+
+    - Burst cost = 280 GPUs * $3/hr * 0.5h = $420.
+
+
+    **Conclusion & Interpretation:**
+
+    - **Result: 280 H100s costing $420 (Bandwidth-Bound).** Tensor parallelism is strictly required to
+    meet the 2s latency SLO, and pre-warming is necessary to serve the burst.'
 status: published
 provenance: imported
 requires_explanation: false

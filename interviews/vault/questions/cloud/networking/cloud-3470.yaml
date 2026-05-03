@@ -8,27 +8,50 @@ competency_area: networking
 bloom_level: analyze
 phase: inference
 title: LLM Inference Load Balancing on TPU Fleet
-scenario: You are tasked with designing a robust and efficient serving system for large language model (LLM) inference on a fleet of TPU accelerators. The system must handle a sustained inference request rate of 50,000 queries per second (QPS) with an average inference latency target of 100ms.
-question: How would you route and load-balance 50,000 QPS across TPU inference servers to hit 100 ms latency during updates and failures?
+scenario: You are tasked with designing a robust and efficient serving system for large language model
+  (LLM) inference on a fleet of TPU accelerators. The system must handle a sustained inference request
+  rate of 50,000 queries per second (QPS) with an average inference latency target of 100ms.
+question: How would you route and load-balance 50,000 QPS across TPU inference servers to hit 100 ms latency
+  during updates and failures?
 details:
-  realistic_solution: A realistic solution would involve a multi-layered load balancing approach. A global ingress load balancer (e.g., L7 proxy with gRPC support) would distribute requests to regional inference clusters. Within each cluster, a specialized routing service would employ consistent hashing for 'sticky' sessions (if stateful inference is required) and dynamic weighted round-robin based on real-time TPU utilization metrics (e.g., active requests, HBM utilization per core, current QPS, and pending queue depth). This service would be aware of model versions and warm-up states. Inference-aware routing logic would direct requests based on model size, batch size, or latency requirements, potentially using separate queues for different inference profiles. An orchestrator (like Kubernetes) would manage TPU pod autoscaling, integrating with the load balancer for dynamic capacity adjustments and seamless model deployments.
-  common_mistake: |
-    **The Pitfall:** Employing static load balancing without hardware awareness.
-    **The Rationale:** Engineers apply standard web server load balancing techniques, ignoring the massive compute vs memory bottleneck ratio of TPUs.
-    **The Consequence:** This leads to suboptimal batching, inefficient model partitioning, and "hot" TPUs that miss latency SLAs despite low average utilization.
-  napkin_math: |
-    **Assumptions & Constraints:**
+  realistic_solution: A realistic solution involves a multi-layered load balancing approach. A global
+    ingress load balancer distributes requests to regional clusters. Within each cluster, dynamic weighted
+    round-robin routes traffic based on real-time TPU HBM utilization, current QPS, and pending queue
+    depth. Given the 1.6 TB/s memory bandwidth limit, each TPU is heavily memory-bound during autoregressive
+    decoding. Using a batch size of 8, a single TPU can process approximately 200 decoding steps per second.
+    To hit the 50,000 QPS target without exceeding the 100ms latency SLA, the fleet size must be scaled
+    proportionally to handle the total token generation throughput.
+  common_mistake: '**The Pitfall:** Employing static load balancing without hardware awareness.
+
+    **The Rationale:** Engineers apply standard web server load balancing techniques, ignoring the massive
+    compute vs memory bottleneck ratio of TPUs.
+
+    **The Consequence:** This leads to suboptimal batching, inefficient model partitioning, and "hot"
+    TPUs that miss latency SLAs despite low average utilization.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
     - Target is 50,000 QPS with 100ms latency.
-    - Optimal batch size of 8 takes 100ms.
+
     - Model is 8GB auto-regressive decoding.
 
+    - 1.6 TB/s memory bandwidth.
+
     **Calculations:**
-    - TPU capacity: 8 requests / 100ms = 80 QPS per TPU.
-    - TPUs needed: 50,000 / 80 = 625 TPUs.
-    - Bandwidth limit: 1.6 TB/s memory bandwidth reading an 8GB model yields max 200 reads/sec.
+
+    - Max reads per second = 1.6 TB/s / 8GB = 200 reads/sec.
+
+    - With an optimal batch size of 8, a TPU generates 200 * 8 = 1600 tokens/sec.
+
+    - Depending on the required tokens per query, the fleet must be sized to provide (50,000 * tokens_per_query)
+    total tokens/sec.
 
     **Conclusion & Interpretation:**
-    - **Result: 200 QPS max per device (Memory-Bandwidth-Bound)**. Memory bandwidth limits per-device QPS to 200, necessitating dynamic batching to maximize the 625-device fleet.
+
+    - **Result: Memory-Bandwidth-Bound**. Memory bandwidth severely limits token throughput, necessitating
+    dynamic batching and a significantly larger fleet than compute alone would suggest to meet the latency
+    SLA.'
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,24 +8,47 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Data-Parallel Process Group Misalignment in 3D Training
-scenario: 'You are debugging a 175B parameter model training job on a 1024-GPU cluster using 3D parallelism.'
-question: "Why is the DP AllReduce running over all 1024 ranks instead of the 8-rank DP group, and what process-group fix is needed?"
+scenario: You are debugging a 175B parameter model training job on a 1024-GPU cluster using 3D parallelism.
+question: Why is the DP AllReduce running over all 1024 ranks instead of the 8-rank DP group, and what
+  process-group fix is needed?
 details:
-  realistic_solution: 'Diagnose that the DP AllReduce call is missing its `group=` argument and defaulting to `dist.group.WORLD`. Fix it by explicitly passing the initialized Data Parallel process group (e.g., `group=dp_group`) so NCCL restricts the gradient sync to the 8 ranks that share the same (TP coord, PP coord). After the fix, the AllReduce runs over the intended 8-way DP ring at ~25 GB/s unidirectional IB, and AllReduce volume drops by the ratio of world ranks to DP ranks (1024/8 = 128x reduction in bus traffic for the same gradient shard).'
-  common_mistake: |
-    **The Pitfall:** Assuming `torch.distributed.all_reduce` automatically infers the right subgroup from the tensor's parallelism dimension.
-    **The Rationale:** Candidates may think NCCL has a built-in notion of TP/PP/DP coordinates, whereas group membership is fully explicit.
-    **The Consequence:** A missing `group=` argument silently routes the collective to the world group, catastrophically degrading training throughput.
-  napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 175B params, TP=8, PP=16, DP=8. 1024 total GPUs.
-       - HDR IB: 25 GB/s unidirectional.
-    2. **Calculations:**
-       - DP shard size: 175B / (8×16) = 1.37B params. Data = 2.74 GB/rank.
-       - 8-rank DP AllReduce: 2 × (7/8) × 2.74 GB / 25 GB/s = ~192 ms.
-       - 1024-rank world: 2 × (1023/1024) × 2.74 GB / 25 GB/s = ~219 ms (theoretical minimum).
-    3. **Conclusion & Interpretation:**
-       **Result: Network Bound. The world ring oversubscribes spine links, empirically blowing the 192 ms target by ~12x.**
+  realistic_solution: Diagnose that the DP AllReduce call is missing its `group=` argument and defaulting
+    to `dist.group.WORLD`. Fix it by explicitly passing the initialized Data Parallel process group so
+    NCCL restricts the gradient sync to the 8 ranks that share the same (TP coord, PP coord). After the
+    fix, the AllReduce runs over the intended 8-way DP ring at ~25 GB/s. While the theoretical transfer
+    time only drops from 219ms to 192ms, restricting traffic to the 8-node local group avoids spine link
+    contention, eliminating the massive empirical delays caused by whole-cluster congestion.
+  common_mistake: '**The Pitfall:** Assuming `torch.distributed.all_reduce` automatically infers the right
+    subgroup from the tensor''s parallelism dimension.
+
+    **The Rationale:** Candidates may think NCCL has a built-in notion of TP/PP/DP coordinates, whereas
+    group membership is fully explicit.
+
+    **The Consequence:** A missing `group=` argument silently routes the collective to the world group,
+    catastrophically degrading training throughput.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
+    - 175B params, TP=8, PP=16, DP=8. 1024 total GPUs.
+
+    - HDR IB: 25 GB/s unidirectional.
+
+
+    **Calculations:**
+
+    - DP shard size: 175B / (8*16) = 1.37B params. Data = 2.74 GB/rank.
+
+    - 8-rank DP AllReduce: 2 * (7/8) * 2.74 GB / 25 GB/s = ~192 ms.
+
+    - 1024-rank world: 2 * (1023/1024) * 2.74 GB / 25 GB/s = ~219 ms (theoretical minimum).
+
+
+    **Conclusion & Interpretation:**
+
+    - **Result: Network Bound**. While theoretical minimums (192ms vs 219ms) are similar, the world ring
+    oversubscribes spine links, leading to severe empirical congestion delays that are resolved by localizing
+    the group.'
 status: published
 provenance: imported
 requires_explanation: false
