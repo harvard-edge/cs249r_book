@@ -1020,19 +1020,33 @@ class ValidateCommand:
 
         Shapes we flag (prose, not code fences; inline backticks scrubbed first):
 
-        - `… et al. <opt-words> ( … YEAR … ) [@key]`  — manual + bracket; the
-          *opt-words* allowance ("at Stanford", "in their paper", etc.)
-          catches the pattern that the original adjacency-only regex missed.
-        - `Surname & Surname ( … ) [@key]`            — two-author manual + bracket.
-        - `… et al. <opt-words> ( … YEAR … )` with **no** `[@…]` or narrative
-          `@<bibkey>` anywhere on the line — bare attribution.
+        Manual + bracket (citeproc duplicate):
+        - `… et al. <opt-words> ( … YEAR … ) [@key]`  — *et al.* + paren + bracket.
+        - `Surname & Surname ( … ) [@key]`            — two-author + bracket.
+
+        Bare attribution (no [@key] or narrative @bibkey on the line):
+        - `… et al. <opt-words> ( … YEAR … )`         — classic *et al.* + paren-year.
+        - `… et al.` with no paren-year on line       — e.g. "Sambasivan et al. found
+          that…" — author + year claim with nothing for the reader to look up.
+        - `Surname and Surname ( … YEAR … )`          — e.g. "Frankle and Carbin
+          (MIT, 2019)".
+        - `Surname, Surname, and Surname ( … YEAR … )` — e.g. "Hinton, Vinyals,
+          and Dean (Google, 2015)".
+        - `(Surname and Surname, YEAR)`               — e.g. "(Ioffe and Szegedy,
+          2015)".
+
+        These six bare patterns share a fix: replace the manual attribution with
+        narrative `@key` (which renders as "Author et al. (YEAR)") or `[@key]`
+        as a fact anchor. If no bib entry exists, restructure to drop the date
+        and author rather than leaving an unverifiable claim.
 
         We do **not** flag acronyms in parentheses that are not *author* lines, e.g.
         "DARTS (Differentiable …) [@liu2019darts]": that has no *et al.* and no
-        *Word & Word* before the paren. The bare-attribution branch additionally
-        requires a 4-digit publication year (19xx/20xx) inside the parenthetical,
-        so "(5--10)% improvement" or "(in production)" do not trigger it. Fenced
-        code and inline backtick docs of anti-patterns are skipped.
+        *Word & Word* before the paren. The bare-attribution branches that involve
+        a paren require a 4-digit publication year (19xx/20xx) inside the
+        parenthetical, so "(5--10)% improvement" or "(in production)" do not
+        trigger it. Fenced code and inline backtick docs of anti-patterns are
+        skipped.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -1057,6 +1071,38 @@ class ValidateCommand:
             r"et al\.[^.\n\[(]{0,100}"
             r"\(\s*[^)\n]{0,60}\b(?:19|20)\d{2}\b[^)\n]{0,60}\)",
             re.IGNORECASE,
+        )
+        # "… et al." anywhere on a line, with no paren-year nearby.
+        # Catches "Sambasivan et al. found that…" — the author makes an
+        # attribution claim but provides no citation for the reader to verify.
+        # The line-level no-cite suppression below ensures we only flag prose
+        # that genuinely lacks a [@key] or narrative @bibkey.
+        et_al_loose = re.compile(r"\bet\s+al\.", re.IGNORECASE)
+        # "Surname and Surname (… YEAR …)" — two-author parenthetical year.
+        # Catches "Frankle and Carbin (MIT, 2019)". Requires both surnames to
+        # start with a capital letter and be followed by lowercase, so common
+        # phrases like "this and that" / "Apple and Microsoft (2024 deal)"
+        # have a lower hit rate. We also require a 4-digit year inside the
+        # paren to avoid matching bare phrases like "Cohen and Welling".
+        two_surname_and_paren = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+\s*"
+            r"\(\s*[^)\n]{0,80}\b(?:19|20)\d{2}\b[^)\n]{0,80}\)"
+        )
+        # "Surname, Surname, and Surname (… YEAR …)" — three-author.
+        # Catches "Hinton, Vinyals, and Dean (Google, 2015)". Optional Oxford
+        # comma (`,?`) before "and". Same paren-year requirement as above.
+        three_surname_paren = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+,\s+[A-Z][a-z][a-zA-Z'-]+,?\s+and\s+"
+            r"[A-Z][a-z][a-zA-Z'-]+\s*"
+            r"\(\s*[^)\n]{0,80}\b(?:19|20)\d{2}\b[^)\n]{0,80}\)"
+        )
+        # "(Surname and Surname, YEAR)" — fully parenthesized two-author cite.
+        # Catches "(Ioffe and Szegedy, 2015)". Tighter than the two-surname
+        # form above because both surnames AND the year live inside one
+        # parenthesis with a comma separator — almost always an author cite.
+        paren_two_authors = re.compile(
+            r"\(\s*[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+,\s*"
+            r"(?:19|20)\d{2}\s*\)"
         )
         # Cite detectors used to suppress the bare branch when the line
         # already has a real citation. Excludes Quarto cross-ref prefixes
@@ -1116,6 +1162,74 @@ class ValidateCommand:
                 context=context,
             )
 
+        def issue_etal_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_etal_no_cite",
+                message=(
+                    "Used *Author et al.* in prose with no citation on the line. "
+                    "Either add narrative @key (renders as 'Author et al. (YEAR)') "
+                    "or [@key] as a fact anchor, or rewrite to drop the named "
+                    "attribution when no bib entry exists."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_two_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_two_author_attribution",
+                message=(
+                    "Hand-typed *Surname and Surname (YEAR)* with no bibliography "
+                    "citation on this line. Use narrative @key (renders as "
+                    "'Surname and Surname (YEAR)') or [@key] as a fact anchor, "
+                    "not the manual paren-year form."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_three_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_three_author_attribution",
+                message=(
+                    "Hand-typed *Surname, Surname, and Surname (YEAR)* with no "
+                    "bibliography citation on this line. Replace with narrative "
+                    "@key (citeproc renders the names from the bib entry) or "
+                    "[@key] as a fact anchor."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_paren_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_paren_author_attribution",
+                message=(
+                    "Hand-typed *(Surname and Surname, YEAR)* parenthetical "
+                    "with no bibliography citation on this line. Replace with "
+                    "[@key] — citeproc renders it the same way and links to "
+                    "the bib entry."
+                ),
+                severity="error",
+                context=context,
+            )
+
         for file in files:
             lines = self._read_text(file).splitlines()
             in_code = False
@@ -1144,12 +1258,45 @@ class ValidateCommand:
                     bracket_cite.search(scrubbed)
                     or narrative_cite.search(scrubbed)
                 )
-                if not line_has_cite:
+                # Skip lines that look like code-comment annotations rather
+                # than body prose. Two signals: a leading `#` followed by
+                # ALL-CAPS content (e.g. "# VERIFIED DATA"), or any
+                # `arXiv:NNNN.NNNNN` token on the line. These appear inside
+                # `{python}` cells whose opening fence is mis-detected when
+                # the file has unbalanced fences elsewhere.
+                looks_like_code_comment = (
+                    bool(re.match(r"^\s*#\s+[A-Z]{3,}", line))
+                    or "arXiv:" in scrubbed
+                )
+                if not line_has_cite and not looks_like_code_comment:
                     for m in et_al_bare.finditer(scrubbed):
                         context = scrubbed[
                             max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
                         ].strip()
                         issues.append(issue_bare_attribution(file, idx, context))
+                    # If et_al_bare did not fire but et al. appears anywhere
+                    # on the line, the author claim still lacks a citation.
+                    if not et_al_bare.search(scrubbed):
+                        for m in et_al_loose.finditer(scrubbed):
+                            context = scrubbed[
+                                max(0, m.start() - 30) : min(len(scrubbed), m.end() + 40)
+                            ].strip()
+                            issues.append(issue_etal_no_cite(file, idx, context))
+                    for m in two_surname_and_paren.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_two_authors_no_cite(file, idx, context))
+                    for m in three_surname_paren.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_three_authors_no_cite(file, idx, context))
+                    for m in paren_two_authors.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 10) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_paren_authors_no_cite(file, idx, context))
 
         return ValidationRunResult(
             name="manual-bracket",
