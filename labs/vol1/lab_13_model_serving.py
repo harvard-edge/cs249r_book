@@ -268,7 +268,7 @@ def _(mo):
         options={
             "A) ~200 ms (normal inference latency)": "200ms",
             "B) ~2 seconds (some loading overhead)": "2s",
-            "C) ~15 seconds (loading 140 GB over PCIe Gen5)": "15s",
+            "C) ~26 seconds (NVMe read bottleneck + deserialization)": "26s",
             "D) ~60 seconds (loading from network storage)": "60s",
         },
         label="Auto-scaling Llama-2 70B during traffic spike. First-user wait?",
@@ -891,9 +891,10 @@ Total        = {_t_total:.1f} s
         """))
 
         _ref = 130/7.0 + 130/20.0 + 0.8 + 0.5
-        if partD_pred.value == "15s":
+        if partD_pred.value == "26s":
             items.append(mo.callout(mo.md(
-                f"**Correct.** 140 GB from NVMe over Gen5: ~{_ref:.0f}s total."), kind="success"))
+                f"**Correct.** NVMe bottleneck (7 GB/s): ~{130/7:.0f}s read + "
+                f"~{130/20:.0f}s deserialize + 1.3s overhead = ~{_ref:.0f}s total."), kind="success"))
         elif partD_pred.value == "200ms":
             items.append(mo.callout(mo.md(
                 "**200 ms is inference latency, not cold start.** 140 GB must "
