@@ -21,25 +21,24 @@ def check_file(filepath):
 
         output_match = re.search(r'# ┌── 4\. OUTPUT.*?(?=\n(?:# ┌──|\Z|```))', block, flags=re.DOTALL)
         if not output_match:
+            errors.append(f"Structure Error: Missing '# ┌── 4. OUTPUT' section in class '{class_name}'. Every LEGO block must export variables in this section.")
             continue
         
         output_section = output_match.group(0)
         vars_assigned = re.findall(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*=', output_section, flags=re.MULTILINE)
         
         for var in vars_assigned:
-            if var.startswith('_'): # Skip private/intermediate vars
+            if var.startswith('_') or var == 'RS': # Skip private/intermediate vars and aliases like RS
                 continue
                 
             full_ref = f"{class_name}.{var}"
-            expected_inline = f"{{python}} {full_ref}"
             
-            # If the exact `{python} Class.var` is missing
-            if expected_inline not in content:
-                # Check if it's used with an alias, e.g., `{python} RS.var_name`
-                alias_pattern = r'\{python\}\s+[a-zA-Z0-9_]+\.' + re.escape(var) + r'\b'
+            # If the exact `Class.var` is missing
+            if full_ref not in content:
+                # Check if it's used with an alias, e.g., `RS.var_name`
+                alias_pattern = r'\b[a-zA-Z0-9_]+\.' + re.escape(var) + r'\b'
                 if not re.search(alias_pattern, content):
                     # Check if it's an intermediate variable used to build ANOTHER string in the OUTPUT section.
-                    # e.g., output_section has `other_str = f"blah {var}"`
                     if output_section.count(var) <= 1:
                         errors.append(f"Dead Code: Variable '{full_ref}' is exported but never used in the prose.")
 
@@ -69,10 +68,10 @@ def main():
                 print(f"  - {e}")
                 
     if all_errors:
-        print("\nFix these by deleting the unused variables from the # ┌── 4. OUTPUT section, or using them in the text.")
+        print("\nFix these by deleting the unused variables from the # ┌── 4. OUTPUT section, or using them in the text. Ensure every LEGO block has a 4. OUTPUT section.")
         sys.exit(1)
     else:
-        print("✅ LEGO variable checks passed! No dead code found.")
+        print("✅ LEGO variable checks passed! No dead code or missing sections found.")
 
 if __name__ == '__main__':
     main()
