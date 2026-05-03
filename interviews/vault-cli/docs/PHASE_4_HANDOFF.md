@@ -1,9 +1,37 @@
 # Phase 4 audit handoff — resume guide for the next session
 
-**Status as of 2026-05-03:** Phases 0-4 complete. The full corpus has been audited.
-**Branch:** `yaml-audit`
+**Status as of 2026-05-03 (updated):** Phases 0-4 + Phase 4 backfill +
+Phase 8 (CLI + cron) complete. **Ready for Phase 5 (interactive
+review).**
+**Branch:** `yaml-audit` (97 commits ahead of origin/dev, 0 behind — merged into
+local dev when ready)
 **Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
 **Active workplan:** `interviews/vault-cli/docs/CORPUS_HARDENING_PLAN.md`
+
+## Update appended 2026-05-03
+
+The handoff doc below was written before the Phase 4 backfill ran. Key
+deltas to know about:
+
+- **Phase 4 backfill is done.** Cloud + edge failures that were
+  audit-only got `--propose-fixes` passes. The merged dataset now has
+  **2,757 questions with suggested_corrections** (up from 1,767),
+  spanning all 5 tracks. **0 error rows** (all retried).
+- **6 cloud questions migrated.** `cloud-{0048,0273,0291,0336,0418,0454}`
+  had stray top-level `options`/`correct_index` (MCQ data) — moved
+  into `details:` per the schema. Phase 6's `Details extra='forbid'`
+  flip is now safe with no further corpus migrations.
+- **Phase 8 CLI subcommand shipped.** `vault audit run / review /
+  summarize / merge` wraps the underlying scripts. Cron workflow
+  was already in place.
+
+So the new session can **skip Step 1 (backfill)** in the doc below
+and go straight to **Step 2 (Phase 5 interactive review)**.
+
+The merged audit dataset for Phase 5 is at:
+`interviews/vault/_pipeline/runs/full-corpus-20260503-merged/01_audit.json`
+
+---
 
 ---
 
