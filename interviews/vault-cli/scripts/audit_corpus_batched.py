@@ -43,9 +43,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import threading
 import time
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -74,7 +77,9 @@ RUNS_DIR = PIPELINE_DIR / "runs"
 DEFAULT_BATCH_SIZE = 30
 PROPOSE_FIXES_BATCH_SIZE = 20  # per-question response is ~3× larger
 DEFAULT_MAX_CALLS = 250
-INTER_CALL_DELAY_S = 4
+DEFAULT_WORKERS = 4         # cap at 8 — see _judges.call_gemini_judge timeout note
+DEFAULT_SUBMIT_STAGGER_S = 1.0  # sleep between batch submissions to avoid
+                                 # all workers hitting Gemini in the same instant
 
 # Per-question payload truncation. Each candidate body is bounded so a
 # single huge scenario doesn't blow the prompt budget.
@@ -284,14 +289,29 @@ def normalize_response(resp: dict | None, batch: list[dict]) -> list[dict]:
 
     Always returns len(batch) rows. Missing-from-response qids get an
     "error" placeholder so the per-batch persistence still has a row
-    for every candidate.
+    for every candidate. Hallucinated qids (returned by Gemini but not
+    in the batch) are dropped, with a warning to stderr.
     """
     expected_qids = [q.get("id") for q in batch]
+    expected_set = set(expected_qids)
     by_qid: dict[str, dict] = {}
+    hallucinated: list[str] = []
     if resp and isinstance(resp.get("results"), list):
         for r in resp["results"]:
-            if isinstance(r, dict) and r.get("qid"):
-                by_qid[r["qid"]] = r
+            if not isinstance(r, dict):
+                continue
+            qid = r.get("qid")
+            if not qid:
+                continue
+            if qid not in expected_set:
+                hallucinated.append(qid)
+                continue
+            by_qid[qid] = r
+
+    if hallucinated:
+        print(f"  WARN: Gemini returned {len(hallucinated)} qid(s) not in batch: "
+              f"{hallucinated[:3]}{'...' if len(hallucinated) > 3 else ''}",
+              file=sys.stderr)
 
     rows: list[dict] = []
     for qid in expected_qids:
@@ -334,6 +354,52 @@ def cross_check_format(rows: list[dict], batch: list[dict]) -> list[dict]:
 # ─── run loop ────────────────────────────────────────────────────────────
 
 
+# Lock guarding rows + seen_qids + the persistent file. Held briefly
+# (just around the mutation + file write); the long-running Gemini
+# subprocess call happens OUTSIDE the lock so workers don't serialize.
+_state_lock = threading.Lock()
+# Lock for stderr/stdout to keep concurrent worker output legible.
+_print_lock = threading.Lock()
+
+
+def _persist(audit_path: Path, rows: list[dict], *, propose_fixes: bool,
+             batches_run: int) -> None:
+    """Atomic write: temp file then os.replace. Caller holds _state_lock."""
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
+    tmp.write_text(json.dumps({
+        "schema_version": 1,
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "model": GEMINI_MODEL,
+        "propose_fixes": propose_fixes,
+        "batches_run_so_far": batches_run,
+        "rows_so_far": len(rows),
+        "rows": rows,
+    }, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, audit_path)
+
+
+def _process_batch(batch: list[dict], *, idx: int, total: int,
+                    propose_fixes: bool) -> tuple[int, list[dict], list[dict]]:
+    """Run ONE batch through Gemini and return (idx, batch, rows).
+
+    Returns rows already cross-checked against the host-side regex.
+    Pure function — no state mutation, no I/O. Safe to call from
+    multiple worker threads.
+    """
+    prompt = build_audit_prompt(batch, propose_fixes=propose_fixes)
+    prompt_chars = len(prompt)
+    with _print_lock:
+        print(f"  [{idx:3d}/{total}] start  {len(batch)}q "
+              f"{prompt_chars // 1000}K char prompt")
+
+    resp = call_gemini_judge(prompt)
+
+    new_rows = normalize_response(resp, batch)
+    new_rows = cross_check_format(new_rows, batch)
+    return idx, batch, new_rows
+
+
 def run_audit(
     *,
     targets: list[dict],
@@ -341,9 +407,18 @@ def run_audit(
     propose_fixes: bool,
     batch_size: int,
     max_calls: int,
+    workers: int,
+    submit_stagger_s: float,
     dry_run: bool,
 ) -> dict:
-    """Drive the per-batch audit loop. Persist after each call."""
+    """Drive the per-batch audit loop with optional ThreadPoolExecutor parallelism.
+
+    Submits up to ``max_calls`` batches with ``submit_stagger_s`` sleep
+    between submissions (so all workers don't slam Gemini at the same
+    instant). State mutations (rows list + persistent file) are
+    serialized via _state_lock; Gemini subprocess calls run outside
+    the lock so workers don't block each other.
+    """
     batches = pack_batches(
         targets,
         payload_for=candidate_payload,
@@ -356,7 +431,8 @@ def run_audit(
 
     print(f"  packed: {len(targets)} questions → {n_batches_target} batches "
           f"(target {batch_size}/batch)")
-    print(f"  cap: {max_calls} calls; will run {capped} batch(es) this invocation")
+    print(f"  cap: {max_calls} calls; will run up to {capped} batch(es) this invocation")
+    print(f"  workers: {workers}; submit-stagger: {submit_stagger_s}s")
     if dry_run:
         sizes = [len(b) for b in batches[:5]]
         chars = [
@@ -388,51 +464,64 @@ def run_audit(
         if r.get("qid") and r.get("format_compliance") != "error"
     }
 
-    started = time.time()
-    calls_made = 0
-
+    # Pre-filter batches into to-submit and to-skip lists. Skips happen
+    # synchronously in the main thread; submits go to the worker pool.
+    pending: list[tuple[int, list[dict]]] = []
     for i, batch in enumerate(batches, start=1):
-        # Skip batches whose first qid is already in `seen_qids` (a
-        # prior partial run completed it).
         batch_qids = [q.get("id") for q in batch]
         if all(q in seen_qids for q in batch_qids):
             print(f"  [{i:3d}/{n_batches_target}] skip — already audited")
             continue
+        pending.append((i, batch))
 
-        if calls_made >= max_calls:
-            print(f"  [{i:3d}/{n_batches_target}] HALT — call cap reached")
-            break
+    # Apply max_calls cap after skips.
+    submit_list = pending[: max_calls]
+    if len(pending) > max_calls:
+        print(f"  [HALT] {len(pending) - max_calls} batch(es) deferred to "
+              f"next invocation (max-calls {max_calls})")
 
-        prompt = build_audit_prompt(batch, propose_fixes=propose_fixes)
-        prompt_chars = len(prompt)
-        print(f"  [{i:3d}/{n_batches_target}] {len(batch)} questions, "
-              f"{prompt_chars // 1000}K char prompt")
+    started = time.time()
+    calls_made = 0
+    batches_run = 0
 
-        resp = call_gemini_judge(prompt)
-        calls_made += 1
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = []
+        for j, (idx, batch) in enumerate(submit_list):
+            if j > 0 and submit_stagger_s > 0:
+                time.sleep(submit_stagger_s)
+            futures.append(pool.submit(
+                _process_batch, batch, idx=idx, total=n_batches_target,
+                propose_fixes=propose_fixes,
+            ))
+            calls_made += 1
 
-        new_rows = normalize_response(resp, batch)
-        new_rows = cross_check_format(new_rows, batch)
+        for fut in as_completed(futures):
+            try:
+                idx, batch, new_rows = fut.result()
+            except Exception as e:
+                with _print_lock:
+                    print(f"  WORKER ERROR: {type(e).__name__}: {e}",
+                          file=sys.stderr)
+                continue
 
-        # Drop any prior rows for these qids (resume can revise) then append.
-        rows = [r for r in rows if r.get("qid") not in set(batch_qids)]
-        rows.extend(new_rows)
-        seen_qids.update(batch_qids)
+            batch_qid_set = {q.get("id") for q in batch}
+            with _state_lock:
+                # Drop any prior rows for these qids (resume can revise),
+                # then append the fresh ones.
+                rows[:] = [r for r in rows if r.get("qid") not in batch_qid_set]
+                rows.extend(new_rows)
+                seen_qids.update(q.get("id") for q in batch)
+                batches_run += 1
+                _persist(audit_path, rows, propose_fixes=propose_fixes,
+                         batches_run=batches_run)
 
-        # Persist after every call so a Ctrl-C / timeout doesn't lose work.
-        outdir.mkdir(parents=True, exist_ok=True)
-        audit_path.write_text(json.dumps({
-            "schema_version": 1,
-            "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            "model": GEMINI_MODEL,
-            "propose_fixes": propose_fixes,
-            "batches_run_so_far": calls_made,
-            "rows_so_far": len(rows),
-            "rows": rows,
-        }, indent=2) + "\n", encoding="utf-8")
-
-        if i < n_batches_target and calls_made < max_calls:
-            time.sleep(INTER_CALL_DELAY_S)
+            # Per-batch summary line. Outside the state lock; print lock only.
+            n_err = sum(1 for r in new_rows if r.get("format_compliance") == "error")
+            tag = "ERR " if n_err else "done"
+            with _print_lock:
+                print(f"  [{idx:3d}/{n_batches_target}] {tag}   "
+                      f"{len(batch)}q "
+                      f"({batches_run}/{calls_made} returned)")
 
     elapsed = time.time() - started
     print(f"\n  elapsed {elapsed:.1f}s  calls={calls_made}  rows={len(rows)}")
@@ -472,11 +561,27 @@ def main() -> int:
     ap.add_argument("--max-calls", type=int, default=DEFAULT_MAX_CALLS,
                     help=f"cap on Gemini calls this invocation "
                          f"(default {DEFAULT_MAX_CALLS}). Resume by re-running.")
+    ap.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                    help=f"concurrent Gemini calls (default {DEFAULT_WORKERS}, "
+                         f"capped at 8 to stay under typical RPM limits)")
+    ap.add_argument("--submit-stagger", type=float,
+                    default=DEFAULT_SUBMIT_STAGGER_S,
+                    help=f"seconds between batch submissions to the worker pool "
+                         f"(default {DEFAULT_SUBMIT_STAGGER_S}). Workers all "
+                         f"hitting Gemini in the same instant can produce "
+                         f"correlated rate-limit hits.")
     ap.add_argument("--output", type=Path, default=None,
                     help="output dir (default _pipeline/runs/<UTC-timestamp>/)")
     ap.add_argument("--dry-run", action="store_true",
                     help="show plan without making Gemini calls")
     args = ap.parse_args()
+
+    if args.workers < 1:
+        args.workers = 1
+    if args.workers > 8:
+        print("warning: workers > 8 may hit Gemini RPM limits; capping at 8",
+              file=sys.stderr)
+        args.workers = 8
 
     # Resolve target set.
     tracks = None
@@ -527,6 +632,8 @@ def main() -> int:
             "qids_count": len(args.qids.split(",")) if args.qids else None,
             "propose_fixes": args.propose_fixes,
             "batch_size": batch_size,
+            "workers": args.workers,
+            "submit_stagger": args.submit_stagger,
             "max_calls": args.max_calls,
             "dry_run": args.dry_run,
         },
@@ -542,6 +649,8 @@ def main() -> int:
         propose_fixes=args.propose_fixes,
         batch_size=batch_size,
         max_calls=args.max_calls,
+        workers=args.workers,
+        submit_stagger_s=args.submit_stagger,
         dry_run=args.dry_run,
     )
 
