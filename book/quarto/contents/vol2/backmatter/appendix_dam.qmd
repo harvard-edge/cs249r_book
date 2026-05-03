@@ -18,6 +18,72 @@ This appendix is designed as a reference for single-node performance. Start with
 
 When training is slow on a single GPU, check utilization, data wait time, and MFU, then map each to its Data, Algorithm, or Machine axis. When serving misses a latency target, identify whether you are latency-bound (overhead), memory-bound (weight/KV movement), or compute-bound. When cost is exploding, use the D·A·M rubric to ensure you are improving the dominant term, not polishing a non-bottleneck.
 
+```{python}
+#| echo: false
+#| label: appendix-dam-setup
+from mlsysim.core.constants import (
+    H100_FLOPS_FP16_TENSOR, TFLOPs, second, flop, GB, byte,
+    BILLION, MILLION, THOUSAND, MS_PER_SEC, BYTES_FP16,
+)
+from mlsysim.fmt import fmt, md, md_frac, md_math, sci_latex, check
+
+# ┌── LEGO ───────────────────────────────────────────────
+# Scenarios: GPU Utilization, Iron Law Analysis, Scaling Discrepancy
+
+class DAMTaxonomy:
+    """
+    Namespace for D·A·M Taxonomy diagnostic examples.
+    """
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # Exercise 1: Starving GPU
+    ex1_gpu_util_pct = 25
+    ex1_disk_sat_pct = 100
+
+    # Exercise 2: Iron Law (7B Model Inference)
+    ex2_params = 7 * BILLION
+    ex2_latency_s = 0.050
+    ex2_bytes_per_param = BYTES_FP16.m_as(byte)  # FP16
+    ex2_flops_per_param = 2 # Fwd pass
+    h100_fp16_tflops_peak = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
+
+    # Exercise 3: Scaling Law
+    ex3_loss_start = 0.45
+    ex3_loss_end = 0.42
+    ex3_chin_pred_pct = 15
+
+    # Exercise 4: Hardware Upgrade
+    ex4_gpu_old_n = 4
+    ex4_gpu_new_n = 8
+    ex4_cost_k = 200
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Exercise 2 logic
+    ex2_flops_per_pass = (ex2_params * ex2_flops_per_param * flop).m_as(TFLOPs)
+    ex2_achieved_tflops = ex2_flops_per_pass/ex2_latency_s
+    ex2_util = (ex2_achieved_tflops/h100_fp16_tflops_peak) * 100
+    ex2_model_size_gb = (ex2_params * ex2_bytes_per_param * byte).m_as(GB)
+
+    # Step 2: Exercise 3 logic
+    ex3_imp_pct = (ex3_loss_start - ex3_loss_end) / ex3_loss_start * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(ex2_util < 10, f"Batch-1 utilization ({ex2_util:.1f}%) unexpectedly high.")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    ex2_flops_per_pass_str = f"{ex2_flops_per_pass:.3f}"
+    ex2_achieved_str = fmt(ex2_achieved_tflops, precision=2, commas=False)
+    ex2_util_str = fmt(ex2_util, precision=2, commas=False)
+        rf"$$\text{{Achieved FLOP/s}} = \frac{{{ex2_flops_per_pass_str} \text{{ TFLOPs}}}}"
+        rf"{{0.050 \text{{ s}}}} = {ex2_achieved_str} \text{{ TFLOP/s}}$$"
+    )
+        rf"$$\eta = \frac{{{ex2_achieved_str}}}{{{int(h100_fp16_tflops_peak)}}} \approx {ex2_util_str}\%$$"
+    )
+
+    # Wrap in md() so the embedded $\times$ math renders when injected via
+    # inline {python}. Bare f-strings bypass Pandoc's math parser.
+```
+
 ::: {.callout-learning-objectives}
 By the end of this appendix, you will be able to:
 
