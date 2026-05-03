@@ -62,6 +62,14 @@ QMD_ROOTS = [
     "periodic-table",
 ]
 
+# Companion paper LaTeX sources
+TEX_FILES = [
+    "interviews/paper/paper.tex",
+    "tinytorch/paper/paper.tex",
+    "mlsysim/paper/paper.tex",
+    "periodic-table/paper/paper.tex",
+]
+
 # Excluded path tokens (build artifacts, deps, etc.)
 EXCLUDE = ("_build", "_site", "node_modules", ".git", "__pycache__",
            ".venv", "venv", ".aiconfigs-local")
@@ -87,6 +95,9 @@ KNOWN_FALSE_POSITIVE_KEYS = {
 # Lookbehind excludes `=@` / `(@` / `,@` patterns that aren't real citations
 # (e.g., Python decorators `func(@x)` or matmul notation `A@B`).
 CITE_RE = re.compile(r"(?<![=,(])\[?@([A-Za-z][\w:.-]*)\b")
+
+# LaTeX citations: \cite{key}, \citep{key1,key2}, \citet{key}, etc.
+TEX_CITE_RE = re.compile(r"\\cite[a-z]*\*?\{([^}]+)\}")
 
 # Single-uppercase-letter "keys" (e.g., A, B, X) are matrix/variable names
 # in math-style markdown like `A@B` (matmul). Not bib citations.
@@ -125,6 +136,20 @@ def extract_qmd_cites(text: str) -> set[str]:
         if re.match(r"^\d+\.\d+", k):
             continue
         keys.add(k)
+    return keys
+
+
+def extract_tex_cites(text: str) -> set[str]:
+    """Extract all citation keys from LaTeX content."""
+    # Strip comments
+    text = re.sub(r"(?<!\\)%.*", "", text)
+    keys = set()
+    for m in TEX_CITE_RE.finditer(text):
+        # Handle comma-separated lists: \cite{key1, key2}
+        for k in m.group(1).split(","):
+            k = k.strip()
+            if k:
+                keys.add(k)
     return keys
 
 
@@ -180,6 +205,22 @@ def main() -> int:
         for k in cites:
             all_cites[k].append(rel)
 
+    # Load all tex citations
+    tex_files_found = 0
+    for tp in TEX_FILES:
+        path = REPO_ROOT / tp
+        if not path.exists():
+            continue
+        tex_files_found += 1
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        cites = extract_tex_cites(text)
+        rel = str(path.relative_to(REPO_ROOT))
+        for k in cites:
+            all_cites[k].append(rel)
+
     # Compute the two failure sets
     cited_keys = set(all_cites.keys())
     bib_keys = set(all_bib_keys.keys())
@@ -188,6 +229,7 @@ def main() -> int:
 
     summary = {
         "qmd_files_scanned": len(qmds),
+        "tex_files_scanned": tex_files_found,
         "bib_files_scanned": len([1 for bp in BIB_FILES if (REPO_ROOT / bp).exists()]),
         "unique_cited_keys": len(cited_keys),
         "unique_bib_keys": len(bib_keys),
@@ -210,8 +252,9 @@ def main() -> int:
         return _exit_code(unresolved, orphans, args.strict)
 
     # Human-readable
-    print(f"# Bib / QMD link integrity report\n")
+    print(f"# Bib / QMD / TeX link integrity report\n")
     print(f"  qmd files scanned:    {summary['qmd_files_scanned']}")
+    print(f"  tex files scanned:    {summary['tex_files_scanned']}")
     print(f"  bib files scanned:    {summary['bib_files_scanned']}")
     print(f"  unique cited keys:    {summary['unique_cited_keys']}")
     print(f"  unique bib keys:      {summary['unique_bib_keys']} ({summary['bib_total_entries']} total entries inc. duplicates)")
