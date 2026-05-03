@@ -29,6 +29,24 @@ console = Console()
 REGISTRY_PATH = Path("interviews/vault/id-registry.yaml")
 APPLICABILITY_PATH = Path("interviews/vault/data/applicable_cells.json")
 
+# Markup-convention templates for `vault new`. The bold markers are
+# enforced by the format-compliance gate (currently in
+# validate_drafts.py; CORPUS_HARDENING_PLAN.md Phase 6 lifts this into
+# `vault check --strict`). See interviews/vault/AUTHORING.md "Markup
+# conventions" for the rationale.
+COMMON_MISTAKE_TEMPLATE = (
+    "**The Pitfall:** <TODO: the wrong intuition or shortcut a candidate takes>\n"
+    "**The Rationale:** <TODO: why that intuition is wrong, in one sentence>\n"
+    "**The Consequence:** <TODO: the operational symptom — latency, cost, failure mode>\n"
+)
+NAPKIN_MATH_TEMPLATE = (
+    "**Assumptions & Constraints:**\n"
+    "- <TODO: assumption 1>\n\n"
+    "**Calculations:**\n"
+    "- <TODO: calc step 1 with units>\n\n"
+    "**Conclusion:** <TODO: one-sentence interpretation of the result>\n"
+)
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -228,10 +246,19 @@ def register(app: typer.Typer) -> None:
         }
         if author:
             payload["authors"] = [author]
+        # Scaffold the prose body. The `common_mistake` and `napkin_math`
+        # blocks are pre-templated with the canonical bold markers
+        # (Pitfall/Rationale/Consequence and Assumptions/Calculations/Conclusion);
+        # the author fills the content between markers. See
+        # interviews/vault/AUTHORING.md "Markup conventions" for the
+        # rationale. Templates are module-level constants so they're
+        # testable.
         payload.update({
             "scenario": "<TODO: describe the scenario in plaintext>",
             "details": {
                 "realistic_solution": "<TODO: canonical answer>",
+                "common_mistake": COMMON_MISTAKE_TEMPLATE,
+                "napkin_math": NAPKIN_MATH_TEMPLATE,
             },
         })
 
