@@ -141,7 +141,8 @@ def _(COLORS, mo):
                     a layer's activations land in given batch size and width, and identify the
                     batch size threshold where a 10x latency cliff appears.</div>
                 <div style="margin-bottom: 3px;">3. <strong>Calculate the Floating Point Operations (FLOPs) scaling law</strong>
-                    for dense layers: doubling width yields ~4x FLOPs, not 2x.</div>
+                    for dense layers: doubling width yields ~2x total FLOPs (hidden-to-hidden
+                    layer quadruples, but input/output layers only double).</div>
                 <div style="margin-bottom: 3px;">4. <strong>Compare forward vs. backward memory</strong>:
                     training stores all layer activations simultaneously, creating a 4-10x
                     memory multiplier over inference.</div>
