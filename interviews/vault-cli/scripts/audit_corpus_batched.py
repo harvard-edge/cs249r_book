@@ -377,7 +377,16 @@ def run_audit(
                 rows = existing["rows"]
         except json.JSONDecodeError:
             pass
-    seen_qids = {r.get("qid") for r in rows if r.get("qid")}
+    # Only treat a row as "done" if Gemini returned a real verdict.
+    # Rows where format_compliance == "error" are placeholders for a
+    # batch that timed out or returned malformed JSON; we want resume
+    # to RETRY them, not skip them. (Caught on the 2026-05-03 canary:
+    # the previous "any persisted row counts as done" rule meant 60
+    # error rows were never re-audited.)
+    seen_qids = {
+        r.get("qid") for r in rows
+        if r.get("qid") and r.get("format_compliance") != "error"
+    }
 
     started = time.time()
     calls_made = 0
@@ -503,6 +512,9 @@ def main() -> int:
     else:
         ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         outdir = RUNS_DIR / ts
+    # Resolve so relative_to(REPO_ROOT) works even when --output is
+    # passed as a relative path.
+    outdir = outdir.resolve()
     outdir.mkdir(parents=True, exist_ok=True)
 
     config = {

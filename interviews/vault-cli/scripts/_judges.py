@@ -107,8 +107,14 @@ def strip_fences(text: str) -> str:
     return out
 
 
-def call_gemini_judge(prompt: str, *, timeout: int = 240) -> dict | None:
+def call_gemini_judge(prompt: str, *, timeout: int = 600) -> dict | None:
     """Invoke the gemini CLI and parse the strict-JSON response.
+
+    Default timeout is 600s. The 2026-05-03 canary run on the global
+    track measured average call latency ~167s for 30-question batches
+    (52-72K char prompts), with the 72K-char calls occasionally hitting
+    the previous 240s ceiling and timing out. 600s gives ~3× the typical
+    call time and still triggers fast on a genuinely-stuck call.
 
     Returns a dict on success, or None on:
       - subprocess timeout
