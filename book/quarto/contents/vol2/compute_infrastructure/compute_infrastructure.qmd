@@ -229,7 +229,6 @@ The bet pays off handsomely when workloads are stable: a purpose-built ASIC can 
 ### Wafer-scale engines {#sec-compute-wafer-scale}
 
 \index{Wafer-Scale Engine}
-\index{Cerebras}
 
 Wafer-Scale Engines (WSE) represent the ultimate pursuit of data locality. While every other architecture on the spectrum relies on chiplets or discrete dies connected by relatively slow PCB-level or package-level interconnects, a wafer-scale engine (like the Cerebras WSE-3) is a single, continuous piece of silicon the size of a dinner plate. By avoiding the need to "dice" the wafer into individual chips, a WSE can maintain a single, massive on-chip interconnect across its entire surface.
 
@@ -658,7 +657,7 @@ The distinction between memory *capacity* (how many gigabytes the HBM can store)
 
 **Scenario**: Generating one token for Llama-3 70B (140 GB weights in FP16) on an NVIDIA H100.
 
-1. **Compute Time**\index{Compute Time}: Each token requires $2 \times 70\text{B} = 1.4 \times 10^{11}$ floating-point operations. At `{python} H100PerformanceScenario.h100_tflops` TFLOPS peak throughput, the arithmetic takes:
+1. **Compute Time**\index{Compute!compute time}: Each token requires $2 \times 70\text{B} = 1.4 \times 10^{11}$ floating-point operations. At `{python} H100PerformanceScenario.h100_tflops` TFLOPS peak throughput, the arithmetic takes:
    `{python} InfraSetup.t_comp_math`
 2. **Memory Time**\index{Memory!time}: Loading 140 GB of weights from HBM at 3.35 TB/s takes:
    `{python} InfraSetup.t_mem_math`
@@ -1164,7 +1163,7 @@ Pipeline bubbles arise when one operation must complete before the next can begi
 
 1.  **Significance (Quantitative):** It represents a direct loss in **System Efficiency ($\eta$)**. For a model with $p$ pipeline stages and $m$ micro-batches, the bubble fraction is approximately **$(p-1)/m$**, dictating the maximum theoretical utilization of the cluster.
 2.  **Distinction (Durable):** Unlike **Network Latency** (which is a data transfer delay), a Pipeline Bubble is a **Temporal Dependency** delay: workers are idle not because the network is slow, but because the next piece of work has not yet been computed.
-3.  **Common Pitfall:** A frequent misconception is that bubbles can be eliminated by "faster networking." In reality, the bubble is an **Algorithmic Constraint**\index{Algorithmic Constraint}: it can only be reduced by increasing the number of micro-batches ($m$), which in turn increases the **Memory Footprint**\index{Memory Footprint} for stored activations.
+3.  **Common Pitfall:** A frequent misconception is that bubbles can be eliminated by "faster networking." In reality, the bubble is an **Algorithmic Constraint**: it can only be reduced by increasing the number of micro-batches ($m$), which in turn increases the **Memory Footprint**\index{Memory Footprint} for stored activations.
 
 :::
 
@@ -2438,7 +2437,7 @@ We can derive the training time for our `{python} InfraSetup.frontier_params_b`B
 1. **Total FLOPs**\index{Total FLOPs}: Using the approximation $6 \times N \times P$, where `{python} PodTrainingMath.n_params_math` and $P = 300 \times 10^9$ tokens:
    `{python} PodTrainingMath.total_flops_math` FLOPs
 
-2. **Cluster Throughput**\index{Cluster!throughput}: 8,192 H100 GPUs at `{python} NodeCapacityScenario.h100_tflops` TFLOPS peak, operating at 45 percent MFU:
+2. **Cluster Throughput**: 8,192 H100 GPUs at `{python} NodeCapacityScenario.h100_tflops` TFLOPS peak, operating at 45 percent MFU:
    `{python} PodTrainingMath.cluster_throughput_math` EFLOPS sustained
 
 3. **Idealized Training Time** (the "physics limit"):
@@ -2501,7 +2500,7 @@ The interaction between failure rate and checkpointing frequency creates an opti
 
 Checkpointing also creates a significant *storage* requirement that demands its own dedicated infrastructure. A full checkpoint for our `{python} InfraSetup.frontier_params_b`B model includes the model weights (350 GB), optimizer states (1,400 GB), and the random number generator states needed to resume training deterministically. The total is approximately 1.75 TB per checkpoint. To keep the checkpoint overhead below 2 percent of total training time, this write operation must complete in under 30 seconds, demanding a sustained aggregate write bandwidth of approximately 60 GB/s. Standard NFS or object storage implementations collapse under this "thundering herd" pattern, where all GPUs transition from compute to I/O simultaneously. The solution requires a high-performance parallel file system like Lustre or IBM Spectrum Scale (GPFS), architected with hundreds of Object Storage Targets (OSTs) striping data across thousands of NVMe drives. A failure to architect for this burst bandwidth results in "I/O jitter," where training hangs unpredictably for minutes as the checkpoint write saturates the storage backend, effectively burning millions of dollars in idle GPU cycles. @sec-data-storage examines the storage architectures that meet these throughput requirements in detail. If checkpoints are taken every 10 minutes during a 2-week training run, the system must write:
 
-- **Checkpoints per run**\index{Checkpoints Per Run}: (14 days$\times$ 24 hours$\times$ 6 per hour) = 2,016 checkpoints
+- **Checkpoints per run**\index{Checkpointing!checkpoints per run}: (14 days$\times$ 24 hours$\times$ 6 per hour) = 2,016 checkpoints
 - **Total checkpoint data**\index{Total Checkpoint Data}: $2,016 \times 1.75$ TB = 3,528 TB
 
 Even retaining only the most recent 10 checkpoints (17.5 TB), the storage system must sustain a continuous write throughput of 1.75 TB every 10 minutes, or approximately 3 GB/s. Organizations that undersize their checkpoint storage discover that checkpointing itself becomes a bottleneck, as the GPUs must wait for the previous checkpoint to complete writing before starting the next one. @sec-data-storage examines the storage architectures that meet these throughput requirements.
@@ -2705,7 +2704,7 @@ The trade-off is cost and complexity. A fat-tree requires a large number of expe
 
 Google's TPU pods take a fundamentally different approach to scaling. Instead of connecting chips through external switches, each TPU chip has direct **Inter-Chip Interconnect (ICI)** links built into the silicon, connecting it to its neighbors in a 3D torus[^fn-torus-topology] topology. This eliminates the switch as a separate component, reducing cost and latency at the expense of the universal any-to-any connectivity that NVSwitch provides.
 
-[^fn-torus-topology]: **3D Torus**\index{3D Torus}: From Latin *torus* (cushion, ring-shaped surface) -- a topology where nodes form a three-dimensional grid with wraparound edges. The torus eliminates switches entirely (each chip connects directly to its six neighbors), which is why Google chose it for TPU pods: at 8,960-chip scale, the switch savings over a fat-tree are substantial. The trade-off is that global communication patterns like AllToAll must traverse $O(\sqrt[3]{N})$ hops, degrading latency for non-local traffic. \index{Torus!topology}
+[^fn-torus-topology]: **3D Torus**\index{Torus!3d torus}: From Latin *torus* (cushion, ring-shaped surface) -- a topology where nodes form a three-dimensional grid with wraparound edges. The torus eliminates switches entirely (each chip connects directly to its six neighbors), which is why Google chose it for TPU pods: at 8,960-chip scale, the switch savings over a fat-tree are substantial. The trade-off is that global communication patterns like AllToAll must traverse $O(\sqrt[3]{N})$ hops, degrading latency for non-local traffic. \index{Torus!topology}
 
 The architectural bet is clear: Google optimizes for the predictable, nearest-neighbor communication patterns that dominate Transformer training, accepting reduced flexibility for irregular patterns like AllToAll (used by Mixture-of-Experts models). This trade-off between topology specialization and workload generality mirrors the accelerator spectrum's trade-off between efficiency and flexibility, applied at the network level rather than the silicon level.
 
@@ -2928,17 +2927,17 @@ Consider a cluster of 1,250 DGX H100 nodes (10,000 GPUs) for training our `{pyth
 
 - **Hardware CapEx**\index{Hardware CapEx}: 1,250 nodes$\times$ \$350,000 = \$437.5M
 - **Network CapEx**\index{Network CapEx}: ~\$25M (InfiniBand fat-tree fabric)
-- **Facility CapEx**\index{Facility CapEx}: ~\$75M (liquid-cooled datacenter hall)
-- **Annual Electricity**\index{Annual Electricity}: 10,000 GPUs$\times$ 700 W$\times$ PUE $1.1 \times 8,760$ h$\times$ \$0.07/kWh = \$4.7M/year
-- **Annual Staffing**\index{Annual Staffing}: ~\$5M/year
+- **Facility CapEx**\index{CapEx!facility capex}: ~\$75M (liquid-cooled datacenter hall)
+- **Annual Electricity**\index{Electricity!annual electricity}: 10,000 GPUs$\times$ 700 W$\times$ PUE $1.1 \times 8,760$ h$\times$ \$0.07/kWh = \$4.7M/year
+- **Annual Staffing**\index{Staffing!annual staffing}: ~\$5M/year
 - **3-Year Total**: \$537.5M + 3$\times$ \$9.7M = **~\$567M**
 
 **Cloud (3-year rental at 80 percent utilization)**:
 
-- **Annual Cost**\index{Annual Cost}: 10,000 GPUs$\times$ \$4.00/hr$\times$ 8,760 h$\times$ 0.80 = \$280M/year
+- **Annual Cost**\index{Cost!annual cost}: 10,000 GPUs$\times$ \$4.00/hr$\times$ 8,760 h$\times$ 0.80 = \$280M/year
 - **3-Year Total**: **~\$840M**
 
-**Break-Even**\index{Break-Even}: On-premises saves approximately \$273M over three years at 80 percent utilization. The savings disappear if utilization drops below ~40 percent, because the on-premises hardware still incurs facility and staffing costs regardless of load.
+**Break-Even**\index{Total Cost of Ownership!break-even}: On-premises saves approximately \$273M over three years at 80 percent utilization. The savings disappear if utilization drops below ~40 percent, because the on-premises hardware still incurs facility and staffing costs regardless of load.
 
 :::
 
@@ -2958,7 +2957,7 @@ The economic impact of this depreciation is significant. A V100 GPU that cost $1
 
 Rapid depreciation has several implications for fleet management:
 
-- **Accelerated write-off**\index{Accelerated Write-Off}: Most organizations depreciate ML accelerators over 3 years for accounting purposes, even if the hardware physically functions for longer. After 3 years, the residual value of the hardware is near zero because the secondary market is flooded with previous-generation equipment.
+- **Accelerated write-off**\index{Depreciation!accelerated write-off}: Most organizations depreciate ML accelerators over 3 years for accounting purposes, even if the hardware physically functions for longer. After 3 years, the residual value of the hardware is near zero because the secondary market is flooded with previous-generation equipment.
 - **Staggered refresh**\index{Staggered Refresh}: Rather than replacing the entire fleet simultaneously (which requires enormous CapEx outlays), some organizations refresh one third of their fleet each year, maintaining a mixed-generation cluster. This approach reduces peak CapEx but complicates software optimization, as training frameworks must handle heterogeneous hardware with different compute capabilities, memory capacities, and communication bandwidths.
 - **Resale and repurposing**\index{Resale and Repurposing}: Older accelerators that are inefficient for training may still be cost-effective for inference, where memory bandwidth (which improves more slowly across generations) is the binding constraint. Some organizations sell their training-retired GPUs to smaller companies or repurpose them for less compute-intensive tasks like fine-tuning or small-model serving.
 - **Lease-back arrangements**\index{Lease-Back Arrangements}: Some GPU-as-a-service providers offer lease-back programs where an organization purchases GPUs, leases them back to the provider when not in use, and receives the GPUs on demand when needed. This reduces the effective cost of ownership by generating revenue during idle periods.
@@ -3313,7 +3312,7 @@ The TCO analysis determines whether the entire enterprise makes financial sense.
 - **Bandwidth Hierarchy Dictates Parallelism**\index{Bandwidth Hierarchy!dictates parallelism}: The 18$\times$ bandwidth cliff between NVLink and InfiniBand confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
 - **Peak vs. Sustained**\index{Peak vs. Sustained}: Model FLOPS Utilization (MFU) of 40--50 percent is considered good for large-scale training. Capacity planning must use sustained throughput, not peak specifications.
 - **PUE as Efficiency Metric**: Liquid cooling achieves PUE of 1.05--1.10, delivering 90--95 percent of facility power to computation, compared to 50--65 percent for air-cooled facilities. The transition from air to liquid cooling is a thermodynamic necessity, not an optional upgrade, for modern ML racks.
-- **Failure at Scale**\index{Failure at Scale}: A 10,000-GPU cluster experiences roughly one GPU failure per hour. Checkpointing strategy is a first-order performance concern that must be designed into the system from the start.
+- **Failure at Scale**\index{Failure!failure at scale}: A 10,000-GPU cluster experiences roughly one GPU failure per hour. Checkpointing strategy is a first-order performance concern that must be designed into the system from the start.
 - **TCO, Not CapEx**: The total cost of ownership includes electricity (which can equal hardware cost over a 3-year lifecycle), facility construction, and staffing. On-premises infrastructure becomes cost-effective only above approximately `{python} TcoScenario.breakeven_util` percent sustained utilization.
 - **WSC Mindset**\index{WSC Mindset}: At pod scale, the datacenter is the computer. Network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
 
