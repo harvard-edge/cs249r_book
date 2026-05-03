@@ -55,7 +55,7 @@ async def _():
 
     ESP32_TFLOPS  = Hardware.Tiny.ESP32_S3.compute.peak_flops.m_as("TFLOPs/s")
     ESP32_TDP     = Hardware.Tiny.ESP32_S3.tdp.m_as("W")
-    ESP32_RAM_KB  = Hardware.Tiny.ESP32_S3.memory.capacity.m_as("KiB")
+    ESP32_RAM_KB  = Hardware.Tiny.ESP32_S3.memory.sram_capacity.m_as("KiB")
 
     # ── Model constants ────────────────────────────────────────────────────
     RESNET50_PARAMS = Models.ResNet50.parameters.m_as("count")
