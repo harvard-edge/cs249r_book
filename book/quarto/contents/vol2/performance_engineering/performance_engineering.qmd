@@ -69,7 +69,7 @@ from mlsysim.core.formulas import calc_bottleneck, model_memory
 
 ::: {.callout-perspective title="Connection: The Fleet Stack"}
 
-Performance Engineering is the **Optimization Layer** of the Fleet Stack. While Inference at Scale (@sec-inference-scale) defines the serving architecture and scheduling policies, Performance Engineering optimizes the individual operations that execute within each serving node. In the **Fleet Stack** (@sec-vol2-introduction), this chapter sits between the Serving Layer (how work is scheduled) and the Infrastructure Layer (how hardware executes). Every technique here targets the same goal: closing the gap between theoretical hardware peak and achieved throughput, turning the **iron law**\index{iron law} from a speed limit into a speedometer that reads closer to maximum.
+Performance Engineering is the **Optimization Layer** of the Fleet Stack. While Inference at Scale (@sec-inference-scale) defines the serving architecture and scheduling policies, Performance Engineering optimizes the individual operations that execute within each serving node. In the **Fleet Stack** (@sec-vol2-introduction), this chapter sits between the Serving Layer (how work is scheduled) and the Infrastructure Layer (how hardware executes). Every technique here targets the same goal: closing the gap between theoretical hardware peak and achieved throughput, turning the **iron law**\index{Iron Law} from a speed limit into a speedometer that reads closer to maximum.
 
 :::
 
@@ -112,7 +112,7 @@ Each technique attacks a different term, and this taxonomy guides optimization s
 Verify your understanding of system-level performance diagnosis:
 
 - [ ] A workload is **Memory-Bound**\index{Memory-Bound}. Will upgrading the GPU's clock frequency (increasing FLOPS) improve performance?
-- [ ] If you apply **Quantization**\index{Quantization} (moving from FP16 to INT4), which term in @eq-iron-law-perf are you reducing?
+- [ ] If you apply **Quantization**\index{Quantization}\index{Quantization!weight-activation} (moving from FP16 to INT4), which term in @eq-iron-law-perf are you reducing?
 - [ ] What is the "Overhead" term in the iron law, and why does **Graph Compilation** target it specifically?
 - [ ] True or False: If a system is Compute-Bound, the memory bandwidth is irrelevant to its performance.
 
@@ -126,7 +126,7 @@ Verify your understanding of system-level performance diagnosis:
 
 The central lesson of @fig-iron-law-flowchart is that profiling must precede optimization: applying operator fusion to a compute-bound workload, or precision engineering to an overhead-bound one, yields zero improvement regardless of implementation quality.
 
-The **efficiency frontier**\index{Efficiency!frontier} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
+The **efficiency frontier**\index{Efficiency Frontier!definition}\index{Efficiency!frontier} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
 
 The multi-dimensional nature of this frontier makes optimization challenging. The relevant dimensions include:
 
@@ -134,7 +134,7 @@ The multi-dimensional nature of this frontier makes optimization challenging. Th
 - **Latency**\index{Latency} (time-to-first-token, inter-token latency): How quickly the system responds to individual requests.
 - **Cost** (dollars per million tokens): The economic efficiency of the system.
 - **Quality** (perplexity, benchmark accuracy, human preference): The accuracy and usefulness of model outputs.
-- **Memory**\index{Memory} (peak GPU memory): The resource constraint that limits batch size and sequence length.
+- **Memory** (peak GPU memory): The resource constraint that limits batch size and sequence length.
 
 These dimensions interact in non-obvious ways. Increasing batch size improves throughput and cost efficiency but degrades latency. Reducing precision improves throughput and memory but may degrade quality. Speculative decoding improves latency but may increase per-token cost. The performance engineer's task is to navigate these trade-offs guided by the application's specific requirements.
 
@@ -215,7 +215,7 @@ The capacity-bandwidth tension shapes every optimization technique in this chapt
 
 To understand why the memory wall exists, consider the physical structure of a modern GPU's memory system. The hierarchy spans four levels, each trading capacity for bandwidth and latency.
 
-Registers are the fastest storage, located directly within each streaming multiprocessor (SM). The H100 provides 256 KB of register file per SM across its 132 SMs, totaling approximately 33 MB of register space across the entire chip. Register access is essentially free in terms of latency (one clock cycle) and energy (~0.01 pJ per access). Registers are, however, private to individual threads and cannot be shared.
+Registers are the fastest storage, located directly within each streaming multiprocessor (SM). The H100 provides 256 KB of register file\index{Register File} per SM across its 132 SMs, totaling approximately 33 MB of register space across the entire chip. Register access is essentially free in terms of latency (one clock cycle) and energy (~0.01 pJ per access). Registers are, however, private to individual threads and cannot be shared.
 
 Shared memory (SRAM) occupies the next level, pooled within each SM. The H100 provides up to 228 KB of configurable shared memory per SM. This memory is shared among all threads in a thread block, enabling cooperative data reuse. Access latency is approximately 20--30 clock cycles (~20 ns), and energy cost is roughly 0.5 pJ per access. Shared memory is the critical resource for operator fusion: if intermediate results fit in shared memory, they never need to traverse the slow HBM bus.
 
@@ -232,7 +232,7 @@ The performance engineering challenge reduces to a data placement problem: keep 
 The GPU memory hierarchy is identical to a scholar researching in a library:
 
 *   **Registers (33 MB)** are your *own memory*: instant access, but you can only hold a few numbers in your head.
-*   **Shared Memory (SRAM)** is your *desk*: very fast to reach, but you can only fit a few open books.
+*   **Shared Memory (SRAM)**\index{SRAM} is your *desk*: very fast to reach, but you can only fit a few open books.
 *   **L2 Cache (50 MB)** is a *book cart* next to your desk: takes a moment to grab a book, holds a moderate amount.
 *   **HBM (`{python} MemoryWallScenario.h100_mem_str` GB)** is the *library basement*: holds everything you could possibly need, but walking down there takes an eternity (300 ns).
 
@@ -269,7 +269,7 @@ The **Roofline Model**[^fn-roofline-origin] provides a quantitative framework fo
 
 1.  **Significance (Quantitative):** It characterizes the **Computational Density** of a workload. It is the independent variable in the **Roofline Model**, determining whether a system operates in the **Bandwidth-Bound** ($\text{BW}$) or **Compute-Bound**\index{Compute-Bound} ($R_{\text{peak}}$) regime.
 2.  **Distinction (Durable):** Unlike **Peak Throughput** (a hardware property), Arithmetic Intensity is an **Algorithmic Property** that measures how effectively a workload reuses data once it is loaded into the processor.
-3.  **Common Pitfall:** A frequent misconception is that AI is fixed for a model. In reality, it varies by **Implementation**\index{Implementation}: techniques like operator fusion increase AI by keeping data in local registers, while increasing batch size increases AI for layers with high parameter reuse.
+3.  **Common Pitfall:** A frequent misconception is that AI is fixed for a model. In reality, it varies by **Implementation**: techniques like operator fusion increase AI by keeping data in local registers, while increasing batch size increases AI for layers with high parameter reuse.
 
 :::
 
@@ -672,7 +672,7 @@ class RooflineDiagnostic:
 
 ::: {.callout-notebook title="The Roofline Diagnostic"}
 
-**Problem**\index{Problem}: You are deploying a 70B parameter LLM on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 17.5B parameters in FP16 (35 GB of weights). Each decode step reads all weights to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
+**Problem**: You are deploying a 70B parameter LLM on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 17.5B parameters in FP16 (35 GB of weights). Each decode step reads all weights to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
 
 **The Math**:
 
@@ -708,7 +708,7 @@ Consider the simple sequence of operations $Y = \text{LayerNorm}(\text{GELU}(XW 
 
 Imagine a kitchen where one chef chops vegetables, puts them in the fridge (HBM), then another chef takes them out to boil them, puts them back in the fridge, and a third chef takes them out to plate them. This is an **unfused execution**\index{Unfused Execution}: the bottleneck is not the cooking but the constant walking to the fridge.
 
-**Operator Fusion** assigns the recipe to a single chef who keeps the ingredients on their cutting board (SRAM/Registers) and performs all three steps consecutively without ever returning to the fridge until the final dish is ready.
+**Operator Fusion**\index{Operator Fusion!element-wise}\index{Operator Fusion!reduction}\index{Operator Fusion!operator-specific} assigns the recipe to a single chef who keeps the ingredients on their cutting board (SRAM/Registers) and performs all three steps consecutively without ever returning to the fridge until the final dish is ready.
 
 :::
 
@@ -1009,11 +1009,11 @@ Post-training quantization to INT8 or INT4 delivers even greater bandwidth savin
 
 LLM.int8() solves this by decomposing each matrix multiplication into two parts: a small set of outlier dimensions processed in FP16, and the remaining dimensions processed in INT8. The system identifies outlier dimensions at runtime (those exceeding a magnitude threshold, typically 6.0), routes them to an FP16 GEMM, and routes the remaining dimensions to an INT8 GEMM. The results are combined to produce the final output. This achieves nearly lossless INT8 inference for models that would otherwise degrade substantially under uniform quantization.
 
-GPTQ [@frantar2023gptq] takes a different approach: weight-only quantization using second-order information. Instead of quantizing each weight independently, GPTQ processes weights column by column, using the Hessian of the layer's loss surface to determine which quantization errors matter most and redistributing those errors across unquantized columns. This produces INT4 weight representations with minimal accuracy loss, even for models with severe outlier features. The key insight is that quantization error in one weight can be compensated by adjusting correlated weights.
+GPTQ\index{GPTQ} [@frantar2023gptq] takes a different approach: weight-only quantization using second-order information. Instead of quantizing each weight independently, GPTQ processes weights column by column, using the Hessian of the layer's loss surface to determine which quantization errors matter most and redistributing those errors across unquantized columns. This produces INT4 weight representations with minimal accuracy loss, even for models with severe outlier features. The key insight is that quantization error in one weight can be compensated by adjusting correlated weights.
 
 AWQ [Activation-Aware Weight Quantization; @lin2024awq] observes that not all weights are equally important: weights connected to high-activation channels contribute disproportionately to model output. AWQ identifies these salient weights by analyzing activation magnitudes across a calibration dataset, then applies per-channel scaling to protect them before uniform group quantization. This achieves INT4 weight quantization with quality comparable to GPTQ but with 10--100$\times$ faster quantization time (minutes instead of hours), since it avoids the expensive Hessian computation.
 
-SmoothQuant [@xiao2023smoothquant] takes yet another approach to the outlier problem. Rather than handling outliers at runtime (LLM.int8()) or through weight optimization (GPTQ, AWQ), SmoothQuant smooths the activation distribution *before* quantization by migrating the quantization difficulty from activations to weights. The key observation is that activation outliers are channel-specific: certain hidden dimensions consistently produce large values across all tokens. SmoothQuant applies a per-channel scaling transformation that divides the activation by a smoothing factor and multiplies the corresponding weight by the same factor. This mathematically equivalent transformation reduces activation outlier magnitudes at the cost of slightly increasing weight magnitudes, making both tensors more amenable to uniform INT8 quantization. The result is efficient W8A8 (weight-8-bit, activation-8-bit) quantization that exploits INT8 Tensor Cores for both bandwidth and compute benefits.
+SmoothQuant\index{SmoothQuant} [@xiao2023smoothquant] takes yet another approach to the outlier problem. Rather than handling outliers at runtime (LLM.int8()) or through weight optimization (GPTQ, AWQ), SmoothQuant smooths the activation distribution *before* quantization by migrating the quantization difficulty from activations to weights. The key observation is that activation outliers are channel-specific: certain hidden dimensions consistently produce large values across all tokens. SmoothQuant applies a per-channel scaling transformation that divides the activation by a smoothing factor and multiplies the corresponding weight by the same factor. This mathematically equivalent transformation reduces activation outlier magnitudes at the cost of slightly increasing weight magnitudes, making both tensors more amenable to uniform INT8 quantization. The result is efficient W8A8 (weight-8-bit, activation-8-bit) quantization that exploits INT8 Tensor Cores for both bandwidth and compute benefits.
 
 These four approaches, LLM.int8(), GPTQ, AWQ, and SmoothQuant, represent a progression in the sophistication of quantization techniques for LLMs. LLM.int8() handles outliers at runtime with mixed-precision decomposition but limits compression to INT8. GPTQ uses second-order information for aggressive INT4 weight compression but requires hours of calibration per model. AWQ achieves similar INT4 quality with minutes of calibration by focusing on activation-aware scaling. SmoothQuant enables W8A8 quantization by preprocessing the weight-activation pairs. In practice, AWQ has become the default choice for weight-only quantization in production LLM deployment, while SmoothQuant is preferred when both weight and activation quantization are needed for compute-bound workloads.
 
@@ -1029,13 +1029,13 @@ For **Archetype C (Federated MobileNet)**, quantization is a prerequisite for su
 
 ### Post-training vs. quantization-aware training {#sec-performance-engineering-ptq-qat}
 
-The trade-off between **Post-Training Quantization (PTQ)** and **Quantization-Aware Training (QAT)** centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is the default choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, requiring approximately 4--8 GPU-hours on a single H100 to quantize a 70B model to INT4. While PTQ preserves greater than 99 percent of accuracy at INT8, aggressive quantization to INT4 or INT3 often incurs a steep penalty: perplexity may degrade by 0.5--1.0 points, and reasoning performance on benchmarks like Massive Multitask Language Understanding (MMLU) can drop from 69 percent to below 64 percent.
+The trade-off between **Post-Training Quantization (PTQ)**\index{Post-Training Quantization} and **Quantization-Aware Training (QAT)**\index{Quantization-Aware Training} centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is the default choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, requiring approximately 4--8 GPU-hours on a single H100 to quantize a 70B model to INT4. While PTQ preserves greater than 99 percent of accuracy at INT8, aggressive quantization to INT4 or INT3 often incurs a steep penalty: perplexity may degrade by 0.5--1.0 points, and reasoning performance on benchmarks like Massive Multitask Language Understanding (MMLU) can drop from 69 percent to below 64 percent.
 
 When PTQ fails to meet quality thresholds, QAT provides the remedy by integrating quantization noise directly into the training loop. By simulating low-precision rounding during the forward pass and approximating gradients during the backward pass via the straight-through estimator[^fn-ste-quantization] (STE), the network learns to adjust its weights to be robust to quantization.
 
 [^fn-ste-quantization]: **Straight-Through Estimator (STE)**: Proposed by @bengio2013estimating, the STE handles a fundamental calculus problem: the gradient of a rounding function is zero almost everywhere, making backpropagation through quantized layers impossible by standard rules. The STE simply passes the upstream gradient through the rounding step unchanged, pretending the rounding did not happen. This mathematically unjustified approximation works in practice because it preserves the gradient's direction even though it ignores the rounding noise, enabling QAT to converge. \index{Straight-Through Estimator!quantization}
 
-The cost is substantial: QAT is effectively a full fine-tuning run, often requiring hundreds of GPU-hours and a distributed training cluster. For a 70B model, this might mean a 3-day run on 8$\times$ H100s compared to the 4-hour single-GPU job for PTQ. Emerging techniques like **QLoRA** (Quantized Low-Rank Adaptation) bridge this gap by freezing the base model in 4-bit precision and fine-tuning only a small set of high-precision adapter weights. This hybrid approach offers the quality recovery of QAT with a memory footprint small enough to run on a single consumer GPU, effectively democratizing high-fidelity quantization.
+The cost is substantial: QAT is effectively a full fine-tuning run, often requiring hundreds of GPU-hours and a distributed training cluster. For a 70B model, this might mean a 3-day run on 8$\times$ H100s compared to the 4-hour single-GPU job for PTQ. Emerging techniques like **QLoRA**\index{QLoRA} (Quantized Low-Rank Adaptation) bridge this gap by freezing the base model in 4-bit precision and fine-tuning only a small set of high-precision adapter weights. This hybrid approach offers the quality recovery of QAT with a memory footprint small enough to run on a single consumer GPU, effectively democratizing high-fidelity quantization.
 
 The practical workflow in most production environments follows a two-stage approach: deploy with PTQ first (because it is fast and requires no training infrastructure), then apply QAT or QLoRA only if the PTQ model fails to meet quality requirements at the target precision. This sequence minimizes engineering effort while preserving the option of higher quality when needed.
 
@@ -1176,7 +1176,7 @@ TorchDynamo operates at the Python bytecode level[^fn-torchdynamo-bytecode], a d
 
 [^fn-torchdynamo-bytecode]: **TorchDynamo Bytecode Interception**\index{TorchDynamo Bytecode Interception}: By hooking CPython's frame evaluation function (`PEP 523`, added in Python 3.6), TorchDynamo captures the computation graph at the lowest level of the Python interpreter, below any source-level abstractions. This is why it can trace through decorators, closures, and third-party libraries that defeated earlier tracing approaches. The trade-off is tight coupling to CPython internals: TorchDynamo must be updated for each new Python version, and it cannot run on alternative interpreters like PyPy. \index{TorchDynamo!bytecode tracing}
 
-Previous tracing methods (torch.jit.trace, torch.fx) operated at the Python source or abstract syntax tree (AST) level, requiring users to avoid unsupported Python constructs. TorchDynamo intercepts the bytecode interpreter itself, capturing a computational graph without requiring the user to modify their model code. When TorchDynamo encounters Python constructs it cannot trace (data-dependent control flow, unsupported operations), it inserts a "graph break" that splits the trace into multiple subgraphs, each compiled independently. The goal is to capture as large a subgraph as possible while gracefully handling dynamic Python behavior.
+Previous tracing methods (torch.jit.trace, torch.fx) operated at the Python source or abstract syntax tree (AST) level, requiring users to avoid unsupported Python constructs. TorchDynamo intercepts the bytecode interpreter itself, capturing a computational graph without requiring the user to modify their model code. When TorchDynamo encounters Python constructs it cannot trace (data-dependent control flow, unsupported operations), it inserts a "graph break\index{Graph Break}" that splits the trace into multiple subgraphs, each compiled independently. The goal is to capture as large a subgraph as possible while gracefully handling dynamic Python behavior.
 
 TorchInductor generates optimized Triton kernels (for GPU) or C++/OpenMP code (for CPU) from the captured graph. Triton is a domain-specific language for writing GPU kernels in Python-like syntax, abstracting away thread block management and memory coalescing while still exposing tiling and fusion decisions. TorchInductor automatically fuses element-wise operations, reduces memory traffic by combining operations that share inputs, and selects tile sizes through autotuning.
 
@@ -1210,9 +1210,9 @@ In this example, `torch.compile` will fuse the GELU activation with surrounding 
 
 ### XLA and TPU optimization {#sec-performance-engineering-xla}
 
-XLA (Accelerated Linear Algebra) is Google's graph compiler, used as the backend for JAX and TensorFlow. Unlike TorchInductor, which generates Triton code targeting NVIDIA GPUs, XLA generates HLO (High-Level Operations) intermediate representation that targets multiple backends, including Google Tensor Processing Units (TPUs), NVIDIA GPUs, and CPUs. Its architecture is fundamentally different from `torch.compile`: while PyTorch prioritizes flexibility by allowing graph breaks for unsupported Python features, XLA enforces **whole-program compilation**\index{Whole-Program Compilation}, tracing the entire computation as a single static graph and enabling global optimizations that span across layers and even across the forward and backward passes.
+XLA (Accelerated Linear Algebra\index{Accelerated Linear Algebra}) is Google's graph compiler, used as the backend for JAX and TensorFlow. Unlike TorchInductor, which generates Triton code targeting NVIDIA GPUs, XLA generates HLO (High-Level Operations) intermediate representation that targets multiple backends, including Google Tensor Processing Units (TPUs), NVIDIA GPUs, and CPUs. Its architecture is fundamentally different from `torch.compile`: while PyTorch prioritizes flexibility by allowing graph breaks for unsupported Python features, XLA enforces **whole-program compilation**\index{Whole-Program Compilation}, tracing the entire computation as a single static graph and enabling global optimizations that span across layers and even across the forward and backward passes.
 
-The global view enables XLA's most distinctive capability: the **GSPMD (General Partitioner for SPMD)**. In distributed training, GSPMD automatically partitions the computation graph across thousands of TPU cores based on a few high-level user annotations. While a PyTorch user must manually wrap models with `DistributedDataParallel` or `FullyShardedDataParallel`, an XLA user defines the computation for a single device and allows the compiler to infer the necessary communication primitives (AllReduce, AllGather) and insert them into the graph. This allows for complex hybrid sharding strategies that are difficult to implement manually.
+The global view enables XLA's most distinctive capability: the **GSPMD (General Partitioner for SPMD)**\index{GSPMD}. In distributed training, GSPMD automatically partitions the computation graph across thousands of TPU cores based on a few high-level user annotations. While a PyTorch user must manually wrap models with `DistributedDataParallel` or `FullyShardedDataParallel`, an XLA user defines the computation for a single device and allows the compiler to infer the necessary communication primitives (AllReduce, AllGather) and insert them into the graph. This allows for complex hybrid sharding strategies that are difficult to implement manually.
 
 For TPU hardware specifically, XLA performs layout optimizations unavailable on other platforms. It maps matrix multiplications onto the TPU's systolic array architecture, padding dimensions to align with the $128 \times 128$ hardware units and scheduling instructions to hide the latency of HBM fetches. The impact of these optimizations is visible in MFU metrics. On large-scale LLM training workloads, JAX/XLA on TPUv4 typically achieves 55--65 percent MFU, outperforming the 40--55 percent MFU typical of PyTorch/GPU setups without extensive hand-tuning.
 
@@ -1224,7 +1224,7 @@ NVIDIA TensorRT is a specialized inference compiler that treats the model not as
 
 This calibration enables **mixed-precision quantization** at a granular level. Blindly quantizing all layers of a 70B parameter LLM to INT8 often degrades perplexity. TensorRT analyzes the sensitivity of each layer individually, keeping precision-sensitive layers (typically the first and last 3 attention blocks) in FP16 while aggressively quantizing the middle 74 layers to INT8. This automated mixed-precision strategy recovers accuracy while capturing the throughput benefits of lower precision. TensorRT also eliminates training-only operations (dropout, batch normalization running statistics updates), optimizes for static shapes by generating kernels tuned for exact dimensions, and plans memory precisely since no gradient tensors are needed.
 
-TensorRT performs **kernel autotuning** far beyond simple heuristics. For every operation in the graph, it benchmarks dozens of candidate kernels, varying tile sizes, thread block configurations, and unrolling factors, on the actual target hardware. It selects the single fastest implementation for that specific GPU and input shape. The performance gap between TensorRT and general-purpose compilers is substantial: in head-to-head comparisons for serving a 70B LLM, TensorRT-LLM typically achieves 1.3--1.8$\times$ higher throughput than `torch.compile` with TorchInductor.
+TensorRT performs **kernel autotuning**\index{Kernel Autotuning} far beyond simple heuristics. For every operation in the graph, it benchmarks dozens of candidate kernels, varying tile sizes, thread block configurations, and unrolling factors, on the actual target hardware. It selects the single fastest implementation for that specific GPU and input shape. The performance gap between TensorRT and general-purpose compilers is substantial: in head-to-head comparisons for serving a 70B LLM, TensorRT-LLM typically achieves 1.3--1.8$\times$ higher throughput than `torch.compile` with TorchInductor.
 
 The trade-off for TensorRT's aggressive optimization is reduced flexibility and high compilation cost. Compilation times are measured in minutes to hours (30--60 minutes for a 70B model), and the resulting engine is strictly tied to the specific GPU architecture and input shape range. Changing any of these requires recompilation. This makes TensorRT the standard for stable, high-volume production deployments, while `torch.compile` remains the preferred choice for development and lower-volume services where rapid iteration matters more than extracting the last percentage of throughput.
 
@@ -1427,7 +1427,7 @@ A standard MoE transformer layer replaces the feed-forward network (FFN) with mu
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
-Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At 900 GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
+Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At 900 GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
 
 At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 = 2$ MB, taking approximately 2.2 $\mu$s at NVLink bandwidth. The corresponding GEMM computation on each shard also takes approximately 20 $\mu$s (for a $64 \times 8192 \times 1024$ GEMM, where 1024 is the per-GPU hidden dimension). Here, the compute time exceeds the communication time by 9$\times$, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
 
@@ -1627,7 +1627,7 @@ fig = plt.gcf()
 
 ### CUDA streams and asynchronous execution {#sec-performance-engineering-cuda-streams}
 
-The mechanism enabling overlap on NVIDIA GPUs is **CUDA streams**. A CUDA stream is an ordered sequence of GPU operations (kernel launches, memory copies, NCCL collectives) that execute sequentially within the stream but can execute concurrently with operations in other streams. The application maintains two distinct streams: a compute stream for matrix multiplications and element-wise kernels, and a communication stream for NCCL operations. The workflow proceeds by launching a compute kernel on the first stream and immediately triggering an asynchronous communication call on the second:
+The mechanism enabling overlap on NVIDIA GPUs is **CUDA streams**\index{CUDA!streams}. A CUDA stream is an ordered sequence of GPU operations (kernel launches, memory copies, NCCL collectives) that execute sequentially within the stream but can execute concurrently with operations in other streams. The application maintains two distinct streams: a compute stream for matrix multiplications and element-wise kernels, and a communication stream for NCCL operations. The workflow proceeds by launching a compute kernel on the first stream and immediately triggering an asynchronous communication call on the second:
 
 ```python
 compute_stream = torch.cuda.Stream()
@@ -1662,7 +1662,7 @@ Observing a distributed ML system fundamentally alters its behavior. Gathering h
 
 ML system profiling operates at four levels, each providing different granularity and targeting different bottleneck categories.
 
-Operation-level profiling measures the execution time and resource utilization of individual GPU kernels. Tools like NVIDIA Nsight Compute provide detailed metrics for a single kernel: achieved memory bandwidth, compute utilization, occupancy (fraction of available threads active), and instruction mix. This level diagnoses whether a specific GEMM achieves peak throughput and whether a kernel is memory-bound or compute-bound.
+Operation-level profiling measures the execution time and resource utilization of individual GPU kernels. Tools like NVIDIA Nsight Compute\index{Nsight Compute} provide detailed metrics for a single kernel: achieved memory bandwidth, compute utilization, occupancy (fraction of available threads active), and instruction mix. This level diagnoses whether a specific GEMM achieves peak throughput and whether a kernel is memory-bound or compute-bound.
 
 Trace-level profiling captures the timeline of all GPU kernels, CPU operations, and data transfers across the full execution of a training step or inference request. NVIDIA Nsight Systems and the PyTorch Profiler provide trace views showing exactly when each kernel executes, when data transfers occur, and where GPU idle gaps (bubbles) exist. This level reveals the overall structure of execution: sequential bottlenecks, launch gaps between kernels, and opportunities for overlap.
 
@@ -1686,7 +1686,7 @@ Inter-token latency (ITL) measures the time between consecutive output tokens du
 
 Throughput (tokens/second for the system, or tokens/second/GPU for per-device efficiency) measures aggregate production capacity. Throughput is maximized by large batch sizes and high utilization, often at the expense of increased per-request latency. The fundamental trade-off between throughput and latency is captured by queuing theory, as explored in @sec-inference-scale.
 
-While MFU is the standard metric for training efficiency, it is often misleading for inference. Inference is predominantly memory-bound, meaning the Tensor Cores spend most cycles waiting for data. For these workloads, **Model Bandwidth Utilization (MBU)** is the more informative metric: the ratio of achieved memory bandwidth to the hardware's peak bandwidth. A decoding step on an H100 might show a dismal 2 percent MFU (using a fraction of the compute capability) but achieve 85 percent MBU (saturating the HBM3 memory bandwidth). In this context, 85 percent MBU indicates a highly optimized system; no amount of code optimization can squeeze more tokens per second without faster memory hardware. The choice of primary metric, MFU for training and MBU for inference, reflects the fundamental bottleneck shift between these two regimes.
+While MFU is the standard metric for training efficiency, it is often misleading for inference. Inference is predominantly memory-bound, meaning the Tensor Cores spend most cycles waiting for data. For these workloads, **Model Bandwidth Utilization (MBU)**\index{Model Bandwidth Utilization} is the more informative metric: the ratio of achieved memory bandwidth to the hardware's peak bandwidth. A decoding step on an H100 might show a dismal 2 percent MFU (using a fraction of the compute capability) but achieve 85 percent MBU (saturating the HBM3 memory bandwidth). In this context, 85 percent MBU indicates a highly optimized system; no amount of code optimization can squeeze more tokens per second without faster memory hardware. The choice of primary metric, MFU for training and MBU for inference, reflects the fundamental bottleneck shift between these two regimes.
 
 ### Using the roofline for diagnosis {#sec-performance-engineering-roofline-diagnosis}
 
@@ -1702,7 +1702,7 @@ Consider a concrete example: a LayerNorm kernel profiled on an H100 reports 15 T
 
 ### PyTorch profiler workflow {#sec-performance-engineering-pytorch-profiler}
 
-The PyTorch Profiler integrates with the training loop to capture detailed traces with minimal code modification:
+The PyTorch Profiler\index{PyTorch Profiler} integrates with the training loop to capture detailed traces with minimal code modification:
 
 ```python
 import torch
@@ -1916,10 +1916,10 @@ class FleetEfficiencyCalc:
 
 ::: {.callout-notebook title="The Scaling Tax"}
 
-**Scenario**\index{Scenario}: Training a **`{python} FleetEfficiencyCalc.fleet_params_b_str`** parameter model across a cluster of **`{python} FleetEfficiencyCalc.fleet_nodes_str` H100 GPUs**.
+**Scenario**: Training a **`{python} FleetEfficiencyCalc.fleet_params_b_str`** parameter model across a cluster of **`{python} FleetEfficiencyCalc.fleet_nodes_str` H100 GPUs**.
 
 *   **Local Node Baseline**\index{Local Node Baseline}: A single 8-GPU node achieves **`{python} FleetEfficiencyCalc.fleet_local_mfu_str` percent MFU**.
-*   **Fleet Performance**\index{Fleet Performance}: At 128 GPUs, the step time increases to **`{python} FleetEfficiencyCalc.fleet_t_step_ms_str` ms**\index{`{python} FleetEfficiencyCalc.fleet_t_step_ms_str` Ms}, dropping MFU to **`{python} FleetEfficiencyCalc.fleet_global_mfu_str` percent**.
+*   **Fleet Performance**\index{Fleet Performance}: At 128 GPUs, the step time increases to **`{python} FleetEfficiencyCalc.fleet_t_step_ms_str` ms**, dropping MFU to **`{python} FleetEfficiencyCalc.fleet_global_mfu_str` percent**.
 
 **The Systems Insight**: The **`{python} FleetEfficiencyCalc.fleet_scaling_tax_str` percent Scaling Tax** represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a **Scaling Regression**\index{Scaling!regression}—typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
 
@@ -1957,7 +1957,7 @@ Consider a raw, unoptimized 70-billion parameter PyTorch model that must serve 1
 
 When approaching a new ML workload for optimization, follow this sequence:
 
-1. **Baseline Measurement**\index{Baseline Measurement}: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the **Model FLOPs Utilization (MFU)** as established in @sec-performance-engineering-measurement-scale. An MFU below 30 percent indicates substantial optimization opportunity; above 50 percent is good; above 60 percent is excellent for large models.
+1. **Baseline Measurement**\index{Baseline Measurement}: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the **Model FLOPs Utilization (MFU)**\index{Nsight Systems} as established in @sec-performance-engineering-measurement-scale. An MFU below 30 percent indicates substantial optimization opportunity; above 50 percent is good; above 60 percent is excellent for large models.
 
 2. **Roofline Classification**\index{Roofline Classification}: For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
 
@@ -2180,7 +2180,7 @@ The unifying principle is that performance engineering is not about making hardw
 * The **memory wall** is the defining constraint of modern ML performance: most transformer operations are memory-bound, with arithmetic intensity far below the hardware ridge point. Performance engineering is primarily about reducing bytes moved, not operations computed.
 * **Operator Fusion** and **Tiling** (FlashAttention) eliminate redundant HBM traffic by keeping intermediate results in on-chip SRAM, reducing attention memory traffic from quadratic to linear in sequence length.
 * **Precision Engineering** doubles effective bandwidth by reducing numerical representation (FP8, INT4), but requires careful handling of outlier features (LLM.int8(), GPTQ, AWQ) and dynamic scaling for training stability.
-* **Graph Compilation** (torch.compile, XLA, TensorRT) automates known optimizations across the entire model graph, but cannot discover algorithmic innovations like FlashAttention or speculative decoding.
+* **Graph Compilation**\index{Graph Compilation!graph capture}\index{Graph Compilation!memory planning}\index{Graph Compilation!kernel selection} (torch.compile, XLA, TensorRT) automates known optimizations across the entire model graph, but cannot discover algorithmic innovations like FlashAttention or speculative decoding.
 * **Speculative Decoding** is the only technique that reduces *latency* for memory-bound decode without changing precision or batch size, by trading abundant compute for scarce bandwidth through parallel verification of draft tokens.
 * **Mixture of Experts** enables parameter scaling without proportional compute scaling, but introduces AllToAll communication patterns and load balancing challenges that require careful system engineering.
 * **Always profile before optimizing**\index{Always Profile Before Optimizing}: the dominant bottleneck is often not where intuition suggests, and applying the wrong optimization wastes engineering effort while leaving the actual bottleneck untouched.
