@@ -1217,7 +1217,7 @@ These three interconnected concerns, obtaining and managing training data at sca
 
 ***Machine Learning Systems***\index{Machine Learning Systems!definition} are software systems whose core behavior is determined by parameters learned from data rather than explicitly programmed rules, making performance a function of data quality, algorithm choice, and hardware capacity simultaneously.
 
-1.  **Significance (Quantitative):** Every performance budget traces back to the iron law: $T = D_{\text{vol}}/BW + O/(R_{\text{peak}} \cdot \eta) + L_{\text{lat}}$. In a production recommendation system serving 10 million requests per day, a 10 percent reduction in $D_{\text{vol}}$ per request (via feature compression) reduces total data movement proportionally, while a 2$\times$ increase in $R_{\text{peak}}$ (via hardware upgrade) only improves the compute term, meaning the binding constraint must be identified before any optimization investment yields returns.
+1.  **Significance (Quantitative):** Every performance budget traces back to the iron law: $T = D_{\text{vol}}/BW + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$. In a production recommendation system serving 10 million requests per day, a 10 percent reduction in $D_{\text{vol}}$ per request (via feature compression) reduces total data movement proportionally, while a 2$\times$ increase in $R_{\text{peak}}$ (via hardware upgrade) only improves the compute term, meaning the binding constraint must be identified before any optimization investment yields returns.
 2.  **Distinction (Durable):** Unlike traditional software, whose correctness degrades only when code changes, an ML system's accuracy degrades when the world changes. Model weights are fixed after deployment, but the distribution of inputs relative to what the model learned shifts continuously, eroding accuracy silently without any error or exception.
 3.  **Common Pitfall:** A frequent misconception is that an ML system is the model. Google's 2015 audit of production ML systems found that model code comprises approximately five percent of total lines; the other 95 percent is data pipelines, serving infrastructure, and monitoring [@sculley2015hidden].
 
@@ -1560,7 +1560,7 @@ $$\text{Time}_{\text{total}} = \underbrace{ \frac{\text{Data} (D_{\text{vol}})}{
 *This equation is the mathematical spine of this book.* It decomposes the total time required for any ML task, whether training a model for weeks or serving an inference in milliseconds, into three terms that correspond directly to the physical constraints of the Dual Mandate introduced earlier:
 
 1.  **The Data Term ($D_{\text{vol}}/BW$)**: The physical cost of moving bits. $D_{\text{vol}}$ is the volume of data moved (bytes), and $BW$ is the memory or network bandwidth (bytes/sec). Whether loading terabytes from cloud storage or fetching weights from high-bandwidth memory, performance is often limited by I/O physics. This is addressed in **Part I: Foundations**.
-2.  **The Compute Term ($O / (R_{\text{peak}} \cdot \eta)$)**: The cost of arithmetic. $O$ is the number of floating-point operations. $R_{\text{peak}}$ is the hardware's theoretical peak throughput (FLOPS). $\eta$ (eta) is the utilization factor ($0 \le \eta \le 1$), representing software efficiency. We address this in **Part II: Build** and **Part III: Optimize**.
+2.  **The Compute Term ($O / (R_{\text{peak}} \cdot \eta_{\text{hw}})$)**: The cost of arithmetic. $O$ is the number of floating-point operations. $R_{\text{peak}}$ is the hardware's theoretical peak throughput (FLOPS). $\eta$ (eta) is the utilization factor ($0 \le \eta \le 1$), representing software efficiency. We address this in **Part II: Build** and **Part III: Optimize**.
 3.  **The Overhead Term ($L_{\text{lat}}$)**: The irreducible "tax" of system orchestration, networking, and serialization. This fixed latency dominates in real-time deployment. We address this in **Part IV: Deploy**.
 
 ::: {.callout-perspective title="The iron law analogy"}
@@ -1569,7 +1569,7 @@ We call this the "iron law" by analogy to Patterson & Hennessy's iron law of Pro
 
 The additive form assumes sequential execution; in practice, systems can **overlap** these terms, transforming the sum into a max as @eq-intro-iron-law-pipelined shows:
 
-$$T_{\text{pipelined}} = \max\left(\frac{D_{\text{vol}}}{BW}, \frac{O}{R_{\text{peak}} \cdot \eta}\right) + L_{\text{lat}}$$ {#eq-intro-iron-law-pipelined}
+$$T_{\text{pipelined}} = \max\left(\frac{D_{\text{vol}}}{BW}, \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}\right) + L_{\text{lat}}$$ {#eq-intro-iron-law-pipelined}
 
 \index{Amdahl's Law!diagnostic analogy}
 We retain "iron law" because, like **Amdahl's Law**, its value lies in **diagnostic power**: identifying which physical constraint dominates before optimizing. The iron law is useful precisely because it simplifies the complexity of the full stack into three manageable terms. @sec-dam-taxonomy presents the refined treatment, including pipelining and overlap techniques that transform the additive model into the max-based formulation used in practice.
@@ -1685,7 +1685,7 @@ class GPT3Training:
     peak_tflops_str = fmt(peak_tflops, precision=0, commas=False)
 
     # Equation assembly (inline refs use GPT3Training.* form)
-    time_formula_math = md_math(r"\text{Time} \approx \frac{O}{N \cdot R_{\text{peak}} \cdot \eta}")
+    time_formula_math = md_math(r"\text{Time} \approx \frac{O}{N \cdot R_{\text{peak}} \cdot \eta_{\text{hw}}}")
     time_value_math = md_math(
         rf"\approx \frac{{{ops_coeff_str} \times 10^{{{ops_exp_value}}}}}{{{num_gpus} \times ({peak_tflops_str} \times 10^{{12}}) \times {eta_base}}}"
     )
@@ -1730,7 +1730,7 @@ The relationship between time, energy, and data movement forms the central analy
 
 ::: {.callout-checkpoint title="The iron law"}
 
-The **iron law** ($T \approx \frac{D_{\text{vol}}}{BW} + \frac{O}{R_{\text{peak}} \cdot \eta} + L_{\text{lat}}$) is the analytical backbone of this book. Before proceeding, verify you can manipulate its terms:
+The **iron law** ($T \approx \frac{D_{\text{vol}}}{BW} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}}$) is the analytical backbone of this book. Before proceeding, verify you can manipulate its terms:
 
 - [ ] **Data Term ($D_{\text{vol}}/BW$)**: Bound by memory bandwidth. Dominates in transformers and large language models where we move massive weights for every token.
 - [ ] **Compute Term ($O/R_{\text{peak}}$)**: Bound by processor speed. Dominates in ConvNets (ResNet) where we reuse weights many times.
@@ -1767,7 +1767,7 @@ Each archetype represents a distinct extreme of the iron law. For instance, **Re
 
 : **Lighthouse Models as Systems Detectives**: Each workload isolates a distinct bottleneck, enabling systematic investigation of how system constraints affect different architectural patterns. Quantitative specifications and architectural details appear in @sec-network-architectures. {#tbl-lighthouse-examples}
 
-The iron law makes these differences precise. ResNet-50 applies the same small weight filters across millions of spatial positions, reusing each weight thousands of times; its $O/(R_{\text{peak}} \cdot \eta)$ term dominates because the processor must sustain enormous arithmetic throughput while the data footprint remains modest. GPT-2, by contrast, loads billions of unique weight parameters for every token it generates, and each weight is used only once before the next must be fetched; its $D_{\text{vol}}/BW$ term dominates because memory bandwidth, not arithmetic, is the binding constraint. The same equation, applied to two different workloads, yields opposite diagnoses and therefore opposite optimization strategies: doubling $R_{\text{peak}}$ accelerates ResNet-50 but barely affects GPT-2, while doubling $BW$ has the reverse effect.
+The iron law makes these differences precise. ResNet-50 applies the same small weight filters across millions of spatial positions, reusing each weight thousands of times; its $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ term dominates because the processor must sustain enormous arithmetic throughput while the data footprint remains modest. GPT-2, by contrast, loads billions of unique weight parameters for every token it generates, and each weight is used only once before the next must be fetched; its $D_{\text{vol}}/BW$ term dominates because memory bandwidth, not arithmetic, is the binding constraint. The same equation, applied to two different workloads, yields opposite diagnoses and therefore opposite optimization strategies: doubling $R_{\text{peak}}$ accelerates ResNet-50 but barely affects GPT-2, while doubling $BW$ has the reverse effect.
 
 Each archetype manifests different constraints along the D·A·M axes, ensuring that the principles developed throughout this text are tested against the diversity of real-world systems engineering challenges. Later in this chapter, these technical workloads are complemented with three deployment case studies, Waymo, FarmBeats, and AlphaFold, that illustrate how the same core challenges manifest in production systems under radically different constraints.
 
@@ -2229,7 +2229,7 @@ The iron law decomposes performance into physical terms, the degradation equatio
 
 ***AI Engineering***\index{AI Engineering!definition} is the engineering discipline of designing, deploying, and maintaining systems whose outputs are inherently probabilistic (stochastic) to meet deterministic reliability targets by simultaneously satisfying constraints on all three D·A·M axes (Data quality, Algorithm correctness, Machine efficiency) in production.
 
-1.  **Significance (Quantitative):** ML Research typically optimizes only the Algorithm axis ($O$ and convergence). AI Engineering jointly optimizes all three: it bounds $D_{\text{vol}}$ by data governance requirements, bounds $O/(R_{\text{peak}} \cdot \eta)$ by latency SLOs, and bounds total power draw by energy and cost budgets. A production system that achieves 95 percent accuracy in research but violates a 100 ms p99 SLO is a failed system, regardless of its Algorithm score.
+1.  **Significance (Quantitative):** ML Research typically optimizes only the Algorithm axis ($O$ and convergence). AI Engineering jointly optimizes all three: it bounds $D_{\text{vol}}$ by data governance requirements, bounds $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ by latency SLOs, and bounds total power draw by energy and cost budgets. A production system that achieves 95 percent accuracy in research but violates a 100 ms p99 SLO is a failed system, regardless of its Algorithm score.
 2.  **Distinction (Durable):** Unlike **machine learning research**, which targets a single objective (validation loss) on a static dataset, AI Engineering targets a multi-objective constraint surface (latency, throughput, accuracy, cost, fairness, and robustness) on a distribution that shifts continuously after deployment.
 3.  **Common Pitfall:** A frequent misconception is that AI Engineering is just "Software Engineering for ML." The critical difference is that the system specification is probabilistic: an ML system's output is statistically valid or invalid relative to a shifting distribution, not correct or incorrect relative to a fixed deterministic contract. This makes continuous monitoring a structural requirement, not an operational choice.
 
