@@ -11,6 +11,9 @@ from rich.console import Console
 
 from vault_cli._version import __version__
 from vault_cli.commands import (
+    audit as audit_cmd_mod,
+)
+from vault_cli.commands import (
     authoring,
     serve_api,
 )
@@ -87,6 +90,7 @@ lint_cmd_mod.register(app)
 ls_cmd_mod.register(app)
 show_cmd_mod.register(app)
 chain_cmd_mod.register(app)
+audit_cmd_mod.register(app)
 
 
 def _version_callback(value: bool) -> None:
