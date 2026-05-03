@@ -1,0 +1,160 @@
+name: '🎯 StaffML · 🔍 Audit corpus (monthly)'
+
+# =============================================================================
+# Monthly Gemini-driven audit of the published vault corpus.
+#
+# Runs audit_corpus_batched.py against the full corpus on the first day
+# of each month, uploads the per-run artifact, and (TODO) opens a GitHub
+# issue if the failure rate exceeds last month's by a configurable
+# threshold.
+#
+# Per CORPUS_HARDENING_PLAN.md Phase 8: the audit becomes a routine
+# artifact, not a one-shot. Findings drive the monthly Phase-5-style
+# review pass.
+#
+# Cost: ~315 Gemini calls per full-corpus run (1.3 days at the 250/day
+# cap). The workflow_dispatch path lets an operator launch ad-hoc; the
+# scheduled run uses the audit-bot's own daily quota.
+#
+# Requirements before this workflow can run:
+#   - Repository secret GEMINI_API_KEY must be provisioned (request via
+#     the StaffML operations channel).
+#   - The runner image needs the gemini CLI installed (or the script
+#     adapted to use the Gemini Python SDK directly). Until that's
+#     wired, the workflow_dispatch run will fail with a clear error;
+#     the schedule simply doesn't fire because the runner can't
+#     resolve the gemini binary. NOT a regression — the workflow YAML
+#     is in place; activation is a one-line change once the auth path
+#     is decided.
+# =============================================================================
+
+on:
+  schedule:
+    # 14:00 UTC on the 1st of each month. Mid-day so a failure has
+    # business hours for triage. Cron is best-effort; GitHub may delay
+    # the run by up to ~30 min during high load.
+    - cron: '0 14 1 * *'
+  workflow_dispatch:
+    inputs:
+      max_calls:
+        description: "Cap Gemini calls this run (250 = full daily quota)"
+        required: false
+        default: '250'
+        type: string
+      tracks:
+        description: "Comma-separated track filter (empty = all tracks)"
+        required: false
+        default: ''
+        type: string
+      propose_fixes:
+        description: "Also ask Gemini to propose corrections (~+50% cost)"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # One audit at a time per repo. If a manual run is in flight when the
+  # cron fires (or vice versa), the second one waits — a half-finished
+  # audit can resume cleanly but two simultaneous runs writing to the
+  # same _pipeline/runs/<UTC>/ would corrupt the persistence file.
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write   # for the regression-issue post (not yet wired)
+
+env:
+  VAULT_DIR:     ${{ vars.VAULT_DIR     || 'interviews/vault' }}
+  VAULT_CLI_DIR: ${{ vars.VAULT_CLI_DIR || 'interviews/vault-cli' }}
+  PYTHON_VERSION: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+jobs:
+  audit:
+    name: audit corpus (full)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360   # 6h ceiling — full corpus at 4 workers is ~3-4h
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install vault-cli with dev extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "$VAULT_CLI_DIR/[dev]"
+
+      - name: Install gemini CLI
+        # TODO: pin a specific gemini-cli version once the project decides
+        # on its install path. Today this step assumes the runner image has
+        # gemini available; if not, the audit step below fails clearly.
+        run: |
+          if ! command -v gemini >/dev/null 2>&1; then
+            echo "::error::gemini CLI not found on PATH. Install it on the"
+            echo "runner image, or wire the script to use the Python SDK"
+            echo "with GEMINI_API_KEY (see workflow comments)."
+            exit 1
+          fi
+          gemini --version || true
+
+      - name: Vault sanity check (no Gemini cost)
+        run: |
+          vault check --strict --vault-dir "$VAULT_DIR"
+          pytest "$VAULT_CLI_DIR/tests/" -q
+
+      - name: Compute run metadata
+        id: meta
+        run: |
+          ts=$(date -u +%Y%m%dT%H%M%SZ)
+          mkdir -p "$VAULT_DIR/_pipeline/runs/cron-$ts"
+          echo "ts=$ts" >> "$GITHUB_OUTPUT"
+          echo "outdir=$VAULT_DIR/_pipeline/runs/cron-$ts" >> "$GITHUB_OUTPUT"
+
+      - name: Run corpus audit
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          MAX_CALLS="${{ github.event.inputs.max_calls || '250' }}"
+          TRACKS_FLAG=""
+          if [ -n "${{ github.event.inputs.tracks }}" ]; then
+            TRACKS_FLAG="--tracks ${{ github.event.inputs.tracks }}"
+          fi
+          PROPOSE_FLAG=""
+          if [ "${{ github.event.inputs.propose_fixes }}" = "true" ]; then
+            PROPOSE_FLAG="--propose-fixes"
+          fi
+          python3 "$VAULT_CLI_DIR/scripts/audit_corpus_batched.py" \
+            ${TRACKS_FLAG:---all} \
+            $PROPOSE_FLAG \
+            --workers 4 \
+            --max-calls "$MAX_CALLS" \
+            --output "${{ steps.meta.outputs.outdir }}"
+
+      - name: Generate AUDIT_FINDINGS markdown
+        run: |
+          python3 "$VAULT_CLI_DIR/scripts/summarize_audit.py" \
+            --input "${{ steps.meta.outputs.outdir }}/01_audit.json" \
+            --output "${{ steps.meta.outputs.outdir }}/AUDIT_FINDINGS.md"
+
+      - name: Upload run artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-corpus-${{ steps.meta.outputs.ts }}
+          path: ${{ steps.meta.outputs.outdir }}
+          retention-days: 90
+
+      # TODO (CORPUS_HARDENING_PLAN.md Phase 8 step 3):
+      # Compare against last month's run. Open an issue if format-failure
+      # rate increases by > X% or new gates regress beyond a threshold.
+      # Skeleton:
+      #   - Download last month's audit-corpus-* artifact
+      #   - Diff per-track failure counts
+      #   - If regression: gh issue create --title "audit regression" \
+      #         --body @AUDIT_FINDINGS.md
+      # Skipped on the first run (no baseline). Wire after one or two
+      # months of data exist.
