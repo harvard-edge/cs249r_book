@@ -30,9 +30,19 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import tempfile
 import threading
+from pathlib import Path
 
 GEMINI_MODEL = "gemini-3.1-pro-preview"
+
+# The gemini CLI in --yolo mode occasionally writes scratch files to its
+# CWD (prompt dumps, partial JSON outputs). When invoked from the repo
+# root those land alongside the worktree and pollute `git status`.
+# Use a process-wide temp dir as the subprocess CWD so scratch files
+# stay isolated from the working tree.
+_GEMINI_SCRATCH_DIR = Path(tempfile.gettempdir()) / "vault_audit_gemini_scratch"
+_GEMINI_SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
 
 # Markup-convention markers required by the format-compliance gate.
 # Mirrored in vault-cli/src/vault_cli/commands/authoring.py's COMMON_MISTAKE_TEMPLATE
@@ -130,6 +140,7 @@ def call_gemini_judge(prompt: str, *, timeout: int = 600) -> dict | None:
         result = subprocess.run(
             ["gemini", "-m", GEMINI_MODEL, "-p", prompt, "--yolo"],
             capture_output=True, text=True, timeout=timeout,
+            cwd=str(_GEMINI_SCRATCH_DIR),
         )
     except subprocess.TimeoutExpired:
         return None
