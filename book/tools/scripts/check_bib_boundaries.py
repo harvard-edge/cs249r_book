@@ -80,7 +80,7 @@ def extract_cites(path):
         keys = set()
         for m in CITE_RE.finditer(text):
             k = m.group(1).rstrip(".,;:)")
-            if k and not k.startswith(NON_CITE_PREFIXES) and k not in KNOWN_FALSE_POSITIVE_KEYS:
+            if k and not k.startswith(NON_CITE_PREFIXES) and not k.endswith("_") and k not in KNOWN_FALSE_POSITIVE_KEYS:
                 keys.add(k)
         return keys
 
