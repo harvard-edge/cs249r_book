@@ -152,6 +152,7 @@ class ValidateCommand:
         ],
         "bib": [
             ("hygiene", "_run_bib_hygiene"),
+            ("key-content", "_run_bib_key_content"),
         ],
         "footnotes": [
             ("placement", "_run_footnote_placement"),
@@ -5424,6 +5425,231 @@ class ValidateCommand:
         return ValidationRunResult(
             name="bib-hygiene", description="bib-hygiene (§5)",
             files_checked=len(bib_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_key_content(self, root: Path) -> ValidationRunResult:
+        """Verify bib key surname/year tokens match the entry's actual
+        author and year fields.
+
+        The bib **key** is a contract: `surname[firstauthor]year[topicword]`.
+        When the key drifts from the entry body, citing the key in prose
+        renders text that contradicts the key. No existing check catches
+        this — `citations` confirms the key resolves to *some* entry,
+        `bib-hygiene` confirms required fields are present, but neither
+        compares the key prefix against the entry's content.
+
+        Real failure observed (May 2026): vol2 had
+
+            @article{shewhart1931economic,
+              author = {Carroll, Alison R. and Johnson, David P.},
+              year = {2020},
+              title = {Know It When You See It: ...},
+              ...
+            }
+
+        Citing [@shewhart1931economic] rendered as "(Carroll and Johnson,
+        2020)" — silently misleading.
+
+        Heuristics to reduce false positives:
+
+        - Only check keys that follow the canonical surname-year convention
+          (`^[a-z]+\\d{4}`). Keys like `the_pile`, `deepbench_github`, or
+          `flexpoint_2017` (which use a separator) are intentional non-author
+          identifiers and skipped.
+        - Surname check passes if the key prefix is a prefix of *any* author's
+          surname, not just the first. Tolerates legitimate re-keys like
+          `harlap2018pipedream` where Harlap is the second author.
+        - Skip entries whose first author looks corporate / institutional
+          (Google, DeepMind, Intel, etc.).
+        - Surname comparison folds diacritics and strips non-alpha so
+          `hebert2018multicalibration` matches `H{\'e}bert-Johnson`.
+        """
+        import unicodedata
+
+        def fold(s: str) -> str:
+            norm = unicodedata.normalize("NFKD", s.lower())
+            return "".join(c for c in norm if not unicodedata.combining(c))
+
+        # Single-token names that almost always indicate a corporate /
+        # institutional author rather than a person. When one of these
+        # appears as a "surname" in the first or second position of the
+        # author field, the entry is skipped — the bib key uses a topic
+        # rather than a personal surname.
+        CORPORATE_AUTHOR_TOKENS = {
+            "google", "deepmind", "microsoft", "openai", "anthropic", "meta",
+            "facebook", "amazon", "aws", "nvidia", "intel", "apple", "ibm",
+            "huggingface", "kaggle", "baidu", "alibaba", "tencent", "samsung",
+            "qualcomm", "arm", "tesla", "siemens", "epoch", "stability",
+            "mistral", "cohere", "deepseek", "moonshot", "perplexity",
+            "cerebras", "graphcore", "groq", "sambanova", "mlcommons",
+            "discord", "github", "gitlab", "wikipedia", "stackoverflow",
+            "openreview", "arxiv", "papers", "pytorch", "tensorflow", "jax",
+            "onnx", "kubernetes", "docker",
+            "corporation", "inc", "ltd", "llc", "research", "team", "labs",
+            "foundation", "consortium", "association", "council", "committee",
+            "group", "network", "alliance", "initiative", "project", "society",
+            "european", "national", "international", "world", "united",
+            "systems", "contributors", "developers", "authors", "community",
+            "staff", "editors", "board", "office", "department", "ministry",
+            "agency", "bureau", "commission", "service", "services",
+        }
+
+        def author_list_surnames(author_field: str) -> List[str]:
+            if not author_field:
+                return []
+            # Strip common LaTeX accent commands so `H\'ebert` → `Hebert`.
+            a = re.sub(r"\\['\"`^~]\{?(\w)\}?", r"\1", author_field)
+            a = a.strip().strip("{}").strip()
+            authors = re.split(r"\s+and\s+", a)
+            surnames: List[str] = []
+            for raw in authors:
+                ent = raw.strip().strip("{}").strip()
+                if not ent:
+                    continue
+                if "," in ent:
+                    surname = ent.split(",", 1)[0].strip().strip("{}").strip()
+                else:
+                    parts = ent.split()
+                    surname = parts[-1] if parts else ""
+                if surname:
+                    surnames.append(surname)
+            for s in surnames[:2]:
+                if fold(s) in CORPORATE_AUTHOR_TOKENS:
+                    return []
+            return surnames
+
+        t0 = time.time()
+        bib_files = sorted(root.rglob("*.bib"))
+        issues: List[ValidationIssue] = []
+
+        entry_header_re = re.compile(r"^@(\w+)\s*\{\s*([\w:_-]+)\s*,", re.M)
+        # Surname-year canonical key: lowercase letters then 4-digit year.
+        convention_re = re.compile(r"^([a-z]+)(\d{4})")
+        # Tolerates one level of nested braces in field values.
+        field_re = re.compile(
+            r"\b(\w+)\s*=\s*"
+            r"(?:\{((?:[^{}]|\{[^{}]*\})*)\}|\"([^\"]*)\")",
+            re.S,
+        )
+
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = str(bib_path.relative_to(root))
+            except ValueError:
+                rel = str(bib_path)
+
+            for hm in entry_header_re.finditer(text):
+                entry_type = hm.group(1).lower()
+                key = hm.group(2)
+                line_no = text[:hm.start()].count("\n") + 1
+
+                # Walk balanced braces from the entry's opening { to its
+                # matching }. Skips escaped braces inside field values.
+                open_brace = text.find("{", hm.start())
+                if open_brace < 0:
+                    continue
+                depth = 0
+                i = open_brace
+                n = len(text)
+                while i < n:
+                    ch = text[i]
+                    if ch == "\\" and i + 1 < n:
+                        i += 2
+                        continue
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    i += 1
+                body = text[open_brace + 1 : i]
+
+                cm = convention_re.match(key.lower())
+                if not cm:
+                    continue
+                key_surname = cm.group(1)
+                key_year = cm.group(2)
+
+                fields: Dict[str, str] = {}
+                for fm in field_re.finditer(body):
+                    name = fm.group(1).lower()
+                    value = fm.group(2) if fm.group(2) is not None else fm.group(3)
+                    fields[name] = (value or "").strip()
+
+                author = fields.get("author", "")
+                year_field = fields.get("year", "")
+
+                surnames = author_list_surnames(author)
+
+                if surnames:
+                    # Bidirectional prefix match: tolerates both
+                    # `boroumandasplos2018` (key longer than surname,
+                    # appended venue) AND `hebert2018multicalibration`
+                    # (key shorter, only catches the prefix of a hyphenated
+                    # surname). One direction must match for it to count.
+                    matched = False
+                    for s in surnames:
+                        sa = re.sub(r"[^a-z]", "", fold(s))
+                        if sa.startswith(key_surname) or key_surname.startswith(sa):
+                            matched = True
+                            break
+                    if not matched:
+                        first = surnames[0]
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=line_no,
+                            code="bib_key_surname_mismatch",
+                            message=(
+                                f"@{entry_type}{{{key}}} — key surname "
+                                f"'{key_surname}' matches no author in this "
+                                f"entry (first author: '{first}'). Citing the "
+                                f"key in prose renders content that contradicts "
+                                f"the key. Either rename the key to match an "
+                                f"actual author, or replace the entry body to "
+                                f"match the work the key names."
+                            ),
+                            severity="warning",
+                            context="",
+                        ))
+
+                if year_field and year_field != key_year:
+                    # Tolerate a one-year gap: papers commonly key from
+                    # the arXiv preprint year (e.g. 2021) but record the
+                    # conference proceedings year (e.g. 2022) in the year
+                    # field. Both attributions are correct; the gap is
+                    # convention drift, not corruption. Larger gaps almost
+                    # always indicate real key/content mismatch.
+                    try:
+                        gap = abs(int(year_field) - int(key_year))
+                    except ValueError:
+                        gap = 99  # unparsable year → flag
+                    if gap > 1:
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=line_no,
+                            code="bib_key_year_mismatch",
+                            message=(
+                                f"@{entry_type}{{{key}}} — key year {key_year} "
+                                f"does not match year field {year_field} "
+                                f"(gap of {gap} years). The key suggests a "
+                                f"different work than the entry actually "
+                                f"describes."
+                            ),
+                            severity="error",
+                            context="",
+                        ))
+
+        return ValidationRunResult(
+            name="bib-key-content",
+            description="Bib key prefix must match author surname + year (§5)",
+            files_checked=len(bib_files),
+            issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
