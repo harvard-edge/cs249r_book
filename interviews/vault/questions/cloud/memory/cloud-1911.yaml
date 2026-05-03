@@ -13,18 +13,43 @@ scenario: You are designing the training architecture for a Click-Through Rate (
   totaling 400GB (FP32). Your target hardware is a single node with 8x A100 (80GB) GPUs connected via
   NVLink (600 GB/s). Evaluate the trade-offs between Data Parallelism, Model Parallelism, and hybrid approaches
   for the embeddings versus the dense layers, and justify a deployment strategy that minimizes step latency.
-question: "How would you parallelize the 400GB embeddings and 2GB dense layers across 8 A100s to minimize step latency?"
+question: How would you parallelize the 400GB embeddings and 2GB dense layers across 8 A100s to minimize
+  step latency?
 details:
   realistic_solution: 'Implement a hybrid parallel strategy: Model Parallel (MP) for the 400GB embedding
     tables (sharded ~50GB per GPU) to fit within HBM, and Data Parallel (DP) for the dense MLPs. Use an
     All-to-All collective over NVLink to route the retrieved vectors.'
-  common_mistake: Recommending standard Data Parallelism with ZeRO-3 or unified memory for the entire
-    model, failing to recognize that sparse embedding lookups have near-zero arithmetic intensity and
-    require careful memory capacity management.
-  napkin_math: Total HBM = 8 * 80GB = 640GB. Embeddings (400GB) sharded via MP consume 50GB/GPU, leaving
-    30GB for activations and optimizer states. For a batch size of 8192 and 50 features of 64-dim FP32
-    (256 bytes), the all-to-all payload per step is 8192 * 50 * 256 bytes = 104.8 MB. Over 600 GB/s NVLink,
-    theoretical communication time is 104.8MB / 600GB/s ≈ 0.17 ms, hiding the transfer overhead.
+  common_mistake: '**The Pitfall:** Recommending standard Data Parallelism with ZeRO-3 or unified memory
+    for the entire model.
+
+    **The Rationale:** Failing to recognize that sparse embedding lookups have near-zero arithmetic intensity
+    and require careful memory capacity management.
+
+    **The Consequence:** The model will suffer from severe memory bottlenecks and fail to minimize step
+    latency.'
+  napkin_math: '**Assumptions & Constraints:**
+
+    - 8x A100 (80GB) GPUs = 640GB HBM.
+
+    - Embeddings = 400GB.
+
+    - Batch size = 8192, 50 features, 64-dim FP32.
+
+    - NVLink = 600 GB/s.
+
+
+    **Calculations:**
+
+    - Embeddings (400GB) sharded via MP consume 50GB/GPU, leaving 30GB for activations and optimizer states.
+
+    - All-to-all payload per step is 8192 * 50 * 256 bytes = 104.8 MB.
+
+    - Over 600 GB/s NVLink, theoretical communication time is 104.8MB / 600GB/s ≈ 0.17 ms.
+
+
+    **Conclusion & Interpretation:**
+
+    - **Result:** The communication time of 0.17 ms hides the transfer overhead effectively.'
 status: published
 provenance: imported
 requires_explanation: true

@@ -13,22 +13,35 @@ scenario: You are designing the inference engine for a multi-tenant LLM serving 
   summarization tasks (avg 4000 tokens). To handle bursty chat traffic, you implement preemptive scheduling
   for the batch tasks. You must evaluate whether to swap the batch tasks' KV cache to CPU RAM via PCIe
   Gen4 or simply discard the cache and recompute the prompt when the batch task resumes.
-question: "For preempting 16 batch tasks averaging 4000 tokens, should you swap KV cache over PCIe Gen4 or discard and recompute it?"
+question: For preempting 16 batch tasks averaging 4000 tokens, should you swap KV cache over PCIe Gen4
+  or discard and recompute it?
 details:
   realistic_solution: Calculate the PCIe transfer time for the KV cache versus the GPU prefill compute
     time. For a large 70B model, recomputing the prefill for 64,000 tokens is extremely compute-intensive
     (~8960 TFLOPs), taking ~3.6s even on 8x A100s. Swapping the 20 GB KV cache over PCIe Gen4 takes only
     ~1.6s. Therefore, swapping the KV cache to CPU RAM is faster and more efficient than discarding and
     recomputing, making it the preferred preemptive scheduling strategy.
-  common_mistake: Candidates often assume that modern FlashAttention makes recomputation so fast that
-    state can be discarded. They fail to quantify that for large models (like 70B) and high batch/token
-    counts, the compute bounds of prefill heavily outweigh PCIe transfer times, making swapping the correct
-    choice.
-  napkin_math: 'Llama-2-70B KV cache per token: 80 layers * 8 KV heads * 128 dim * 2 bytes * 2 (K+V) =
-    ~320 KB/token. A batch of 16 requests of 4000 tokens = ~20 GB of KV cache. Swapping out and back in
-    over PCIe Gen4 (~24 GB/s effective) takes (20 * 2) / 24 = ~1.6 seconds. Recomputing the 4000-token
-    prefill for the batch (64,000 tokens) requires ~8960 TFLOPs. On 8x A100s (~2496 TFLOPS peak), recomputation
-    takes at least 3.6 seconds. Swapping is over 2x faster than recomputation.'
+  common_mistake: '**The Pitfall:** Assuming state can be discarded and quickly recomputed.
+
+    **The Rationale:** Candidates fail to quantify that the compute bounds of prefill heavily outweigh
+    PCIe transfer times.
+
+    **The Consequence:** Choosing recomputation over swapping, leading to significantly higher latency.'
+  napkin_math: '**Assumptions & Constraints:**
+
+    - 8x A100 GPUs, 16 requests of 4000 tokens.
+
+    **Calculations:**
+
+    - KV cache per token: ~320 KB/token. Batch = ~20 GB.
+
+    - Swapping over PCIe Gen4 (~24 GB/s effective): (20 * 2) / 24 = ~1.6 seconds.
+
+    - Recomputing 64,000 tokens: ~8960 TFLOPs. On 8x A100s, it takes at least 3.6 seconds.
+
+    **Conclusion & Interpretation:**
+
+    Swapping is over 2x faster than recomputation.'
 status: published
 provenance: imported
 requires_explanation: false

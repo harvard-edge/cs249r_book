@@ -15,20 +15,44 @@ scenario: 'You are operating a Llama-3-70B customer service chatbot on an 8x H10
   Inspecting the API gateway logs, you see the backend formats the prompt as: `[SessionID: 9a8b7c] [Date:
   2026-03-24] You are an expert AI assistant...`. Diagnose the root cause of the cache misses and propose
   a fix.'
-question: "Why is automatic prefix caching hitting 0% with the SessionID and Date prefix, and how should the prompt be reformatted?"
+question: Why is automatic prefix caching hitting 0% with the SessionID and Date prefix, and how should
+  the prompt be reformatted?
 details:
   realistic_solution: Prefix caching relies on a Radix tree that requires strictly identical token sequences
     from the very beginning of the prompt. Dynamic variables (SessionID, Date) at the start instantly
     branch the Radix tree, invalidating the subsequent 4K static tokens for every new request. The fix
     is to move the static 4K system instructions to the absolute beginning of the prompt and append the
     dynamic metadata right before the user query.
-  common_mistake: Candidates often assume the KV cache can intelligently deduplicate arbitrary substrings
-    or suggest tuning PagedAttention block sizes, failing to recognize that APC requires exact sequence
-    matches from index 0.
-  napkin_math: 'Llama-3-70B KV size per token = 2 (K+V) * 80 layers * 8 KV-heads * 128 dim * 2 bytes (FP16)
-    = 327.68 KB. A 4,096-token system prompt = ~1.34 GB. Uncached for 100 concurrent users: 100 * 1.34
-    GB = 134 GB VRAM consumed. Cached properly: All 100 users share a single 1.34 GB physical block, saving
-    ~132.6 GB VRAM.'
+  common_mistake: '**The Pitfall:** Assuming the KV cache can deduplicate arbitrary substrings or suggesting
+    tuning PagedAttention block sizes.
+
+    **The Rationale:** Candidates fail to recognize that APC requires exact sequence matches from index
+    0 due to its Radix tree structure.
+
+    **The Consequence:** The cache never hits, leading to massive redundant memory allocations and OOM
+    errors under load.'
+  napkin_math: '**Assumptions & Constraints:**
+
+    - Llama-3-70B: 80 layers, 8 KV heads, 128 dim, FP16.
+
+    - 4,096-token system prompt, 100 concurrent users.
+
+
+    **Calculations:**
+
+    - KV size per token = 2 * 80 * 8 * 128 * 2 = 327.68 KB.
+
+    - Total prompt size = 327.68 KB * 4096 = ~1.34 GB.
+
+    - Uncached footprint = 100 * 1.34 GB = 134 GB.
+
+    - Cached footprint = 1.34 GB.
+
+
+    **Conclusion & Interpretation:**
+
+    - **Result: ~132.6 GB VRAM saved**. Reordering the prompt to enable prefix caching eliminates massive
+    redundant memory allocations.'
 status: published
 provenance: imported
 requires_explanation: false

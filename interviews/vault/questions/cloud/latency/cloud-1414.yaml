@@ -14,7 +14,7 @@ scenario: 'An e-commerce platform serves a PyTorch-based visual search model on 
   The inference pipeline is built with Python FastAPI and sequentially performs: base64 decode, PIL image
   resize (1080p to 224x224), host-to-device transfer, GPU inference, and JSON serialization. Diagnose
   the root cause of this latency degradation.'
-question: "Why does P90 API latency spike to 120ms at 150 QPS despite 8ms TensorRT inference?"
+question: Why does P90 API latency spike to 120ms at 150 QPS despite 8ms TensorRT inference?
 details:
   realistic_solution: The bottleneck is CPU starvation and queueing delay from synchronous image preprocessing.
     PIL resize takes ~15ms per 1080p image, consuming 2.25 CPU cores at 150 QPS, plus base64 decode and
@@ -22,13 +22,38 @@ details:
     Python GIL, this drives utilization above 75%, causing exponential queueing delays (M/M/c queue behavior)
     that explain the 120ms P90 latency. Fix by using async preprocessing with OpenCV/libjpeg-turbo or
     offloading resize to GPU.
-  common_mistake: Focusing solely on GPU optimizations like dynamic batching or model quantization, ignoring
-    the CPU-bound preprocessing steps and Python GIL contention that are the actual source of the P90
-    latency spike.
-  napkin_math: PIL 1080p resize takes ~15ms. At 150 QPS, total CPU resize time is 150 * 15ms = 2250ms
-    per second (requires 2.25 cores). Base64 decode (2ms) + HTTP (3ms) adds 300ms/sec + 450ms/sec = 0.75
-    cores. Total CPU demand = 3.0 cores. On a 4 vCPU instance running Python (GIL), CPU utilization approaches
-    75%+. High utilization in an M/M/c queue drives exponential wait times, causing the 120ms P90 latency.
+  common_mistake: '**The Pitfall:** Focusing solely on GPU optimizations like dynamic batching or model
+    quantization.
+
+    **The Rationale:** Practitioners naturally look to the GPU for deep learning latency, overlooking
+    the host-side CPU-bound preprocessing steps.
+
+    **The Consequence:** Ignoring the Python GIL contention and CPU starvation, leaving the actual source
+    of the P90 latency spike unresolved.'
+  napkin_math: '**Assumptions & Constraints:**
+
+    - PIL 1080p resize: ~15ms.
+
+    - QPS: 150.
+
+    - 4 vCPU instance running Python (GIL).
+
+
+    **Calculations:**
+
+    - Total CPU resize time at 150 QPS = 150 × 15ms = 2250ms per second (2.25 cores).
+
+    - Base64 decode (2ms) + HTTP (3ms) = 5ms × 150 = 750ms per second (0.75 cores).
+
+    - Total CPU demand = 2.25 + 0.75 = 3.0 cores.
+
+    - Utilization = 3.0 / 4.0 = 75%.
+
+
+    **Conclusion & Interpretation:**
+
+    - **Result: CPU Starvation**. 75%+ CPU utilization in a Python GIL environment causes severe M/M/c
+    queueing delays, creating the 120ms P90 latency.'
 status: published
 provenance: imported
 requires_explanation: false

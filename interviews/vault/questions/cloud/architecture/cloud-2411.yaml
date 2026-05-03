@@ -13,7 +13,7 @@ scenario: You deploy a 30B parameter LLM on an A100 (80GB, 2 TB/s bandwidth). Us
   You expect a ~4x speedup since generation is memory-bandwidth bound and weights dropped from 60GB to
   15GB. Instead, generation speed is 40 tokens/sec (latency ~25ms/token) and GPU compute utilization is
   98%. What is the architectural cause of this missing speedup?
-question: "What is the architectural cause of this missing speedup?"
+question: What is the architectural cause of this missing speedup?
 details:
   realistic_solution: The symptom reveals a lack of fused dequantization kernels. In a naive W4A16 implementation,
     the system launches a standalone kernel that reads the 15GB of INT4 weights from HBM, dequantizes
@@ -24,11 +24,30 @@ details:
     The solution is to use fused kernels (like Marlin, AWQ, or GPTQ kernels) that load the INT4 weights
     directly into SRAM/registers, dequantize them on the fly, and immediately compute the MMA without
     ever writing the intermediate FP16 values back to global memory.
-  common_mistake: Assuming the INT4 decoding math itself (bit-shifting and masking) takes too many ALUs,
-    completely ignoring the memory subsystem traffic.
-  napkin_math: 'FP16 Baseline traffic: 60GB read. Expected INT4 fused traffic: 15GB read (4x less). Actual
-    Unfused traffic: 15G read + 60G write + 60G read = 135GB. Time = 135GB / 2000 GB/s = 67.5ms theoretically,
-    but caching and pipelining masks some of it, resulting in the observed 25ms.'
+  common_mistake: '**The Pitfall:** Assuming INT4 decoding math is the compute bottleneck.
+
+    **The Rationale:** Assuming the INT4 decoding math itself takes too many ALUs, completely ignoring
+    the memory subsystem traffic.
+
+    **The Consequence:** Failing to implement fused kernels, resulting in increased memory traffic and
+    lost performance.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
+    - FP16 Baseline traffic: 60GB read. Expected INT4 fused traffic: 15GB read (4x less).
+
+    **Calculations:**
+
+    - Actual Unfused traffic: 15G read + 60G write + 60G read = 135GB.
+
+    - Time = 135GB / 2000 GB/s = 67.5ms theoretically.
+
+    **Conclusion & Interpretation:**
+
+    - Caching and pipelining masks some of it, resulting in the observed 25ms.
+
+    '
 status: published
 provenance: imported
 requires_explanation: false

@@ -13,17 +13,42 @@ scenario: You are profiling a distributed training job for a 10B parameter (40GB
   bandwidth is 50 GB/s (400 Gbps Infiniband). You observe that the gradient synchronization step takes
   ~1.58 seconds, which is 5x longer than your target. Profiling shows a flat Ring AllReduce algorithm
   is being used across all 64 GPUs. Diagnose the root cause of this poor performance.
-question: "Why is the flat Ring AllReduce taking about 1.58 seconds, and what collective topology should replace it?"
+question: Why is the flat Ring AllReduce taking about 1.58 seconds, and what collective topology should
+  replace it?
 details:
   realistic_solution: 'The flat ring forces every chunk transfer to operate at the 50 GB/s Infiniband
     limit. The solution is to switch to a Hierarchical AllReduce topology: perform a local Reduce-Scatter
     via NVLink, an inter-node AllReduce via IB on the reduced chunks, and a local All-Gather via NVLink.'
-  common_mistake: Assuming the bottleneck is purely total data volume divided by inter-node bandwidth,
-    missing that a flat ring topology throttles the fast intra-node NVLink connections to the speed of
-    the slowest inter-node link for all 63 ring steps.
-  napkin_math: 'Flat Ring: 2 * (64-1)/64 * 40GB / 50GB/s = 1.575s. Hierarchical: Intra-node Reduce-Scatter
-    (35GB / 600GB/s = 0.058s) + Inter-node AllReduce (2 * 7/8 * 5GB / 50GB/s = 0.175s) + Intra-node All-Gather
-    (35GB / 600GB/s = 0.058s). Total time = 0.291s (a ~5.4x speedup).'
+  common_mistake: '**The Pitfall:** Assuming the bottleneck is purely total data volume divided by inter-node
+    bandwidth, missing that a flat ring topology throttles the fast intra-node NVLink connections to the
+    speed of the slowest inter-node link for all 63 ring steps.
+
+    **The Rationale:** It''s easy to look at the total data volume and the slowest link without considering
+    the topological path constraints.
+
+    **The Consequence:** The training job takes 5x longer because the fast NVLink bandwidth is wasted.'
+  napkin_math: '**Assumptions & Constraints:**
+
+    - 64 GPUs (8 nodes x 8 GPUs).
+
+    - Intra-node bandwidth: 600 GB/s.
+
+    - Inter-node bandwidth: 50 GB/s.
+
+    - Gradient size: 40 GB.
+
+    **Calculations:**
+
+    - Flat Ring: 2 * (64-1)/64 * 40GB / 50GB/s = 1.575s.
+
+    - Hierarchical: Intra-node Reduce-Scatter (35GB / 600GB/s = 0.058s) + Inter-node AllReduce (2 * 7/8
+    * 5GB / 50GB/s = 0.175s) + Intra-node All-Gather (35GB / 600GB/s = 0.058s). Total time = 0.291s.
+
+    - Speedup = 1.575 / 0.291 = ~5.4x.
+
+    **Conclusion & Interpretation:**
+
+    - Hierarchical AllReduce avoids throttling NVLink, achieving a ~5.4x speedup over Flat Ring.'
 status: published
 provenance: imported
 requires_explanation: false

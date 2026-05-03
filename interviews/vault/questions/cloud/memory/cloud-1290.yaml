@@ -15,22 +15,38 @@ scenario: Your team is extending the context window of a 7B parameter LLM from 2
   to fit into memory, while another strongly advocates rewriting the kernels to adopt FlashAttention.
   Evaluate the architectural trade-offs between these two approaches, specifically quantifying the difference
   in HBM read/write volume and explaining the impact on arithmetic intensity.
-question: "Should you use activation checkpointing with standard attention or adopt FlashAttention for 32K context, and why?"
+question: Should you use activation checkpointing with standard attention or adopt FlashAttention for
+  32K context, and why?
 details:
   realistic_solution: FlashAttention is the superior architectural choice. At N=32768 with 32 heads, the
     intermediate attention matrix S = QK^T requires ~2.14 GB per head in FP16, totaling ~68.7 GB across
     all heads — nearly filling an 80GB A100. FlashAttention never materializes this matrix to HBM, instead
     computing attention in SRAM tiles and outputting only the final O matrix (~268 MB). This achieves
     over 250x reduction in intermediate HBM traffic while keeping the mathematical result exact.
-  common_mistake: Candidates often mistakenly believe FlashAttention reduces the total number of FLOPs.
-    In reality, the forward pass FLOPs remain identical, and FlashAttention may even add FLOPs for online
-    softmax recomputation. The speedup comes entirely from eliminating O(N^2) HBM transfers.
-  napkin_math: 'For $N=32,768$, $d_{head}=128$, and $H=32$ heads in FP16 (2 bytes): Standard attention
-    materializes the intermediate attention matrix $S = QK^T$. Size = $N^2 \times 2$ bytes $\approx 2.14$
-    GB per head. Total across 32 heads = $\sim 68.7$ GB of HBM just for this intermediate tensor, barely
-    fitting an 80GB A100. FlashAttention never writes this to HBM. It only outputs the final matrix $O$,
-    which is $N \times (H \cdot d_{head}) \times 2$ bytes = $32768 \times 4096 \times 2 \approx 268$ MB.
-    HBM R/W is reduced by over 250x for the intermediate states.'
+  common_mistake: '**The Pitfall:** Candidates often mistakenly believe FlashAttention reduces the total
+    number of FLOPs.
+
+    **The Rationale:** In reality, the forward pass FLOPs remain identical, and FlashAttention may even
+    add FLOPs for online softmax recomputation.
+
+    **The Consequence:** The speedup comes entirely from eliminating O(N^2) HBM transfers, which is completely
+    misunderstood.'
+  napkin_math: '**Assumptions & Constraints:**
+
+    - For $N=32,768$, $d_{head}=128$, and $H=32$ heads in FP16 (2 bytes).
+
+    **Calculations:**
+
+    - Standard attention materializes the intermediate attention matrix $S = QK^T$. Size = $N^2 \times
+    2$ bytes $\approx 2.14$ GB per head. Total across 32 heads = $\sim 68.7$ GB of HBM just for this intermediate
+    tensor, barely fitting an 80GB A100.
+
+    - FlashAttention never writes this to HBM. It only outputs the final matrix $O$, which is $N \times
+    (H \cdot d_{head}) \times 2$ bytes = $32768 \times 4096 \times 2 \approx 268$ MB.
+
+    **Conclusion & Interpretation:**
+
+    - HBM R/W is reduced by over 250x for the intermediate states.'
 status: published
 provenance: imported
 requires_explanation: false

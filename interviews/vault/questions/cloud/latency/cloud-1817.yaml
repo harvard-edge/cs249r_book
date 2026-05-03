@@ -13,20 +13,43 @@ scenario: Your team deployed a visual inspection model (ResNet-50) on an NVIDIA 
   you enable Saliency Maps (computing gradients with respect to the input image). Expected latency was
   ~75ms (25ms forward + ~50ms backward). However, p99 latency spikes to 280ms, and GPU utilization drops
   from 85% to 40%. Diagnose the architectural bottleneck causing this latency spike.
-question: "Why does enabling Saliency Maps spike p99 latency to 280ms and drop GPU utilization despite the expected 75ms compute cost?"
+question: Why does enabling Saliency Maps spike p99 latency to 280ms and drop GPU utilization despite
+  the expected 75ms compute cost?
 details:
   realistic_solution: The bottleneck is memory allocation and host-bound overhead. Standard inference
     discards activations. Saliency maps require storing the full computational graph (~3GB for BS=32).
     This triggers dynamic memory allocation overhead and prevents standard inference optimizations. To
     resolve this, pre-allocate the memory workspace using CUDA Graphs covering both the forward and input-gradient
     backward passes.
-  common_mistake: Candidates often misdiagnose this as a compute bottleneck (assuming the backward pass
-    has exponentially more FLOPs) or suggest complex explainability methods like SHAP instead of diagnosing
+  common_mistake: '**The Pitfall:** Misdiagnosing the latency spike as a compute bottleneck.
+
+    **The Rationale:** Candidates assume the backward pass has exponentially more FLOPs rather than identifying
     the memory subsystem overhead.
-  napkin_math: ResNet-50 stores ~100MB of activations per image for backprop. BS=32 requires 3.2GB. T4
-    has 320GB/s bandwidth. Writing and reading 3.2GB takes ~20ms in pure bandwidth, but dynamic CUDA malloc/free
-    for 3.2GB across hundreds of layer tensors per request adds 100-200ms of CPU-bound scheduling overhead,
-    explaining the GPU utilization drop to 40%.
+
+    **The Consequence:** Suggesting complex explainability methods like SHAP instead of pre-allocating
+    the memory workspace.
+
+    '
+  napkin_math: '**Assumptions & Constraints:**
+
+    - ResNet-50 stores ~100MB of activations per image for backprop.
+
+    - BS=32 requires 3.2GB.
+
+    - T4 has 320GB/s bandwidth.
+
+
+    **Calculations:**
+
+    - Writing and reading 3.2GB takes ~20ms in pure bandwidth.
+
+    - Dynamic CUDA malloc/free for 3.2GB across hundreds of layer tensors per request adds 100-200ms of
+    CPU-bound scheduling overhead.
+
+
+    **Conclusion & Interpretation:**
+
+    - This overhead explains the p99 latency spike to 280ms and the GPU utilization drop to 40%.'
 status: published
 provenance: imported
 requires_explanation: false

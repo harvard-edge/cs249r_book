@@ -14,18 +14,40 @@ scenario: You operate a global fleet of 500 inference nodes (8xH100 each) servin
   exceed $50,000/month. Evaluate the trade-offs between implementing 1% head-based random sampling at
   the API gateway versus deploying node-level telemetry sidecars to compute HDR histograms and pre-aggregate
   metrics.
-question: "Should you use 1% random sampling or node-level sidecar aggregation for the 50,000 QPS telemetry pipeline, and why?"
+question: Should you use 1% random sampling or node-level sidecar aggregation for the 50,000 QPS telemetry
+  pipeline, and why?
 details:
   realistic_solution: Deploy an OpenTelemetry Collector sidecar on each node to pre-aggregate latencies
     into exponential histograms (forwarded every 10s) and implement tail-based trace sampling. This forwards
     100% of errors and P99 traces, but only 0.1% of baseline traffic.
-  common_mistake: Candidates often suggest blindly scaling up the Kafka ingestion cluster or using aggressive
-    random sampling, failing to realize that random sampling destroys the statistical validity of P99
-    tail latency monitoring and drops rare out-of-memory (OOM) traces.
-  napkin_math: 'Raw throughput: 50,000 req/s * 4KB = 200 MB/s (~17 TB/day). With sidecar aggregation:
-    500 nodes * (100 histogram buckets * 8 bytes) / 10s = 40 KB/s for metrics. Tail-based sampling (1%
-    of traffic as errors/tails): 500 req/s * 4KB = 2 MB/s. Total reduction: 200 MB/s to 2.04 MB/s (99%
-    reduction) while preserving 100% of critical diagnostic data.'
+  common_mistake: '**The Pitfall:** Blindly scaling up the Kafka ingestion cluster or using aggressive
+    random sampling.
+
+    **The Rationale:** Random sampling destroys the statistical validity of P99 tail latency monitoring.
+
+    **The Consequence:** It drops rare out-of-memory (OOM) traces and fails to capture critical tail anomalies.'
+  napkin_math: '**Assumptions & Constraints:**
+
+    - Raw throughput: 50,000 req/s * 4KB = 200 MB/s (~17 TB/day).
+
+    - 500 nodes, 100 histogram buckets (8 bytes) per 10s.
+
+    - Tail-based sampling: 1% of traffic.
+
+
+    **Calculations:**
+
+    - Sidecar aggregation: 500 * (100 * 8) / 10 = 40 KB/s (0.04 MB/s) for metrics.
+
+    - Tail-based sampling: 50,000 * 0.01 = 500 req/s * 4KB = 2 MB/s.
+
+    - Total output: 2 MB/s + 0.04 MB/s = 2.04 MB/s.
+
+
+    **Conclusion & Interpretation:**
+
+    - **Result:** Total reduction from 200 MB/s to 2.04 MB/s (99% reduction) while preserving 100% of
+    critical diagnostic data.'
 status: published
 provenance: imported
 requires_explanation: false
