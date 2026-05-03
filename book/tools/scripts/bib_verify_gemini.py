@@ -71,9 +71,9 @@ from typing import Any
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 MODEL = "gemini-3.1-pro-preview"
-BATCH_SIZE = 25
+BATCH_SIZE = 50
 MAX_PARALLEL = 4
-STAGGER_SECONDS = 1
+STAGGER_SECONDS = 25  # gap between batch launches (pipeline stagger to dodge burst rate-limits)
 GEMINI_TIMEOUT = 900          # per-batch timeout in seconds (Gemini + web search is slow)
 MAX_RETRIES = 1               # if a call times out at 15 min, retrying rarely helps
 
@@ -281,7 +281,7 @@ def call_gemini(prompt_input: str, system_prompt: str, model: str) -> tuple[bool
     for attempt in range(MAX_RETRIES):
         try:
             result = subprocess.run(
-                ["gemini", "-m", model, "-p", system_prompt, "-o", "text"],
+                ["gemini", "-m", model, f"--prompt={system_prompt}", "-o", "text"],
                 input=prompt_input,
                 capture_output=True,
                 text=True,
@@ -579,6 +579,7 @@ def main() -> int:
                         help="Skip every entry up to and including this key (resume)")
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--max-parallel", type=int, default=MAX_PARALLEL)
+    parser.add_argument("--stagger", type=int, default=STAGGER_SECONDS, help="Seconds between successive batch launches (pipeline stagger, dodges burst rate-limits)")
     parser.add_argument("--model", type=str, default=MODEL)
     parser.add_argument("--reverify", action="store_true",
                         help="Re-verify entries even if already stamped by a previous run")
@@ -663,13 +664,18 @@ def main() -> int:
     print(f"Prompt: {rules_size} chars (bib-check.md inlined from {short_path(RULES_PATH)})")
     print()
 
-    # Run with global thread pool, stagger starts to avoid burst rate-limit
+    # Pipeline stagger: launch one batch every STAGGER_SECONDS regardless of
+    # max_parallel. This avoids the all-fire-at-once burst that triggers
+    # Gemini's per-minute rate limit. With max_parallel workers and a stagger
+    # ≈ (per-batch latency / max_parallel), the pool stays full but launches
+    # never overlap in a thundering herd. Default 25 s × 4 workers ≈ steady
+    # state of one in-flight batch per 6 s on the launch side.
     all_results: list[dict] = []
     with ThreadPoolExecutor(max_workers=args.max_parallel) as ex:
         futures = []
         for idx, (path, batch, i, n) in enumerate(tasks):
-            if idx > 0 and idx % args.max_parallel == 0:
-                time.sleep(STAGGER_SECONDS)
+            if idx > 0:
+                time.sleep(args.stagger)
             futures.append(ex.submit(
                 verify_batch, path, batch, i, n, out_dir, args.model, system_prompt
             ))
