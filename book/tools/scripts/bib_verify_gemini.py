@@ -90,26 +90,55 @@ EXCLUDE_PATTERNS = [
 
 
 # ── Prompt ──────────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """\
-You are verifying bibliographic entries for an academic textbook (MIT Press,
-ML Systems). For each entry below, check whether the citation information
-is correct, internally consistent, and matches a real published work.
+# bib-check.md is the single source of truth for what an entry must satisfy.
+# We inline the whole file into the prompt at runtime so the prompt and the
+# rule can never drift. If the rule file is updated, every subsequent run
+# uses the new rules without code changes.
+RULES_PATH = REPO_ROOT / ".claude" / "rules" / "bib-check.md"
 
-For every entry, verify that ALL of these align:
-1. The bib key prefix (e.g., "shewhart1931economic" → surname=shewhart,
-   year=1931) matches the FIRST author's surname and the publication year.
-2. The author list, title, year, and venue all describe the SAME real paper.
-3. If a DOI or URL is present, it points to that exact paper.
+PROMPT_PREAMBLE = """\
+You are verifying bibliographic entries for an academic textbook
+(MIT Press, ML Systems by Vijay Janapa Reddi). For each entry below,
+check whether the citation information is correct, internally
+consistent, matches a real published work, AND complies with the
+project bibliography style rules quoted below.
 
-When uncertain, USE GOOGLE SEARCH to look up the paper — search by title +
-first author surname, then check whether the venue / year / DOI from the
-search results match what the entry claims. The most common silent
-corruption is when an entry's body has been overwritten with a different
-paper than the key suggests; another is when the year field is wrong by
-several years.
+PRIMARY GOAL: catch silent corruption — entries whose body content
+describes a different paper than the key suggests, plausible-but-wrong
+DOIs, drifted years, missing required fields, etc. The bib-check.md
+rules below are the canonical schema; verify against them.
 
-Return ONLY a single JSON object in this exact shape (no prose around it,
-no markdown fences):
+When uncertain, USE GOOGLE SEARCH to look up the paper — search by
+title + first author surname, then check whether the venue / year /
+DOI from the search results match what the entry claims.
+
+CRITICAL: do NOT silently rename a bib key in your `suggested_fix`.
+Every `[@key]` reference in the .qmd source files would break. If you
+detect that the canonical key would be different from what the entry
+uses (e.g., body says "Smith 2020" but key is "jones2018"), put the
+new key in `suggested_fix.rename_key_to` AND set `issue` to call out
+that the rename requires propagating every `[@oldkey]` and `@oldkey`
+reference in `book/quarto/contents/**/*.qmd` to the new name. The
+human reviewer must do this together; partial application breaks
+links.
+
+──────────── BIBLIOGRAPHY RULES (.claude/rules/bib-check.md) ────────
+{rules}
+──────────────────────── END BIBLIOGRAPHY RULES ─────────────────────"""
+
+
+def build_system_prompt() -> str:
+    """Inline bib-check.md into the prompt + append output-format spec.
+
+    bib-check.md is the canonical rule file (single source of truth).
+    The script does not duplicate its content — only the I/O contract
+    Gemini must follow lives here.
+    """
+    rules_text = RULES_PATH.read_text(encoding="utf-8") if RULES_PATH.exists() else "(rules file not found)"
+    return PROMPT_PREAMBLE.format(rules=rules_text) + """
+
+══════════════════════ OUTPUT FORMAT ══════════════════════
+Return ONLY a single JSON object (no markdown fences, no prose around it):
 
 {
   "verdicts": [
@@ -123,26 +152,30 @@ no markdown fences):
         "author": "Correct author list (BibTeX format)",
         "year": "YYYY",
         "venue": "Correct journal/booktitle",
+        "publisher": "Correct publisher (no city)",
+        "pages": "N--M",
         "doi": "10.xxxx/yyyy",
-        "rename_key_to": "new_canonical_key (only if the key itself is wrong)"
+        "rename_key_to": "new_canonical_key (only if the key itself is wrong; see CRITICAL note above)"
       },
       "sources": ["url1", "url2"]
     }
   ]
 }
 
-Rules for verdicts:
-- "verified" = author + title + year + venue all match a real paper, key
-  prefix matches author/year. Include a source URL even when verified, so
-  the human reviewer can spot-check.
-- "broken" = at least one field is demonstrably wrong. Include the fix.
-  Fields you cannot improve, omit from suggested_fix.
-- "uncertain" = the entry might be fine but you cannot find authoritative
-  confirmation in 2-3 search queries. Include what you tried in "issue".
+Verdict rules:
+- "verified" = author + title + year + venue match a real paper, key
+  prefix matches author/year, and the entry satisfies the bib-check.md
+  schema (publisher present where required, no city in publisher,
+  full author names, etc.). Include a source URL even when verified.
+- "broken" = at least one field is demonstrably wrong, OR a required
+  bib-check.md field is missing. Include the specific fix.
+- "uncertain" = the entry might be fine but you cannot find
+  authoritative confirmation in 2-3 search queries. Include what you
+  tried in "issue".
 
 Be conservative: only mark "broken" when you have a specific source
-URL contradicting the entry. Otherwise mark "uncertain" and let a human
-decide.
+URL contradicting the entry, OR a bib-check.md schema rule that's
+clearly violated. Otherwise mark "uncertain" and let a human decide.
 
 Entries to verify follow.
 """
@@ -239,8 +272,8 @@ def serialize_entry_for_prompt(entry) -> str:
 
 
 # ── Gemini invocation ──────────────────────────────────────────────────────
-def call_gemini(prompt_input: str, model: str) -> tuple[bool, str, str]:
-    """Invoke `gemini -m MODEL -p SYSTEM_PROMPT` with stdin = prompt_input.
+def call_gemini(prompt_input: str, system_prompt: str, model: str) -> tuple[bool, str, str]:
+    """Invoke `gemini -m MODEL -p system_prompt` with stdin = prompt_input.
 
     Returns (ok, stdout, stderr). Filters out the gemini-CLI internal
     error noise that mixes into stdout (matches gemini_review.py).
@@ -248,7 +281,7 @@ def call_gemini(prompt_input: str, model: str) -> tuple[bool, str, str]:
     for attempt in range(MAX_RETRIES):
         try:
             result = subprocess.run(
-                ["gemini", "-m", model, "-p", SYSTEM_PROMPT, "-o", "text"],
+                ["gemini", "-m", model, "-p", system_prompt, "-o", "text"],
                 input=prompt_input,
                 capture_output=True,
                 text=True,
@@ -406,13 +439,14 @@ def verify_batch(
     total_batches: int,
     out_dir: Path,
     model: str,
+    system_prompt: str,
 ) -> dict:
     """Verify one batch of entries via Gemini, write raw + parsed JSON."""
     label = f"{short_path(bib_path)} batch {batch_index + 1}/{total_batches} ({len(entries)} entries)"
     print(f"  [start]  {label}", flush=True)
     body = "\n\n".join(serialize_entry_for_prompt(e) for e in entries)
     t0 = time.time()
-    ok, stdout, stderr = call_gemini(body, model)
+    ok, stdout, stderr = call_gemini(body, system_prompt, model)
     elapsed = time.time() - t0
 
     raw_path = out_dir / f"batch_{batch_index:04d}_raw.txt"
@@ -623,6 +657,12 @@ def main() -> int:
         print(f"\n[dry-run] would send {len(tasks)} batches to Gemini")
         return 0
 
+    # Build the system prompt once (inlines bib-check.md at runtime)
+    system_prompt = build_system_prompt()
+    rules_size = len(system_prompt)
+    print(f"Prompt: {rules_size} chars (bib-check.md inlined from {short_path(RULES_PATH)})")
+    print()
+
     # Run with global thread pool, stagger starts to avoid burst rate-limit
     all_results: list[dict] = []
     with ThreadPoolExecutor(max_workers=args.max_parallel) as ex:
@@ -631,7 +671,7 @@ def main() -> int:
             if idx > 0 and idx % args.max_parallel == 0:
                 time.sleep(STAGGER_SECONDS)
             futures.append(ex.submit(
-                verify_batch, path, batch, i, n, out_dir, args.model
+                verify_batch, path, batch, i, n, out_dir, args.model, system_prompt
             ))
         for fut in as_completed(futures):
             try:
