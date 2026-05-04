@@ -7,23 +7,50 @@ topic: autograd-computational-graphs
 competency_area: optimization
 bloom_level: create
 phase: training
-title: 'Designing a custom autograd function for a differentiable rendering operation'
-scenario: 'You are building a differentiable neural radiance field (NeRF) renderer that requires a custom ray-marching operation on H100 (989 TFLOPS FP16, 3.35TB/s). The operation is not expressible as composition of standard PyTorch ops and requires a hand-written CUDA kernel. You need to integrate it into the autograd graph.'
-question: 'How would you wrap the custom H100 ray-marching CUDA kernel so gradients flow through PyTorch autograd?'
+title: Designing a custom autograd function for a differentiable rendering operation
+scenario: You are building a differentiable neural radiance field (NeRF) renderer that requires a custom
+  ray-marching operation on H100 (989 TFLOPS FP16, 3.35TB/s). The operation is not expressible as composition
+  of standard PyTorch ops and requires a hand-written CUDA kernel. You need to integrate it into the autograd
+  graph.
+question: How would you wrap the custom H100 ray-marching CUDA kernel so gradients flow through PyTorch
+  autograd?
 details:
-  realistic_solution: 'Subclass torch.autograd.Function. In forward(), call the CUDA kernel via a loaded extension and use ctx.save_for_backward() for needed intermediates. In backward(), implement the analytical gradient of the ray-marching operation and call the adjoint CUDA kernel. Register with @staticmethod and use apply() at call sites. Use gradcheck() with double precision to validate correctness.'
-  common_mistake: 'Implementing the CUDA kernel but wrapping it in a regular Python function, preventing autograd from computing gradients through it. Alternatively, trying to use .detach() in the middle of the computation and manually backpropagating, which breaks the gradient tape.'
-  napkin_math: |
-    **Assumptions & Constraints:**
+  realistic_solution: Subclass torch.autograd.Function. In forward(), call the CUDA kernel via a loaded
+    extension and use ctx.save_for_backward() for needed intermediates. In backward(), implement the analytical
+    gradient of the ray-marching operation and call the adjoint CUDA kernel. Register with @staticmethod
+    and use apply() at call sites. Use gradcheck() with double precision to validate correctness.
+  common_mistake: '**The Pitfall:** Implementing the CUDA kernel but wrapping it in a regular Python function,
+    preventing autograd from computing gradients through it.
+
+    **The Rationale:** Alternatively, trying to use .detach() in the middle of the computation and manually
+    backpropagating breaks the gradient tape.
+
+    **The Consequence:** The model cannot train because gradients do not flow properly through the custom
+    rendering operation.'
+  napkin_math: '**Assumptions & Constraints:**
+
     - NeRF ray marching: 512 rays * 256 samples * 8 feature dims = 1M operations.
+
     - Hardware: H100 at 989 TFLOPS.
 
+
     **Calculations:**
-    - Forward kernel: <1ms execution time.
-    - Backward kernel (adjoint): 1.5-2x more expensive due to scatter operations (<2ms).
+
+    - 1M operations is negligible compute (~1ns) for an H100.
+
+    - Real execution time will be dominated by kernel launch overhead and memory latency.
+
+    - Forward kernel: ~5-10 us launch overhead.
+
+    - Backward kernel: ~10-20 us due to scatter operations overhead.
+
 
     **Conclusion & Interpretation:**
-    - **Result: ~5-10ms total gradient step (Compute-Bound)**. Wrapping the custom CUDA kernel correctly ensures the adjoint runs efficiently in the backward pass.
+
+    - **Result: ~15-30 us total gradient step (Latency-Bound)**. Wrapping the custom CUDA kernel correctly
+    ensures the adjoint runs efficiently, though at this scale it is bound by launch overhead, not compute.
+
+    '
 status: published
 provenance: imported
 requires_explanation: false
