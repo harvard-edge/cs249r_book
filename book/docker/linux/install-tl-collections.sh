@@ -47,12 +47,22 @@ while IFS= read -r collection; do
     if command -v tlmgr >/dev/null 2>&1; then
       success=false
       for retry in 1 2; do
-        if tlmgr install "$collection"; then
+        # Capture tlmgr stdout+stderr so its actual error message reaches the
+        # CI log. The previous 'if tlmgr install ...; then' form left only
+        # "Attempt N failed" with no diagnostic, which masked a silent
+        # collection-fontsextra failure that took 3 hours to surface as a
+        # Vol II PDF build error.
+        tlmgr_log=$(mktemp)
+        tlmgr install "$collection" >"$tlmgr_log" 2>&1
+        tlmgr_status=$?
+        cat "$tlmgr_log"
+        rm -f "$tlmgr_log"
+        if [ "$tlmgr_status" -eq 0 ]; then
           printf '%s\n' "✅ Successfully installed $collection"
           success=true
           break
         else
-          printf '%s\n' "❌ Attempt $retry failed for $collection"
+          printf '%s\n' "❌ Attempt $retry failed for $collection (exit $tlmgr_status)"
           if [ "$retry" -lt 2 ]; then
             echo "⏳ Retrying in 5 seconds..."
             sleep 5
