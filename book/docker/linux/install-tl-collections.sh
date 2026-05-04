@@ -16,6 +16,20 @@ if ! tlmgr option repository "$TLMGR_REPO"; then
   exit 1
 fi
 
+# install-tl ran minutes ago against a tlnet snapshot; tlnet rolls forward
+# continuously, so by the time we reach 'tlmgr install collection-X' the local
+# tlmgr is often older than the remote tlpdb and tlmgr refuses with
+# "Local TL version is incompatible with the repository". Bring tlmgr in sync
+# first. Failure here is non-fatal — if the remote already matches, the update
+# is a no-op; if the network is flaky, the per-collection retry loop still gets
+# a chance.
+echo "🔄 Syncing tlmgr to remote tlpdb (tlmgr update --self)..."
+if tlmgr update --self; then
+  echo "✅ tlmgr is in sync with remote tlpdb"
+else
+  echo "⚠️ tlmgr --self update failed; collection install may still recover"
+fi
+
 printf '%s\n' "📊 Analyzing tl_packages file..."
 collection_count=$(grep -c '^collection-' /tmp/tl_packages 2>/dev/null || true)
 if [ -z "$collection_count" ] || [ "$collection_count" = "0" ]; then
