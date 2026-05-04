@@ -101,15 +101,21 @@ def load_yaml(path: Path) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
-def load_published_corpus(tracks: set[str] | None = None) -> dict[str, dict]:
+def load_published_corpus(tracks: set[str] | None = None,
+                           include_non_published: bool = False) -> dict[str, dict]:
     """qid -> full body for every status=published YAML.
 
     If ``tracks`` is provided, only return questions from those tracks.
+    If ``include_non_published`` is True, drafts/flagged/archived/deleted
+    are also returned — useful for an explicit-qids audit on items not
+    yet in the published set.
     """
     out: dict[str, dict] = {}
     for path in QUESTIONS_DIR.rglob("*.yaml"):
         d = load_yaml(path)
-        if not d or d.get("status") != "published":
+        if not d:
+            continue
+        if not include_non_published and d.get("status") != "published":
             continue
         if tracks and d.get("track") not in tracks:
             continue
@@ -589,7 +595,12 @@ def main() -> int:
         tracks = {t.strip() for t in args.tracks.split(",") if t.strip()}
 
     print("loading published corpus ...")
-    corpus = load_published_corpus(tracks=tracks)
+    # When --qids is given, allow drafts/flagged/archived/deleted: the
+    # operator is explicitly opting into auditing whatever they listed.
+    corpus = load_published_corpus(
+        tracks=tracks,
+        include_non_published=bool(args.qids),
+    )
     print(f"  {len(corpus)} candidates")
 
     if args.qids:
