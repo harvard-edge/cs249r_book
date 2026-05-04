@@ -43,8 +43,22 @@ failed_packages=""
 while IFS= read -r collection; do
   case "$collection" in
   collection-*)
-    printf '%s\n' "📦 [$i/$collection_count] Installing $collection..."
+    printf '%s\n' "📦 [$i/$collection_count] Processing $collection..."
     if command -v tlmgr >/dev/null 2>&1; then
+      # install-tl already installs most of these via scheme-medium (basic,
+      # fontsrecommended, fontutils, latex, latexrecommended, luatex,
+      # pictures, ...). Calling 'tlmgr install <already-present>' against
+      # mirror.ctan.org's random-mirror redirect can hit a stale mirror that
+      # refuses with a silent version-mismatch exit 1 — the failure mode that
+      # took down the 2026-05-04 16:23 build for collection-fontsrecommended.
+      # Query the local tlpdb (no network) first and skip if already installed;
+      # only collections that genuinely need network install (e.g. fontsextra,
+      # latexextra) reach the tlmgr install retry loop.
+      if tlmgr info --only-installed "$collection" 2>/dev/null | grep -q '^package:'; then
+        printf '%s\n' "✅ $collection already installed locally (no network call)"
+        i=$(expr "$i" + 1)
+        continue
+      fi
       success=false
       for retry in 1 2; do
         # Capture tlmgr stdout+stderr so its actual error message reaches the
