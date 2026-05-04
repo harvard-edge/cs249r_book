@@ -138,7 +138,10 @@ def call_gemini_judge(prompt: str, *, timeout: int = 600) -> dict | None:
     """
     try:
         result = subprocess.run(
-            ["gemini", "-m", GEMINI_MODEL, "-p", prompt, "--yolo"],
+            # --skip-trust required: cwd is a temp scratch dir Gemini doesn't
+            # treat as a trusted workspace; without --skip-trust the CLI
+            # silently overrides --yolo to "default" and exits 55 (2026-05-04).
+            ["gemini", "-m", GEMINI_MODEL, "-p", prompt, "--yolo", "--skip-trust"],
             capture_output=True, text=True, timeout=timeout,
             cwd=str(_GEMINI_SCRATCH_DIR),
         )
