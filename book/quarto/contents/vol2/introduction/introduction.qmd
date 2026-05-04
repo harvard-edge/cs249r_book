@@ -130,18 +130,18 @@ class Gpt4TrainingScenario:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     mission = Applications.Frontier
     num_gpus = 25000 # Specific fleet size for this mission
-    gpu_days = 100   # Standard training window
+    gpu_days = 90    # Reported GPT-4 training window
 
-    # Calculate MTBF from component MTTF (Physics Engine)
+    # Convert an 8% annual failure rate into component MTTF.
     # MTBF_cluster = MTTF_gpu/N
-    node_mttf = GPU_MTTF_HOURS
+    node_mttf = 109_500 * hour
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     cluster_mtbf_hours = node_mttf/num_gpus
     cluster_failures_per_day = 24 / cluster_mtbf_hours
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(cluster_mtbf_hours < 5, f"MTBF should be < 5 hours for 25k GPUs, got {cluster_mtbf_hours:.1f}")
+    check(cluster_mtbf_hours < 5 * hour, f"MTBF should be < 5 hours for 25k GPUs, got {cluster_mtbf_hours:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt4_gpus_str = fmt(num_gpus, precision=0)
@@ -1591,8 +1591,8 @@ The following notebook applies this law to a real-world cluster to calculate the
 # │
 # │ Goal: Quantify the Coordination Tax (time) and Energy Tax (joules)
 # │       for GPT-3 synchronization across IB HDR vs 100G Ethernet.
-# │ Show: "~700" GB sync size, ">90%" IB efficiency, and "~50" MJ energy
-# │       per training run sync.
+# │ Show: "~700" GB sync size, "~4%" IB efficiency, "~2%" Ethernet efficiency,
+# │       and "~84" J per synchronization.
 # │ How: sync_size = 2 × params × 2 bytes; energy = sync_bits * Energy_per_bit.
 # │
 # │ Imports: mlsysim.core.constants (GPT3_PARAMS, INFINIBAND_HDR_BW, Gbps,
@@ -1600,7 +1600,7 @@ The following notebook applies this law to a real-world cluster to calculate the
 # │ Exports: GPT3SyncTax.ib_efficiency_pct_str,
 # │          GPT3SyncTax.eth_efficiency_pct_str,
 # │          GPT3SyncTax.sync_size_gb_str,
-# │          GPT3SyncTax.sync_energy_mj_str
+# │          GPT3SyncTax.sync_energy_j_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
     GPT3_PARAMS, INFINIBAND_HDR_BW, Gbps, BILLION, BITS_PER_BYTE
@@ -1662,11 +1662,11 @@ To synchronize 175B parameters (FP16), a Ring All-Reduce\index{Ring All-Reduce} 
 
 **2. The Comparison (iron law of Scale)**:
 
-*   **InfiniBand (200 Gbps)**: High bandwidth and low latency yield a Scaling Efficiency of **`{python} GPT3SyncTax.ib_efficiency_pct_str` percent**. Most of the time is spent computing.
-*   **Ethernet (100 Gbps)**: Lower bandwidth and higher overhead collapse the Scaling Efficiency to **`{python} GPT3SyncTax.eth_efficiency_pct_str` percent**. The fleet spends most of its time waiting for the network.
+*   **InfiniBand (200 Gbps)**: High bandwidth and low latency yield a Scaling Efficiency of **`{python} GPT3SyncTax.ib_efficiency_pct_str` percent**. Even so, most of the step is still spent waiting on synchronization.
+*   **Ethernet (100 Gbps)**: Lower bandwidth and higher overhead collapse the Scaling Efficiency to **`{python} GPT3SyncTax.eth_efficiency_pct_str` percent**. The fleet spends even more of its time waiting for the network.
 
 **3. The Thermodynamic Cost (Energy Wall)**:
-Each gradient synchronization consumes approximately **`{python} GPT3SyncTax.sync_energy_j_str` Joules** of energy across the network fabric (at 15 pJ/bit). In a training run of 1 million steps, the network movement alone consumes gigajoules of energy.
+Each gradient synchronization consumes approximately **`{python} GPT3SyncTax.sync_energy_j_str` Joules** of energy across the network fabric (at 15 pJ/bit). In a training run of 1 million steps, the network movement alone consumes about 84 MJ of energy.
 
 **The Systems Insight**: Scale makes the network the primary "processor." If the network is inefficient, the GPUs sit idle, wasting millions of dollars in compute capacity. Furthermore, the thermodynamic cost of data movement (the Energy Wall) means that "more GPUs" is not a sustainable scaling strategy without communication-hiding and compression.
 
