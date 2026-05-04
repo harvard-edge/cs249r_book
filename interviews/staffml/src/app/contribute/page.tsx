@@ -2,7 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Send, Terminal, CheckCircle2, Github, Copy, Check } from "lucide-react";
+import { Send, Terminal, CheckCircle2, Copy, Check } from "lucide-react";
+import { GithubIcon } from "@/components/GithubIcon";
 import clsx from "clsx";
 import { getAreas } from "@/lib/taxonomy";
 import { buildContributeUrl } from "@/lib/issue-url";
@@ -205,7 +206,7 @@ export default function ContributePage() {
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-textPrimary text-background font-bold rounded-lg hover:opacity-90 transition-all text-sm"
             >
-              <Github className="w-4 h-4" /> Submit on GitHub
+              <GithubIcon className="w-4 h-4" /> Submit on GitHub
             </a>
             <button
               onClick={copyToClipboard}

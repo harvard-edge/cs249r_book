@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { BookOpen, Github, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, Shuffle } from "lucide-react";
+import { BookOpen, Target, ArrowLeft, Layers, Package, Users, Crosshair, Calendar, Shuffle } from "lucide-react";
+import { GithubIcon } from "@/components/GithubIcon";
 import { LEVELS } from "@/lib/levels";
 import { getQuestions } from "@/lib/corpus";
 import {
@@ -296,7 +297,7 @@ export default function AboutPage() {
         {/* ─── Open Source ─── */}
         <section className="mb-10">
           <h2 className="text-lg font-bold text-textPrimary mb-3 flex items-center gap-2">
-            <Github className="w-4.5 h-4.5 text-textSecondary" /> Open Source
+            <GithubIcon className="w-4.5 h-4.5 text-textSecondary" /> Open Source
           </h2>
           <p className="text-[14px] text-textSecondary leading-relaxed mb-3">
             The entire question corpus, taxonomy, and web application are open source.
@@ -308,7 +309,7 @@ export default function AboutPage() {
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-4 py-2 bg-surface border border-border text-textSecondary hover:text-textPrimary rounded-lg text-sm font-medium transition-colors"
           >
-            <Github className="w-4 h-4" /> View on GitHub
+            <GithubIcon className="w-4 h-4" /> View on GitHub
           </a>
           <p className="text-[11px] text-textTertiary font-mono mt-4">
             v{RELEASE_ID} &middot; built {BUILD_DATE.slice(0, 10)}

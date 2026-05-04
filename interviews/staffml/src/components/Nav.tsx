@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ECOSYSTEM_BASE } from "../lib/env";
 import {
-  Library, Target, Crosshair, BarChart3, BookOpen, Github,
+  Library, Target, Crosshair, BarChart3, BookOpen,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
   Star, Bug, Send, Atom, Network,
 } from "lucide-react";
