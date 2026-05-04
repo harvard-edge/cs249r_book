@@ -766,7 +766,7 @@ The combination of operator fusion (reducing the number of kernels) and CUDA Gra
 
 ### FlashAttention: Tiled attention as a system primitive {#sec-performance-engineering-flashattention}
 
-Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape $[\text{sequence length}\times\text{head dimension}]$. The na\"ive implementation materializes the full $N\times N$ attention matrix $S = QK^T$ in HBM, where $N$ is the sequence length. For $N = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 = 128$ MB per attention head. At 32 heads, the materialized attention matrices require 4 GB per layer, dominating memory traffic for the entire forward pass.
+Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $N{\times}N$ attention matrix $S = QK^T$ in HBM, where $N$ is the sequence length. For $N = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 = 128$ MB per attention head. At 32 heads, the materialized attention matrices require 4 GB per layer, dominating memory traffic for the entire forward pass.
 
 ```{python}
 #| label: flash-attention-savings-refactor
@@ -833,15 +833,15 @@ class FlashAttentionSavings:
     flash_savings_factor_str = f"{savings_ratio:.0f}"
 ```
 
-FlashAttention [@dao2022flashattention] reformulates attention as a **tiled** computation. Instead of materializing the full $N\times N$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads a block of $Q$ rows and iterates over blocks of $K$ and $V$ columns, computing partial attention scores and maintaining running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
+FlashAttention [@dao2022flashattention] reformulates attention as a **tiled** computation. Instead of materializing the full $N{\times}N$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads a block of $Q$ rows and iterates over blocks of $K$ and $V$ columns, computing partial attention scores and maintaining running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
 
 The HBM traffic reduction is dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 32 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the na\"ive attention reads and writes approximately `{python} FlashAttentionSavings.naive_mb_str` MB of attention matrices through HBM. FlashAttention reads $Q$, $K$, $V$ and writes $O$ once each, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` MB. This is a `{python} FlashAttentionSavings.savings_str`$\times$ reduction in HBM traffic, translating directly into a proportional speedup for this memory-bound operation.
 
 The key insight behind FlashAttention is the **online softmax**[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information.
 
-[^fn-online-softmax-algo]: **Online Softmax**: "Online" here is an algorithmic term meaning the computation processes data incrementally in a single pass without storing the full input -- the same sense as in "online learning" or "online algorithms." This property is what makes tiling possible: the algorithm never needs the complete $N\times N$ score matrix in memory simultaneously, reducing attention memory from $O(N^2)$ to $O(N)$ and making long-context inference feasible on fixed-size SRAM. \index{Online Softmax!FlashAttention}
+[^fn-online-softmax-algo]: **Online Softmax**: "Online" here is an algorithmic term meaning the computation processes data incrementally in a single pass without storing the full input -- the same sense as in "online learning" or "online algorithms." This property is what makes tiling possible: the algorithm never needs the complete $N{\times}N$ score matrix in memory simultaneously, reducing attention memory from $O(N^2)$ to $O(N)$ and making long-context inference feasible on fixed-size SRAM. \index{Online Softmax!FlashAttention}
 
-Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $N\times N$ matrix.
+Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $N{\times}N$ matrix.
 
 The online algorithm avoids this by maintaining running statistics that are updated incrementally as each tile is processed. When processing tile $t$, the algorithm:
 
@@ -858,7 +858,7 @@ A concrete numerical example clarifies the memory savings. Consider one attentio
 
 The na\"ive algorithm computes $S = QK^T$, a matrix of shape $8192\times8192$. In FP16, this score matrix occupies $8192 \times 8192 \times 2 = 128$ MB per head. After applying softmax, the result $P = \text{softmax}(S)$ is also $128$ MB. Computing $PV$ requires reading $P$ again. In total, the na\"ive algorithm reads $Q$, $K$, $V$ from HBM (6 MB), writes $S$ (128 MB), reads $S$ for softmax (128 MB), writes $P$ (128 MB), reads $P$ for the final multiply (128 MB), and writes $O$ (2 MB). The total HBM traffic is approximately 520 MB per head, dominated by the quadratic intermediates.
 
-FlashAttention processes the computation in tiles of size $B_r\times B_c$ (typically $128\times128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
+FlashAttention processes the computation in tiles of size $B_r{\times}B_c$ (typically $128\times128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
 
 FlashAttention-2 [@dao2023flashattention2] further optimizes the algorithm for modern GPU architectures by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy on GPUs with many streaming multiprocessors. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
 
@@ -866,11 +866,11 @@ FlashAttention-3 targets the H100's new hardware features: FP8 Tensor Cores and 
 
 ::: {.callout-war-story title="The FlashAttention Breakthrough"}
 
-In 2022, Tri Dao challenged the prevailing wisdom that the attention mechanism's $O(N^2)$ complexity required better matrix multiplication kernels. His insight was that the bottleneck was not compute, but memory hierarchy. Standard attention materialized the massive $N\times N$ attention score matrix in high-latency HBM. FlashAttention restructured the algorithm using tiling to keep running statistics in on-chip SRAM, computing the softmax without ever writing the full matrix to global memory. This reduced memory complexity to linear $O(N)$ and wall-clock time by 2$\times$--4$\times$. Within six months, it was integrated into PyTorch, TensorFlow, and JAX, becoming the default attention implementation for the industry.
+In 2022, Tri Dao challenged the prevailing wisdom that the attention mechanism's $O(N^2)$ complexity required better matrix multiplication kernels. His insight was that the bottleneck was not compute, but memory hierarchy. Standard attention materialized the massive $N{\times}N$ attention score matrix in high-latency HBM. FlashAttention restructured the algorithm using tiling to keep running statistics in on-chip SRAM, computing the softmax without ever writing the full matrix to global memory. This reduced memory complexity to linear $O(N)$ and wall-clock time by 2$\times$--4$\times$. Within six months, it was integrated into PyTorch, TensorFlow, and JAX, becoming the default attention implementation for the industry.
 
 :::
 
-@fig-flashattention-memory-savings quantifies the memory advantage across sequence lengths. Standard attention allocates the full $N\times N$ score matrix in HBM, while FlashAttention maintains only $O(N)$ running statistics. The gap widens quadratically: at a typical 8K context, FlashAttention uses 4,096$\times$ less attention memory; at 64K long-context, the savings reach 32,768$\times$.
+@fig-flashattention-memory-savings quantifies the memory advantage across sequence lengths. Standard attention allocates the full $N{\times}N$ score matrix in HBM, while FlashAttention maintains only $O(N)$ running statistics. The gap widens quadratically: at a typical 8K context, FlashAttention uses 4,096$\times$ less attention memory; at 64K long-context, the savings reach 32,768$\times$.
 
 ::: {.callout-checkpoint title="FlashAttention Mechanics"}
 
@@ -883,7 +883,7 @@ Verify your understanding of memory-aware attention:
 
 :::
 
-::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention Memory Savings**. $O(N^2) \rightarrow O(N)$. Standard attention allocates the full $N\times N$ score matrix in HBM, while FlashAttention maintains only $O(N)$ running statistics. The shaded region represents memory freed for KV cache, activations, or larger batch sizes. At long-context lengths (64K+), the savings exceed four orders of magnitude." fig-alt="Log-log plot of attention memory vs. sequence length. Standard O(N²) curve rises steeply; FlashAttention O(N) stays flat. Shaded region shows savings, with annotations at 8K and 65K."}
+::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention Memory Savings**. $O(N^2) \rightarrow O(N)$. Standard attention allocates the full $N{\times}N$ score matrix in HBM, while FlashAttention maintains only $O(N)$ running statistics. The shaded region represents memory freed for KV cache, activations, or larger batch sizes. At long-context lengths (64K+), the savings exceed four orders of magnitude." fig-alt="Log-log plot of attention memory vs. sequence length. Standard O(N²) curve rises steeply; FlashAttention O(N) stays flat. Shaded region shows savings, with annotations at 8K and 65K."}
 
 ```{python}
 #| echo: false
@@ -2062,7 +2062,7 @@ The Nsight Systems trace shows that GEMM time decreased by approximately 45 perc
 
 The second round targets the 14 percent of step time consumed by element-wise operations and the 24 percent consumed by attention. Applying `torch.compile` with the `max-autotune` backend fuses element-wise operations (GELU, LayerNorm, residual additions), reducing their contribution from 14 percent to approximately 4 percent of step time. Simultaneously, enabling FlashAttention-2 replaces the standard attention implementation, reducing attention HBM traffic by approximately 16$\times$ for the prefill phase.
 
-For the decode phase, FlashAttention's impact is more modest because decode attention is dominated by KV cache reads rather than the $N\times N$ score matrix. However, the combination of INT8 KV cache compression and FlashAttention's efficient paged attention kernel reduces attention decode time by approximately 30 percent.
+For the decode phase, FlashAttention's impact is more modest because decode attention is dominated by KV cache reads rather than the $N{\times}N$ score matrix. However, the combination of INT8 KV cache compression and FlashAttention's efficient paged attention kernel reduces attention decode time by approximately 30 percent.
 
 The `reduce-overhead` mode in `torch.compile` wraps the decode step in a CUDA Graph, eliminating the 12 percent kernel launch overhead almost entirely.
 
