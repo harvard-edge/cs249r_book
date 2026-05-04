@@ -1008,6 +1008,13 @@ class ValidateCommand:
            (2016)" from the key. Prefer `[@key]` / `[@a; @b]` alone, or
            narrative `@key`.
 
+        1b. **Narrative + duplicated year**. Writing
+            "@williams2009roofline introduced the model at UC Berkeley in
+            2009" repeats the year that the narrative citation already
+            renders. If the year is only there to identify the cited work,
+            move or drop it. If the year is a separate timeline fact, reword
+            so the prose does not read like duplicated attribution.
+
         2. **Bare attribution** (no bib citation at all). Writing
            "Tri Dao et al. at Stanford (2022)" or "Coffman et al. (1971)"
            with no accompanying `[@key]` or narrative `@bibkey` on the line
@@ -1350,6 +1357,22 @@ class ValidateCommand:
                 context=context,
             )
 
+        def issue_narrative_year_dup(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="narrative_citation_year",
+                message=(
+                    "Narrative citation already renders the cited work's year. "
+                    "Do not repeat the same year later in the clause; move it "
+                    "or remove it unless it is a genuinely separate timeline fact."
+                ),
+                severity="error",
+                context=context,
+            )
+
         def issue_period_before_bracket(
             f: Path, line_num: int, context: str
         ) -> ValidationIssue:
@@ -1453,6 +1476,23 @@ class ValidateCommand:
                         max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
                     ].strip()
                     issues.append(issue_comma_multicite(file, idx, context))
+                for m in narrative_cite.finditer(scrubbed):
+                    key = m.group(0)[1:]
+                    key_year_match = re.search(r"(?:18|19|20)\d{2}", key)
+                    if not key_year_match:
+                        continue
+                    key_year = key_year_match.group(0)
+                    tail = scrubbed[m.end() : m.end() + 120]
+                    year_dup = re.search(
+                        rf"\b(?:in|at|on|from|during|since)\s*\(?{key_year}\)?\b"
+                        rf"|(?:\(\s*{key_year}\s*\))",
+                        tail,
+                    )
+                    if year_dup:
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 80)
+                        ].strip()
+                        issues.append(issue_narrative_year_dup(file, idx, context))
                 # Bare attribution: only flag when the line carries no real
                 # citation. A bracket cite anywhere or a narrative @bibkey
                 # (i.e., @ followed by a non-cross-ref word) suppresses this.
@@ -5139,101 +5179,16 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Source citation validation  (delegated to manage_sources.py)
+    # Source citation validation (native audit.checks.source_citations)
     # ------------------------------------------------------------------
 
     def _run_sources(self, root: Path) -> ValidationRunResult:
-        """Validate source citation patterns (asterisk sources, missing periods, etc.).
-
-        Native import of book/tools/scripts/utilities/manage_sources.py via
-        importlib — no subprocess. Instantiates SourceChecker pointed at
-        the contents directory, runs analyze_sources(), and reads the
-        populated `problems` dict to emit one ValidationIssue per
-        pattern hit. The script itself remains callable as a standalone
-        CLI for its --clean / --report modes.
-        """
-        import importlib.util
-        import sys as _sys
-        import io
-        import contextlib
-
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "utilities" / "manage_sources.py"
-        )
-        mod_name = "mlsys_manage_sources"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
-
-        t0 = time.time()
-        # SourceChecker resolves files via target_directories — pass an absolute
-        # path to contents/ so we don't depend on cwd (the original subprocess
-        # invocation set cwd=quarto_dir; this is the cwd-free equivalent).
-        contents_dir = root if root.name == "contents" else root / "contents"
-        if not contents_dir.exists():
-            # Fall back to the canonical book/quarto/contents location.
-            contents_dir = (
-                Path(__file__).resolve().parent.parent.parent
-                / "quarto" / "contents"
-            )
-
-        checker = mod.SourceChecker(target_directories=[str(contents_dir)])
-        # SourceChecker's analyze_sources() prints status banners; suppress
-        # them so binder's own renderer owns the output channel.
-        with contextlib.redirect_stdout(io.StringIO()):
-            try:
-                checker.analyze_sources()
-            except Exception as e:
-                elapsed = int((time.time() - t0) * 1000)
-                return ValidationRunResult(
-                    name="sources", description="Source citation validation",
-                    files_checked=0, elapsed_ms=elapsed,
-                    issues=[ValidationIssue(
-                        file=str(script.relative_to(root)) if script.is_relative_to(root) else str(script),
-                        line=0, code="sources-runtime-error",
-                        message=f"SourceChecker failed: {type(e).__name__}: {e}",
-                        severity="error",
-                    )],
-                )
-
-        issues: List[ValidationIssue] = []
-        # checker.problems is dict[category, list[{file, line, text, ...}]]
-        for category, hits in checker.problems.items():
-            for hit in hits:
-                hit_file = str(hit.get("file", "?"))
-                p = Path(hit_file)
-                if p.is_absolute():
-                    try:
-                        rel = str(p.relative_to(root))
-                    except ValueError:
-                        rel = hit_file
-                else:
-                    rel = hit_file
-                issues.append(ValidationIssue(
-                    file=rel,
-                    line=int(hit.get("line", 0) or 0),
-                    code=category,
-                    message=str(hit.get("text", ""))[:200],
-                    severity="error",
-                    context="",
-                ))
-
-        elapsed = int((time.time() - t0) * 1000)
-        if not issues:
-            return ValidationRunResult(
-                name="sources", description="Source citation validation",
-                files_checked=int(checker.stats.get("total_files", 0) or 0),
-                issues=[], elapsed_ms=elapsed,
-            )
-        return ValidationRunResult(
-            name="sources", description="Source citation validation",
-            files_checked=int(checker.stats.get("total_files", 0) or 0),
-            issues=issues, elapsed_ms=elapsed,
+        """Validate source citation patterns via `audit.checks.source_citations`."""
+        return self._run_audit_check(
+            root,
+            "audit.checks.source_citations",
+            "sources",
+            "Source citation validation",
         )
 
     def _run_check_references(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:
