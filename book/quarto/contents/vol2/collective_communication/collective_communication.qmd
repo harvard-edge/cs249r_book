@@ -56,7 +56,7 @@ The gap between that assumption and reality reveals a fundamental asymmetry in *
 
 ***Gradient Synchronization***\index{Gradient Synchronization!definition} is the collective communication protocol executed at each training step in which every worker transmits its locally computed gradient tensor to all other workers, receives their gradients, and computes an aggregate update that all workers apply identically to their model copies.
 
-1.  **Significance (Quantitative):** A 70B-parameter model in BF16 generates 140 GB of gradient data per worker per step. Synchronizing across 1,000 GPUs via ring AllReduce at 50 GB/s per link requires approximately 140 GB/50 GB/s $\approx 2.8$ seconds of communication per step—dominating the $L_{\text{lat}}$ term in the iron law and consuming 40–70 percent of total training time before overlap techniques are applied.
+1.  **Significance (Quantitative):** A 70B-parameter model in BF16 generates 140 GB of gradient data per worker per step. Synchronizing across 1,000 GPUs via ring AllReduce at 50 GB/s per link requires approximately $2 \times 140$ GB/50 GB/s $\approx 5.6$ seconds of communication per step—dominating the $L_{\text{lat}}$ term in the iron law and consuming 40–70 percent of total training time before overlap techniques are applied.
 2.  **Distinction (Durable):** Unlike parameter-server approaches (where all workers send gradients to a centralized aggregator whose bandwidth scales as $O(N)$), ring AllReduce distributes the communication across all workers so that each worker's per-step communication cost stays constant at $2 \times (N-1)/N \times \text{gradient\_size}$ regardless of cluster size.
 3.  **Common Pitfall:** A frequent misconception is that gradient synchronization overhead scales with the number of GPUs. In ring AllReduce, per-node communication volume is constant as the cluster grows—the bottleneck is the gradient volume per step (proportional to model size), not the number of participants.
 
@@ -303,7 +303,7 @@ Expert Parallelism refers to the mixture-of-experts (MoE)[^fn-moe-sparsity] arch
 
 A datacenter engineer cannot predict how long it takes to send ten megabytes across a cluster without knowing two distinct variables: the fixed startup tax and the per-byte transit fee. As the gradient begins its journey, it immediately encounters the physical reality of the datacenter network.
 
-### The - reality: When physics fights back {#sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4}
+### The reality: When physics fights back {#sec-communication-collective-operations-collective-operations-alphabeta-model-f9b4}
 
 Every step our gradient takes is governed by the linear cost model $T(n) = \alpha + n/\beta$. This is not merely a formula; it is the "Physics of Failure" for distributed systems.
 
@@ -522,7 +522,7 @@ The alpha-beta model becomes most valuable when applied to real training configu
 # │ Goal: Quantify hierarchical AllReduce vs. flat Ring AllReduce for a 70B
 # │       model across 128 GPUs (16 nodes × 8 GPUs) to show that hierarchical
 # │       decomposition cuts inter-node traffic by 8×, enabling overlap.
-# │ Show: hier_total_llama_ms ≈ 399 ms vs flat_total_ms ≈ 5,600 ms—inline.
+# │ Show: hier_total_llama_ms ≈ 305 ms vs flat_total_ms ≈ 5,600 ms—inline.
 # │ How: α-β model applied per tier: NVLink ReduceScatter → IB Ring → NVLink
 # │      AllGather; comm-to-compute ratio computed for both strategies.
 # │
@@ -939,9 +939,9 @@ The resulting time complexity reflects this trade-off:
 $$ T_{\text{tree}} = \underbrace{2\log_2 N \cdot \alpha}_{\text{Latency}} + \underbrace{2 \log_2 N \frac{M}{\beta}}_{\text{Bandwidth}} $$
 
 *   **Latency**: Logarithmic ($O(\log N)$). For 1024 nodes, Ring needs 2046 steps while Tree needs only 20. This 100$\times$ reduction in steps makes Tree the preferred algorithm for latency-sensitive collectives such as tensor parallelism's per-layer AllReduce, where message sizes are small but frequency is high.
-*   **Bandwidth**: The $\log_2 N$ factor in the bandwidth term (vs. Ring's constant factor of 2) means Tree sends $\log_2 N/2$ times more data per node. For 64 GPUs, this amounts to $6/2 = 3\times$ more bandwidth consumed. This bandwidth penalty makes Tree a poor choice for data parallelism's large gradient AllReduce, where bandwidth efficiency determines whether the network is fully utilized or partially idle.
+*   **Bandwidth**: The $\log_2 N$ factor in the bandwidth term (vs. Ring's constant factor of 2) means Tree sends $\log_2 N$ times more data per node. For 64 GPUs, this amounts to $6\times$ more bandwidth consumed. This bandwidth penalty makes Tree a poor choice for data parallelism's large gradient AllReduce, where bandwidth efficiency determines whether the network is fully utilized or partially idle.
 
-This bandwidth penalty is catastrophic for large-scale data parallelism. For our 175B parameter model's 350 GB gradient AllReduce across 1,000 GPUs, the bandwidth term's $\log_2(1000) \approx 10$ multiplier means Tree would move roughly 10 times more data through the network than Ring---3.5 *terabytes* per GPU per training step. This would saturate the network for an order of magnitude longer, completely erasing any latency advantage.
+This bandwidth penalty is catastrophic for large-scale data parallelism. For our 175B parameter model's 350 GB gradient AllReduce across 1,000 GPUs, the bandwidth term's $\log_2(1000) \approx 10$ multiplier means Tree would move roughly 10 times more data through the network than Ring---7 *terabytes* per GPU per training step. This would saturate the network for an order of magnitude longer, completely erasing any latency advantage.
 
 Tree AllReduce is, however, the correct choice when latency is the primary bottleneck, typically for smaller collectives with small message sizes. The canonical use case is the AllReduce required for tensor parallelism, which operates on activations or weight gradients within a single layer. For an 8-GPU group inside a node communicating a 50 MB tensor, the latency drops from Ring's $2(8-1)\alpha = 14\alpha$ to Tree's $2\log_2(8)\alpha = 6\alpha$. The bandwidth penalty is a mere factor of $\log_2(8)=3$, a small price to pay for more than halving the latency.
 
@@ -1018,7 +1018,7 @@ latency_sec = 1e-6
 message_sizes = np.logspace(3, 10, 100)
 
 t_ring = 2 * (N - 1) * latency_sec + (2 * (N - 1) / N) * (message_sizes/bandwidth_bytes_sec)
-t_tree = 2 * np.log2(N) * latency_sec + (2 * np.log2(N)) * (message_sizes/bandwidth_bytes_sec) * 0.5
+t_tree = 2 * np.log2(N) * latency_sec + (2 * np.log2(N)) * (message_sizes/bandwidth_bytes_sec)
 t_dbt = 2 * np.log2(N) * latency_sec * 1.2 + (2 * (N - 1) / N) * (message_sizes/bandwidth_bytes_sec) * 1.05
 
 t_ring_ms = t_ring * 1000
