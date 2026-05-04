@@ -1065,6 +1065,29 @@ class ValidateCommand:
             r"\b[A-Z][a-z][a-zA-Z'-]*\s+&\s+[A-Z][a-z][a-zA-Z'-]*\s*"
             r"\([^)\n]{0,500}\)\s*,?\s*\[@"
         )
+        # "Hennessy and Patterson [@Patterson2021]" — two surnames + and + bracket
+        # cite, with no paren-year between. Distinct from `two_surname_and_paren`
+        # (which requires a paren-year and is a *bare* attribution) and from
+        # `two_surname_amp_bracket` (which uses & and requires a paren). Citeproc
+        # renders [@key] as "(Author and Author YEAR)" — duplicates the prose.
+        two_surname_and_bracket = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+\s*,?\s*\[@"
+        )
+        # "(Sweeney, 2002) [@sweeney2002k]" — single-author parenthetical year
+        # immediately before a bracket cite. Citeproc renders [@key] as
+        # "(Author YEAR)" so the (Surname, YEAR) prose duplicates it.
+        single_paren_author_year_bracket = re.compile(
+            r"\(\s*[A-Z][a-z][a-zA-Z'-]+,\s*(?:19|20)\d{2}\s*\)\s*,?\s*\[@"
+        )
+        # "**Optimal Brain Damage (LeCun, 1989)** [@cite]:" — footnote bold head
+        # whose parenthetical already names (Author, YEAR) or (YEAR), followed
+        # immediately by [@cite]. Per the book's footnote convention (Dartmouth
+        # Conference, AlexNet, HIPAA, EU AI Act, A11 Bionic, Optimal Brain
+        # Damage, etc.), the bold head IS the attribution — adding a bracket
+        # cite right after produces "(YEAR) (Author YEAR)" in the rendered output.
+        bold_head_year_bracket = re.compile(
+            r"\*\*[^*\n]*\([^)\n]*\b(?:19|20)\d{2}\b[^)\n]*\)\*\*\s*\[@"
+        )
         # "et al. <opt-words> ( … YEAR … )" — bare attribution.
         # Requires a 4-digit publication year inside the paren so we don't
         # flag unrelated parentheticals.
@@ -1231,6 +1254,59 @@ class ValidateCommand:
                 context=context,
             )
 
+        def issue_two_surname_and_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *Surname and Surname* before a bracket cite — "
+                    "citeproc already prints both authors from [@key]. Use "
+                    "narrative @key (renders as 'Surname and Surname (YEAR)') "
+                    "or [@key] alone, not both."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_single_paren_year_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *(Surname, YEAR)* before a bracket cite — "
+                    "citeproc renders [@key] as '(Author YEAR)' immediately "
+                    "after, duplicating the prose. Use [@key] alone."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_bold_head_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Footnote bold head **Term (Author, YEAR)** is followed by "
+                    "a bracket cite [@key]; citeproc renders '(Author YEAR)' "
+                    "right after, duplicating the head's parenthetical. Per "
+                    "book convention (Dartmouth Conference, AlexNet, HIPAA, "
+                    "EU AI Act, etc.), the bold head IS the attribution — drop "
+                    "the cite, or place it later in the body attached to a "
+                    "specific factual claim."
+                ),
+                severity="error",
+                context=context,
+            )
+
         for file in files:
             lines = self._read_text(file).splitlines()
             in_code = False
@@ -1252,6 +1328,21 @@ class ValidateCommand:
                         max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
                     ].strip()
                     issues.append(issue_ampersand(file, idx, context))
+                for m in two_surname_and_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_two_surname_and_bracket(file, idx, context))
+                for m in single_paren_author_year_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_single_paren_year_bracket(file, idx, context))
+                for m in bold_head_year_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_bold_head_bracket(file, idx, context))
                 # Bare attribution: only flag when the line carries no real
                 # citation. A bracket cite anywhere or a narrative @bibkey
                 # (i.e., @ followed by a non-cross-ref word) suppresses this.
