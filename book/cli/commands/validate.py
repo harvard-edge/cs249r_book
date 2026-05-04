@@ -1065,6 +1065,52 @@ class ValidateCommand:
             r"\b[A-Z][a-z][a-zA-Z'-]*\s+&\s+[A-Z][a-z][a-zA-Z'-]*\s*"
             r"\([^)\n]{0,500}\)\s*,?\s*\[@"
         )
+        # "Hennessy and Patterson [@Patterson2021]" — two surnames + and + bracket
+        # cite, with no paren-year between. Distinct from `two_surname_and_paren`
+        # (which requires a paren-year and is a *bare* attribution) and from
+        # `two_surname_amp_bracket` (which uses & and requires a paren). Citeproc
+        # renders [@key] as "(Author and Author YEAR)" — duplicates the prose.
+        two_surname_and_bracket = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+\s*,?\s*\[@"
+        )
+        # "(Sweeney, 2002) [@sweeney2002k]" — single-author parenthetical year
+        # immediately before a bracket cite. Citeproc renders [@key] as
+        # "(Author YEAR)" so the (Surname, YEAR) prose duplicates it.
+        single_paren_author_year_bracket = re.compile(
+            r"\(\s*[A-Z][a-z][a-zA-Z'-]+,\s*(?:19|20)\d{2}\s*\)\s*,?\s*\[@"
+        )
+        # "**Optimal Brain Damage (LeCun, 1989)** [@cite]:" — footnote bold head
+        # whose parenthetical already names (Author, YEAR) or (YEAR), followed
+        # immediately by [@cite]. Per the book's footnote convention (Dartmouth
+        # Conference, AlexNet, HIPAA, EU AI Act, A11 Bionic, Optimal Brain
+        # Damage, etc.), the bold head IS the attribution — adding a bracket
+        # cite right after produces "(YEAR) (Author YEAR)" in the rendered output.
+        bold_head_year_bracket = re.compile(
+            r"\*\*[^*\n]*\([^)\n]*\b(?:19|20)\d{2}\b[^)\n]*\)\*\*\s*\[@"
+        )
+        # "[^fn-X]: **Term** [@cite]: ..." — footnote bold head followed
+        # immediately by a [@cite], even when the head has no parenthetical
+        # year. citeproc still inserts "(Author YEAR)" right where you put
+        # [@cite], producing rendered output like "**Federated Learning**
+        # (Li et al. 2020): A distributed training paradigm…" — the cite
+        # reads as part of the term name. Place the cite inside the body
+        # sentence at a specific factual claim instead.
+        footnote_head_then_bracket = re.compile(
+            r"^\[\^fn-[a-z0-9-]+\]:\s*\*\*[^*\n]+\*\*\s*\[@",
+            re.M,
+        )
+        # "text.[@cite]" — period BEFORE the cite. Convention is the
+        # opposite: the cite is part of the sentence, so it goes before the
+        # terminal punctuation: "text [@cite]." Pandoc renders the wrong
+        # order with the period jammed against the citation visually.
+        period_before_bracket = re.compile(r"\S\.\[@[A-Za-z]")
+        # "word[@cite]" — no space before the cite. A parenthetical citation
+        # always takes a leading space in body prose. Excludes footnote
+        # markers and reference labels.
+        no_space_before_bracket = re.compile(r"[a-zA-Z]\[@(?!sec-|fig-|tbl-|eq-|lst-|exr-|exm-|thm-|cor-|cnj-|def-|prp-|rem-|prf-|alg-)[A-Za-z]")
+        # "[@a, @b]" — comma-separated multi-cite. Pandoc's citation syntax
+        # requires semicolons: "[@a; @b]".
+        comma_multicite = re.compile(r"\[@[A-Za-z][\w:.-]+,\s*@[A-Za-z]")
         # "et al. <opt-words> ( … YEAR … )" — bare attribution.
         # Requires a 4-digit publication year inside the paren so we don't
         # flag unrelated parentheticals.
@@ -1231,6 +1277,126 @@ class ValidateCommand:
                 context=context,
             )
 
+        def issue_two_surname_and_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *Surname and Surname* before a bracket cite — "
+                    "citeproc already prints both authors from [@key]. Use "
+                    "narrative @key (renders as 'Surname and Surname (YEAR)') "
+                    "or [@key] alone, not both."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_single_paren_year_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *(Surname, YEAR)* before a bracket cite — "
+                    "citeproc renders [@key] as '(Author YEAR)' immediately "
+                    "after, duplicating the prose. Use [@key] alone."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_bold_head_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Footnote bold head **Term (Author, YEAR)** is followed by "
+                    "a bracket cite [@key]; citeproc renders '(Author YEAR)' "
+                    "right after, duplicating the head's parenthetical. Per "
+                    "book convention (Dartmouth Conference, AlexNet, HIPAA, "
+                    "EU AI Act, etc.), the bold head IS the attribution — drop "
+                    "the cite, or place it later in the body attached to a "
+                    "specific factual claim."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_footnote_head_then_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Footnote bold head **Term** followed immediately by "
+                    "[@cite] — citeproc inserts '(Author YEAR)' right after "
+                    "the term name, making the cite read as part of the term "
+                    "rather than attribution for the body. Place the cite "
+                    "inside the body sentence at a specific factual claim "
+                    "(e.g., '...without centralizing the raw information "
+                    "[@key].')."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_period_before_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Period BEFORE the citation. Convention is "
+                    "\"text [@cite].\" not \"text.[@cite]\" — the citation "
+                    "is part of the sentence and goes before terminal "
+                    "punctuation."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_no_space_before_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Citation glued to the preceding word. Always insert a "
+                    "space: \"word [@cite]\" not \"word[@cite]\"."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_comma_multicite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Comma-separated multi-cite [@a, @b]. Pandoc's citation "
+                    "syntax requires semicolons: [@a; @b]."
+                ),
+                severity="error",
+                context=context,
+            )
+
         for file in files:
             lines = self._read_text(file).splitlines()
             in_code = False
@@ -1252,6 +1418,41 @@ class ValidateCommand:
                         max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
                     ].strip()
                     issues.append(issue_ampersand(file, idx, context))
+                for m in two_surname_and_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_two_surname_and_bracket(file, idx, context))
+                for m in single_paren_author_year_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_single_paren_year_bracket(file, idx, context))
+                for m in bold_head_year_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_bold_head_bracket(file, idx, context))
+                if footnote_head_then_bracket.match(scrubbed):
+                    context = scrubbed[: min(len(scrubbed), 80)]
+                    issues.append(issue_footnote_head_then_bracket(file, idx, context))
+                for m in period_before_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_period_before_bracket(file, idx, context))
+                for m in no_space_before_bracket.finditer(scrubbed):
+                    # Skip footnote markers like text[^fn-...] which look similar but
+                    # the regex requires "[@" so footnote markers (which use "[^") don't match.
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_no_space_before_bracket(file, idx, context))
+                for m in comma_multicite.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_comma_multicite(file, idx, context))
                 # Bare attribution: only flag when the line carries no real
                 # citation. A bracket cite anywhere or a narrative @bibkey
                 # (i.e., @ followed by a non-cross-ref word) suppresses this.
