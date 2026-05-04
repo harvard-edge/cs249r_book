@@ -54,7 +54,13 @@ while IFS= read -r collection; do
       # Query the local tlpdb (no network) first and skip if already installed;
       # only collections that genuinely need network install (e.g. fontsextra,
       # latexextra) reach the tlmgr install retry loop.
-      if tlmgr info --only-installed "$collection" 2>/dev/null | grep -q '^package:'; then
+      # Match 'installed: Yes' specifically. tlmgr prints 'package: NAME' for
+      # *both* installed and not-installed lookups (verified against TL 2026
+      # locally: a not-installed lookup still prints 'package: NAME' followed
+      # by 'installed: No'), so grepping '^package:' would falsely skip
+      # everything — including the collections that genuinely need network
+      # install. Anchor on 'installed: Yes' instead.
+      if tlmgr info --only-installed "$collection" 2>/dev/null | grep -q '^installed:.*Yes'; then
         printf '%s\n' "✅ $collection already installed locally (no network call)"
         i=$(expr "$i" + 1)
         continue
