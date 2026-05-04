@@ -70,11 +70,12 @@ while IFS= read -r collection; do
         fi
       done
       if [ "$success" = "false" ]; then
-        echo "⚠️ Failed to install $collection after retries, continuing..."
+        echo "❌ Failed to install $collection after retries"
         failed_packages="$failed_packages $collection"
       fi
     else
-      echo "⚠️ tlmgr not available, skipping $collection"
+      echo "❌ tlmgr not available, cannot install $collection"
+      failed_packages="$failed_packages $collection"
     fi
     i=$(expr "$i" + 1)
     ;;
@@ -82,7 +83,11 @@ while IFS= read -r collection; do
 done < /tmp/tl_packages
 
 if [ -n "$failed_packages" ]; then
-  echo "⚠️ Some packages failed to install:$failed_packages"
-  echo "📋 This may not be critical for basic functionality"
+  echo "❌ TeX Live collections failed to install:$failed_packages"
+  echo "📋 Every collection in tl_packages is required by the book PDF build."
+  echo "📋 Failing the container build now rather than publishing a broken"
+  echo "📋 :latest image (collection-fontsextra silently dropping newpx caused"
+  echo "📋 a 3-hour-delayed Vol II PDF build failure on 2026-05-04)."
+  exit 1
 fi
 echo "✅ TeX Live packages installation completed"
