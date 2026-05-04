@@ -202,9 +202,13 @@ class Visual(BaseModel):
 
 
 class Details(BaseModel):
-    # Allow unknown keys: a few imported YAMLs carry legacy fields
-    # (e.g. details.question) that we preserve but do not validate strictly.
-    model_config = ConfigDict(extra="allow")
+    # Phase 6 (2026-05-04): tightened to extra="forbid". A pre-flight
+    # survey across all 10,711 YAMLs found 0 unknown keys on Details, so
+    # the historical "imported legacy fields" risk no longer applies.
+    # The marker patterns on common_mistake / napkin_math are enforced
+    # at the structural-tier check (validator._check_format_markers),
+    # not here, so draft YAMLs with malformed markers still load.
+    model_config = ConfigDict(extra="forbid")
 
     realistic_solution: str
     common_mistake: str | None = None

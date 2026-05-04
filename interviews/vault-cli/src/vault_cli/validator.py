@@ -10,6 +10,7 @@ This module is the engine; tier selection and reporting are in
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +18,17 @@ from pathlib import Path
 from vault_cli.loader import LoadedQuestion
 from vault_cli.paths import is_lowercase, vault_questions_root
 from vault_cli.yaml_io import load_file
+
+# Phase 6 (2026-05-04): the AUTHORING.md marker convention is now a
+# published-corpus invariant. Patterns mirror the LinkML source of truth at
+# interviews/vault/schema/question_schema.yaml. Both fields are optional;
+# only PRESENT-AND-MALFORMED triggers a failure (matches gate_format).
+_CM_MARKER_RE = re.compile(
+    r"(?s).*\*\*The Pitfall:\*\*.*\*\*The Rationale:\*\*.*\*\*The Consequence:\*\*.*"
+)
+_NM_MARKER_RE = re.compile(
+    r"(?s).*\*\*Assumptions.*\*\*Calculations:\*\*.*\*\*Conclusion.*"
+)
 
 
 @dataclass(frozen=True)
@@ -292,6 +304,59 @@ def structural_tier(
     # #15: applicability matrix respected — no questions in excluded (track, topic) cells (B.8).
     failures.extend(_check_applicability(loaded, vault_dir))
 
+    # #19 (Phase 6, 2026-05-04): published YAMLs follow the AUTHORING.md
+    # marker convention on common_mistake / napkin_math. Lifts gate_format
+    # from validate_drafts.py / _judges.py to a corpus-wide invariant.
+    # Drafts are exempt — author-in-progress drafts may not yet be marker-
+    # compliant, and `vault check --strict` runs against the published set.
+    failures.extend(_check_format_markers(loaded))
+
+    return failures
+
+
+def _check_format_markers(loaded: list[LoadedQuestion]) -> list[InvariantFailure]:
+    """Invariant #19: published common_mistake / napkin_math follow markers.
+
+    Both fields are optional. Empty / absent values pass. A non-empty value
+    must contain the canonical AUTHORING.md markers in order — see
+    interviews/vault/schema/question_schema.yaml for the authoritative
+    pattern. Drafts are exempt; this is a published-corpus invariant.
+    """
+    failures: list[InvariantFailure] = []
+    for lq in loaded:
+        if lq.question.status != "published":
+            continue
+        details = lq.question.details
+        cm = (details.common_mistake or "").strip()
+        if cm and not _CM_MARKER_RE.match(cm):
+            failures.append(
+                _fail(
+                    "structural",
+                    "format-markers",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=(
+                        "common_mistake missing AUTHORING.md markers — must "
+                        "contain **The Pitfall:** / **The Rationale:** / "
+                        "**The Consequence:** in order"
+                    ),
+                )
+            )
+        nm = (details.napkin_math or "").strip()
+        if nm and not _NM_MARKER_RE.match(nm):
+            failures.append(
+                _fail(
+                    "structural",
+                    "format-markers",
+                    qid=lq.id,
+                    path=lq.path,
+                    message=(
+                        "napkin_math missing AUTHORING.md markers — must "
+                        "contain **Assumptions** / **Calculations:** / "
+                        "**Conclusion** in order"
+                    ),
+                )
+            )
     return failures
 
 
