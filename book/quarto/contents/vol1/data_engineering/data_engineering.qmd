@@ -1929,7 +1929,8 @@ Quality monitoring extends beyond simple schema validation to statistical proper
 # │ Context: Callout "Detecting Drift with K-S Test"
 # │
 # │ Goal: Provide a concrete numeric threshold for detecting distribution drift.
-# │ Show: That a difference of 0.043 marks the threshold for 1000 samples.
+# │ Show: That a two-sample difference of about 0.061 marks the threshold
+# │       when training and serving samples both contain 1000 observations.
 # │ How: Calculate the K-S critical value $D_{\text{crit}}$ at $\alpha = 0.05$.
 # │
 # │ Imports: math (sqrt), mlsysim.constants (KS_TEST_COEFFICIENT),
@@ -1944,19 +1945,20 @@ from mlsysim.fmt import fmt, check
 class KSTest:
     """
     Namespace for K-S Test Critical Value calculation.
-    Scenario: Detecting drift with n=1000 samples at alpha=0.05.
+    Scenario: Detecting drift with 1000 training and 1000 serving samples at alpha=0.05.
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    n = 1000
+    n_train = 1000
+    n_serving = 1000
     coeff = KS_TEST_COEFFICIENT # 1.36 for alpha=0.05
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    d_crit = coeff/math.sqrt(n)
+    d_crit = coeff * math.sqrt((n_train + n_serving)/(n_train * n_serving))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(d_crit > 0, "Critical value must be positive.")
-    check(d_crit <= 0.1, f"Critical value ({d_crit:.3f}) is too loose for n=1000. Check formula.")
+    check(d_crit <= 0.1, f"Critical value ({d_crit:.3f}) is too loose for n=1000 per sample. Check formula.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ks_dcrit_str = fmt(d_crit, precision=3, commas=False)
@@ -1972,13 +1974,13 @@ class KSTest:
 2.  **Calculate Statistic ($D_{\text{KS}}$)**: Find the maximum absolute difference between the CDFs. Let $F_P(x)$ and $F_Q(x)$ denote the cumulative distribution functions of the training ($P$) and serving ($Q$) datasets.
     $$D_{\text{KS}} = \max_x |F_P(x) - F_Q(x)|$$
 
-3.  **Determine Significance**: Compare $D_{\text{KS}}$ to critical value $D_{\text{crit}}$ based on sample size $n$ and confidence level ($\alpha = 0.05$).
-    $$D_{\text{crit}} \approx \frac{1.36}{\sqrt{n}}$$
+3.  **Determine Significance**: Compare $D_{\text{KS}}$ to critical value $D_{\text{crit}}$ based on training sample size $n_P$, serving sample size $n_Q$, and confidence level ($\alpha = 0.05$).
+    $$D_{\text{crit}} \approx 1.36\sqrt{\frac{n_P + n_Q}{n_P n_Q}}$$
 
 **Example Calculation**
 
-- Sample size $n = 1000$.
-- Critical value $D_{\text{crit}} \approx 1.36 / \sqrt{1000}$ ≈ `{python} KSTest.ks_dcrit_str`.
+- Sample sizes $n_P = n_Q = 1000$.
+- Critical value $D_{\text{crit}} \approx 1.36\sqrt{(1000 + 1000)/(1000 \cdot 1000)}$ ≈ `{python} KSTest.ks_dcrit_str`.
 - If observed max difference $D_{\text{KS}} = 0.08$, then 0.08 > `{python} KSTest.ks_dcrit_str` → **Reject Null Hypothesis**. Significant drift detected. Trigger retraining or investigation.
 
 :::

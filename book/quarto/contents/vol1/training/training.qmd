@@ -210,7 +210,7 @@ The simplification is valid when the pipeline is correctly staged: at training s
 | **Gradient Checkpointing**      | Total Operations ↑                | Adds recomputation, but enables larger models                                      |
 | **Gradient Accumulation**       | Utilization ↑                     | Maintains high batch parallelism efficiency                                        |
 | **Operator Fusion**             | Utilization ↑                     | Reduces memory bandwidth bottlenecks                                               |
-| **FlashAttention**              | Total Operations ↓, Utilization ↑ | Algorithmic improvement reduces FLOP count, tiling improves memory access patterns |
+| **FlashAttention**              | Memory Traffic ↓, Utilization ↑   | Same asymptotic FLOPs, much lower HBM IO; backward recomputation may add FLOPs     |
 
 : **iron law Optimization Mapping.** Optimization techniques mapped to iron law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping tbl-colwidths="[25,27,48]"}
 
@@ -234,7 +234,7 @@ Training speed is governed by the utilization of hardware peaks.
 :::
 
 \index{Transformer!training evolution}
-The iron law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the *binding constraint* has shifted over time as hardware and algorithms co-evolved. In 1986, backpropagation was formalized [@rumelhart1986learning], and training a three-layer network on toy datasets required days on CPU workstations---the bottleneck was raw compute throughput ($R_{\text{peak}}$). In 2012, AlexNet demonstrated GPU training [@alexnet2012], reducing ImageNet training from weeks to days and launching the deep learning era. By 2017, transformers and NVIDIA Volta Tensor Cores enabled mixed-precision training with a further 5$\times$ speedup [@vaswani2017attention]. GPT-3 in 2020 used over `{python} TrainingScenarios.gpt3_gpu_count_str` V100 GPUs at an estimated \$`{python} TrainingScenarios.gpt3_compute_cost_str`M cost [@brown2020language], making utilization ($\eta_{\text{hw}}$) critical. By 2023, training efficiency improved 10$\times$ through the techniques examined in this chapter: FlashAttention reduces $O$ while improving $\eta$; gradient checkpointing trades $O$ for memory capacity; mixed precision increases $R_{\text{peak}}$. Each innovation was motivated by a specific iron law bottleneck.
+The iron law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the *binding constraint* has shifted over time as hardware and algorithms co-evolved. In 1986, backpropagation was formalized [@rumelhart1986learning], and training a three-layer network on toy datasets required days on CPU workstations---the bottleneck was raw compute throughput ($R_{\text{peak}}$). In 2012, AlexNet demonstrated GPU training [@alexnet2012], reducing ImageNet training from weeks to days and launching the deep learning era. By 2017, transformers and NVIDIA Volta Tensor Cores enabled mixed-precision training with a further 5$\times$ speedup [@vaswani2017attention]. GPT-3 in 2020 used over `{python} TrainingScenarios.gpt3_gpu_count_str` V100 GPUs at an estimated \$`{python} TrainingScenarios.gpt3_compute_cost_str`M cost [@brown2020language], making utilization ($\eta_{\text{hw}}$) critical. By 2023, training efficiency improved 10$\times$ through the techniques examined in this chapter: FlashAttention reduces memory traffic while improving $\eta$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $R_{\text{peak}}$. Each innovation was motivated by a specific iron law bottleneck.
 
 ```{python}
 #| label: gpt2-lighthouse-hardware-calc
@@ -964,24 +964,24 @@ class AdamMemory:
 
 The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors ($m_t$ and $v_t$) for each parameter, tripling the memory required for optimization state.
 
-[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: The two moving averages are the first moment (momentum) and second moment (uncentered variance) of the gradients, stored for every model parameter. This state requirement triples the memory footprint compared to SGD, meaning the optimizer state for a `{python} OptimizerScenarios.adam_7b_params_str`B parameter model consumes `{python} OptimizerScenarios.adam_7b_state_gb_str` GB—often more than the weights themselves. \index{Adam Optimizer!memory overhead}
+[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: The two moving averages are the first moment (momentum) and second moment (uncentered variance) of the gradients, stored for every model parameter. For a `{python} OptimizerScenarios.adam_7b_params_str`B parameter model, Adam's FP32 moment tensors alone consume 56 GB; the full mixed-precision training state before activations is `{python} OptimizerScenarios.adam_7b_state_gb_str` GB when FP16 weights, FP16 gradients, and Adam moments are counted together. \index{Adam Optimizer!memory overhead}
 
 #### Optimization algorithm system implications {#sec-model-training-optimization-algorithm-system-implications-f9f2}
 
-The choice of optimization algorithm creates specific patterns of computation and memory access that influence training efficiency. Memory requirements increase progressively from SGD (1$\times$ model size) through Momentum (2$\times$) to Adam (3$\times$), as quantified in @tbl-optimizer-properties. These memory costs must be balanced against convergence[^fn-convergence-training] benefits. While Adam often requires fewer iterations to reach convergence, its per-iteration memory and computation overhead may impact training speed on memory-constrained systems. The concrete scale of these *GPT-2 optimizer memory requirements* illustrates the significance of this overhead for large models.
+The choice of optimization algorithm creates specific patterns of computation and memory access that influence training efficiency. Optimizer auxiliary memory increases progressively from SGD (no auxiliary state) through Momentum (one velocity vector) to Adam (two moment vectors), as quantified in @tbl-optimizer-properties. These memory costs must be balanced against convergence[^fn-convergence-training] benefits. While Adam often requires fewer iterations to reach convergence, its per-iteration memory and computation overhead may impact training speed on memory-constrained systems. The concrete scale of these *GPT-2 optimizer memory requirements* illustrates the significance of this overhead for large models.
 
-[^fn-convergence-training]: **Convergence**: Training converges when the loss stops decreasing meaningfully, typically after `{python} OptimizerScenarios.sgd_iterations_min_str`--`{python} OptimizerScenarios.sgd_iterations_max_str` iterations for large models. The systems consequence: faster convergence (fewer iterations) directly reduces wall-clock time and cost, but the optimizer that converges fastest (Adam) requires 3$\times$ the memory of the cheapest alternative (SGD)---a trade-off between time and memory that shapes every training budget. \index{Convergence!time-memory trade-off}
+[^fn-convergence-training]: **Convergence**: Training converges when the loss stops decreasing meaningfully, typically after `{python} OptimizerScenarios.sgd_iterations_min_str`--`{python} OptimizerScenarios.sgd_iterations_max_str` iterations for large models. The systems consequence: faster convergence (fewer iterations) directly reduces wall-clock time and cost, but the optimizer that converges fastest (Adam) requires two FP32 auxiliary tensors beyond the parameters and gradients---a trade-off between time and memory that shapes every training budget. \index{Convergence!time-memory trade-off}
 
 | **Property**             |  **SGD**   |  **Momentum**  |    **RMSprop**    |               **Adam**              |
 |:-------------------------|:----------:|:--------------:|:-----------------:|:-----------------------------------:|
 | **Memory Overhead**      |    None    | Velocity terms | Squared gradients | Both velocity and squared gradients |
-| **Memory Cost**          | 1$\times$  |   2$\times$    |     2$\times$     |              3$\times$              |
+| **Parameter + optimizer state** | 1$\times$  |   2$\times$    |     2$\times$     |              3$\times$              |
 | **Access Pattern**       | Sequential |   Sequential   |       Random      |                Random               |
 | **Operations/Parameter** |     2      |       3        |         4         |                  5                  |
 | **Hardware Efficiency**  |    Low     |     Medium     |        High       |               Highest               |
 | **Convergence Speed**    |  Slowest   |     Medium     |        Fast       |               Fastest               |
 
-: **Optimizer Memory Footprint.** Different optimization algorithms impose varying memory costs due to the storage of intermediate values like gradients, velocities, and squared gradients. Understanding these trade-offs is important for resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[22,12,15,17,34]"}
+: **Optimizer Memory Footprint.** Different optimization algorithms impose varying auxiliary-state costs due to the storage of intermediate values like velocities and squared gradients. The multiplier row counts parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. Understanding these trade-offs is important for resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[22,12,15,17,34]"}
 
 ```{python}
 #| label: gpt2-optimizer-memory-calc
@@ -2759,7 +2759,8 @@ class VRAMRequirements:
     seq = 2048
     hidden = 4096
     layers = 32
-    activations_gb = 2
+    activation_factor = 4
+    activations_gb = batch * seq * hidden * layers * bytes_fp16 * activation_factor / 1e9
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     weights_gb = params_b * bytes_fp16
@@ -2781,6 +2782,7 @@ class VRAMRequirements:
     vram_seq_str = fmt(seq, precision=0, commas=False)
     vram_hidden_str = fmt(hidden, precision=0, commas=False)
     vram_layers_str = fmt(layers, precision=0, commas=False)
+    vram_activation_factor_str = fmt(activation_factor, precision=0, commas=False)
     vram_activations_gb_str = fmt(activations_gb, precision=0, commas=False)
     vram_batch_str = f"{batch}"
 ```
@@ -2797,7 +2799,7 @@ class VRAMRequirements:
 2.  **Gradients (FP16)**: Same size as weights = **`{python} VRAMRequirements.vram_gradients_gb_str` GB**.
 3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. `{python} VRAMRequirements.vram_params_b_str` B $\times$ `{python} VRAMRequirements.vram_adam_bytes_str` bytes = **`{python} VRAMRequirements.vram_optimizer_gb_str` GB**.
 4.  **Subtotal (before activations)**: `{python} VRAMRequirements.vram_weights_gb_str` + `{python} VRAMRequirements.vram_gradients_gb_str` + `{python} VRAMRequirements.vram_optimizer_gb_str` = **`{python} VRAMRequirements.vram_subtotal_gb_str` GB**. Already exceeds `{python} VRAMRequirements.vram_gpu_capacity_str` GB.
-5.  **Activations**: Scale with batch size. Formula: Batch $\times$ SeqLen $\times$ Hidden $\times$ Layers $\times$ Bytes. Example: Batch = `{python} VRAMRequirements.vram_batch_str`, Seq = `{python} VRAMRequirements.vram_seq_str`, Hidden = `{python} VRAMRequirements.vram_hidden_str`, `{python} VRAMRequirements.vram_layers_str` Layers ≈ **`{python} VRAMRequirements.vram_activations_gb_str` GB** additional.
+5.  **Activations**: Scale with batch size. A simplified transformer estimate is Batch $\times$ SeqLen $\times$ Hidden $\times$ Layers $\times$ Bytes $\times$ an activation factor for retained attention, MLP, and normalization intermediates. Example: Batch = `{python} VRAMRequirements.vram_batch_str`, Seq = `{python} VRAMRequirements.vram_seq_str`, Hidden = `{python} VRAMRequirements.vram_hidden_str`, `{python} VRAMRequirements.vram_layers_str` Layers, activation factor $\approx$ `{python} VRAMRequirements.vram_activation_factor_str` gives **`{python} VRAMRequirements.vram_activations_gb_str` GB** additional.
 
 \index{Parameter!sharding, memory constraint solution}W
 **The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is 4--6$\times$ larger than model weights. Training a `{python} VRAMRequirements.vram_params_b_str` B model on a single `{python} VRAMRequirements.vram_gpu_capacity_str` GB GPU requires quantization (4-bit) or parameter sharding (FSDP/ZeRO).

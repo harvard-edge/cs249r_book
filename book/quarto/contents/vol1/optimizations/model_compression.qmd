@@ -178,7 +178,7 @@ Model optimization is not a single technique but a *framework* with three comple
 
 The top layer, *efficient model representation*, focuses on eliminating redundancy in the model structure. Techniques like pruning, knowledge distillation, and neural architecture search (NAS)[^fn-nas-search-cost] reduce the number of parameters or operations required, addressing memory footprint and computational complexity at the algorithmic level.
 
-[^fn-nas-search-cost]: **Neural Architecture Search (NAS)**: @zoph2017neural at Google Brain used reinforcement learning to *learn* the architecture itself at a cost of 22,400 GPU-hours (800 GPUs for twenty-eight days). Weight-sharing approaches later reduced this by 1,000$\times$, transforming NAS from a data-center-scale experiment into a practical tool whose one-time search budget is amortized across every deployment of the resulting architecture (EfficientNet, MobileNetV3). \index{NAS!search cost}
+[^fn-nas-search-cost]: **Neural Architecture Search (NAS)**: @zoph2017neural at Google Brain used reinforcement learning to *learn* the architecture itself at a cost of 22,400 GPU-days (800 GPUs for twenty-eight days), equivalent to 537,600 GPU-hours. Weight-sharing approaches later reduced this by 1,000$\times$, transforming NAS from a data-center-scale experiment into a practical tool whose one-time search budget is amortized across every deployment of the resulting architecture (EfficientNet, MobileNetV3). \index{NAS!search cost}
 
 The middle layer, *efficient numerics representation*, optimizes how numerical values are stored and processed. Quantization and mixed-precision\index{Mixed-Precision Training} training reduce the bit-width of weights and activations (for example, from 32-bit floating point to 8-bit integers), enabling faster execution and lower memory usage on specialized hardware.
 
@@ -2294,13 +2294,13 @@ This factorization reveals a fundamental *bandwidth-compute trade-off* that recu
 
 **Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a `{python} LowRankFactorization.mat_dim_str` $\times$ `{python} LowRankFactorization.mat_dim_str` matrix requires `{python} LowRankFactorization.full_mb_str` MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
 
-If we factorize it with rank k = `{python} LowRankFactorization.rank_k_str`, we store two matrices (`{python} LowRankFactorization.mat_dim_str` $\times$ `{python} LowRankFactorization.rank_k_str` and `{python} LowRankFactorization.rank_k_str` $\times$ `{python} LowRankFactorization.mat_dim_str`), totaling only `{python} LowRankFactorization.factored_mb_str` MB, a **`{python} LowRankFactorization.data_reduction_str`$\times$ reduction in data movement**. While the number of floating-point operations (FLOPs) actually *increases* slightly because we perform two smaller matrix multiplies instead of one large one, the system speedup is often dramatic. By reducing data movement by `{python} LowRankFactorization.data_reduction_str`$\times$, we allow the processor to spend more time computing and less time waiting for memory.
+If we factorize it with rank k = `{python} LowRankFactorization.rank_k_str`, we store two matrices (`{python} LowRankFactorization.mat_dim_str` $\times$ `{python} LowRankFactorization.rank_k_str` and `{python} LowRankFactorization.rank_k_str` $\times$ `{python} LowRankFactorization.mat_dim_str`), totaling only `{python} LowRankFactorization.factored_mb_str` MB, a **`{python} LowRankFactorization.data_reduction_str`$\times$ reduction in data movement**. When inference uses the two factors directly, matrix-vector compute also falls from $O(mn)$ to $O(k(m+n))$ for small $k$. The system speedup is often dramatic because the processor moves much less data and performs fewer operations than with the original dense matrix. Explicitly materializing $UV$ would add $O(mkn)$ work and defeat the purpose.
 
 :::
 
 This bandwidth-compute trade-off reflects the broader memory wall phenomenon where memory access becomes the dominant bottleneck (explored in depth in @sec-hardware-acceleration).
 
-To see why this matters, study @fig-matrix-factorization: the matrix $M$ can be approximated by the product of matrices $L_k$ and $R_k^T$. For intuition, most fully connected layers in networks are stored as a projection matrix $M$, which requires $m \times n$ parameters to be loaded during computation. However, by decomposing and approximating it as the product of two lower-rank matrices, we only need to store $m \times k + k \times n$ parameters in terms of storage while incurring an additional compute cost of the matrix multiplication. So long as $k < n/2$, this factorization has fewer total parameters to store while adding a computation of runtime $O(mkn)$ [@gu2023deep].
+To see why this matters, study @fig-matrix-factorization: the matrix $M$ can be approximated by the product of matrices $L_k$ and $R_k^T$. For intuition, most fully connected layers in networks are stored as a projection matrix $M$, which requires $m \times n$ parameters to be loaded during computation. However, by decomposing and approximating it as the product of two lower-rank matrices, we only need to store $m \times k + k \times n$ parameters in terms of storage. Applying the factors directly costs $O(k(m+n))$ for a vector input, instead of $O(mn)$ for the original dense matrix; explicitly forming the dense product $UV$ would cost $O(mkn)$ and should be avoided in inference [@gu2023deep].
 
 ::: {#fig-matrix-factorization fig-env="figure" fig-pos="htb" fig-cap="**Low-Rank Factorization**: A weight matrix $M$ of size $m \times n$ is approximated as the product of two smaller matrices, $L_k$ ($m \times k$) and $R_k^T$ ($k \times n$), reducing storage from $m \times n$ to $m \times k + k \times n$ parameters at the cost of one additional matrix multiplication during inference." fig-alt="Three rectangular boxes showing matrix factorization. Large M matrix of size m by n approximately equals product of narrower L matrix of size m by k and wider R-transpose matrix of size k by n."}
 
@@ -3500,7 +3500,7 @@ class A100Int8Speedup:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     a100_tflops_fp16 = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
     a100_tflops_int8 = A100_FLOPS_INT8.m_as(TFLOPs/second)
-    bandwidth_bound_speedup = 4            # memory-traffic-dominated case
+    bandwidth_bound_speedup = 2            # FP16 -> INT8 memory-traffic-dominated case
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     a100_int8_speedup = int(a100_tflops_int8 / a100_tflops_fp16)
@@ -3526,7 +3526,7 @@ class A100Int8Speedup:
 2. **Memory Bandwidth**: INT8 weights are half the size, so loading them from memory takes half the time.
 3. **Combined Effect**: For compute-bound operations, the speedup is primarily from compute throughput: **~`{python} A100Int8Speedup.a100_int8_speedup_str`$\times$ speedup**.
 
-**The Systems Insight**: The speedup from quantization depends on the bottleneck. Compute-bound operations (large batch sizes, high Arithmetic Intensity [$AI$]) see ~`{python} A100Int8Speedup.a100_int8_speedup_str`$\times$ from faster INT8 units. The bandwidth-bound case (demonstrated in the Optimization Framework's napkin math) achieves up to `{python} A100Int8Speedup.bandwidth_bound_speedup_str`$\times$ because memory traffic dominates, so halving data size nearly doubles effective throughput for both bandwidth and compute.
+**The Systems Insight**: The speedup from quantization depends on the bottleneck. Compute-bound operations (large batch sizes, high Arithmetic Intensity [$AI$]) see ~`{python} A100Int8Speedup.a100_int8_speedup_str`$\times$ from faster INT8 units. The FP16-to-INT8 bandwidth-bound case achieves up to `{python} A100Int8Speedup.bandwidth_bound_speedup_str`$\times$ because memory traffic dominates, so halving data size nearly doubles effective throughput. Larger bandwidth-bound reductions, such as FP16 to INT4 or FP32 to INT8, can reach 4$\times$ when the bytes moved fall by 4$\times$.
 
 :::
 
