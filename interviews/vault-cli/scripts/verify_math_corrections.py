@@ -261,8 +261,18 @@ def main() -> int:
             continue
         if not isinstance(body, dict):
             continue
-        # Has the proposed realistic_solution already landed? Skip if so.
-        if (body.get("details") or {}).get("realistic_solution") == row["suggested_corrections"].get("realistic_solution"):
+        # Has every proposed math field already landed? Skip if so.
+        # (Original guard only compared realistic_solution; that missed
+        # cases where rs matched by coincidence but napkin_math/common_mistake
+        # still diverged. 2026-05-04: broadened to all three fields.)
+        details = body.get("details") or {}
+        sc = row["suggested_corrections"]
+        rs_match = details.get("realistic_solution") == sc.get("realistic_solution")
+        nm_match = (not sc.get("napkin_math")
+                    or details.get("napkin_math") == sc.get("napkin_math"))
+        cm_match = (not sc.get("common_mistake")
+                    or details.get("common_mistake") == sc.get("common_mistake"))
+        if rs_match and nm_match and cm_match:
             skipped_already_applied += 1
             continue
         payloads.append(build_verify_payload(row, body))
