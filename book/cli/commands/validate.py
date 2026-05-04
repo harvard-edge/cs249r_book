@@ -299,6 +299,11 @@ class ValidateCommand:
             choices=all_group_names,
             help="Check group to run (refs, labels, headers, footnotes, figures, rendering, references, content, all)",
         )
+        parser.add_argument(
+            "files",
+            nargs="*",
+            help="Optional file(s) or directories to check; used by pre-commit",
+        )
         parser.add_argument("--scope", default=None, help="Narrow to a specific check within a group")
         parser.add_argument("--path", default=None, help="File or directory path to check")
         parser.add_argument("--vol1", action="store_true", help="Scope to Volume I")
@@ -437,6 +442,8 @@ class ValidateCommand:
             elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
+                results.append(method(root, ns))
+            elif method_name == "_run_sources":
                 results.append(method(root, ns))
             elif method_name == "_run_epubcheck":
                 # Thresholds come from --max-fatal / --max-errors; when not
@@ -5182,8 +5189,23 @@ class ValidateCommand:
     # Source citation validation (native audit.checks.source_citations)
     # ------------------------------------------------------------------
 
-    def _run_sources(self, root: Path) -> ValidationRunResult:
+    def _run_sources(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:
         """Validate source citation patterns via `audit.checks.source_citations`."""
+        if ns is not None and getattr(ns, "files", None):
+            file_paths: list[Path] = []
+            for raw in ns.files:
+                p = Path(raw)
+                if not p.is_absolute():
+                    p = self.config_manager.root_dir / p
+                if p.is_file():
+                    file_paths.append(p)
+            if file_paths:
+                return self._run_audit_check_files(
+                    file_paths,
+                    "audit.checks.source_citations",
+                    "sources",
+                    "Source citation validation",
+                )
         return self._run_audit_check(
             root,
             "audit.checks.source_citations",
@@ -5887,6 +5909,59 @@ class ValidateCommand:
             name=name,
             description=description,
             files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_audit_check_files(
+        self,
+        files: list[Path],
+        module_path: str,
+        name: str,
+        description: str,
+    ) -> ValidationRunResult:
+        """Run an audit check against an explicit file list."""
+        import importlib
+        import sys as _sys
+
+        audit_root = Path(__file__).resolve().parent.parent.parent / "tools"
+        audit_root_str = str(audit_root)
+        if audit_root_str not in _sys.path:
+            _sys.path.insert(0, audit_root_str)
+        mod = importlib.import_module(module_path)
+
+        t0 = time.time()
+        issues: List[ValidationIssue] = []
+        counter = 0
+        checked = 0
+        for qmd in files:
+            if qmd.suffix != ".qmd" or not qmd.exists():
+                continue
+            try:
+                text = qmd.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            checked += 1
+            audit_issues, counter = mod.check(qmd, text, "both", counter)
+            for issue in audit_issues:
+                message = issue.reason or issue.rule_text or issue.category
+                severity = "warning" if getattr(issue, "needs_subagent", False) else "error"
+                try:
+                    rel = str(qmd.relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = str(qmd)
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=issue.line,
+                    code=issue.category,
+                    message=message,
+                    severity=severity,
+                    context=(issue.before or "")[:160],
+                ))
+        return ValidationRunResult(
+            name=name,
+            description=description,
+            files_checked=checked,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )

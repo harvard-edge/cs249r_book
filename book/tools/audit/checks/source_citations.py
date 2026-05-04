@@ -84,6 +84,12 @@ def _source_segment(line: str) -> tuple[int, str] | None:
         segment = rest[:quote]
     else:
         segment = rest
+    # Quarto table captions carry trailing `{#tbl-...}` metadata after the
+    # caption text. Stop before that marker so the punctuation check only
+    # evaluates the human-written source note.
+    meta = segment.find(" {#")
+    if meta != -1:
+        segment = segment[:meta]
     return start, segment
 
 
