@@ -1,26 +1,40 @@
 # Phase 5 — corrections that need human review
 
 **Generated:** 2026-05-03 after the autonomous Phase 5 mass-apply +
-math-verify passes.
+math-verify passes. **Updated 2026-05-04** after two follow-up slices:
+math-skip-level apply (15 fixes) and math-finish queue drain (66 fixes).
 
-The autonomous Phase 5 work applied **2,279 of 2,757** Gemini-proposed
-corrections (82.6%). The remaining **478** were deliberately not
-applied because they fail one of three safety checks. They live in
-the disposition logs and need human attention to close out.
+Autonomous Phase 5 work has now applied **2,372 of 2,757** Gemini-proposed
+corrections (86.0%). **385 residual** corrections still differ from the
+YAML and need human attention; these are accepted as known-deferred
+ahead of Phase 6.
 
 ---
 
-## Summary by skip reason
+## Summary by skip reason (post-2026-05-04 drain)
 
 | reason | count | next step |
 |---|---:|---|
-| Math verification said "no" | 75 | Read rationale in `03_math_verification.json`; re-derive yourself; either re-prompt Gemini for a different fix or rewrite manually |
-| Math verification said "unclear" | 14 | Same as above; case-by-case |
-| Math fix has level-relabel that breaks a chain | 13 | Either relabel chain neighbors too OR keep math fix without level change |
-| Level relabel is upward (against §10 Q3 policy) | 168 | Each requires a question REWRITE to match the higher level — separate authoring task; not a Phase 5 correction |
-| Level relabel-down would break chain monotonicity | 138 | Same chain-restructuring decision as #3, but no math fix accompanying |
-| Already-applied (no-op) | 70 | No action needed |
-| **Total skipped** | **478** | |
+| Level-only diff (relabel-up or chain-monotonicity-block) | 253 | Authoring rewrite OR chain restructuring per §10 Q3; not pure Phase 5 |
+| Math nm/rs diff (Gemini-2 said "no" + nm-only edge cases) | 77 | Read rationale in `03_math_verification.json`; manual rewrite per case |
+| Level + math combo blocked | 35 | Math already applied via `apply_math_skip_level.py`; level still pending |
+| Misc small combos (cm, title, multi-field) | 20 | Case-by-case |
+| **Total residual** | **385** | |
+
+### What changed since the original 2026-05-03 doc
+
+- Original doc claimed **70 already-applied no-ops** — actually those were
+  **70 unverified math candidates** that `verify_math_corrections.py`
+  skipped because its "already-applied" guard checked only
+  `realistic_solution`. The guard was widened on 2026-05-04 to also
+  consider `napkin_math` / `common_mistake`, and the queue was drained:
+  68 verdicts were `yes` (66 applied + 2 level-blocked → math fields
+  applied via `apply_math_skip_level.py`), 2 verdicts were `no`.
+- 13 level-block math fixes from the original doc's "Math fix has
+  level-relabel that breaks a chain" bucket got their math fields
+  applied via `apply_math_skip_level.py` (level relabel still deferred).
+- Original 70 "already-applied (no-op)" was a doc accounting error;
+  no such bucket exists in the disposition logs.
 
 ---
 
@@ -157,20 +171,32 @@ your progress.
 
 ---
 
-## Cumulative Phase 5 status
+## Cumulative Phase 5 status (post-2026-05-04 drain)
 
 ```
 2,757  proposed corrections
-2,279  auto-applied + validated     (82.6%)
-  478  awaiting human review        (17.4%)
-   75  math 'no'              ← highest priority
-   14  math 'unclear'
-   13  math + level-block
-  168  relabel-up
-  138  chain-block (level-only)
-   70  no-op / already-applied
+2,372  auto-applied + validated     (86.0%)
+  385  known-deferred                (14.0%)
+   253  level-only (relabel-up + chain-monotonicity-block)
+    77  math nm/rs (Gemini-2 'no' + nm-only divergence cases)
+    35  level + math combo (math applied; level still deferred)
+    20  misc small combos
 ```
 
-The corpus is now in much better shape than it was at audit time.
-Phase 6 (schema tightening + lift format gate) is now safe to attempt
-once these 478 are dispositioned (or accepted as known-deferred).
+Phase 6 (schema tightening + lift format gate) proceeds with these 385
+accepted as known-deferred. The cron audit workflow
+(`.github/workflows/staffml-audit-corpus-monthly.yml`) will resurface
+them on the next run, at which point per-category review can resume.
+
+### Sidecar pipeline dirs (post-drain, gitignored)
+
+```
+interviews/vault/_pipeline/runs/
+├── full-corpus-20260503-merged/        original autonomous Phase 5 outputs
+│   └── 05_math_skip_level.json         13 math-only applies for level-blocked
+└── full-corpus-20260503-mathfinish/    2026-05-04 queue-drain run (70 unverified)
+    ├── 01_audit.json                    filtered audit (70 rows only)
+    ├── 03_math_verification.json        70 verdicts (68 yes, 2 no)
+    ├── 04_math_applied.json             66 applied, 2 level-block
+    └── 05_math_skip_level.json          2 math-only applies for level-blocked
+```
