@@ -36,11 +36,15 @@ def register(app: typer.Typer) -> None:
         local_json: bool = typer.Option(
             False,
             "--local-json",
-            help="Also write a site-readable corpus.json at "
-                 "interviews/staffml/src/data/corpus.json so the StaffML "
-                 "frontend can serve full question content from disk during "
-                 "local dev (with NEXT_PUBLIC_VAULT_FALLBACK=static). "
-                 "Production never reads this file; it is dev-only.",
+            "--local",
+            help="Materialize the local-dev artifacts so the StaffML frontend "
+                 "can serve full question content from disk: writes "
+                 "interviews/staffml/src/data/corpus.json AND mirrors it to "
+                 "interviews/staffml/public/data/corpus.json (the path the "
+                 "Next.js loader actually fetches with "
+                 "NEXT_PUBLIC_VAULT_FALLBACK=static). Production never reads "
+                 "either file; this is dev-only. The shorter --local alias "
+                 "is preferred.",
         ),
     ) -> None:
         """Compile all YAML questions under vault/questions/ to a SQLite file.
@@ -72,6 +76,19 @@ def register(app: typer.Typer) -> None:
             console.print(
                 f"[dim]local corpus.json: {local_result['count']} questions → "
                 f"{local_result['output']}[/dim]"
+            )
+            # Mirror corpus.json into public/data/ so Next can serve it as a
+            # static asset. The frontend's getStaticFullDetail() fetches
+            # /data/corpus.json (set NEXT_PUBLIC_VAULT_FALLBACK=static to
+            # opt in) — Turbopack does not bundle the src/data/ copy because
+            # it would balloon the prod bundle, so the public mirror is the
+            # only reliable runtime path in local dev.
+            public_out = Path("interviews/staffml/public/data/corpus.json")
+            public_out.parent.mkdir(parents=True, exist_ok=True)
+            public_out.write_bytes(local_out.read_bytes())
+            console.print(
+                f"[dim]public mirror:    {local_result['count']} questions → "
+                f"{public_out}[/dim]"
             )
             # Mirror visual assets alongside the JSON. The frontend
             # references /question-visuals/<track>/<file>.svg directly
