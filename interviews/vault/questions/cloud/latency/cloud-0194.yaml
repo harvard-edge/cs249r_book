@@ -12,7 +12,7 @@ scenario: 'You are the Staff ML Systems Engineer designing the serving infrastru
 question: How would you prove static batching cannot meet the 500 ms TTFT and size capacity under continuous batching?
 details:
   realistic_solution: |
-    Prove the migration with two separate arguments. First, static batching violates TTFT because new requests wait for the current batch boundary; under load that boundary is gated by long decodes from earlier requests, so queueing alone can exceed 500 ms even if each token is fast. Continuous batching fixes this by admitting new prefills between decode iterations and by scheduling decode one token at a time. Second, size capacity per TP=2 replica: verify that the 70B weights fit, reserve memory for runtime overhead, and budget KV cache for the actual 200-user peak across 8 replicas. If the per-replica KV budget and decode throughput both clear the load with headroom, continuous batching is necessary for TTFT and sufficient for the stated peak.
+    Prove the migration with two separate arguments. First, static batching violates TTFT because new requests wait for the current batch boundary; under load that boundary is gated by long decodes from earlier requests, so queueing alone can exceed 500 ms even if each token is fast. Continuous batching fixes this by admitting new prefills between decode iterations and by scheduling decode one token at a time. Second, size capacity per TP=2 replica: verify that the 70B weights fit, reserve memory for runtime overhead, budget KV cache for the actual 200-user peak across 8 replicas, and check that the per-step decode time stays below the 50ms TPOT target. Under those assumptions, continuous batching is necessary for TTFT and sufficient for the stated peak.
   common_mistake: |
     **The Pitfall:** Focusing only on the aggregate throughput of the system and ignoring queueing delays.
     **The Rationale:** Engineers see high GPU utilization and assume the system is efficient, mistaking high system throughput for low user latency.
@@ -26,17 +26,20 @@ details:
     - KV cache cost = ~0.5 MB/token per replica after tensor parallel sharding and implementation overhead.
     - Peak load = 200 concurrent users, evenly routed to 8 replicas = 25 users/replica.
     - Active context budget per user at peak = 300 prompt tokens + 200 generated tokens = 500 tokens.
-    - Static batch cycle under load contains 25 active users and one decode step costs ~20 ms.
+    - Static batch cycle under load contains 25 active users and each user may generate up to 200 output tokens.
+    - A continuous-batching decode step for the active set costs ~20 ms, which is below the 50ms TPOT SLO.
 
     **Calculations:**
-    - Static batching TTFT proof: if the server only admits work between full batch iterations, a new request can wait behind the current active decode wave. A 25-user wave generating 500 tokens at 20 ms/token lasts ~10 s, so P99 TTFT can exceed 500 ms by an order of magnitude before prefill even starts.
+    - Static batching TTFT proof: if the server only admits work after the current fixed batch finishes, a new request can wait behind the remaining decode loop. With 200 output steps at ~20 ms/step, the admission wait can be ~4 s before prefill even starts.
     - Continuous batching memory capacity: 8 GB KV / 0.5 MB per token = ~16,000 tokens/replica.
     - Peak tokens in flight: 25 users/replica * 500 tokens/user = 12,500 tokens/replica.
     - Memory headroom: 16,000 - 12,500 = 3,500 tokens/replica, about 28%.
+    - TPOT check: continuous batching emits one token per active user about every 20 ms, which is better than the 50 ms TPOT SLO.
+    - Throughput check at the SLO boundary: 25 users/replica * 20 tokens/s/user = 500 tokens/s required; 25 tokens per 20 ms step = 1,250 tokens/s available under the stated timing.
     - Cluster capacity check: 8 replicas * 25 users/replica = 200 concurrent users.
 
     **Conclusion & Interpretation:**
-    - **Result: Continuous Batching Is Necessary and Sufficient Under These Assumptions.** Static batching fails the 500 ms TTFT SLO because admission waits behind long decode waves. Continuous batching admits prefills between decode steps, and the 8-replica cluster has enough KV memory for 200 users with modest headroom.
+    - **Result: Continuous Batching Is Necessary and Sufficient Under These Assumptions.** Static batching fails the 500 ms TTFT SLO because admission can wait seconds behind a fixed batch. Continuous batching admits prefills between decode steps, and the 8-replica cluster has enough KV memory and decode throughput for 200 users with modest headroom.
 status: published
 provenance: imported
 requires_explanation: true

@@ -9,9 +9,9 @@ bloom_level: create
 phase: inference
 title: 'Model Size Estimation: Specify Maximum On-Device LLM for Target Memory Constraint'
 scenario: You are building an Android app on Snapdragon 8 Gen 3 (16GB). The app must coexist with the Android system (3GB), maintain an 8192-token context window, achieve TPOT < 50ms, and stay under 80% memory utilization for stability.
-question: How would you derive the maximum model family, precision, max parameter count, and expected accuracy to satisfy these constraints?
+question: How would you choose the model family, precision, max parameter count, and accuracy validation plan for these constraints?
 details:
-  realistic_solution: 'Solve memory and TPOT together. The 80% stability cap is 12.8GB total resident memory. After 3GB for Android and 1GB for app/runtime overhead, the ML budget is 8.8GB. An 8192-token KV cache for the target 7B-class layout is about 524KB/token * 8192 = 4.29GB, leaving 4.51GB for weights. Memory alone would allow about 9B INT4 parameters, but the TPOT constraint is tighter: 50ms * 77GB/s = 3.85GB max streamed weights, or 7.7B INT4 parameters. Choose a 7B INT4 AWQ/GPTQ-family model: 3.5GB weights, 4.29GB KV, 1GB app/runtime, and 3GB OS totals 11.79GB, or 73.7% of 16GB. Expected accuracy is not derivable from the prompt; specify a 7B-class quality target and validate it with the app benchmark suite rather than claiming a fixed MMLU number.'
+  realistic_solution: 'Solve memory and TPOT together. The 80% stability cap is 12.8GB total resident memory. After 3GB for Android and 1GB for app/runtime overhead, the ML budget is 8.8GB. For a 7B-class layout with 32 layers and hidden size 4096, FP16 KV is about 524KB/token, so an 8192-token window uses about 4.29GB and leaves 4.51GB for weights. Memory alone would allow about 9B INT4 parameters. For TPOT, use an explicit lower-bound model where compressed weights are streamed once per decoded token: 50ms × 77GB/s gives a 3.85GB weight-traffic budget, or 7.7B INT4 parameters before overhead. Choose a 7B INT4 AWQ/GPTQ-family model: 3.5GB weights, 4.29GB KV, 1GB app/runtime, and 3GB OS totals 11.79GB, or 73.7% of 16GB. Accuracy is a validation output: set a 7B-class quality target and measure it on the app benchmark suite for the selected base model and quantization recipe.'
   common_mistake: |
     **The Pitfall:** Not solving the constraint system simultaneously.
     **The Rationale:** Candidates set model size, then check TPOT, then check memory sequentially, missing that they are coupled through the choice of precision.
@@ -22,10 +22,11 @@ details:
     - Android system reserve: 3GB.
     - App/runtime overhead: 1GB.
     - ML memory budget after OS and app overhead: 12.8GB - 3GB - 1GB = 8.8GB.
-    - TPOT < 50ms at 77GB/s bandwidth: max weight size = 50ms * 77GB/s = 3.85GB.
+    - TPOT model: compressed weights streamed once per decoded token. TPOT < 50ms at 77GB/s gives max weight traffic = 50ms * 77GB/s = 3.85GB.
 
     **Calculations:**
-    - KV cache for 8192 tokens (7B model): ~4.29GB.
+    - KV per token for assumed 7B layout: 32 layers * 2 (K,V) * 4096 hidden * 2 bytes = 524KB/token.
+    - KV cache for 8192 tokens: 8192 * 524KB = 4.29GB.
     - Memory-only weight budget: 8.8GB - 4.29GB = 4.51GB, which is about 9B INT4 parameters.
     - TPOT-limited max INT4 parameters: 3.85GB / 0.5 bytes/param = 7.7B params.
     - Choose 7B INT4 (3.5GB) to leave margin under the TPOT ceiling.
@@ -33,7 +34,7 @@ details:
     - Total resident memory: 3GB OS + 1GB app/runtime + 7.79GB ML = 11.79GB.
 
     **Conclusion & Interpretation:**
-    - **Result: 7B INT4 is constrained by TPOT, not memory.** 11.79GB / 16GB = 73.7% utilization and 3.5GB / 77GB/s = 45.5ms/token lower-bound TPOT, meeting both constraints. Accuracy must be validated for the chosen 7B model and quantization recipe.
+    - **Result: 7B INT4 is constrained by TPOT, not memory, under the stated weight-streaming model.** 11.79GB / 16GB = 73.7% utilization and 3.5GB / 77GB/s = 45.5ms/token lower-bound TPOT, meeting both constraints. Accuracy must be measured for the chosen 7B model and quantization recipe.
 status: published
 provenance: imported
 requires_explanation: true

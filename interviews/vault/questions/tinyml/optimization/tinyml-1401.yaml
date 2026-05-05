@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: training
 title: 'Ethos-U55 Pruning Impact: Latency & Memory for Object Detection'
 scenario: You are tasked with optimizing a quantized MobileNetV2-SSDLite object detection model for deployment on an Arm Cortex-M7 + Ethos-U55 platform. The Ethos-U55 NPU operates at 480 MHz, has 512 KB of SRAM, and achieves a peak throughput of 256 MAC/cycle. Your current unpruned model has 10 million parameters (all int8), and a single inference takes 150 ms. Convolutional layers account for 80% of total MACs and 90% of total parameters. To meet a latency budget, you apply 2:4 structured sparsity to all convolutional layers, resulting in a 50% reduction in their MACs and parameters.
-question: How do you calculate the minimum achievable inference time, effective MACs per cycle, and freed SRAM?
+question: How do you calculate latency reduction and parameter storage saved from 2:4 pruning?
 details:
   realistic_solution: |
     1.  **Minimum Achievable Inference Time:**
@@ -18,18 +18,11 @@ details:
         *   New convolutional layer inference time (50% reduction): `T_conv_new = 0.5 * T_conv_orig = 0.5 * 120 ms = 60 ms`
         *   Minimum achievable inference time: `T_total_new = T_conv_new + T_non_conv_orig = 60 ms + 30 ms = 90 ms`
 
-    2.  **Effective MACs per Cycle (entire model):**
-        *   Total original cycles needed for inference: `C_orig = 150 ms * 480 MHz = 72,000,000 cycles`
-        *   Total original MACs (hypothetical, if NPU was saturated throughout): `MAC_orig_total = C_orig * 256 MAC/cycle = 18,432,000,000 MACs`
-        *   New total cycles needed for inference: `C_new = 90 ms * 480 MHz = 43,200,000 cycles`
-        *   Equivalent throughput on the original dense-work basis: `MAC_orig_total / C_new = 18,432,000,000 / 43,200,000 = 426.67 dense-equivalent MAC/cycle`
-        *   This is not actual hardware throughput; the Ethos-U55 peak remains 256 MAC/cycle.
-
-    3.  **Parameter Storage Freed Up:**
+    2.  **Parameter Storage Saved:**
         *   Total parameters in convolutional layers: `P_conv_total = 0.9 * 10,000,000 parameters = 9,000,000 parameters`
         *   Parameters reduced: `P_reduced = 0.5 * P_conv_total = 0.5 * 9,000,000 = 4,500,000 parameters`
         *   Parameter storage saved: `P_reduced * 1 byte/parameter = 4,500,000 bytes = 4.5 MB`
-        *   This is SRAM freed only if those weights were resident in SRAM; otherwise it is flash/PSRAM/model-image storage saved.
+        *   This should be treated as flash, PSRAM, or model-image storage saved unless the deployment explicitly keeps those weights in SRAM. Peak SRAM is still determined by activations, tensor arena planning, and scratch buffers.
   common_mistake: |
     **The Pitfall:** Misapplying the 50% reduction to the entire model latency and parameter count.
     **The Rationale:** Candidates fail to isolate the impact of pruning exclusively on the convolutional layers, overlooking Amdahl's Law regarding the unpruned non-convolutional portion.
@@ -45,13 +38,11 @@ details:
        - Baseline Non-Conv Latency: 0.2 × 150 ms = 30 ms.
        - New Conv Latency: 0.5 × 120 ms = 60 ms.
        - Total New Latency: 60 ms + 30 ms = 90 ms.
-       - Effective Speedup: 150 ms / 90 ms = 1.66x.
-       - Dense-equivalent effective throughput: 256 MAC/cycle × 1.66 = 426.6 dense-equivalent MAC/cycle.
-       - Actual hardware throughput cap remains 256 MAC/cycle; the higher number is a normalized comparison against the original dense workload, not a physical NPU rate.
+       - Effective latency speedup: 150 ms / 90 ms = 1.67x.
        - Parameter storage saved: (0.9 × 10,000,000) × 0.5 × 1 byte = 4.5 MB.
-       - This is only "freed SRAM" if the baseline stored convolution weights in SRAM; on a 512 KB SRAM platform, it should normally be described as model parameter storage saved, with peak working-set SRAM still determined by activations and scratch buffers.
+       - On a 512 KB SRAM platform, those saved weights normally reduce flash/PSRAM/model-image storage, not peak SRAM, unless the memory plan explicitly keeps weights resident in SRAM.
     **Conclusion & Interpretation:**
-       - **Result: Total latency is 90 ms, 426 dense-equivalent MAC/cycle, and 4.5 MB parameter storage saved.** **Result: Amdahl's Law Compute Limit.** The effective throughput is a normalized metric, and peak SRAM must still be checked from the deployment memory plan.
+       - **Result: Total latency is 90 ms and parameter storage saved is 4.5 MB.** This is an Amdahl's Law latency estimate plus a model-storage estimate; peak SRAM must still be checked from the deployment memory plan.
 status: published
 provenance: imported
 requires_explanation: false

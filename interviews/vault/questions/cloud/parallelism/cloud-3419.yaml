@@ -11,11 +11,12 @@ title: Scaling a 500B Parameter LLM with Hybrid Parallelism
 scenario: You are leading the deployment of a 500B parameter LLM for production inference on a cluster of accelerators.
 question: How would you combine tensor and pipeline parallelism across GPUs for a 500B LLM to balance memory, communication, and latency?
 details:
-  realistic_solution: A hybrid parallelism strategy, combining tensor parallelism for individual layers that exceed single-GPU memory, with pipeline parallelism for distributing multiple layers across different GPUs. Techniques like activation checkpointing or recomputation would be crucial to manage activation memory. Efficient communication would involve using asynchronous non-blocking collectives and strategically overlapping communication with computation cycles.
+  realistic_solution: |
+    Use hybrid inference parallelism: tensor parallelism within a high-bandwidth GPU island to shard attention and MLP matrix multiplies, and pipeline parallelism across layer groups when the weight footprint and KV cache cannot fit in one tensor-parallel group. Keep TP groups topology-local because each layer needs activation all-reduces or all-gathers; use PP to reduce per-rank weight memory while accepting pipeline bubbles and extra latency. Size the layout from weights plus KV cache and runtime buffers, then tune micro-batching only if the service can tolerate the added latency.
   common_mistake: |
-    **The Pitfall:** Neglecting the substantial memory footprint of activations and optimizer states or sequentializing communication.
-    **The Rationale:** Focusing purely on fitting the static model weights into memory and ignoring dynamic memory or the critical need to overlap communication with computation.
-    **The Consequence:** Out-of-memory errors during execution, or massive underutilization of the GPU's compute capability due to idle waiting.
+    **The Pitfall:** Treating inference as a weights-only placement problem or sequentializing communication.
+    **The Rationale:** Focusing purely on fitting static weights ignores KV-cache growth, runtime buffers, and the latency cost of TP collectives and PP stage boundaries.
+    **The Consequence:** The service either runs out of memory at production context lengths or meets capacity targets only by adding unacceptable per-token latency.
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 500B parameters in FP16 = 500B * 2 bytes = 1,000 GB of weights.

@@ -11,24 +11,25 @@ title: MCU Convolution Cycle Cost
 scenario: Writing a custom INT8 convolution kernel for a hearing aid on a Cortex-M4 running at 100 MHz.
 question: Implement an analytical model to estimate the cycle count of a 3x3 depthwise convolution output pixel with 16 channels, considering MAC instructions and SRAM load/store overheads?
 details:
-  realistic_solution: For a 3x3 depthwise patch, each channel performs 9 MACs. On a Cortex-M4, dual-MAC SIMD instructions can handle pairs, so the math lower bound is ceil(9 / 2) = 5 MAC cycles per channel. Under a simple SRAM model with about 4 additional cycles per channel for packed activation and weight loads, the estimate is 5 + 4 = 9 cycles per channel. For 16 channels, that gives about 16 * 9 = 144 cycles per output pixel, before loop-control, boundary handling, output store, and pipeline stall overheads. This is an estimate, not an exact cycle count.
+  realistic_solution: For a 3x3 depthwise patch, each channel performs 9 multiplies and 8 accumulations. On a conservative Cortex-M4 scalar model, count one cycle per multiply-accumulate step after the accumulator is initialized, rather than assuming a dual-MAC SIMD instruction. Add about 4 cycles per channel for SRAM activation and weight loads. That gives roughly 9 + 4 = 13 cycles per channel. For 16 channels, the estimate is 16 * 13 = 208 cycles per output pixel before loop-control, boundary handling, output store, and pipeline stall overheads. This is a defensible lower-bound planning estimate, not an exact cycle count.
   common_mistake: |
     **The Pitfall:** Assuming every MAC operation executes perfectly in 1 cycle without pipeline stalls.
     **The Rationale:** Engineers blindly quote hardware specification peaks without analyzing memory fetch overhead or register starvation.
     **The Consequence:** Theoretical cycle estimations are entirely detached from reality, leading to missed strict real-time deadlines upon deployment.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Target: Cortex-M4 (SIMD SMLAD, dual MAC/cycle).
-    - Depthwise patch: 9 MACs per channel.
+    - Target: Cortex-M4 with conservative scalar MAC accounting.
+    - Depthwise patch: 9 multiplies and 8 adds per channel.
+    - Memory model: about 4 SRAM load cycles per channel.
 
     **Calculations:**
-    - Pure math cycles per channel: ceil(9 MACs / 2 MACs/cycle) = 5 cycles.
-    - Packed activation/weight load overhead per channel: ~4 cycles.
-    - Compute + load per channel: 5 + 4 = ~9 cycles.
-    - Across a 16-channel output pixel: 16 channels * ~9 cycles/channel = ~144 cycles.
+    - Scalar compute per channel: 9 MAC steps, approximated as 9 cycles.
+    - Activation/weight load overhead per channel: ~4 cycles.
+    - Compute + load per channel: 9 + 4 = ~13 cycles.
+    - Across a 16-channel output pixel: 16 channels * ~13 cycles/channel = ~208 cycles.
 
     **Conclusion & Interpretation:**
-    - **Result: ~144 cycles per output pixel (Compute/Memory Estimate)**. Even with SIMD, memory fetch overhead materially increases the lower bound, so this model is suitable for sizing but not a substitute for cycle-accurate measurement.
+    - **Result: ~208 cycles per output pixel (Compute/Memory Estimate)**. This avoids assuming dual-MAC throughput that may not exist on the target and should be treated as a sizing estimate before cycle-accurate measurement.
 status: published
 provenance: llm-draft
 requires_explanation: true

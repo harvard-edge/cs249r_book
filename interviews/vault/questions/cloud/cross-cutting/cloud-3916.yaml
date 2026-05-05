@@ -18,16 +18,16 @@ details:
     **The Consequence:** The framework inserts implicit, expensive transpositions at boundaries, causing severe performance degradation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Feature map: ResNet-50, batch 32, 64 channels, 56x56.
-    - Precision: FP16 (2 bytes).
-    - Each explicit layout conversion must read and write this tensor once.
+    - TPU and MI300X convolution paths commonly prefer NHWC/channels-last access patterns.
+    - NCHW tensors can force implicit copies or select less efficient kernels at framework boundaries.
+    - The exact 20-30% drop depends on tensor shapes and how often conversions occur.
 
     **Calculations:**
-    - Tensor size: 32 × 64 × 56 × 56 × 2 bytes = 12.8 MB.
-    - Transpose penalty: 12.8 MB memory copy per boundary.
-    - Total overhead depends on the number of inserted conversion boundaries; for B boundaries, overhead is B × 12.8 MB for this tensor shape.
+    - A layout conversion must at least read and write the affected activation tensor, so the cost scales with activation bytes rather than model parameters.
+    - If conversions occur around several high-resolution convolution blocks, repeated memory traffic and kernel-format changes can plausibly consume 20-30% of step time.
+    - Keeping tensors channels-last end-to-end removes those boundaries and lets the backend choose native NHWC kernels.
 
     **Conclusion & Interpretation:**
-    - **Result: Per-Boundary Transpose Cost (Memory-Transpose-Bound)**. The fixed 12.8 MB tensor copy is enough to hurt throughput when repeated at layout boundaries, but the total cannot be inferred from layer count alone.
+    - **Result: layout-bound portability loss.** The fix is not a one-off transpose; set channels_last/NHWC consistently through inputs, model weights, checkpoints, and kernels so conversions are not reintroduced.
 status: published
 provenance: imported

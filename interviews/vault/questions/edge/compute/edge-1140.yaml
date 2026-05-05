@@ -11,7 +11,7 @@ title: 'Edge Systolic Array Optimization: Fix Memory-Bound Conv on Hailo-8'
 scenario: A Hailo-8 achieves only 3 TOPS effective throughput on a custom CNN. Profiling shows 72% of time in 1x1 pointwise convolutions with very low arithmetic intensity.
 question: What bottleneck explains the CNN's 11.5% MFU, and how do channel grouping and larger spatial resolution change its intensity and speed?
 details:
-  realistic_solution: The 11.5% MFU matches 3 TOPS effective throughput on a 26 TOPS Hailo-8, and the bottleneck is low arithmetic intensity in small 1x1 convolutions. A 7x7, 512->1024 1x1 layer has only about 86 FLOPs/byte, far below the 4333 ops/byte ridge from 26 TOPS and 6 GB/s, so bandwidth and data movement dominate. Channel grouping reduces FLOPs, but it also reduces weight reuse and leaves input/output traffic in place; for group=4 the AI drops to about 62 FLOPs/byte, so speed may improve less than the 4x FLOP reduction and utilization can get worse. Larger spatial resolution improves intensity because the same 1x1 weights are reused over more pixels; at 28x28 the AI rises to about 476 FLOPs/byte, still memory-bound but much faster and better utilized than the 7x7 case. Prefer fusion, layout-aware scheduling, and larger spatial/batch reuse over grouping as the main fix.
+  realistic_solution: The 11.5% MFU matches 3 TOPS effective throughput on a 26 TOPS Hailo-8, and the bottleneck is low arithmetic intensity in small 1x1 convolutions. A 7x7, 512->1024 1x1 layer has only about 86 FLOPs/byte, far below the 4333 ops/byte ridge from 26 TOPS and 6 GB/s, so bandwidth and data movement dominate. Channel grouping reduces FLOPs, but it also reduces weight reuse and leaves input/output traffic in place; for group=4 the AI drops to about 62 FLOPs/byte, so the roofline time improves by only about 2.9x rather than the 4x FLOP reduction. Larger spatial resolution improves intensity because the same 1x1 weights are reused over more pixels; at 28x28 the AI rises to about 476 FLOPs/byte, still memory-bound but with much higher effective throughput, roughly 2.9 TOPS under the same bandwidth model. Prefer fusion, layout-aware scheduling, and larger spatial/batch reuse over grouping as the main fix.
   common_mistake: |
     **The Pitfall:** Applying channel grouping to fix a memory bandwidth bottleneck.
     **The Rationale:** Candidates blindly apply FLOP-reduction techniques (like MobileNet's depthwise design) without calculating the Arithmetic Intensity ratio.
@@ -26,10 +26,11 @@ details:
     - Baseline bytes = input 25.1KB + weights 524.3KB + output 50.2KB = 599.6KB. AI = 51.4M / 599.6K = 85.7 ops/byte.
     - Group=4 FLOPs = 51.4M / 4 = 12.85M. Bytes = input 25.1KB + grouped weights 131.1KB + output 50.2KB = 206.3KB. AI = 62.3 ops/byte.
     - 28x28 FLOPs = 2 * 28 * 28 * 512 * 1024 = 822M. Bytes = input 401KB + weights 524KB + output 803KB = 1.73MB. AI = 476 ops/byte.
+    - Bandwidth-bound time estimates: baseline ≈ 599.6KB / 6GB/s = 0.100ms; group=4 ≈ 206.3KB / 6GB/s = 0.034ms, about 2.9x faster rather than 4x; 28x28 ≈ 1.73MB / 6GB/s = 0.288ms with effective throughput ≈ 822M / 0.288ms = 2.85 TOPS.
     - Observed MFU = 3 TOPS / 26 TOPS = 11.5%.
 
     **Conclusion & Interpretation:**
-    - **Result: memory-bound 1x1 convolutions explain the 11.5% MFU.** Grouping lowers AI from about 86 to 62 ops/byte, while larger spatial resolution raises AI to about 476 ops/byte by amortizing weights over more pixels.
+    - **Result: memory-bound 1x1 convolutions explain the 11.5% MFU.** Grouping lowers AI from about 86 to 62 ops/byte and gives sublinear speedup; larger spatial resolution raises AI to about 476 ops/byte by amortizing weights over more pixels, improving utilization even though the larger layer has more total work.
 status: published
 provenance: imported
 requires_explanation: false

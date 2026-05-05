@@ -8,11 +8,11 @@ competency_area: optimization
 bloom_level: evaluate
 phase: both
 title: TPU v5e vs H100 for a 7B LoRA Fine-Tune
-scenario: A team runs LoRA fine-tuning (rank=16) on a 7B base model using 1M samples, batch size 64, for 3 epochs. The LoRA adapter has 40M trainable parameters. TPU v5e (16 chips) achieves 197 TFLOPS BF16 per chip at MFU 55%; standard GPUs (8 GPUs) achieve 989 TFLOPS FP16 per GPU at MFU 50%.
+scenario: A team runs LoRA fine-tuning (rank=16) on a 7B base model using 1M samples, batch size 64, 512 tokens/sample, for 3 epochs. The LoRA adapter has 40M trainable parameters. TPU v5e (16 chips) achieves 197 BF16 TFLOPS/chip at 55% MFU; H100 (8 GPUs) achieves 989 FP16/BF16 Tensor Core TFLOPS/GPU at 50% MFU. Assume the stated MFUs already include interconnect and input-pipeline effects.
 question: Which configuration finishes faster, and what is the per-dollar cost comparison assuming 1.2/chip-hr for TPU v5e and 3.5/GPU-hr for H100?
 details:
   realistic_solution: |
-    Use a LoRA training cost model that still includes the frozen 7B backbone forward and backward-through-activations. LoRA avoids full weight-gradient and optimizer-state work for the 7B parameters, but it does not make training cost proportional only to the 40M adapter parameters. With 46,875 steps, batch size 64, and 512 tokens/sample, a reasonable estimate is about 4 * 7B * 64 * 512 = 9.17e14 FLOPs/step, or 4.30e19 FLOPs total. The 16-chip TPU v5e slice delivers 16 * 197 * 0.55 = 1.73 PFLOP/s effective, finishing in about 6.9 hours for about $132. The 8xH100 configuration delivers 8 * 989 * 0.50 = 3.96 PFLOP/s effective, finishing in about 3.0 hours for about $84. H100 is faster and cheaper for the stated prices and MFU assumptions.
+    Use a LoRA training cost model that still includes the frozen 7B backbone forward and backward-through-activations. LoRA avoids full weight-gradient and optimizer-state work for the 7B parameters, but it does not make training cost proportional only to the 40M adapter parameters. With 46,875 steps, batch size 64, and 512 tokens/sample, a reasonable estimate is about 4 * 7B * 64 * 512 = 9.17e14 FLOPs/step, or 4.30e19 FLOPs total. The 16-chip TPU v5e slice delivers 16 * 197 * 0.55 = 1.73 PFLOP/s effective, finishing in about 6.9 hours for about $132. The 8xH100 configuration delivers 8 * 989 * 0.50 = 3.96 PFLOP/s effective, finishing in about 3.0 hours for about $84. This conclusion depends on the prompt's explicit MFU simplification; different sequence lengths, interconnect overhead, or input stalls could change the result.
   common_mistake: |
     **The Pitfall:** Using theoretical TFLOPS multipliers without adjusting for LoRA's unique computation profile.
     **The Rationale:** Engineers default to the standard formula for full fine-tuning (forward + full backward), overestimating total FLOPs.
@@ -20,9 +20,10 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - LoRA parameters: 40M trainable on a 7B base model.
-    - Batch size: 64, Tokens: 512, Steps: 46,875 (3 epochs, 1M samples).
+    - Batch size: 64, Tokens/sample: 512, Steps: 46,875 (3 epochs, 1M samples).
     - TPU v5e (16 chips): 197 TFLOPS/chip at 55% MFU, $1.2/chip-hr.
-    - GPUs (8 GPUs): 989 TFLOPS/GPU at 50% MFU, $3.5/GPU-hr.
+    - H100 (8 GPUs): 989 FP16/BF16 Tensor Core TFLOPS/GPU at 50% MFU, $3.5/GPU-hr.
+    - The stated MFUs are treated as effective end-to-end MFUs for this workload.
 
     **Calculations:**
     - LoRA step FLOPs estimate: forward plus backward-through-activations for the frozen backbone, roughly 4 * params * batch * tokens.

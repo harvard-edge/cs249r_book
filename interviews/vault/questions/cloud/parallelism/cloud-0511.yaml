@@ -11,7 +11,7 @@ title: The FSDP vs DDP Memory Trade-off
 scenario: Your team wants to full fine-tune LLaMA-2 7B in a single node with AdamW on 8x80GB A100s. Assume mixed precision training with BF16 parameters and gradients, FP32 master weights, FP32 Adam momentum, and FP32 Adam variance; ignore activations and temporary communication buffers for the base model-state calculation. An engineer proposes standard DDP. Another says FSDP saves memory. The first engineer argues FSDP adds communication overhead for a model that already fits in memory.
 question: Which engineer is correct regarding the use of DDP versus FSDP for a 7B model, and what are the exact memory numbers?
 details:
-  realistic_solution: With the stated full-fine-tuning memory model, the FSDP engineer is correct about model-state memory. DDP replicates the full 112GB of parameters, gradients, master weights, and Adam states on every GPU before activations, which does not fit on an 80GB A100. Ideal full-shard FSDP divides that model state across 8 GPUs, about 14GB per GPU before activations and temporary buffers. The first engineer is right that FSDP adds AllGather and ReduceScatter communication, but on a single NVLink node that trade-off is usually worthwhile because it leaves memory for activations, larger micro-batches, or longer context.
+  realistic_solution: With the stated full-fine-tuning memory model, the FSDP engineer is correct about model-state memory. For 7B parameters, BF16 weights are about 14GB and BF16 gradients are another 14GB; the FP32 master weights, Adam momentum, and Adam variance are about 28GB each. DDP replicates the full 112GB model state on every GPU before activations, which does not fit on an 80GB A100. Ideal full-shard FSDP divides that model state across 8 GPUs, about 14GB per GPU before activations and temporary buffers. The first engineer is right that FSDP adds AllGather and ReduceScatter communication, but on a single NVLink node that trade-off is usually worthwhile because it leaves approximate headroom for activations, larger micro-batches, or longer context.
   common_mistake: |
     **The Pitfall:** Assuming that if the parameter weights fit in memory, DDP is sufficient.
     **The Rationale:** Candidates calculate 7B parameters * 2 bytes = 14 GB, falsely concluding it easily fits, forgetting that DDP replicates the full optimizer state on every GPU.
@@ -23,11 +23,16 @@ details:
     - Hardware: 8x 80GB A100s.
 
     **Calculations:**
-    - DDP per GPU: 14 GB (weights) + 28 GB (FP32 master) + 28 GB (momentum) + 28 GB (variance) + 14 GB (gradients) = 112 GB.
+    - BF16 weights: 7B * 2 bytes = 14 GB.
+    - BF16 gradients: 7B * 2 bytes = 14 GB.
+    - FP32 master weights: 7B * 4 bytes = 28 GB.
+    - FP32 Adam momentum: 7B * 4 bytes = 28 GB.
+    - FP32 Adam variance: 7B * 4 bytes = 28 GB.
+    - DDP per GPU: 14 GB + 14 GB + 28 GB + 28 GB + 28 GB = 112 GB.
     - FSDP per GPU: 112 GB / 8 GPUs = 14 GB for model state.
 
     **Conclusion & Interpretation:**
-    - **Result: DDP requires 112 GB and OOMs instantly. FSDP leaves 66 GB for activations (Memory-Bound).**
+    - **Result: DDP requires 112 GB and OOMs before activations. Ideal full-shard FSDP leaves roughly 80 GB - 14 GB = 66 GB of headroom for activations, fragmentation, and communication buffers.**
 status: published
 provenance: imported
 requires_explanation: false

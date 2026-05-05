@@ -9,9 +9,9 @@ bloom_level: create
 phase: both
 title: Orin DLA SRAM Tiling for 3x3 INT8 Convolution
 scenario: Specify the tile size for processing a 3x3 convolution (128 channels in, 256 channels out, 224x224 output feature map, INT8) on Jetson Orin DLA (2 cores, 5.5 TOPS INT8 each, 3MB SRAM per core). Ensure tiles fit in SRAM, minimize memory re-reads, and achieve maximum DLA utilization.
-question: What output tile size should you use for the 128-to-256 3x3 conv on Orin DLA, how should output channels be split across the 2 cores, and do the exact per-core SRAM byte counts fit in 3MB?
+question: What safe 16-aligned output tile fits this 3x3 conv in Orin DLA SRAM, how should output channels be split, and what are the per-core byte counts?
 details:
-  realistic_solution: 'Use a 96x96 output tile per core and split output channels evenly: core 0 computes Cout 0..127 and core 1 computes Cout 128..255. Per core, the weights are 128 Cin * 128 Cout * 3 * 3 = 147,456 bytes. A 96x96 output tile needs a 98x98 input tile with halo, or 98 * 98 * 128 = 1,229,312 bytes. The per-core output tile is 96 * 96 * 128 = 1,179,648 bytes. Total per-core SRAM is 2,556,416 bytes, which fits under 3,145,728 bytes. A 112x112 tile would require 3,416,576 bytes per core, so 96x96 is a near-maximum safe square tile.'
+  realistic_solution: 'Use a safe 96x96 output tile per core and split output channels evenly: core 0 computes Cout 0..127 and core 1 computes Cout 128..255. Per core, the weights are 128 Cin * 128 Cout * 3 * 3 = 147,456 bytes. A 96x96 output tile needs a 98x98 input tile with a one-pixel halo on each side, or 98 * 98 * 128 = 1,229,312 bytes. The per-core output tile is 96 * 96 * 128 = 1,179,648 bytes. Total per-core SRAM is 2,556,416 bytes, which fits under 3,145,728 bytes. A 112x112 tile would require 3,416,576 bytes per core, so 96x96 is the safe 16-aligned tile choice under this SRAM budget.'
   common_mistake: |
     **The Pitfall:** Choosing tile sizes that do not account for the filter support region overlap (halos) required for valid convolution output.
     **The Rationale:** Without proper overlap handling, boundaries are calculated incorrectly or require excessive re-fetching.
@@ -28,10 +28,10 @@ details:
     - 96x96 output tile: output = 96 * 96 * 128 = 1,179,648 bytes.
     - 96x96 tile input with halo: 98 * 98 * 128 = 1,229,312 bytes.
     - Total for 96x96 = 147,456 + 1,179,648 + 1,229,312 = 2,556,416 bytes, which fits in 3,145,728 bytes.
-    - Check next larger 112x112 tile: weights 147,456 + output 112 * 112 * 128 = 1,605,632 + input 114 * 114 * 128 = 1,663,488 gives 3,416,576 bytes, which does not fit.
+    - Check next larger 16-aligned tile, 112x112: weights 147,456 + output 112 * 112 * 128 = 1,605,632 + input 114 * 114 * 128 = 1,663,488 gives 3,416,576 bytes, which does not fit.
 
     **Conclusion & Interpretation:**
-    - **Result: 96x96 output tiles with a 128-output-channel split per core.** The 96x96 tile uses 2,556,416 bytes per core and fits in 3MB SRAM; 112x112 does not fit, so 96x96 is the safe square tile choice.
+    - **Result: 96x96 output tiles with a 128-output-channel split per core.** The 96x96 tile uses 2,556,416 bytes per core and fits in 3MB SRAM; the next larger 16-aligned square tile does not fit, so 96x96 is the safe 16-aligned choice.
 status: published
 provenance: imported
 requires_explanation: true

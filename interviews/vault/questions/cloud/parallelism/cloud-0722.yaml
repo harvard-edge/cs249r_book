@@ -20,21 +20,22 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 500B model = 1 TB FP16 weights.
-    - Assume 80 transformer layers for a rough per-layer estimate.
     - ZeRO-3 shards parameters over 256 GPUs.
+    - ZeRO-3 gathers parameter buckets just before use and relies on prefetching to overlap communication with compute.
     - Effective cross-node all-gather bandwidth on the critical path: 50 GB/s.
-    - Compute takes about 200 ms per layer.
+    - Example parameter prefetch bucket: 1 GB.
+    - Compute available to hide each bucket: about 25 ms.
 
     **Calculations:**
     - Total weight shard stored per GPU: 1 TB / 256 = 3.9 GB.
-    - Average full layer weight size: 1 TB / 80 = 12.5 GB.
-    - Per-layer local shard already resident per GPU: 12.5 GB / 256 = 49 MB.
-    - Per-layer remote weight data needed by AllGather: about 12.5 GB * (255/256) = 12.45 GB.
-    - Per-layer AllGather time if not overlapped: 12.45 GB / 50 GB/s = 249 ms.
-    - With prefetch overlap, most of that 249 ms can be hidden behind the 200 ms compute of the previous layer. Without overlap, the layer boundary pays that transfer time directly.
+    - A 1 GB full parameter bucket has only about 1 GB / 256 = 4 MB resident locally before the gather.
+    - Remote data needed for that bucket is about 1 GB * (255/256) = 996 MB.
+    - Critical-path gather time if not overlapped: 996 MB / 50 GB/s ≈ 20 ms.
+    - Before the batch increase, a prefetch buffer lets that ~20 ms run during nearby compute, mostly hiding it.
+    - After the batch increase, extra activations consume the spare memory for in-flight buckets, so many ~20 ms gathers land at layer boundaries. Repeating that stall across many buckets can multiply step time even without OOM.
 
     **Conclusion & Interpretation:**
-    - **Result: Lost prefetch overlap.** The step-time spike comes from putting roughly 249 ms of all-gather latency per layer onto the critical path, compounded across many layers, not from the small batch increase's compute cost alone.
+    - **Result: Lost prefetch overlap.** The small batch increase is a memory-scheduling cliff: activation memory crowds out ZeRO-3 prefetch buffers, exposing repeated parameter all-gathers on the critical path.
 status: published
 provenance: imported
 requires_explanation: true

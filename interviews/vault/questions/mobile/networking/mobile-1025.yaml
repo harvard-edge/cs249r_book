@@ -11,8 +11,8 @@ title: 'Network Bandwidth Bottlenecks: Design Offline-First Bandwidth Architectu
 scenario: 'Design a bandwidth-aware inference architecture for a mobile health app targeting rural areas with intermittent connectivity (2G: 0.1Mbps, 3G: 1Mbps, WiFi: 10Mbps). The app uses a 1B INT4 LLM for medical Q&A.'
 question: 'How would you specify: on-device model configuration, model download strategy, graceful degradation for different connectivity levels, and cloud fallback criteria?'
 details:
-  realistic_solution: 'On-device: 1B INT4 = 500MB. Download time at: WiFi: 500MB/1.25MB/s=400s=6.7min. 3G: 500MB/125KB/s=4000s=67min (background download). 2G: 500MB/12.5KB/s=40000s=11hr (impractical). Strategy: pre-install or first-run download over WiFi, then use small delta updates. Delta updates: 50MB avg / WiFi = 40s, 3G = 400s=6.7min in the background; avoid model updates on 2G except emergency text/config patches. On-device latency should be measured on target hardware rather than inferred from model size divided by bandwidth; use the local 1B model as the default because it works offline. Cloud fallback: use only when connectivity is stable enough and the measured end-to-end cloud response for the requested task beats the on-device path or provides required quality, e.g. WiFi with acceptable RTT for long/nonurgent answers. Graceful degradation: 2G -> offline-only local model and cached clinical content; 3G -> local answers with deferred sync and optional cloud for long completions;
-    WiFi -> optional cloud 13B model when quality or latency justifies it.'
+  realistic_solution: 'Use decimal network units throughout: Mbps converts to MB/s by dividing by 8. On-device: 1B INT4 = 500MB. Download time at WiFi 10Mbps = 1.25MB/s is 500MB/1.25MB/s = 400s = 6.7min. At 3G 1Mbps = 0.125MB/s, download time is 4000s = 67min, suitable only as a background download. At 2G 0.1Mbps = 0.0125MB/s, download time is 40,000s = 11hr, so full-model OTA is impractical. Strategy: pre-install or first-run download over WiFi, then use small delta updates. Delta updates: 50MB avg / WiFi = 40s, 3G = 400s = 6.7min in the background; avoid model updates on 2G except emergency text/config patches. Graceful degradation: 2G uses offline-only local answers and cached clinical content; 3G uses local answers with deferred sync and optional cloud only for nonurgent long completions; WiFi can use a cloud model when quality is needed and measured end-to-end latency is better than local. Cloud fallback criteria should be explicit: stable WiFi or 3G above about 1Mbps, RTT below about
+    150ms for interactive tasks, no recent disconnects, and task quality/latency better than the local path.'
   common_mistake: |
     **The Pitfall:** Designing only the cloud-fallback path without specifying an on-device capability that works completely offline.
     **The Rationale:** Developers assume constant connectivity and deploy cloud-first defaults.
@@ -23,8 +23,9 @@ details:
     - WiFi Download: 10 Mbps (1.25 MB/s).
     - 3G Download: 1 Mbps (0.125 MB/s).
     - 2G Download: 0.1 Mbps (0.0125 MB/s).
+    - Decimal units: 1 MB = 1,000,000 bytes and 1 Mbps = 0.125 MB/s.
     - On-device latency is measured as an empirical device benchmark, not derived only from model size.
-    - Example measured cloud path on WiFi: 7.8 ms/server token plus 50 ms RTT.
+    - Cloud fallback requires stable connectivity, interactive RTT below about 150ms, and measured end-to-end task latency or quality better than local.
 
     **Calculations:**
     - WiFi Download: 500 MB / 1.25 MB/s = 400 seconds.
@@ -32,10 +33,10 @@ details:
     - 2G Download: 500 MB / 0.0125 MB/s = 40,000 seconds = 11 hours.
     - Delta over WiFi: 50 MB / 1.25 MB/s = 40 seconds.
     - Delta over 3G: 50 MB / 0.125 MB/s = 400 seconds = 6.7 minutes.
-    - Cloud first-token/network penalty on WiFi example: 50 ms RTT + server queue/compute; per-token compute may be 7.8 ms, but RTT is not added independently to every generated token.
+    - Cloud fallback tiers: 2G offline-only; 3G delayed sync and optional nonurgent cloud; WiFi interactive cloud if RTT and quality thresholds are met.
 
     **Conclusion & Interpretation:**
-    - **Result: 11hr 2G full-model download.** Slow edge networking precludes large OTA model installs on 2G, so the architecture must be offline-first with WiFi-preload, background deltas on 3G/WiFi, and cloud fallback based on measured end-to-end task latency and quality.
+    - **Result: 11hr 2G full-model download.** Slow edge networking precludes large OTA model installs on 2G, so the architecture must be offline-first with WiFi-preload, background deltas on 3G/WiFi, and explicit cloud fallback thresholds for connectivity, RTT, task latency, and quality.
 status: published
 provenance: imported
 requires_explanation: true

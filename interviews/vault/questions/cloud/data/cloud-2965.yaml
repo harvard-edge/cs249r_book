@@ -25,14 +25,15 @@ details:
 
     **Calculations:**
     - Signature material to shuffle: 12.5B docs * 200 bytes = 2.5TB before replication across LSH bands.
-    - With 20 bands, emitted band keys are about 2.5TB * 20 = 50TB logical shuffle before compression and locality.
-    - The 72-hour runtime implies the bottleneck is not raw MinHash CPU time; it is skewed LSH buckets and candidate comparison.
-    - To finish in 24 hours, total candidate/shuffle work must drop by at least 72 / 24 = 3x.
-    - If domain/language sharding eliminates 70% of cross-domain candidates and skew splitting/caps remove another 30% of remaining hot-bucket work, residual work is 0.30 * 0.70 = 21% of baseline, a ~4.8x reduction.
-    - Expected runtime after fixes: 72h * 21% = ~15h plus overhead, leaving margin under 24h.
+    - The exact LSH shuffle volume depends on band-key size, compression, partitioning, and replication, so the safer sizing signal is the observed 72-hour end-to-end runtime.
+    - To finish in 24 hours, the pipeline needs at least 72 / 24 = 3x less wall-clock work on the bottleneck stage.
+    - MinHash signature generation is embarrassingly parallel; the stage that usually violates the target is skewed LSH buckets producing too many candidate pairs and cross-node shuffle.
+    - If profiling shows candidate comparison plus shuffle is 80% of runtime, cutting that stage to 20% of its current work gives new runtime = 72h * (20% non-bottleneck + 80% * 20% remaining bottleneck) = 25.9h, still slightly high.
+    - Add domain/language sharding and hot-bucket salting/caps to cut the candidate/shuffle stage to 15% of baseline: 72h * (20% + 80% * 15%) = 23.0h.
+    - Keep a safety margin by over-partitioning hot buckets and spilling large candidate lists locally rather than reshuffling them repeatedly.
 
     **Conclusion & Interpretation:**
-    - **Result: Skewed LSH Candidate-Shuffle Bound**. The fix is to reduce hot-bucket candidate pairs and cross-shard shuffle, not to treat the pipeline as brute-force O(N^2) all-pairs comparison.
+    - **Result: Skewed LSH Candidate-Shuffle Bound**. The run gets under 24 hours only if skew splitting, sharding, and candidate caps reduce the candidate/shuffle bottleneck to roughly 15% of its current work; adding generic CPU nodes alone is unlikely to meet the deadline.
 status: published
 provenance: imported
 requires_explanation: false

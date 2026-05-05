@@ -11,7 +11,7 @@ title: Flash-Attention Memory Bandwidth Savings for LLM Prefill on Mobile SoCs
 scenario: A 3B LLM prefill runs on a mobile SoC (77 GB/s) using 1024 tokens, 32 heads, 128 head_dim, and 32 layers.
 question: How would you calculate the memory bandwidth savings from using Flash-Attention vs. standard attention for this 3B LLM prefill?
 details:
-  realistic_solution: Standard attention materializes the massive QxK^T matrix to LPDDR RAM. Flash-Attention-2 mitigates this via loop tiling and kernel fusion, maintaining the intermediate Softmax denominators entirely in NPU SRAM. This avoids reading and writing the 67MB matrix per layer back to main memory. Across 32 layers, this rescues 2.14GB of redundant memory IO, saving roughly 27ms of latency on a 77GB/s bus.
+  realistic_solution: Standard prefill attention materializes the attention scores and usually the softmax probabilities for each layer in LPDDR. For shape [1, 32, 1024, 1024] at FP16, one attention matrix is 67.1MB per layer. If the unfused implementation writes scores, reads scores for softmax, writes probabilities, and reads probabilities for P*V, that is about 4 matrix transfers, or 268MB/layer of avoidable LPDDR traffic. Across 32 layers, Flash-Attention-style tiling can avoid roughly 8.6GB of score/probability traffic by keeping tiles and normalization state on-chip. On a 77GB/s bus, that traffic alone corresponds to about 112ms of bandwidth time; the actual latency saved is lower if other work overlaps or dominates.
   common_mistake: |
     **The Pitfall:** Applying Flash-Attention bandwidth savings to the decode phase.
     **The Rationale:** Candidates recognize Flash-Attention reduces memory I/O but misapply it to autoregressive decoding.
@@ -24,12 +24,13 @@ details:
     - Memory Bandwidth: 77 GB/s.
 
     **Calculations:**
-    - Matrix size per layer: [1, 32, 1024, 1024] * 2 bytes = 32 * 1,048,576 * 2B = 67.1 MB/layer.
-    - Total across 32 layers: 67.1 MB * 32 = 2,147 MB ≈ 2.14 GB.
-    - Bandwidth time saved: 2.14 GB / 77 GB/s ≈ 0.027 seconds (27 ms).
+    - One attention score/probability matrix per layer: [1, 32, 1024, 1024] * 2 bytes = 67.1 MB.
+    - Standard materialized path traffic model: write scores + read scores + write probabilities + read probabilities = 4 * 67.1 MB = 268 MB/layer.
+    - Avoidable traffic across 32 layers: 268 MB * 32 = 8.59 GB.
+    - Bandwidth time represented by that traffic: 8.59 GB / 77 GB/s = 0.112 seconds (112 ms).
 
     **Conclusion & Interpretation:**
-    - **Result: 2.14 GB / 27 ms saved (Memory-Bandwidth-Bound)**. The standard attention prefill is unnecessarily memory-bandwidth-bound; Flash-Attention shifts it back to compute-bound.
+    - **Result: about 8.6 GB of avoidable LPDDR traffic, or 112 ms of raw bus time.** Flash-Attention reduces prefill bandwidth by avoiding materialized score/probability readback, but this estimate does not prove the whole layer becomes compute-bound.
 status: published
 provenance: imported
 requires_explanation: false

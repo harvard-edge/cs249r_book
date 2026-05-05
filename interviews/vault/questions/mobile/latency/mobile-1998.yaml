@@ -12,7 +12,7 @@ scenario: A mobile live-translation app queues incoming audio chunks of 200ms to
 question: Model the processing pipeline as an M/D/1 queue and formulate an adaptive batching strategy to keep 99th percentile latency under 500ms when user speech rate unexpectedly doubles?
 details:
   realistic_solution: |
-    Model doubled speech as 10 chunks/sec because each chunk covers 200 ms. Use an adaptive batcher with two triggers: dispatch immediately when 4 chunks are queued, or dispatch earlier when the oldest chunk has waited about 300 ms. At the burst rate, filling a 4-chunk batch takes at most 3 interarrival gaps, or 300 ms, and the batch service time is 40 ms. The resulting batch arrival rate is 10 / 4 = 2.5 batches/sec with utilization 2.5 * 40 ms = 0.10, so queueing delay remains small. This keeps the oldest chunk's P99 latency below 500 ms while avoiding large batches during normal low-load speech.
+    Model doubled speech as 10 chunks/sec because each chunk covers 200 ms. Use an adaptive batcher with two triggers: dispatch immediately when 4 chunks are queued, or dispatch earlier when the oldest chunk has waited about 300 ms. At the burst rate, a 4-chunk batch fills after at most 3 interarrival gaps, or 300 ms, and the batch service time is 40 ms. Since full-batch service capacity is 100 chunks/sec, utilization is about 0.10, so residual queueing is small. The practical latency bound is timeout plus service plus modest jitter, keeping the oldest chunk under 500 ms without relying on an unsupported closed-form P99 claim.
   common_mistake: |
     **The Pitfall:** Assuming exponential service times (M/M/1 queue model).
     **The Rationale:** Candidates default to generic queuing theory without realizing that fixed-size audio chunks passing through an NPU yield highly deterministic execution times.
@@ -28,13 +28,13 @@ details:
 
     **Calculations:**
     - Full-batch service capacity = 4 chunks / 0.04 sec = 100 chunks/sec.
-    - At doubled speech rate, utilization = 10 / 100 = 0.10.
-    - Batch arrival rate at size 4 = 10 / 4 = 2.5 batches/sec.
-    - M/D/1 mean queue wait for batches: Wq = λ_b * S^2 / (2 * (1 - ρ)) = 2.5 * 0.04^2 / (2 * 0.90) = 0.0022 sec.
+    - At doubled speech rate, chunk-level utilization = 10 / 100 = 0.10.
+    - Full-batch fill time at 10 chunks/sec is at most 3 interarrival gaps = 300 ms for the oldest chunk.
+    - The timeout also caps oldest-chunk batching wait at 300 ms when arrivals are irregular.
     - Conservative oldest-chunk latency budget = batching wait 300 ms + service 40 ms + queueing/jitter allowance about 50 ms = about 390 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: adaptive batch-4 with a 300 ms oldest-chunk timeout (Queue-Bound)**. At the doubled 10 chunks/sec arrival rate, utilization is only 0.10 and the latency budget stays below the 500 ms P99 target with margin.
+    - **Result: adaptive batch-4 with a 300 ms oldest-chunk timeout (Queue-Bound)**. The timeout-plus-service bound is about 390 ms under the stated jitter allowance, leaving margin under the 500 ms target without pretending the simple M/D/1 formula directly proves P99 latency for a bulk-service batcher.
 status: published
 provenance: llm-draft
 requires_explanation: true

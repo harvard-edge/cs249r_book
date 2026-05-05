@@ -11,7 +11,7 @@ title: The ITCM Execution Bottleneck
 scenario: You compile a highly optimized custom ML C++ kernel for an NXP i.MX RT crossover MCU (running at 600 MHz). The code is stored in the external QSPI Flash. When you run it, the performance is identical to an MCU running at 150 MHz. You check the cache, and it's enabled.
 question: Why does compiling a custom ML C++ kernel to QSPI Flash cause a 600 MHz Cortex-M7 CPU to effectively run at quarter speed?
 details:
-  realistic_solution: 'The 600MHz MCU executes code from external QSPI flash via XIP (execute-in-place). QSPI flash latency is tens of cycles per cache miss. The 16KB I-cache masks this for most code, but unrolled ML inner loops can thrash the cache. If instruction fetch stalls raise the effective CPI from 1.0 to about 4.0, the 600MHz core delivers only about 150MHz-equivalent throughput. Fix: copy the critical ML kernel to ITCM (Instruction Tightly Coupled Memory) for zero wait states and deterministic 1-cycle access. This restores full 600MHz throughput for the compute-intensive path.'
+  realistic_solution: 'The 600MHz MCU executes code from external QSPI flash via XIP (execute-in-place). QSPI flash latency is tens of cycles per instruction-cache miss. The enabled cache masks this for ordinary code, but unrolled ML inner loops can exceed the useful instruction-cache footprint and repeatedly stall on fetch. If 10% of instructions trigger a 30-cycle fetch penalty, effective CPI rises from 1.0 to about 4.0, so the 600MHz core delivers about 150MHz-equivalent instruction throughput even though the clock is still 600MHz. Fix: copy the critical ML kernel to ITCM for zero wait states and deterministic 1-cycle instruction access.'
   common_mistake: |
     **The Pitfall:** Stating "The external flash is slow" without analyzing the caching mechanism.
     **The Rationale:** It is slow, but the cache should normally mask that latency for standard code.
@@ -21,14 +21,14 @@ details:
     - CPU: 600 MHz Cortex-M7.
     - QSPI Flash miss penalty for XIP instruction fetch: ~30 extra stall cycles.
     - Ideal CPI: 1.0.
-    - I-cache miss rate for unrolled loop: 10%.
+    - Per-instruction I-cache miss assumption for the unrolled loop: 10% of retired instructions incur the penalty.
 
     **Calculations:**
     - Effective CPI = 1.0 + (0.10 * 30 extra stall cycles) = 4.0.
-    - Effective throughput = 600 MHz / 4.0 = 150 MHz equivalent.
+    - Effective instruction throughput = 600 MHz / 4.0 = 150 MHz equivalent.
 
     **Conclusion & Interpretation:**
-    - **Result: Throughput drops by 75% acting like a 150 MHz core (Memory-Bound Instruction Fetch Stalls)**. Large unrolled ML loops thrash the I-cache, requiring relocation to ITCM.
+    - **Result: instruction throughput drops by 75%, equivalent to about 150 MHz at CPI=1 (Memory-Bound Instruction Fetch Stalls)**. The CPU clock remains 600 MHz; instruction fetch stalls consume the missing cycles, so the hot kernel should be relocated to ITCM.
 status: published
 provenance: imported
 requires_explanation: false

@@ -16,7 +16,7 @@ visual:
   alt: Four Jetson Orin nodes arranged in a logical ring topology.
   caption: Ring AllReduce logical topology across four Orin nodes.
 details:
-  realistic_solution: A flat 4-node ring is bottlenecked by the 62 MB/s cross-rack hop, giving roughly 1.5 * 100 MB / 62 MB/s = 2.42s for one AllReduce. A simple two-level scheme does an intra-rack reduce to a rack representative, an inter-rack two-node AllReduce, then an intra-rack broadcast. That costs about 100/125 + 100/62 + 100/125 = 3.21s, so the flat ring is faster for the stated topology. Compression can still help because every viable design is constrained by the 62 MB/s cross-rack link.
+  realistic_solution: A flat 4-node ring is bottlenecked by the 62 MB/s cross-rack hop, giving a back-of-envelope lower estimate of roughly 1.5 * 100 MB / 62 MB/s = 2.42s for one AllReduce, before software overhead and imperfect overlap. A simple serialized two-level scheme does an intra-rack reduce to a rack representative, an inter-rack two-node AllReduce, then an intra-rack broadcast. With no phase overlap, that costs about 100/125 + 100/62 + 100/125 = 3.21s, so the flat ring is faster under this explicit model. Compression can still help because every viable design is constrained by the 62 MB/s cross-rack link, but compression and decompression cost must be profiled.
   common_mistake: |
     **The Pitfall:** Applying standard ring-allreduce formulas using the fastest link bandwidth.
     **The Rationale:** Candidates fail to realize that an asymmetric topology pins the ring's performance to the single slowest hop.
@@ -26,18 +26,19 @@ details:
     - Topologies: 4-node ring vs. 2-D hierarchical.
     - Cross-rack link: 62 MB/s. Intra-rack link: 125 MB/s.
     - Payload: 100 MB model.
+    - Estimates ignore protocol overhead and assume the hierarchical phases are serialized with no useful overlap.
 
     **Calculations:**
     - Flat 4-node ring factor: 2 * (4 - 1) / 4 = 1.5 payloads per bottleneck link.
-    - Flat ring time: 1.5 * 100 MB / 62 MB/s = 2.42s.
+    - Flat ring lower estimate: 1.5 * 100 MB / 62 MB/s = 2.42s.
     - Hierarchical local reduce within each 2-node rack: 100 MB / 125 MB/s = 0.80s.
     - Hierarchical inter-rack 2-node AllReduce: 100 MB / 62 MB/s = 1.61s.
     - Hierarchical local broadcast within each rack: 100 MB / 125 MB/s = 0.80s.
-    - Hierarchical total: 0.80s + 1.61s + 0.80s = 3.21s.
-    - Gradient Compression (4x, 25MB) with Flat Ring = (1.5 * 25) / 62 = 0.6s.
+    - Serialized hierarchical estimate: 0.80s + 1.61s + 0.80s = 3.21s.
+    - With 4x compression to 25 MB, flat-ring communication lower estimate = (1.5 * 25 MB) / 62 MB/s = 0.60s, plus compression/decompression overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: Flat Ring is faster (2.42s vs 3.21s) (Network-Bound)**. Under this explicit timing model, the hierarchical scheme loses because it serializes local reduce, cross-rack exchange, and local broadcast around the same slow uplink.
+    - **Result: Flat Ring is faster under the stated back-of-envelope model (2.42s vs 3.21s) (Network-Bound)**. A measured implementation could differ if it overlaps phases or has large compression overheads, so treat these as comparative estimates rather than exact realistic times.
 status: published
 provenance: llm-draft
 requires_explanation: true

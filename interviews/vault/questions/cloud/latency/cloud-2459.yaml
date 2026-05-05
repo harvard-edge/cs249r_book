@@ -11,8 +11,10 @@ title: The NPU Fallback Latency Cliff
 scenario: You deploy an upgraded vision model to your edge devices via your cloud management platform, replacing an older model. Although the new model has slightly more parameters, its FLOP count is highly optimized. The release notes show it introduced SiLU/Swish activations, and the edge compiler warns that this operator is unsupported on the target NPU and will fall back to CPU execution. You expect inference latency to roughly double from 15ms to 30ms. Instead, device telemetry shows the latency skyrocketing to 185ms, and the edge CPU utilization spikes from 10% to 85%. Both models are compiled targeting the exact same edge NPU.
 question: Why does YOLOv8-nano jump to 185ms and 85% CPU utilization despite targeting the same edge NPU?
 details:
-  realistic_solution: "This is a classic hardware-compiler-algorithm mismatch causing an Operator Fallback. Newer algorithms often introduce activation functions or operations that edge NPU compilers do not natively support. For example, YOLOv8 uses the SiLU (Swish) activation function, whereas YOLOv5 used SiLU in later versions but older versions used LeakyReLU or ReLU, which are universally supported by NPUs. \n\nWhen the NPU compiler encounters an unsupported op like SiLU, it partitions the computation graph. It runs the layers before the op on the NPU, copies the intermediate tensor back to the CPU DRAM, computes the SiLU on the CPU, and copies the result back to the NPU for the next layer. This graph shattering completely destroys latency due to PCIe/memory bus synchronization overhead. The tradeoff-analysis dictates modifying the algorithm prior to cloud deployment: replacing SiLU with ReLU (or a hard-swish approximation) and retraining/fine-tuning the model. The slight ~1% mAP accuracy\
-    \ drop is worth the 6x latency improvement.\n"
+  realistic_solution: |
+    This is a classic hardware-compiler-algorithm mismatch causing an Operator Fallback. Newer model revisions can introduce activation functions or operations that edge NPU compilers do not natively support. Here, the unsupported SiLU/Swish activation causes the compiler to split the graph instead of keeping the whole model on the NPU.
+
+    When the NPU compiler encounters an unsupported op like SiLU, it partitions the computation graph. It runs the layers before the op on the NPU, copies the intermediate tensor back to the CPU DRAM, computes the SiLU on the CPU, and copies the result back to the NPU for the next layer. This graph shattering completely destroys latency due to PCIe/memory bus synchronization overhead. The tradeoff-analysis dictates modifying the algorithm prior to cloud deployment: replacing SiLU with ReLU (or a hard-swish approximation) and retraining/fine-tuning the model. The slight ~1% mAP accuracy drop is worth the 6x latency improvement.
   common_mistake: |
     **The Pitfall:** Assuming the latency increase is purely due to the increased parameter count or memory bandwidth saturation on the NPU.
     **The Rationale:** Candidates often ignore operator support on edge NPU compilers and the cost of fallback execution on the CPU.
@@ -20,12 +22,14 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Graph shatters ~60 times due to unsupported SiLU ops.
-    - 60 syncs * 2 memory copies (NPU->CPU->NPU).
+    - Each fallback requires two 1MB transfers: NPU->CPU for the intermediate tensor and CPU->NPU for the result.
     - Average intermediate tensor size 1MB, 4GB/s bus. OS context switch: ~1ms.
     - CPU compute for SiLU: ~60ms. NPU compute: ~35ms.
 
     **Calculations:**
-    - Pure transfer time: 60 * 2 * (1MB / 4GB/s) = 30ms.
+    - Data moved per fallback = 2 * 1MB = 2MB.
+    - Total data moved = 60 * 2MB = 120MB.
+    - Pure transfer time = 120MB / 4GB/s = 0.03s = 30ms.
     - Context switch overhead: 60 * 1ms = 60ms.
     - Total latency: 30ms (transfer) + 60ms (sync) + 60ms (CPU) + 35ms (NPU) = 185ms.
 

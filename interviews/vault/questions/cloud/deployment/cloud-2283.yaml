@@ -12,25 +12,23 @@ scenario: You structurally prune 30% of attention heads and 25% of FFN intermedi
 question: How do you determine if more data will close the gap or if you pruned too much, and how do you systematically set the ratio?
 details:
   realistic_solution: |
-    Use a scaling-law-guided approach. Plot the fine-tuning recovery curve: perplexity vs. fine-tuning tokens at the current pruning ratio (30% heads, 25% FFN). If the curve is still decreasing meaningfully at 10B tokens, more data will help — the model has capacity to recover but hasn't converged. If the curve has plateaued (perplexity flat from 8B to 10B tokens), you've hit the capacity floor of the pruned architecture and no amount of data will reach 6.4. To set the pruning ratio systematically: (1) Prune at multiple ratios (10%, 20%, 30%, 40%) and measure immediate perplexity degradation. (2) Fine-tune each for a fixed budget (e.g., 2B tokens) and measure recovery. (3) Plot the Pareto frontier of pruning ratio vs. recovered perplexity. (4) Interpolate to find the maximum pruning ratio that achieves your 6.4 target. Critical insight: the relationship between pruning ratio and recoverable accuracy is NOT linear — there's typically a 'cliff' beyond which recovery is impossible regardless of data. For LLMs, this cliff is usually around 40-50% structured pruning for attention heads and 30-40% for FFN dimensions.
+    Treat this as a recovery-curve diagnosis, not a yes/no guess. Continue the current pruning ratio only if perplexity is still improving at a useful slope near 10B tokens and extrapolates toward 6.4. If the curve from recent checkpoints has flattened well above 6.4, the pruned architecture has likely hit a capacity floor and more data is unlikely to close the gap. To set the ratio systematically, run a small grid of pruning ratios and token budgets: for example lighter, current, and heavier pruning, each evaluated after short and medium fine-tuning budgets. Compare immediate damage, recovery slope, and final plateau. Choose the most aggressive ratio whose recovery curve is still on track to meet 6.4 with the available fine-tuning budget. The key evidence is the shape of the curve and ablations by pruning ratio, not a fixed universal pruning threshold.
   common_mistake: |
     **The Pitfall:** Throwing more data at the problem without diagnostic analysis.
     **The Rationale:** Engineers often assume that more fine-tuning will always help, or conversely guess that they pruned too much, without a principled framework.
     **The Consequence:** Wasting hundreds of GPU-hours on blind fine-tuning runs that fail to recover accuracy because the model's structural capacity has been fundamentally broken.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Fine-tuning 9B parameters on 10B tokens.
-       - H100 at 40% MFU (396 TFLOPS).
-       - Illustrative H100 price: $2 per GPU-hour.
+       - Baseline perplexity: 6.2; target after pruning recovery: <= 6.4.
+       - Current pruned model: 8.1 immediately after pruning, 6.8 after 10B fine-tuning tokens.
+       - Checkpoints are available at multiple token counts and pruning ratios.
     2. **Calculations:**
-       - One 10B-token run: 6 * 9B parameters * 10B tokens = 5.4e20 FLOPs.
-       - Time: 5.4e20 / 3.96e14 ≈ 1.36e6 s ≈ 379 GPU-hours.
-       - Cost of one blind 10B-token run: 379 * $2 ≈ $758.
-       - One 2B-token sweep point: 6 * 9B * 2B = 1.08e20 FLOPs.
-       - Time per 2B-token point: 1.08e20 / 3.96e14 ≈ 2.73e5 s ≈ 76 GPU-hours.
-       - Four-point Pareto sweep: 4 * 76 ≈ 304 GPU-hours, or about $608.
+       - Remaining gap at 10B tokens = 6.8 - 6.4 = 0.4 perplexity.
+       - If recent checkpoints show material improvement, e.g. 7.0 at 8B tokens to 6.8 at 10B tokens, the slope is 0.1 perplexity per 1B tokens; reaching 6.4 would need roughly 4B more tokens if the slope holds.
+       - If recent checkpoints are flat, e.g. 6.82 at 8B tokens to 6.80 at 10B tokens, the slope is 0.01 perplexity per 1B tokens; reaching 6.4 would need about 40B more tokens and the plateau suggests the extrapolation is unreliable.
+       - A lighter-pruning ablation that reaches <=6.4 at the same token budget indicates the current 30%/25% pruning point is too aggressive for the target.
     3. **Conclusion & Interpretation:**
-       - **Result: Diagnostic sweep is cheaper.** Under the same FLOPs and $/GPU-hour assumptions, a short four-point sweep costs less than one blind 10B-token run and reveals whether the current pruning ratio has hit a capacity floor.
+       - **Result: Curve-Diagnosis Required.** More data is justified only if the recovery slope is still strong enough to plausibly reach 6.4; plateauing curves and better lighter-pruning ablations indicate a capacity-limited pruning ratio.
 status: published
 provenance: imported
 requires_explanation: false

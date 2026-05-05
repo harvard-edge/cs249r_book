@@ -12,7 +12,7 @@ scenario: A production MobileNetV3-Large serving endpoint on H100 shows only 12%
 question: Why is MobileNetV3-Large only reaching 12% SM utilization at 5,000 QPS batch=1 on H100, and how would you fix it?
 details:
   realistic_solution: |
-    At 5K QPS with batch=1, each forward pass takes ~0.8ms at 12% SM util. Root causes: (1) batch size=1 means each 0.22-GFLOP inference is dominated by kernel launch overhead; (2) CPU preprocessing (decode + resize) taking 3–5ms per image; (3) H2D PCIe transfers serializing GPU work. Fix: implement server-side dynamic batching (10ms window → batch=50), move preprocessing to GPU with DALI, use CUDA graphs to fuse kernel launches.
+    At 5K QPS with batch=1, the incoming math work is only about 1.1 TFLOP/s, far below H100 capacity. The 12% SM utilization therefore points to dispatch and pipeline overhead rather than raw compute saturation: many tiny convolutions are launched as small kernels, CPU decode/resize may be gating requests, and host-to-device copies can serialize the path. Fix it by adding server-side dynamic batching within the latency budget, moving preprocessing to GPU or a dedicated CPU pool, using pinned memory and overlapping transfers, and capturing the steady-state graph with CUDA graphs or a serving runtime that fuses launches. Validate with traces before and after: queueing, preprocessing, H2D, kernel launch gaps, and GPU active time should all be measured.
   common_mistake: |
     **The Pitfall:** Arbitrarily increasing batch size without root-cause diagnosis.
     **The Rationale:** Candidates assume batch size always solves utilization, without checking if the bottleneck is CPU preprocessing, Python overhead, or PCIe transfer.
@@ -24,7 +24,8 @@ details:
 
     **Calculations:**
     - Work arriving per second: 5,000 req/s * 0.22 GFLOPs = 1.1 TFLOPs/s, far below H100 peak.
-    - Pure math time per single request at 119 TFLOPS effective would be 0.22 GFLOPs / 119,000 GFLOPs/s = 0.00185 ms = 1.85 microseconds.
+    - The observed 12% utilization corresponds to about 0.12 * 989 = 119 TFLOP/s utilization-implied capacity, not a measured per-request throughput limit.
+    - Pure math time per single request at that capacity would be 0.22 GFLOPs / 119,000 GFLOPs/s = 0.00185 ms = 1.85 microseconds.
     - A 10 ms batching window at 5,000 QPS collects about 50 requests, for 50 * 0.22 GFLOPs = 11 GFLOPs per batch.
     - Pure math time for that batch at 119 TFLOPS is 11 / 119,000 = 0.092 ms; real latency is dominated by launch overhead, preprocessing, transfer, and framework scheduling, not FLOPs.
 

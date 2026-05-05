@@ -11,7 +11,7 @@ title: TPU v5e Roofline Analysis for Batch-1 LLM Decode
 scenario: 'A custom fused LLM decoding kernel on one TPU v5e chip (197 TFLOPS BF16 peak, 819 GB/s) shows 12 TFLOPS effective throughput during profiling (6.1% MFU). The kernel does: load attention KV cache (batch=1, L=512, H=16, D=128, BF16), and compute 1 decode step.'
 question: Is the 12 TFLOPS decode kernel compute- or memory-bound, what is the attainable performance, and which optimization gives the largest gain?
 details:
-  realistic_solution: Decode step batch=1 loads KV for all 512 context tokens. KV cache traffic is 512 * 16 * 128 * 2 tensors * 2 bytes = 4 MiB. If the fused kernel also streams four 4096x4096 BF16 projection matrices, weight traffic is 4 * 4096^2 * 2 = 128 MiB. Compute is about 136M FLOPs, so AI is roughly 136M / 132 MiB = 1 FLOP/byte. The memory roofline is about 819 GB/s * 1 FLOP/byte = 0.8 TFLOPS, far below the 197 TFLOPS compute peak. A reported 12 TFLOPS is likely using a different FLOP accounting or excluding weight/KV traffic; under the stated traffic model it is not attainable. The largest gains come from reducing bytes per token, such as GQA/MQA, KV quantization, batching, and weight reuse.
+  realistic_solution: Decode step batch=1 must read the KV cache for all 512 context tokens. KV traffic is 512 * 16 * 128 * 2 tensors * 2 bytes = 4 MiB. The attention over that cache is about 4.2M FLOPs, so the KV-only arithmetic intensity is about 1 FLOP/byte and the KV attention sub-op is memory-bound at roughly 0.8 TFLOPS of attention FLOPs. The observed 12 TFLOPS profiling number should be treated as an effective model-level throughput measurement, not proof that the KV attention sub-op is compute-bound; it may use a different FLOP denominator or amortize/reuse fused projection weights. The optimization with the largest gain is reducing bytes per decoded token, especially GQA/MQA, KV quantization, paged/cache layout improvements, or batching to reuse weights.
   common_mistake: |
     **The Pitfall:** Blaming compute efficiency (low MFU) for the poor performance.
     **The Rationale:** Candidates see 6.1% MFU and assume the kernel logic is bad, failing to realize that batch=1 decoding is overwhelmingly memory-bandwidth bound.
@@ -25,13 +25,13 @@ details:
     - KV traffic = 512 * 16 * 128 * 2 * 2 = 4,194,304 bytes = 4 MiB.
     - Weight traffic = 4 * 4096 * 4096 * 2 = 134,217,728 bytes = 128 MiB.
     - Total traffic = 132 MiB = 138.4 MB.
-    - Compute = attention dot products (~2M FLOPs) + four projections (~134M FLOPs) = ~136M FLOPs.
-    - AI = 136M FLOPs / 138.4M bytes = 0.98 FLOPs/byte.
-    - Memory roofline = 819 GB/s * 0.98 FLOPs/byte = 0.80 TFLOPS.
-    - Equivalent memory time = 138.4MB / 819GB/s = 0.169ms; 136M / 0.169ms = 0.80 TFLOPS.
+    - Attention FLOPs over the KV cache ≈ QK dot products plus AV combine = 2 * 512 * 16 * 128 * 2 = 4.19M FLOPs.
+    - KV-only AI = 4.19M FLOPs / 4.19M bytes ≈ 1 FLOP/byte.
+    - KV attention memory roofline = 819 GB/s * 1 FLOP/byte ≈ 0.82 TFLOPS, far below the 197 TFLOPS compute peak.
+    - If a profiler reports 12 TFLOPS, it is an observed effective model-level metric, not the KV-only roofline. It can be reconciled only by changing the FLOP denominator or assuming additional fused compute with much lower effective HBM traffic than streaming all weights every step.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Decode.** Under the stated bytes-read model, attainable performance is about 0.8 TFLOPS; optimize by reducing KV/weight traffic or increasing reuse, not by tuning the systolic matmul alone.
+    - **Result: Memory-Bound Decode.** The KV attention sub-op is bandwidth-bound; optimize by reducing KV bytes or increasing reuse/batch size, and interpret the 12 TFLOPS profile number as an effective observed metric rather than the KV-only roofline.
 status: published
 provenance: imported
 requires_explanation: true

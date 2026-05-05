@@ -11,7 +11,7 @@ title: Diagnosing Input Stationary Bottlenecks in MLP Workloads
 scenario: You are porting a DLRM model with $4096 \times 4096$ MLP layers to a legacy accelerator with a 64x64 MAC array and 2MB SRAM using a strict Input Stationary (IS) dataflow. At batch size 256, DRAM bandwidth (800 GB/s) is saturated but MAC utilization is 4%.
 question: Why does the Input Stationary dataflow bottleneck MLP layers, and how do you quantify the architectural mismatch?
 details:
-  realistic_solution: The Input Stationary architecture pins input activations in the MACs and streams weights. Since the 64x64 array only holds a tile of 64 batch items or input features at once, the compiler may force multiple passes that reload the same 33.55MB weight matrix from DRAM, wasting bandwidth while the MAC array waits. A software transpose does not change a strict IS dataflow into weight-stationary hardware. The real remedy is dataflow-aware tiling/layout so reuse appears on the dimension the hardware can keep stationary, or moving this MLP layer to a weight-stationary/output-stationary accelerator when the legacy IS mapping cannot expose enough reuse.
+  realistic_solution: The Input Stationary architecture pins input activations in the MACs and streams weights. With a 64-row batch tile assumption, batch 256 requires four tiles, so a poor strict-IS mapping can reload the same 33.55MB weight matrix about four times from DRAM. A software transpose does not change a strict IS dataflow into weight-stationary hardware. The real remedy is dataflow-aware tiling/layout so reuse appears on the dimension the hardware can keep stationary, or moving this MLP layer to a weight-stationary/output-stationary accelerator when the legacy IS mapping cannot expose enough reuse.
   common_mistake: |
     **The Pitfall:** Assuming the problem is simply a 'memory-bound' matrix-vector multiplication.
     **The Rationale:** Failing to realize that at Batch=256, the layer should be compute-bound, but the hardware dataflow is forcing redundant memory reads.
@@ -20,12 +20,14 @@ details:
     **Assumptions & Constraints:**
     - Weights: $4096 \times 4096$ FP16 = 33.55 MB.
     - Hardware: Input Stationary, 64x64 MAC array, 800 GB/s DRAM.
+    - FLOP convention: one multiply-add counts as 2 FLOPs.
+    - Tiling assumption: the strict IS mapping processes 64 batch rows at a time.
 
     **Calculations:**
     - Input tiles for Batch 256: 256 / 64 = 4 passes.
-    - Weight data loaded: 4 passes * 33.55 MB = 134.2 MB per layer.
+    - Estimated DRAM weight traffic under this tiling: 4 passes * 33.55 MB = 134.2 MB per layer.
     - Total compute: $2 \times 256 \times 4096 \times 4096 = 8.59\text{ GFLOPs}$.
-    - Arithmetic Intensity: 8.59 GFLOPs / 134.2 MB = 64 FLOPs/Byte.
+    - Arithmetic intensity from the estimated traffic: 8.59e9 FLOPs / 134.2e6 bytes ≈ 64 FLOPs/Byte.
     - Max throughput: 800 GB/s * 64 = 51.2 TFLOPs/s.
 
     - If the 64x64 MAC array performs one FMA per MAC per cycle at 1 GHz, peak compute is about 64 × 64 × 2 × 1GHz = 8.2 TFLOPs/s.

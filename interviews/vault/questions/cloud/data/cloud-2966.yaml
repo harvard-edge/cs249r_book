@@ -11,7 +11,7 @@ title: 'Dataset Curation: Realize Token Budget for Chinchilla-Optimal 30B Traini
 scenario: You are planning data curation for a Chinchilla-optimal 30B parameter model to be trained on 64 H100s.
 question: What are the full data requirements and DataLoader throughput needed for a Chinchilla-optimal 30B model on 64 H100s?
 details:
-  realistic_solution: 'Chinchilla: 20 tokens/param for optimal compute, so a 30B model needs 600B training tokens. With a 60% filtering pass rate, source about 1T raw tokens. At ~4 bytes/token for raw UTF-8 text this is ~4TB raw text; tokenized int32 ids are 600B * 4 bytes = 2.4TB before index/metadata overhead. For 64 H100 SXM GPUs at 40% MFU, training consumes about 140K tokens/sec, so the DataLoader must deliver at least 0.56 MB/s of token ids, and should be provisioned with multi-GB/s sequential bandwidth and prefetching to absorb packing, randomization, and restart overhead.'
+  realistic_solution: 'Chinchilla: 20 tokens/param for optimal compute, so a 30B model needs 600B training tokens. With a 60% filtering pass rate, source about 1T raw tokens. Raw-text storage depends on tokenizer, language mix, compression, and document metadata; a few TB is a planning estimate, not an exact 4 bytes/token conversion. Tokenized int32 ids are at least 600B * 4 bytes = 2.4TB before index, shard, and metadata overhead. For 64 H100 SXM GPUs at 40% MFU, training consumes about 140K tokens/sec, so the DataLoader must deliver at least 0.56 MB/s of token ids, and should be provisioned with multi-GB/s sequential bandwidth and prefetching to absorb packing, randomization, and restart overhead.'
   common_mistake: |
     **The Pitfall:** Computing token counts without accounting for filtering drop rates or DataLoader throughput.
     **The Rationale:** Candidates focus entirely on the theoretical math of the Chinchilla scaling laws but forget the practical systems engineering required to feed the GPUs.
@@ -23,15 +23,16 @@ details:
     **Calculations:**
     - Optimal tokens: 30B * 20 = 600B tokens.
     - Raw tokens before filtering: 600B / 0.60 = 1T tokens.
-    - Raw text storage: 1T tokens * 4 bytes/token = ~4TB.
-    - Tokenized training storage: 600B tokens * 4 bytes/token = 2.4TB.
-    - Compute throughput: 64 * 989T * 0.4 MFU = 25,318 TFLOPS.
+    - Raw text storage: a few TB depending on encoding, compression, and metadata; do not equate text bytes exactly with token IDs.
+    - Tokenized training storage lower bound: 600B tokens * 4 bytes/token-id = 2.4TB before index/shard overhead.
+    - Peak compute: 64 * 989 TFLOPS = 63,296 TFLOPS.
+    - Sustained compute at 40% MFU: 63,296 * 0.4 = 25,318.4 TFLOPS.
     - FLOPs/token: 6 * 30B params = 180B FLOPs/token.
     - Token throughput: 25,318e12 / 180e9 = ~140,700 tokens/sec.
-    - Minimum token-id bandwidth: 140,700 * 4 bytes = ~563 KB/s.
+    - Minimum token-id bandwidth: 140,700 * 4 bytes = 562,800 bytes/sec = ~0.56 MB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: 600B Curated Tokens and ~141K Tokens/sec Loader Throughput.** Capacity planning should size storage for ~4TB raw plus ~2.4TB tokenized data and provision much more than the minimum byte rate to hide shuffle and prefetch overhead.
+    - **Result: 600B Curated Tokens and ~141K Tokens/sec Loader Throughput.** Capacity planning should size raw text as a tokenizer/compression-dependent estimate, treat ~2.4TB tokenized storage as a lower bound, and provision much more than the minimum byte rate to hide shuffle and prefetch overhead.
 status: published
 provenance: imported
 requires_explanation: false

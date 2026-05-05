@@ -11,24 +11,28 @@ title: Diagnosing Slow First-Token Latency in On-Device RAG on Tensor G3
 scenario: A Tensor G3 (7.5 TOPS, 12GB) on-device RAG app shows time-to-first-token (TTFT) of 4.2 seconds despite the LLM being loaded into memory. Users experience a 4-second freeze before any text appears. The LLM is a 1B INT8 model with a 2048-token context. Retrieval returns 3 documents averaging 400 tokens each.
 question: Why does Tensor G3 on-device RAG have 4.2 s TTFT with a loaded 1B INT8 LLM and three 400-token documents?
 details:
-  realistic_solution: Diagnose TTFT as prefill plus retrieval and runtime overhead, not generation speed. A 1B INT8 model needs roughly 2B ops per token for the dense layers; for a 2048-token prompt, that is 2048 * 2e9 = 4.096e12 ops. At 7.5 TOPS with 30% effective utilization, the dense prefill lower bound is about 1.82s. Retrieval adds about 600ms for query embedding, FAISS search, document load, and tokenization, giving an expected ~2.42s before scheduler, memory-bandwidth, attention, and framework overhead. The observed 4.2s means about 1.8s remains unexplained by the simple model; because the scenario says the model is already loaded, the grounded diagnosis is inefficient/serialized prefill and retrieval overhead, not a cold model load. Instrument retrieval, tokenization, NPU queue time, and prefill separately, then reduce retrieved context or overlap retrieval with prompt preparation.
+  realistic_solution: Diagnose TTFT as prefill plus retrieval and runtime overhead, not generation speed. The retrieved documents contribute about 3 * 400 = 1200 tokens; with the user query, instructions, and separators, a realistic prompt estimate is roughly 1400 tokens unless the app pads to the full 2048-token window. A coarse dense-layer estimate for a 1B INT8 model is about 2e9 ops per prompt token, so 1400 tokens costs about 2.8e12 ops. At 7.5 TOPS with 30% effective utilization, the dense prefill lower bound is about 1.24s. Retrieval adds about 600ms for query embedding, search, document load, and tokenization, giving an expected ~1.84s before scheduler, memory-bandwidth, attention, and framework overhead. The observed 4.2s therefore indicates substantial serialized retrieval, prefill inefficiency, attention/runtime overhead, or queueing, not a cold model load. Instrument retrieval, tokenization, NPU queue time, and prefill separately, then reduce retrieved context or overlap retrieval
+    with prompt preparation.
   common_mistake: |
     **The Pitfall:** Assuming TTFT is dominated by model weight loading or generation speed.
     **The Rationale:** Engineers forget that processing a large context window (prefill) scales quadratically and is computationally intensive on mobile hardware.
     **The Consequence:** Time is wasted optimizing disk I/O when the issue is actually the NPU prefill compute and cache eviction.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Dense prefill lower bound (1B INT8, 2048 tokens): 2048 * 2B ops = 4.096e12 ops.
+    - Retrieved context: 3 documents * 400 tokens = 1200 tokens.
+    - Prompt estimate after query, instructions, and separators: ~1400 tokens unless padded to the full 2048-token window.
+    - Dense prefill lower bound: ~2e9 ops/token for a coarse 1B-model forward pass.
     - Effective compute: 7.5 TOPS * 0.3 utilization = 2.25e12 ops/s.
 
     **Calculations:**
-    - Prefill time: 4.096 / 2.25 = 1.82s.
+    - Prefill work: 1400 tokens * 2e9 ops/token = 2.8e12 ops.
+    - Prefill time lower bound: 2.8e12 ops / 2.25e12 ops/s = 1.24s.
     - Retrieval pipeline & Overhead: 300ms embed + 50ms search + 50ms tokenization + 200ms doc load = 600ms.
-    - Total expected TTFT: 1.82s + 0.6s = 2.42s.
-    - Observed TTFT: 4.2s, leaving a gap of 1.78s.
+    - Total simple-model TTFT: 1.24s + 0.6s = 1.84s before attention, memory-bandwidth, scheduler, and framework overhead.
+    - Observed TTFT: 4.2s, leaving about 2.36s for overheads not captured by the simple lower-bound model.
 
     **Conclusion & Interpretation:**
-    - **Result: 4.2s TTFT with a 1.78s unexplained overhead gap.** The measured latency is consistent with large-context prefill plus retrieval/runtime overhead; do not conclude cold model load unless instrumentation shows weights were reloaded.
+    - **Result: 4.2s TTFT with a large runtime-overhead gap.** The measured latency is consistent with retrieved-context prefill plus serialized retrieval/runtime overhead; do not conclude cold model load unless instrumentation shows weights were reloaded.
 status: published
 provenance: imported
 requires_explanation: false

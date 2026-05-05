@@ -11,7 +11,7 @@ title: RoPE Embedding Degradation in BF16
 scenario: You are extending a 13B model's context window from 8k to 100k tokens. You deploy the model purely in BF16 to save memory. While short-context tasks work perfectly, retrieval tasks at position > 60,000 fail entirely. Profiling shows the attention maps become smeared and indistinct at high positions.
 question: Why do retrieval tasks fail beyond position 60,000 with BF16 long-context inference, and how would you fix RoPE computation?
 details:
-  realistic_solution: The issue is a direct result of BF16's severe lack of mantissa precision (only 7 bits). Rotary Position Embedding (RoPE) relies on calculating cos(m * theta) and sin(m * theta) where m is the token position. At large positions (e.g., m = 60,000), representing 'm' in BF16 causes severe truncation. The step size between representable numbers in BF16 at this magnitude is large enough that consecutive token positions map to the exact same BF16 value. Consequently, the model cannot distinguish between adjacent tokens at long contexts. The architecture must compute and apply RoPE in FP32, casting to BF16 only after the positional rotation is complete.
+  realistic_solution: The issue is BF16 precision in the RoPE angle/cache computation. RoPE needs accurate sin(m * theta) and cos(m * theta) values for large token positions m. BF16 has only 7 stored fraction bits, so large positions and the resulting angles have coarse spacing; many adjacent or nearby positions can alias or receive overly coarse rotations if the position, frequency multiplication, or trig cache is built in BF16. The model then loses positional resolution and attention becomes smeared at long context. Compute RoPE positions, inverse frequencies, angle products, and sin/cos cache construction in FP32, then cast the final rotated activations or cache values back to BF16 if needed.
   common_mistake: |
     **The Pitfall:** Assuming the RoPE base frequency (theta) wasn't scaled properly for long context, leading to out-of-distribution cosine values.
     **The Rationale:** Explanation of the pitfall.
@@ -23,12 +23,13 @@ details:
     - Long-context positions around 65,536 are near 2^16.
 
     **Calculations:**
-    - BF16 spacing near 2^16 is 2^(16 - 7) = 512 between adjacent representable values.
-    - Many nearby integer positions therefore alias after BF16 rounding. For example, adjacent positions such as 65,536 and 65,537 both round to the same BF16 value.
-    - When m is rounded before computing RoPE angles, groups of nearby positions can receive identical or overly coarse rotations.
+    - For BF16 values in the binade around 2^16, the unit in the last place is 2^(16 - 7) = 512.
+    - Thus positions 65,536 and 65,537 cannot be represented as distinct BF16 values; they round to the same stored value, and many nearby positions share coarse buckets.
+    - The same precision loss can occur in m * theta and sin/cos cache construction if those computations are performed in BF16.
+    - FP32 spacing around 2^16 is 2^(16 - 23) = 1/128, which is fine-grained enough for adjacent integer positions before the trig computation.
 
     **Conclusion & Interpretation:**
-    - **Result: Degraded Positional Resolution**. BF16 position arithmetic at long contexts can smear attention because nearby positions are no longer represented distinctly. Compute RoPE positions and angles in FP32, then cast the rotated activations back to BF16 if needed.
+    - **Result: Degraded Positional Resolution**. BF16 RoPE angle/cache arithmetic at long contexts can smear attention because nearby positions receive indistinct rotations. Build RoPE positions, angles, and sin/cos values in FP32, then cast outputs back to BF16 if needed.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,24 +11,26 @@ title: 4-GPU Tensor Parallel AllReduce on Mixed NVLink and PCIe Gen4
 scenario: A server has 4 GPUs. GPUs 0-1 are connected via NVLink, and GPUs 2-3 are connected via NVLink, but the two pairs only connect via PCIe Gen4 through the root complex. You want to run 4-way tensor parallelism.
 question: What is the 4-way tensor-parallel AllReduce time for a 100 MB activation tensor, and which link is the bottleneck?
 details:
-  realistic_solution: Use a hierarchical 4-GPU AllReduce. First, each NVLink pair reduce-scatters the 100 MB tensor into two 50 MB shards, taking 50 MB / 600 GB/s = 0.083 ms. Next, the corresponding shards must cross between the two pairs over the PCIe Gen4 root-complex path. If the stated 32 GB/s is the effective cross-pair bisection bandwidth, the two 50 MB shard exchanges consume 100 MB of bisection traffic and take 100 MB / 32 GB/s = 3.125 ms. Finally, each pair all-gathers the two 50 MB shards over NVLink, taking another 0.083 ms. Total time is about 3.29 ms, dominated by the PCIe cross-pair step. A fully connected 4-GPU NVLink ring at 600 GB/s would take 2 * (4 - 1) / 4 * 100 MB / 600 GB/s = 0.25 ms, so the mixed topology is about 13x slower for this collective. Prefer 2-way TP within each NVLink pair and use pipeline or data parallelism across the PCIe boundary when possible.
+  realistic_solution: Use a hierarchical 4-GPU AllReduce implemented as reduce-scatter, cross-pair shard exchange, then all-gather. First, each NVLink pair reduce-scatters the 100 MB tensor into two 50 MB shards, taking 50 MB / 600 GB/s = 0.083 ms. Next, the corresponding shards must cross between the two pairs over the PCIe Gen4 root-complex path. If 32 GB/s is the effective cross-pair bisection bandwidth for the two simultaneous shard transfers, the cross-pair phase moves 100 MB of bisection traffic and takes 100 MB / 32 GB/s = 3.125 ms. Finally, each pair all-gathers the two 50 MB shards over NVLink, taking another 0.083 ms. Total time is about 3.29 ms for the hierarchical AllReduce, dominated by the PCIe cross-pair step. Prefer 2-way TP within each NVLink pair and use pipeline or data parallelism across the PCIe boundary when possible.
   common_mistake: |
     **The Pitfall:** Assuming NVLink connects all 4 GPUs in a full mesh.
     **The Rationale:** Candidates abstract away the physical server topology and assume "NVLink is available" means full-bandwidth connectivity everywhere.
     **The Consequence:** Designing a 4-way TP layout that violently degrades performance due to silent PCIe bottlenecks.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Activation Tensor: 100 MB.
-       - NVLink Bandwidth: 600 GB/s.
-       - PCIe Gen4 Bandwidth: 32 GB/s.
-    2. **Calculations:**
-       - Intra-Pair (Reduce-Scatter): 50 MB / 600 GB/s = 0.083 ms.
-       - Cross-Pair (PCIe shard exchange): two 50 MB shard exchanges cross the pair boundary, so 100 MB / 32 GB/s = 3.125 ms.
-       - Intra-Pair (All-Gather): 0.083 ms.
-       - Total: 0.083 + 3.125 + 0.083 = 3.29 ms.
-       - Full Mesh Ideal Ring: 2 * (4 - 1) / 4 * 100 MB / 600 GB/s = 0.25 ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: PCIe Interconnect-Bound.** The cross-pair bisection dominates the collective and makes the operation about 13x slower than an all-NVLink 4-GPU collective.
+    **Assumptions & Constraints:**
+    - Activation tensor: 100 MB.
+    - NVLink bandwidth inside each pair: 600 GB/s.
+    - Effective PCIe Gen4 cross-pair bisection bandwidth: 32 GB/s.
+    - Collective primitive: hierarchical AllReduce as pairwise reduce-scatter, cross-pair shard exchange, then pairwise all-gather.
+
+    **Calculations:**
+    - Intra-pair reduce-scatter: 50 MB / 600 GB/s = 0.083 ms.
+    - Cross-pair PCIe shard exchange: two 50 MB shard transfers cross the pair boundary, so 100 MB / 32 GB/s = 3.125 ms.
+    - Intra-pair all-gather: 50 MB / 600 GB/s = 0.083 ms.
+    - Total hierarchical AllReduce time: 0.083 + 3.125 + 0.083 = 3.29 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: PCIe interconnect-bound.** The cross-pair bisection dominates the collective, so 4-way TP across both NVLink pairs is much slower than keeping TP inside a single pair.
 status: published
 provenance: imported
 requires_explanation: false

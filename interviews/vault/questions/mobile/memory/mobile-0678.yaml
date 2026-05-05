@@ -11,7 +11,8 @@ title: The On-Device Training Storage Bloat
 scenario: Your keyboard app fine-tunes a next-word prediction model (50M params, FP16 = 100 MB) on device. After 3 months, users complain the app is using 4.2 GB of storage, though the model is still 100 MB.
 question: Where did the 4.2 GB of storage use come from during on-device fine-tuning?
 details:
-  realistic_solution: On-device training generates hidden storage through optimizer snapshots, rolling checkpoints, and cached training batches. The 100 MB model is only the deployed FP16 weights. Adam keeps two per-parameter state tensors; if those states are stored as FP16 on disk, each checkpoint is 100 MB of model weights plus 200 MB of optimizer state. Ten rolling checkpoints, one active optimizer-state copy, and the local training/cache buffer account for the observed 4.2 GB.
+  realistic_solution: |
+    On-device training generates hidden storage through optimizer snapshots, rolling checkpoints, and cached training batches. The 100 MB model is only the deployed FP16 weights. Adam keeps two per-parameter state tensors; if those states are stored as FP16 on disk, each rolling checkpoint is a self-contained 300 MB snapshot: 100 MB of model weights plus 200 MB of optimizer state. In addition to those ten historical checkpoints, the trainer may keep one active optimizer-state copy and a retained local cache for recent examples, tokenized batches, telemetry logs, and crash recovery. Those categories account for the observed 4.2 GB.
   common_mistake: |
     **The Pitfall:** Blaming user typing data accumulation.
     **The Rationale:** Candidates assume the raw data inputs are bloated, ignoring the massive size of intermediate training tensors.
@@ -28,7 +29,7 @@ details:
     - Rolling checkpoint storage = 10 * 300 MB = 3000 MB.
     - Active on-disk optimizer state = 200 MB.
     - Current deployed/training model copy = 100 MB.
-    - Training data cache, logs, and batch staging = 900 MB.
+    - Retained training/cache storage = 900 MB, covering recent typed-example shards, tokenized batch cache, logs, and crash-recovery staging.
     - Total disk usage = 3000 MB + 200 MB + 100 MB + 900 MB = 4200 MB = 4.2 GB.
 
     **Conclusion & Interpretation:**

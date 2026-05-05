@@ -18,14 +18,21 @@ details:
     **The Rationale:** Standard resource schedulers multiplex smaller workloads easily.
     **The Consequence:** This fundamentally misunderstands modern LLM memory physics. Evicting and reloading a ~170GB+ context to serve a chatbot query takes seconds in memory transfer time alone, catastrophically violating both SLAs.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 70B parameter model (FP16) = 140 GB weights.
-       - B200 Memory: 192 GB HBM3e.
-    2. **Calculations:**
-       - Available memory after loading one model: 192 GB - 140 GB = 52 GB.
-       - The 52 GB must serve KV cache, context, and OS/CUDA overhead.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Capacity-Bound. Memory is extremely tight; you cannot fit a second large model on this same GPU without heavy quantization or severe thrashing.**
+    **Assumptions & Constraints:**
+    - One 70B FP16 model uses about 70B * 2 bytes = 140 GB for weights.
+    - A B200 has 192 GB of HBM.
+    - Serving also needs memory for KV cache, CUDA graphs, activations, fragmentation, and runtime buffers.
+    - Leadership wants both a chatbot and a batch product active on the same GPU.
+
+    **Calculations:**
+    - Two independently loaded 70B FP16 services would require 2 * 140 GB = 280 GB for weights alone.
+    - 280 GB exceeds 192 GB before allocating any KV cache or runtime overhead.
+    - One resident FP16 copy leaves 192 GB - 140 GB = 52 GB for all serving headroom.
+    - If runtime overhead/reserve is roughly 10-20 GB, only about 32-42 GB remains for KV cache across both products.
+    - Long-context batch jobs can consume that shared KV headroom quickly, so they need admission control rather than a second resident service.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Capacity-Bound Shared Serving**. Two full 70B FP16 services do not fit on one B200. Keep one resident model, reserve chatbot KV/cache headroom, and let batch work use only low-priority slack or separate capacity.
 status: published
 provenance: imported
 requires_explanation: false

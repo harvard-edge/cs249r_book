@@ -11,7 +11,7 @@ title: The Model Compression Pipeline
 scenario: You have a 70B FP16 model that costs $1.20 per 1M tokens to serve on 4x GPUs. Your target is $0.40 per 1M tokens on a single GPU. Design a compression pipeline that achieves this 3x cost reduction while keeping quality degradation under 2% on your evaluation suite.
 question: How would you compress the 70B FP16 model to hit $0.40 per 1M tokens on one GPU while keeping quality loss under 2%?
 details:
-  realistic_solution: 'A production compression pipeline is multi-stage: (1) Calibration-aware quantization (GPTQ/AWQ) to INT4 with group size 128, reducing weights from about 140 GB to about 35 GB. Quality loss: ~1.5%. (2) KV-cache quantization to FP8, reducing cache pressure without assuming every remaining GB is usable for KV. Quality impact: <0.5%. (3) Speculative decoding with a 1B draft model, validated on the target workload rather than assumed as a fixed multiplier. (4) Continuous batching to improve utilization. The release gate is measured cost per 1M generated tokens and measured eval degradation, not the nominal 4x reduction in GPU count.'
+  realistic_solution: 'A production compression pipeline is multi-stage: (1) Calibration-aware quantization (GPTQ/AWQ) to INT4 with group size 128, reducing weights from about 140 GB to about 35 GB. Quality loss: ~1.5%. (2) KV-cache quantization to FP8, reducing cache pressure without assuming every remaining GB is usable for KV. Quality impact: <0.5%. (3) Optional speculative decoding with a 1B draft model, used only if its extra memory and acceptance rate improve measured cost on the target workload. (4) Continuous batching to improve utilization. The release gate is measured cost per 1M generated tokens and measured eval degradation, not the nominal 4x reduction in GPU count.'
   common_mistake: |
     **The Pitfall:** Naively quantizing the entire model to INT4 without considering KV-cache or serving strategies.
     **The Rationale:** Assuming weight size reduction is the only factor in lowering serving costs.
@@ -25,13 +25,14 @@ details:
     **Calculations:**
     - INT4 weights: 70B * 0.5 bytes = 35 GB before metadata; reserve several GB more for scales, runtime workspace, activations, fragmentation, and the draft model.
     - Remaining memory supports a moderate continuous-batching window, but not a guaranteed batch of 80 at 4k context for a 70B model. Measure the safe batch after runtime overhead and KV-cache layout are known.
-    - Cost model: if the target single GPU costs $2.80/hour, then meeting $0.40/1M tokens requires throughput >= $2.80 / $0.40 = 7.0M tokens/hour.
-    - A measured serving run at 7.2M tokens/hour gives $2.80 / 7.2M = $0.389 per 1M tokens.
-    - Speculative decoding should be reported as the measured reason throughput crosses 7.0M tokens/hour, not as a universal 2.5x multiplier.
+    - Relative cost model from the prompt: baseline cost is $1.20/1M tokens on 4 GPUs; target is $0.40/1M tokens on 1 GPU.
+    - With equal GPU-hour prices, the single-GPU pipeline must deliver at least 75% of the baseline 4-GPU token throughput: 1/T_single <= 4/(3*T_baseline), so T_single >= 0.75*T_baseline.
+    - If compression plus batching delivers 0.8*T_baseline on one GPU, cost is $1.20 * (1/4) / 0.8 = $0.375 per 1M tokens.
+    - Speculative decoding should be reported as an optional measured reason throughput crosses the 0.75*T_baseline threshold, not as a universal multiplier.
     - Total quality degradation = 1.5% + 0.3% = 1.8%.
 
     **Conclusion & Interpretation:**
-    - **Result: $0.39 per 1M tokens at 1.8% quality loss if the measured single-GPU throughput is at least 7.0M tokens/hour**. Multi-stage compression can hit the target, but the batch size and speculative speedup must be validated on the actual serving stack.
+    - **Result: Target Feasible Only With Measured Throughput.** Multi-stage compression can hit $0.40 per 1M tokens at 1.8% quality loss if the one-GPU stack reaches at least 75% of the original 4-GPU throughput. Batch size and any speculative speedup must be validated on the actual serving stack.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: Core ML Mixed Precision for Neural Engine with FP32 Accuracy
 scenario: You're deploying a 100-layer model via Core ML. Running everything in FP16 gives a 2% accuracy drop — unacceptable for your medical imaging app. Running everything in FP32 means the Neural Engine can't be used.
 question: How would you design a mixed-precision strategy that gets Neural Engine speed with FP32 accuracy?
 details:
-  realistic_solution: Implement a layer-wise mixed-precision profiling strategy. Execute the model in FP32 as the golden baseline, then iteratively quantize individual layers to FP16, measuring the cosine similarity of the output activations. Pin layers with cosine similarity < 0.999 (e.g., softmax, layer normalization) to FP32 for execution on the CPU/GPU, while offloading the remaining 90%+ FP16-safe layers to the Neural Engine. Use Core ML's MLComputeUnits configuration to manage execution routing.
+  realistic_solution: Implement a mixed-precision conversion strategy that preserves the FP32 reference numerics while keeping the bulk of the graph on the Neural Engine. Start from an FP32 golden baseline, profile layer outputs after FP16 conversion, and identify numerically sensitive operations such as reductions, normalization, softmax, or unstable activation variants. Prefer ANE-supported operator substitutions, graph rewrites, clipping, calibration, and local higher-precision accumulation patterns that keep those regions inside a single ANE-compiled graph. Only use CPU/GPU fallback for unavoidable unsupported or numerically unsafe operations, and keep those partitions coarse enough that transfer overhead does not erase the ANE speedup.
   common_mistake: |
     **The Pitfall:** Bumping the entire model to FP32 upon observing a slight top-line accuracy regression.
     **The Rationale:** Assuming precision sensitivity is uniform across the architecture, rather than isolated to specific operations that demand high dynamic range.
@@ -20,19 +20,20 @@ details:
     **Assumptions & Constraints:**
     - Model depth: 100 layers.
     - ANE (FP16) layer time: 0.2 ms.
-    - CPU (FP32) layer time: 1.0 ms.
-    - ANE-CPU context switch / data transfer: 1.5 ms per round-trip.
-    - Precision sensitivity: 5 layers require FP32.
+    - CPU/GPU fallback layer time: 1.0 ms.
+    - ANE-CPU/GPU context switch / data transfer: 1.5 ms per round-trip.
+    - Precision sensitivity: 5 layers need special handling; assume 4 can be rewritten to ANE-safe numerics and 1 unavoidable op falls back.
 
     **Calculations:**
     - FP16 only: 100 * 0.2 ms = 20 ms.
     - FP32 only (CPU): 100 * 1.0 ms = 100 ms.
-    - Mixed precision execution: (95 * 0.2) + (5 * 1.0) = 19 + 5 = 24 ms.
-    - Transfer overhead: 5 round-trips * 1.5 ms = 7.5 ms.
-    - Total mixed latency: 24 ms + 7.5 ms = 31.5 ms.
+    - ANE-safe mixed graph: 99 layers * 0.2 ms = 19.8 ms.
+    - One unavoidable fallback op: 1 * 1.0 ms = 1.0 ms.
+    - Transfer overhead for one coarse fallback partition: 1 round-trip * 1.5 ms = 1.5 ms.
+    - Total mixed latency: 19.8 ms + 1.0 ms + 1.5 ms = 22.3 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 31.5 ms (Compute-Bound Optimization)**. Mixed precision achieves 31.5 ms (vs 100 ms pure FP32), delivering a ~3.1x speedup while strictly preserving the medical-grade FP32 accuracy baseline.
+    - **Result: about 22.3 ms (ANE-Preserving Mixed Precision)**. The design keeps almost all execution on the Neural Engine and uses rewrites or coarse fallback only where needed to match the FP32 accuracy baseline.
 status: published
 provenance: imported
 requires_explanation: true

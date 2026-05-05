@@ -7,12 +7,12 @@ topic: encoder-decoder-tradeoffs
 competency_area: architecture
 bloom_level: evaluate
 phase: inference
-title: Sizing On-Device Translation Architectures for A17 Pro
+title: Sizing On-Device Translation Architectures
 scenario: You are designing an on-device real-time translation system targeting a modern NPU. You need to evaluate the deployment tradeoffs between a 1B parameter encoder-decoder model and a 1.5B parameter decoder-only model.
 question: How should an on-device translation architecture be sized for NPU memory-bandwidth limits?
 details:
   realistic_solution: |
-    Size the architecture around decode-time bandwidth, because batch-1 generation usually reads decoder weights and KV cache every output token. The encoder-decoder model pays an upfront encoder cost once per source sentence, then reuses the encoder states while the smaller decoder generates each target token. The decoder-only model has a simpler stack but carries a larger per-token decoder weight stream. For translation, a 500M/500M encoder-decoder can be preferable when the source encoding is reused across many output tokens and the encoder-state cache fits in memory; the decoder-only model is preferable only if its unified implementation gives enough cache locality or quality benefit to justify the higher per-token bandwidth.
+    Size the architecture around decode-time bandwidth, because batch-1 generation repeatedly touches decoder weights, KV cache, and attention state. The encoder-decoder model pays an upfront encoder cost once per source sentence, then reuses the encoder states while the smaller decoder generates each target token. The decoder-only model has a simpler stack but carries a larger decoder working set per generated token. For this translation target, choose the 500M/500M encoder-decoder if quality is comparable and the encoder-state cache fits, because its smaller decoder leaves more bandwidth headroom during generation.
   common_mistake: |
     **The Pitfall:** Assuming fewer total parameters guarantees lower latency.
     **The Rationale:** Candidates falsely equate total parameter count directly to inference speed, missing the distinction between compute-bound prefill and bandwidth-bound generation.
@@ -23,18 +23,17 @@ details:
     - Precision: 8-bit weights for sizing.
     - Models: 1B encoder-decoder (500M encoder/500M decoder) vs 1.5B decoder-only.
     - Translation request: 80 source tokens, 80 generated target tokens.
-    - Encoder outputs are computed once and reused during decoding.
+    - Encoder outputs are computed once and reused during decoding; weight-stream estimates below are pessimistic DRAM upper bounds for active decoder weights, not claims that every parameter must miss cache every token.
 
     **Calculations:**
-    - Decoder-only per-token weight traffic upper bound: 1.5B * 1 byte = 1.5 GB/token.
-    - Decoder-only bandwidth time upper bound: 1.5 GB / 50 GB/s = 30 ms/token, before KV traffic.
-    - Encoder-decoder upfront encoder read: 0.5 GB once for the source sentence.
-    - Encoder-decoder per-token decoder read upper bound: 0.5 GB / 50 GB/s = 10 ms/token, before decoder KV and cross-attention state reads.
-    - Cross-attention state is reused from the encoded source; it grows with source length and layers, but it is not another full 0.5 GB weight load per generated token.
-    - For 80 target tokens, decoder-only weight traffic upper bound is 80 * 1.5 = 120 GB; encoder-decoder is 0.5 GB encoder + 80 * 0.5 GB decoder = 40.5 GB plus state/KV traffic.
+    - Decoder-only active decoder-weight traffic upper bound: 1.5B * 1 byte = 1.5 GB/token, or 30 ms/token at 50 GB/s before KV traffic.
+    - Encoder-decoder upfront encoder-weight traffic upper bound: 0.5 GB once for the source sentence.
+    - Encoder-decoder active decoder-weight traffic upper bound: 0.5 GB/token, or 10 ms/token at 50 GB/s before decoder KV and cross-attention state reads.
+    - Cross-attention state is reused from the encoded source; for 80 source tokens it is bounded by source length and layer width, not by the full decoder parameter count.
+    - For 80 target tokens, pessimistic decoder-only weight traffic is 80 * 1.5 = 120 GB; encoder-decoder is 0.5 GB encoder + 80 * 0.5 GB decoder = 40.5 GB plus state/KV traffic.
 
     **Conclusion & Interpretation:**
-    - **Result: decode bandwidth drives the choice**. The encoder-decoder design has an upfront encoder cost but much lower per-token decoder traffic, while the decoder-only model has simpler execution and higher per-token traffic. The final choice should be based on profiled weight, KV-cache, and encoder-state bandwidth at the target token rate.
+    - **Result: prefer the encoder-decoder design for this bandwidth-limited translation target if quality is comparable.** It has an upfront encoder cost but a much smaller decoder working set per generated token; the decoder-only model is preferable only when profiling shows better cache locality or materially better quality.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,10 +9,9 @@ bloom_level: create
 phase: inference
 title: Speculative Decoding on Jetson Orin
 scenario: 'You want to use speculative decoding for a 7B target model on Jetson Orin (32GB LPDDR5, 102 GB/s, ~2 TFLOPS FP16). Options for draft: (A) 0.5B model, (B) 2-layer early-exit from 7B, (C) n-gram lookup table with no neural compute.'
-question: Which draft strategy for speculative decoding a 7B model on Jetson Orin reduces latency most under the 102GB/s bandwidth limit?
+question: Which draft strategy gives the best expected speculative decoding throughput on Jetson Orin under the 102GB/s bandwidth limit?
 details:
-  realistic_solution: 'Target decode on Orin is dominated by weight bandwidth: 14 GB of FP16 target weights / 102 GB/s = about 137 ms per generated token, while the 14 GFLOP compute cost is only about 7 ms at 2 TFLOPS. Use one speculative-decoding model for all options: each round drafts K tokens, then one target pass verifies them; expected emitted tokens are E = 1 + alpha + ... + alpha^K. With K=5, assume alpha=0.70 for the 0.5B neural draft, alpha=0.60 for the 2-layer early exit, and with K=8 assume alpha=0.45 for n-gram lookup. The 0.5B draft costs 1 GB / 102 GB/s = 9.8 ms per draft token, so a round costs 5 * 9.8 + 137 = 186 ms and emits E=2.94 tokens, or 63 ms/token. The early-exit draft costs about 0.875 GB / 102 GB/s = 8.6 ms per draft token, so it reaches about 76 ms/token. The n-gram draft has negligible compute but lower acceptance, giving about 137 / 1.82 = 75 ms/token. Under these explicit assumptions, the 0.5B draft wins on latency, but only if its acceptance rate stays high
-    enough to justify its added bandwidth and memory footprint.'
+  realistic_solution: Use expected accepted tokens per verification round as the comparison metric. Under a bandwidth-bound model, the 7B target pass reads about 14 GB / 102 GB/s = 137 ms per verify pass; small compute terms are treated as already hidden by or secondary to the bandwidth read. With K=5 and alpha=0.70, the 0.5B draft emits E=2.94 expected tokens in a 186 ms round, or about 15.8 tokens/s. The 2-layer early exit reaches about 13.2 tokens/s, and the n-gram strategy reaches about 13.3 tokens/s because its acceptance is lower. Under these explicit assumptions, the 0.5B draft has the best expected throughput, but it only wins if the measured acceptance rate stays near 0.70 and the extra 1 GB model fits without harming the target pass.
   common_mistake: |
     **The Pitfall:** Assuming a neural draft model is always best.
     **The Rationale:** Candidates assume that speculative decoding requires a neural model, forgetting that on Orin, even a tiny draft model competes for the same limited memory bandwidth.
@@ -20,17 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target model: 14 GB read at 102 GB/s = 137 ms/token.
-    - Speculative model: round time = K * draft_time + target_verify_time.
+        - Speculative model: expected throughput = expected emitted tokens / round time.
     - Expected emitted tokens per round: E = 1 + alpha + ... + alpha^K.
     - Acceptance assumptions: 0.5B draft alpha=0.70, early-exit alpha=0.60, n-gram alpha=0.45.
 
     **Calculations:**
-    - 0.5B draft: 1 GB / 102 GB/s = 9.8 ms. K=5 round time = 5 * 9.8 + 137 = 186 ms. E = (1 - 0.70^6) / (1 - 0.70) = 2.94 tokens. Effective latency = 186 / 2.94 = 63 ms/token.
-    - 2-layer early exit: (14 GB / 32) * 2 / 102 GB/s = 8.6 ms. K=5 round time = 5 * 8.6 + 137 = 180 ms. E = (1 - 0.60^6) / (1 - 0.60) = 2.38 tokens. Effective latency = 180 / 2.38 = 76 ms/token.
-    - N-gram lookup: draft compute is negligible. K=8 round time = 137 ms. E = (1 - 0.45^9) / (1 - 0.45) = 1.82 tokens. Effective latency = 137 / 1.82 = 75 ms/token.
+        - 0.5B draft: 1 GB / 102 GB/s = 9.8 ms. K=5 round time = 5 * 9.8 + 137 = 186 ms. E = (1 - 0.70^6) / (1 - 0.70) = 2.94 tokens. Throughput = 2.94 / 0.186 = 15.8 tokens/s.
+        - 2-layer early exit: (14 GB / 32) * 2 / 102 GB/s = 8.6 ms. K=5 round time = 5 * 8.6 + 137 = 180 ms. E = (1 - 0.60^6) / (1 - 0.60) = 2.38 tokens. Throughput = 2.38 / 0.180 = 13.2 tokens/s.
+        - N-gram lookup: draft compute is negligible. K=8 round time = 137 ms. E = (1 - 0.45^9) / (1 - 0.45) = 1.82 tokens. Throughput = 1.82 / 0.137 = 13.3 tokens/s.
 
     **Conclusion & Interpretation:**
-    - **Result: ~63 ms/token (Memory-Bandwidth Bound)**. Under the stated acceptance assumptions, the 0.5B draft provides the best latency reduction, about 2.2x over the 137 ms/token target-only baseline.
+        - **Result: 0.5B draft at about 15.8 tokens/s (Memory-Bandwidth Bound)**. Under the stated acceptance assumptions, it beats target-only decoding at about 7.3 tokens/s, but the ranking should be rechecked with measured acceptance and round costs.
 status: published
 provenance: imported
 requires_explanation: false

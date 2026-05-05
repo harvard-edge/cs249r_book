@@ -11,7 +11,7 @@ title: Fix an NFS DataLoader Bottleneck in a 256-H100 Training Job
 scenario: 'Your 256 H100 training job is GPU-starved: GPUs run at 9% MFU instead of expected 45%. Profiling shows DataLoader workers are the bottleneck — each H100 waits 180ms per batch vs 45ms compute. Your dataset is 2TB stored on distributed NFS.'
 question: What is starving the 256-H100 training job, and how would you fix the DataLoader and storage path to recover the expected MFU?
 details:
-  realistic_solution: 'Bottleneck is NFS I/O: 256 GPUs × 1 batch/45ms = 5,689 batches/second. Each batch = 512 sequences × 2048 tokens × 4 bytes = 4MB. Bandwidth needed: 5,689 × 4MB = 22.7 GB/s. NFS likely capped at 10 GB/s. Fix: pre-tokenize and shard data to local NVMe SSDs per node, use memory-mapped files, prefetch 3 batches ahead.'
+  realistic_solution: Bottleneck is the shared NFS input path, not GPU compute. At the target 45ms compute step, 256 GPUs need 256 / 0.045 = 5,689 GPU-batches/sec. If each GPU batch is 512 sequences × 2048 tokens × 4 bytes, that is about 4MB per GPU-batch, or 22.7 GB/s aggregate input bandwidth before metadata and decompression overhead. The observed 180ms wait stretches each step to 225ms, so GPUs are active only 45/225 = 20% of wall time, matching the drop from expected 45% MFU to about 9% observed MFU. Fix by pre-tokenizing, packing into large sharded mmap files, staging shards to local NVMe per 8-GPU node, using persistent DataLoader workers with pinned-memory prefetch, and monitoring per-node read throughput. Local NVMe needs only about 0.71 GB/s per node at the target step rate, well under a 6.4 GB/s device, so prefetch can hide the storage path.
   common_mistake: |
     **The Pitfall:** Adding more DataLoader workers without diagnosing the bottleneck.
     **The Rationale:** Engineers assume CPU core starvation is always the root cause of data loading stalls.
@@ -24,16 +24,17 @@ details:
     - Local NVMe bandwidth: 6.4 GB/s per node (8 GPUs).
 
     **Calculations:**
-       - GPU utilization: 45ms / 225ms = 20%. Current MFU = 45% * 20% = 9%.
-       - Data per node: 8 GPUs * 4MB/batch = 32MB per node.
-       - I/O time with NVMe: 32MB / 6.4 GB/s = 5ms.
-       - New batch time (with prefetching): max(45ms, 5ms) = 45ms.
-       - Speedup: 225ms / 45ms = 5x faster wall time.
-    - Current effective throughput is 20% of the target step rate, so recovering the 45ms step avoids 80% of the GPU-hours needed for the same training work.
-    - Monthly wasted GPU cost at current utilization: 256 H100s * $3/hr * 720hr * 80% = ~$442K.
+       - Current step time: 180ms wait + 45ms compute = 225ms.
+       - GPU active fraction: 45ms / 225ms = 20%; expected 45% MFU * 20% active fraction = ~9% observed MFU.
+       - Data per GPU-batch: 512 * 2048 * 4 bytes = 4,194,304 bytes = 4 MiB.
+       - Target aggregate bandwidth: 256 GPUs * 4 MiB / 45ms = ~22.7 GiB/s before metadata and decompression overhead.
+       - Current aggregate read rate implied by the stalled step: 256 GPUs * 4 MiB / 225ms = ~4.6 GiB/s, consistent with a saturated shared NFS path plus overhead.
+       - Per-node target bandwidth after sharding to local NVMe: 8 GPUs * 4 MiB / 45ms = ~711 MiB/s, below 6.4 GB/s local NVMe bandwidth.
+       - I/O time per node from NVMe: 32 MiB / 6.4 GB/s = about 5ms, so prefetch can overlap it with the 45ms compute step.
+       - Step-time recovery: 225ms / 45ms = 5x faster wall time if preprocessing and reads stay overlapped.
 
     **Conclusion & Interpretation:**
-       - **Result: I/O-Bound DataLoader**. Prefetching from local NVMe entirely hides I/O latency, achieving a 5x speedup.
+       - **Result: Shared-Storage DataLoader Bottleneck.** Sharded mmap data on local NVMe plus pinned-memory prefetch reduces the per-node read requirement below device capacity and can recover the expected 45% MFU if preprocessing is also overlapped.
 status: published
 provenance: imported
 requires_explanation: false

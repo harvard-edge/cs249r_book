@@ -11,27 +11,30 @@ title: Multi-Task Model Specification for On-Device AI Assistant on A17 Pro
 scenario: You need to specify the architecture of an on-device AI assistant for iPhone 15 Pro that must handle speech recognition (streaming, <200ms latency), intent classification (50ms), and response generation (LLM, 10-15 tok/s) with a total memory budget of strictly 1.5GB.
 question: Which model sizes, quantization levels, and execution units fit ASR, intent, and LLM generation in 1.5 GB on iPhone 15 Pro?
 details:
-  realistic_solution: 'The listed weights alone nearly fill the 1.5GB limit: Whisper-small INT4 is about 122MB, BERT-mini INT8 about 11MB, and Phi-2 INT4 about 1.35GB. That leaves only about 17MB before accounting for Core ML/runtime buffers, activations, tokenizer state, KV cache, and app memory, so this exact combination does not satisfy a strict total resident-memory budget. To fit safely, the design needs a smaller response model, a smaller ASR model, model streaming with mutually exclusive residency, or an explicitly larger memory budget. The execution units can still be ASR/intent on ANE and LLM decode on CPU/ANE hybrid, but memory capacity is the blocking constraint.'
+  realistic_solution: |
+    A fitting architecture should use a small streaming ASR model, a tiny intent classifier, and a sub-2B response model rather than trying to keep Whisper-small plus Phi-2 resident. One concrete fit is a ~40M streaming ASR encoder at INT8 on the Neural Engine (~40 MB weights), a ~10M intent model at INT8 on the Neural Engine (~10 MB), and a ~1.1B LLM at 4-bit on CPU/GPU or ANE where operator support is proven (~620 MB weights). Reserve roughly 250 MB for KV cache at the chosen context cap, 250 MB for Core ML/runtime buffers and activations, and 100 MB for tokenizers and glue code. That totals about 1.27 GB, leaving about 230 MB margin inside 1.5 GB; larger LLMs such as Phi-2 INT4 do not fit once runtime memory is counted.
   common_mistake: |
     **The Pitfall:** Designing three separate full-size models that compete for memory simultaneously.
     **The Rationale:** Treating each pipeline step in isolation rather than optimizing for the system's shared memory budget.
     **The Consequence:** The combined memory footprint causes severe OOM crashes or massive latency from page faults.
   napkin_math: |
     **Assumptions & Constraints:**
-    - iPhone 15 Pro, strictly 1.5GB total memory budget.
-    - ASR, Intent, and LLM models.
+    - iPhone 15 Pro, strictly 1.5GB total resident memory budget.
+    - ASR target: streaming model under 200 ms.
+    - Intent target: 50 ms.
+    - LLM target: 10-15 tok/s with a capped context.
 
     **Calculations:**
-    - Whisper-small INT4 = 122MB.
-    - BERT-mini INT8 = 11MB.
-    - Phi-2 INT4 = 1350MB.
-    - Weights total = 122MB + 11MB + 1350MB = 1483MB.
-    - Remaining headroom in a 1500MB budget: 1500MB - 1483MB = 17MB.
-    - Runtime/activation/tokenizer/KV-cache overhead: comfortably more than 17MB for ASR plus LLM decode.
-    - The strict budget applies to resident memory, not just stored model weights.
+    - ASR: 40M INT8 = about 40 MB weights.
+    - Intent: 10M INT8 = about 10 MB weights.
+    - LLM: 1.1B 4-bit with group metadata = about 620 MB weights.
+    - KV cache at the capped context: about 250 MB.
+    - Runtime, activations, tokenizers, and glue: about 350 MB.
+    - Total resident estimate = 40 + 10 + 620 + 250 + 350 = 1270 MB.
+    - Headroom = 1500 MB - 1270 MB = 230 MB.
 
     **Conclusion & Interpretation:**
-    - **Result: does not fit strict 1.5GB resident memory**. The weights alone are 1483MB, leaving too little headroom for runtime buffers and KV cache, so the model sizes or residency plan must be reduced.
+    - **Result: a small ASR + tiny intent + 1.1B 4-bit LLM can fit.** Keep ASR and intent on the Neural Engine, run LLM decode on the best measured CPU/GPU/ANE path, cap context, and reject the larger Phi-2-style stack because it leaves no resident-memory headroom.
 status: published
 provenance: imported
 requires_explanation: true

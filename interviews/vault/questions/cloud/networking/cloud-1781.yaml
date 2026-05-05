@@ -11,15 +11,24 @@ title: Evaluating RoCEv2 vs TCP for LLM Clusters
 scenario: You are designing the network fabric for a new GPU cluster consisting of 2,048 NVIDIA GPUs for training large language models. The networking team proposes using standard 400Gbps Ethernet with a highly tuned TCP/IP stack instead of deploying RoCEv2, arguing that 400Gbps provides enough raw bandwidth for AllReduce collectives.
 question: Should the 2,048-GPU cluster use tuned TCP/IP over 400 Gbps Ethernet or RoCEv2 for AllReduce, and why?
 details:
-  realistic_solution: Reject the TCP/IP proposal for ML training. RDMA provides zero-copy memory transfers and kernel bypass, reducing per-hop latency from ~20µs down to ~2µs. Furthermore, driving 400Gbps via TCP would consume excessive CPU cores on the host, stealing resources from data loading and orchestration.
+  realistic_solution: Choose RoCEv2 for the training fabric. Large AllReduce collectives are sensitive to software latency, host copies, and CPU overhead on every communication step, not just raw link bandwidth. RoCEv2 provides RDMA zero-copy transfers and kernel bypass so GPUs can sustain high-throughput collectives with less host involvement. A tuned TCP/IP stack may reach high point-to-point bandwidth, but at 2,048 GPUs its per-message software overhead and CPU consumption compound across collective steps and reduce scaling efficiency.
   common_mistake: |
     **The Pitfall:** Focusing solely on the raw 400Gbps bandwidth capability while ignoring kernel overhead.
     **The Rationale:** Assuming tuned TCP/IP can saturate the link without causing severe CPU bottlenecks or latency spikes.
     **The Consequence:** Ignoring the compounding latency of kernel-space context switching in collectives completely cripples multi-node scaling efficiency.
   napkin_math: |
-    1. **Assumptions & Constraints:** 2,048 GPUs. Ring AllReduce has 2 * (N-1) communication steps for reduce-scatter plus all-gather. TCP adds kernel crossings, copies, and host CPU work; RoCEv2 uses RDMA kernel bypass.
-    2. **Calculations:** A ring step transfers a chunk while neighboring links overlap, so completion time is governed by 2 * (N-1) small-message latency terms plus 2 * (N-1)/N of the tensor volume per GPU divided by effective link bandwidth. TCP increases the per-step software latency and consumes host CPU to drive high throughput; it is not valid to multiply a flat hop count by per-hop latency as the total collective time.
-    3. **Conclusion & Interpretation:** **Result: choose RoCEv2.** For large AllReduce collectives, RDMA reduces software latency and CPU overhead while preserving bandwidth overlap; tuned TCP/IP risks lower scaling efficiency even on 400 Gbps links.
+    **Assumptions & Constraints:**
+    - 2,048 GPUs.
+    - Ring AllReduce has 2 * (N - 1) communication steps for reduce-scatter plus all-gather.
+    - TCP adds kernel crossings, copies, and host CPU work; RoCEv2 uses RDMA kernel bypass.
+
+    **Calculations:**
+    - Ring steps: 2 * (2048 - 1) = 4,094 communication steps.
+    - A ring step transfers a chunk while neighboring links overlap, so completion time is governed by thousands of per-step software-latency costs plus roughly 2 * (N - 1) / N of the tensor volume per GPU divided by effective link bandwidth.
+    - TCP increases the per-step software overhead and host CPU demand; RoCEv2 reduces those costs without assuming unsupported absolute latency numbers.
+
+    **Conclusion & Interpretation:**
+    - **Result: choose RoCEv2.** For large AllReduce collectives, RDMA reduces software latency and CPU overhead while preserving bandwidth overlap; tuned TCP/IP risks lower scaling efficiency even on 400 Gbps links.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: KV Cache Capacity and Bandwidth Limits
 scenario: You are deploying a 7B parameter Transformer LLM (FP16, 32 layers, hidden dimension 4096) on a single 80GB GPU. You have allocated 14GB for model weights and 6GB for OS/workspace overhead, leaving the rest of VRAM entirely for the KV Cache. Assume a uniform sequence length of 2048 tokens per request.
 question: What are the KV cache size per token, maximum 2048-token batch size, and total memory read per decoding step?
 details:
-  realistic_solution: 'Calculate KV cache per token: 2 (K+V) * 32 layers * 4096 dimension * 2 bytes = 524,288 bytes (512 KiB). For a 2048-token request, each sequence requires 1,073,741,824 bytes, or 1 GiB, of KV cache. With 60 GB nominally available (80 - 14 - 6), the maximum 2048-token batch is about 55 sequences if using decimal GB strictly, or 60 sequences if the budget is treated as 60 GiB. At that full-cache point, attention reads roughly the live KV cache per generated token; model-weight traffic is additional and implementation-dependent, so the useful estimate is about 60 GiB of KV traffic plus up to about 14GB of streamed weights, not an exact invariant 74GB.'
+  realistic_solution: 'Calculate KV cache per token: 2 (K+V) * 32 layers * 4096 dimension * 2 bytes = 524,288 bytes (512 KiB). For a 2048-token request, each sequence requires 1,073,741,824 bytes, or 1 GiB, of KV cache. With 60 GB nominally available (80 - 14 - 6), the maximum 2048-token batch is about 55 sequences if using decimal GB strictly, or 60 sequences if the budget is treated as 60 GiB. At that full-cache point, each decode step reads roughly one pass over the live KV cache for attention, subject to kernel tiling and cache behavior; model-weight traffic is separate and implementation-dependent.'
   common_mistake: |
     **The Pitfall:** Forgetting to multiply by 2 for both Key and Value tensors across all layers.
     **The Rationale:** Autoregressive decoding requires reading the entire KV cache from HBM into SRAM for every single generated token.
@@ -25,8 +25,9 @@ details:
        - KV footprint per token = 2 (K+V) × 32 layers × 4096 dim × 2 bytes = 524,288 bytes = 512 KiB.
        - KV footprint per 2048-token sequence = 524,288 bytes/token × 2048 tokens = 1,073,741,824 bytes = 1 GiB.
        - Max batch size = 60 GiB / 1 GiB = 60 sequences if the budget is binary; using strict decimal GB, 60 GB / 1.074 GB ≈ 55 sequences.
-       - Decode-step KV read at the 60-sequence binary limit is about 60 GiB per generated token; weight reads can add up to roughly 14GB depending on kernel scheduling and cache reuse.
-    3. **Conclusion & Interpretation:** **The per-token KV size is 512 KiB, not 1GB. A 2048-token sequence is 1 GiB, capping the batch near 55-60 sequences depending on unit convention. Decode traffic is dominated by the live KV cache, with model-weight traffic as an implementation-dependent addition.**
+       - Decode-step KV traffic is approximately one read over the live KV cache for attention: about 60 GiB at the 60-sequence binary limit, or about 59 GiB at the 55-sequence decimal-limit case.
+       - Model-weight reads are a separate implementation-dependent source of traffic and are not part of the KV-cache read estimate.
+    3. **Conclusion & Interpretation:** **The per-token KV size is 512 KiB, not 1GB. A 2048-token sequence is 1 GiB, capping the batch near 55-60 sequences depending on unit convention. Decode traffic is dominated by one pass over the live KV cache, not an exact universal total-memory-read invariant.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: 'For a 1B LLM on A17 Pro, compare KV cache strategies: (A) FP16 KV, (B
 question: How do FP16, INT8, and INT4 KV caches trade memory, bandwidth, quality, and complexity for a 1B LLM?
 details:
   realistic_solution: |
-    Per-head KV quantization stores scale/zero-point metadata for each layer, K/V tensor, and KV head, then dequantizes inside or immediately before the attention kernel. INT8 usually offers the balanced tradeoff: roughly half the KV memory and bandwidth with modest quality risk after calibration. INT4 roughly quarters the FP16 KV bytes, but has higher long-context quality and dequantization risk and should be gated by perplexity/task-quality tests. On A17 Pro this may require a backend path that supports quantized KV reads or a custom Metal/Core ML delegate path; it is not inherently a CUDA requirement.
+    FP16 KV is the quality and implementation baseline: no quantization error and the simplest attention kernels, but the highest memory footprint and bandwidth per decoded token. INT8 per-head KV quantization stores scale/zero-point metadata for each layer, K/V tensor, and KV head, then dequantizes inside or immediately before the attention kernel. INT8 usually offers the balanced tradeoff: roughly half the FP16 KV memory and bandwidth with modest quality risk after calibration. INT4 roughly quarters the FP16 payload bytes, but has higher long-context quality and dequantization risk and should be gated by perplexity/task-quality tests. On A17 Pro this requires a backend path that can read quantized KV efficiently, such as a supported Core ML path or a custom Metal attention kernel.
   common_mistake: |
     **The Pitfall:** Overlooking quantization overhead and context error accumulation.
     **The Rationale:** Candidates blindly assume INT4 is twice as fast as INT8 without accounting for dequantization compute stalls or the massive quality degradation in long sequences.
@@ -25,13 +25,13 @@ details:
     - Hardware Bandwidth: 68 GB/s.
 
     **Calculations:**
-    - (A) FP16: 24 layers * 2 (K,V) * 8 KV heads * 128 dim * 2B = 98,304B/token = 98.3 KB/token. At 2048 context = 201 MB KV. Bandwidth time = 201MB / 68 GB/s = 2.96ms.
+    - (A) FP16: 24 layers * 2 (K,V) * 8 KV heads * 128 dim * 2B = 98,304B/token = 98.3 KB/token. At 2048 context = 201,326,592 bytes = 201.3 MB decimal = 192.0 MiB. Bandwidth time = 201.3MB / 68 GB/s = 2.96ms.
     - Quantization metadata across all layers: 64B/layer * 24 = 1536B/token = 1.5 KB/token.
-    - (B) INT8 payload: 24 * 2 * 8 * 128 * 1B = 49.2 KB/token. With metadata: 50.7 KB/token. At 2048 context = 104 MB KV. Bandwidth time = 104MB / 68 GB/s = 1.53ms.
-    - (C) INT4 payload: 24 * 2 * 8 * 128 * 0.5B = 24.6 KB/token. With metadata: 26.1 KB/token. At 2048 context = 53.5 MB KV. Bandwidth time = 53.5MB / 68 GB/s = 0.79ms.
+    - (B) INT8 payload: 24 * 2 * 8 * 128 * 1B = 49.2 KB/token. With metadata: 50.7 KB/token. At 2048 context = about 103.8 MB decimal = 99.0 MiB. Bandwidth time = 103.8MB / 68 GB/s = 1.53ms.
+    - (C) INT4 payload: 24 * 2 * 8 * 128 * 0.5B = 24.6 KB/token. With metadata: 26.1 KB/token. At 2048 context = about 53.5 MB decimal = 51.0 MiB. Bandwidth time = 53.5MB / 68 GB/s = 0.79ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Bandwidth-Bound.** INT8 cuts the KV read from about 201MB to 104MB at 2048 tokens, reducing the bandwidth component from ~2.96ms to ~1.53ms. INT4 reduces it further to ~0.79ms, but quality and dequantization overhead determine whether that extra saving is acceptable.
+    - **Result: Bandwidth-Bound.** INT8 cuts the KV read from about 201 MB decimal (192 MiB) to about 104 MB decimal (99 MiB) at 2048 tokens, reducing the bandwidth component from ~2.96ms to ~1.53ms. INT4 reduces it further to ~0.79ms, but quality and dequantization overhead determine whether that extra saving is acceptable.
 status: published
 provenance: imported
 requires_explanation: false

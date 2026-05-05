@@ -7,28 +7,30 @@ topic: fault-tolerance-checkpointing
 competency_area: reliability
 bloom_level: create
 phase: training
-title: Zero-Overhead Distributed Tracing for LLM Serving
-scenario: You need to architect a distributed tracing framework for a 70B LLM serving platform across A100 nodes to debug strict P99 latency SLAs, specifically focusing on tensor parallelism syncs and KV-cache allocations.
-question: How would you trace a 70B LLM serving stack across A100 nodes to debug P99 spikes in TP syncs and KV-cache allocations?
+title: Low-Overhead Tracing for Checkpoint Recovery
+scenario: You need to architect a low-overhead tracing framework for a 70B training job across A100 nodes to debug long-tail checkpoint stalls and recovery delays without perturbing the hot path.
+question: How would you trace checkpoint and recovery stalls in a 70B A100 training job without inflating P99 latency?
 details:
-  realistic_solution: 'Implement a low-overhead, zero-allocation tracing framework using eBPF and CUDA event hooks. Inject unique request IDs at the gateway. Propagate these IDs through the custom CUDA kernels using PTX payload registers. Trace critical path boundaries: NCCL all-reduce times (TP sync), KV-cache PCIe transfer latencies, and kernel launch queues. Aggregate the traces asynchronously to a time-series database. Define SLA thresholds and trigger automated dump sequences when P99 tail latency spikes occur.'
+  realistic_solution: Implement low-overhead, zero-allocation tracing around the checkpoint and recovery critical path. Stamp each training step and checkpoint epoch with a correlation ID, then record asynchronous events for gradient synchronization, checkpoint serialization, local NVMe writes, remote object-store commits, barrier waits, and restore phases. Use eBPF for filesystem and network latency, CUDA/NCCL events for GPU-side waits, and per-rank ring buffers flushed out of band. Aggregate traces by checkpoint epoch so tail stalls can be attributed to slow ranks, storage queues, network commits, or recovery replay without adding synchronous logging to the training loop.
   common_mistake: |
-    **The Pitfall:** Using heavy CPU-based synchronous logging within the token generation loop.
-    **The Rationale:** Synchronous `logger.info()` is the standard tool for backend tracing.
-    **The Consequence:** The observer effect: the heavy CPU tracing artificially inflates the ultra-low latency TP syncs, making it impossible to measure true P99 performance.
+    **The Pitfall:** Adding synchronous logging or blocking metrics calls around every checkpoint write.
+    **The Rationale:** Standard backend tracing often records rich per-event logs directly on the request or training critical path.
+    **The Consequence:** The observer effect inflates checkpoint barriers and recovery latency, making the trace report the instrumentation overhead rather than the true fault-tolerance bottleneck.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model: 70B parameters with TP=8.
-       - NCCL All-Reduce syncs: ~80 times per token.
-       - Expected sync latency: ~5-10μs.
-       - Anomaly sync latency: 50μs.
-    2. **Calculations:**
-       - Normal sync time per token: 80 syncs * 10μs = 0.8ms using the high end of the expected baseline.
-       - Anomalous sync time per token: 80 syncs * 50μs = 4.0ms.
-       - Anomaly delta: 4.0ms - 0.8ms = 3.2ms added per token if every TP sync on the request is affected.
-       - Total latency for 100 tokens (normal): 100 * (~0.5ms compute + 0.8ms sync) = ~130ms.
-       - Added latency from anomaly: 100 tokens * 3.2ms = 320ms. The anomalous sync component itself is 100 * 4.0ms = 400ms.
-    3. **Conclusion & Interpretation:** **~320ms Added Latency Upper Bound.** This assumes the anomaly affects every token and every TP sync in the sampled request; partial anomalies scale proportionally.
+    **Assumptions & Constraints:**
+    - 70B training job with 64 ranks.
+    - Checkpoint interval: 20 minutes.
+    - Expected checkpoint barrier: 90 seconds.
+    - Observed P99 checkpoint barrier: 150 seconds.
+    - Tracing must stay below 1% overhead on the checkpoint path.
+
+    **Calculations:**
+    - Tail stall to explain: 150s - 90s = 60s extra at P99.
+    - 1% tracing budget on the normal checkpoint path: 90s * 0.01 = 0.9s total overhead.
+    - Per-rank synchronous overhead budget: 0.9s / 64 ranks ≈ 14ms per rank, so event capture must use buffered, asynchronous writes rather than per-event blocking logs.
+
+    **Conclusion & Interpretation:**
+    - **Result: trace asynchronously and attribute the 60s P99 stall by checkpoint epoch.** Instrumentation that blocks on storage or metrics from each rank can consume the entire overhead budget and distort the checkpoint diagnosis.
 status: published
 provenance: imported
 requires_explanation: true

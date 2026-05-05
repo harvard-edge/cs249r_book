@@ -7,11 +7,12 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: MI300X XCD Architecture and Memory Locality
+title: MI300X XCD Bandwidth Locality
 scenario: The MI300X has 8 XCDs (Compute Dies) sharing a unified 192GB HBM3 pool. A kernel achieves 4.2 TB/s measured bandwidth — 79% of the 5.3 TB/s peak. A developer then splits the workload across all 8 XCDs using hip-aware thread block placement and measures 3.1 TB/s. They expected 8× improvement from parallelism.
 question: Why does splitting the kernel across all 8 MI300X XCDs reduce bandwidth from 4.2 TB/s to 3.1 TB/s, and how should memory locality be handled?
 details:
-  realistic_solution: 'The MI300X is a multi-die chiplet design: 8 Compute Dies (XCDs) connected via AMD''s Infinity Fabric on an interposer. Each XCD has direct high-bandwidth access to its nearest HBM3 stacks, but accessing HBM3 stacks attached to a remote XCD requires crossing the Infinity Fabric — adding 100-200ns latency (vs 50ns local). The bandwidth regression from 4.2 TB/s to 3.1 TB/s when using all 8 XCDs indicates the workload has cross-XCD memory access patterns that are bottlenecked by Infinity Fabric bandwidth rather than HBM3 bandwidth. Fix: use HIP''s device-locality hints or ROCm''s NUMA-aware memory allocation (hipMemAdvise) to bind each XCD''s thread blocks to memory pages in its local HBM3 partition. For uniform workloads (transformer matmuls), AMD''s hardware prefetcher and the unified memory controller typically handle this transparently — the regression suggests irregular access patterns or incorrect thread affinity.'
+  realistic_solution: |
+    The MI300X is a multi-die chiplet design: 8 Compute Dies (XCDs) connected through the package fabric to a unified HBM3 pool. Unified memory does not mean uniform bandwidth for every access pattern: if thread blocks running on one XCD frequently touch pages physically served through another XCD or create cross-die synchronization, the package fabric can become the limiter. The bandwidth regression from 4.2 TB/s to 3.1 TB/s indicates that the split placement changed locality or scheduling enough to add cross-XCD traffic rather than exposing more HBM bandwidth. Fix by partitioning data per XCD, keeping each XCD's blocks mostly on the pages they stream, and using ROCm/HIP placement, affinity, and profiling tools to verify locality. Regular matmuls may tolerate the unified memory controller well, but placement and affinity still matter; do not assume all workloads see uniform HBM bandwidth automatically.
   common_mistake: |
     **The Pitfall:** Assuming all 8 XCDs have equal-latency access to all 192GB of HBM3.
     **The Rationale:** Candidates miss that the MI300X has NUMA-like memory locality; crossing the Infinity Fabric for remote HBM3 access bottlenecks bandwidth.

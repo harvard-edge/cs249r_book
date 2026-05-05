@@ -8,10 +8,10 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: 3D Parallelism Sizing — Adam State + Activations on A100s
-scenario: A 70B-parameter transformer is trained on 80 GB A100s. Each parameter under mixed-precision Adam costs 16 bytes of model state. Reserve 16 GB per GPU for activations and workspace. The team must choose tensor parallelism (TP), pipeline parallelism (PP), and data parallelism (DP) sizes that respect the per-GPU HBM budget.
-question: Decompose how DP, TP, and PP affect the per-GPU memory footprint, and choose the minimum (TP, PP) to fit?
+scenario: A 70B-parameter transformer is trained on 80 GB A100s. Each parameter under mixed-precision Adam costs 16 bytes of model state. Reserve 16 GB per GPU for activations and workspace. Assume TP may be any integer for arithmetic sizing, but 8-wide TP is preferred on common NVLink nodes. The team must choose tensor parallelism (TP), pipeline parallelism (PP), and data parallelism (DP) sizes that respect the per-GPU HBM budget.
+question: How do DP, TP, and PP affect per-GPU memory, and what minimum sharding product makes the 70B model fit?
 details:
-  realistic_solution: DP replicates each model replica, so it does not reduce per-GPU model-state memory; it only increases throughput once one replica already fits. TP shards tensor-parallel weights and gradients inside each pipeline stage, while PP assigns different layers to different stages. With the simplified scenario assumption that the 16 bytes/parameter model state is evenly distributed by layer and tensor shard, the per-GPU model state is approximately 1120 GB / (TP * PP). The per-GPU budget is 80 - 16 = 64 GB, so TP * PP must be at least 18. A topology-conscious minimum is TP=6 and PP=3 if the hardware supports 6-wide TP groups; on common 8-GPU NVLink nodes, TP=8 and PP=3 is the smallest node-friendly choice, giving about 46.7 GB per GPU and leaving 17.3 GB for reserved activations/workspace.
+  realistic_solution: DP replicates each model replica, so it does not reduce per-GPU model-state memory; use DP=1 for the minimum fitting replica and add DP only after TP and PP make one replica fit. TP shards tensor-parallel weights and gradients inside each pipeline stage, while PP assigns different layers to different stages. With the simplified scenario assumption that the 16 bytes/parameter model state is evenly distributed by layer and tensor shard, the per-GPU model state is approximately 1120 GB / (TP * PP). The per-GPU budget is 80 - 16 = 64 GB, so TP * PP must be at least 18. A mathematical minimum is any valid TP/PP pair with product 18, such as TP=6 and PP=3 under the stated arithmetic-sizing assumption; on common 8-GPU NVLink nodes, TP=8 and PP=3 is the smallest node-friendly choice.
   common_mistake: |
     **The Pitfall:** Assuming Data Parallelism (DP) reduces per-GPU model memory.
     **The Rationale:** Novices often think "splitting the job" across GPUs reduces memory footprint everywhere, missing that DP replicates the full model state on every rank unless ZeRO is used.
@@ -22,13 +22,13 @@ details:
     - Per-GPU Budget: 80 GB - 16 GB (activations) = 64 GB.
 
     **Calculations:**
-    - Required Splitting: min(TP * PP) = ceil(1120 / 64) = 18.
-    - Mathematical minimum example: TP=6 and PP=3 gives TP * PP = 18 and 1120 GB / 18 = 62.2 GB per GPU.
+    - Required sharding product: min(TP * PP) = ceil(1120 / 64) = 18.
+    - Mathematical minimum example under arbitrary integer TP: TP=6 and PP=3 gives TP * PP = 18 and 1120 GB / 18 = 62.2 GB per GPU.
     - Node-friendly A100 choice: TP=8 within an NVLink node and PP=3 across layer groups gives TP * PP = 24.
     - Node-friendly footprint: 1120 GB / 24 = 46.7 GB per GPU, leaving 64 - 46.7 = 17.3 GB of the reserved budget.
 
     **Conclusion & Interpretation:**
-    - **Result: TP=6, PP=3 is the arithmetic minimum under the simplified sharding model; TP=8, PP=3 is the smallest common node-friendly choice.** DP can be added only after TP/PP make each replica fit, and it does not reduce per-GPU model-state memory.
+    - **Result: the minimum fitting sharding product is TP * PP = 18 with DP=1 for one replica.** TP=6, PP=3 is an arithmetic example; TP=8, PP=3 is the smallest common node-friendly choice when 8-wide NVLink TP is preferred.
 status: published
 provenance: imported
 requires_explanation: false

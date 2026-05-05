@@ -11,8 +11,8 @@ title: Model Parallelism Strategy for 100TB Embedding Cluster
 scenario: Design the training parallelism strategy for a DLRM with 100 TB of embedding tables and a 10B parameter MLP across 512 GPUs and CPUs.
 question: What hybrid training strategy and throughput would you expect for 100 TB embeddings and a 10B-parameter MLP on 512 H100s plus CPU nodes?
 details:
-  realistic_solution: Use hybrid parallelism with separate sparse and dense planes. Shard the 100 TB embedding tables row-wise across CPU/host-memory parameter servers or storage nodes, keep a small GPU cache for the hottest rows, and route sparse ID lookups through an all-to-all/RPC layer that returns only the touched rows and sparse gradients. The 10B dense MLP should use tensor parallelism within each 8-GPU H100 node and data parallelism across the 64 nodes, with reduce-scatter/all-gather for dense gradients rather than trying to replicate the 100 TB embedding state. With a per-GPU microbatch of 256 (global batch 131k), the dense pass is about 2.6 PFLOP/step and the 8-way tensor-parallel gradient shard is about 2.5 GB per rank; a 64-way data-parallel ring over 50 GB/s links costs roughly 100 ms. Adding sparse embedding RPC/cache time gives a practical step time around 120-160 ms, or roughly 0.8-1.1M samples/s. The design is communication-bound, not capable of multi-million-sample throughput
-    without stronger network locality or larger batches.
+  realistic_solution: Use hybrid parallelism with separate sparse and dense planes. Shard the 100 TB embedding tables row-wise across CPU/host-memory parameter servers or storage nodes, keep a small GPU cache for the hottest rows, and route sparse ID lookups through an all-to-all/RPC layer that returns only the touched rows and sparse gradients. The 10B dense MLP should use tensor parallelism within each 8-GPU H100 node and data parallelism across the 64 nodes, using intra-node NVLink for TP collectives and inter-node reduce-scatter/all-gather for dense gradients. With a per-GPU microbatch of 256 (global batch 131k), training compute is about 7.9 PFLOP/step using a 6P forward/backward/update-scale estimate. At 180 PFLOP/s effective cluster throughput, dense compute is about 44 ms. The 8-way tensor-parallel dense gradient shard is about 2.5 GB per rank; a 64-way inter-node ring over 50 GB/s links costs roughly 100 ms. Adding sparse embedding RPC/cache time gives a practical step time around
+    160-190 ms, or roughly 0.7-0.8M samples/s. The design is communication-bound, not capable of multi-million-sample throughput without stronger network locality or larger batches.
   common_mistake: |
     **The Pitfall:** Applying data parallelism uniformly across the entire model.
     **The Rationale:** Assuming standard DP works efficiently for massive sparse parameters.
@@ -26,17 +26,18 @@ details:
     - Effective dense throughput: ~180 PFLOP/s after MFU; inter-node bandwidth: 50 GB/s.
 
     **Calculations:**
-    - Dense MLP FLOPs per step: 2 * 10B * 131,072 ≈ 2.62 PFLOP.
-    - Dense compute time: 2.62 PFLOP / 180 PFLOP/s ≈ 15 ms.
+    - Dense MLP training FLOPs per step, using a standard forward/backward estimate: 6 * 10B * 131,072 ≈ 7.86 PFLOP.
+    - Dense compute time: 7.86 PFLOP / 180 PFLOP/s ≈ 44 ms.
     - Tensor-parallel shard of dense weights: 20 GB / 8 = 2.5 GB per rank.
-    - 64-way ring all-reduce per shard: 2 * (63/64) * 2.5 GB / 50 GB/s ≈ 98 ms.
+    - Keep tensor-parallel collectives inside each 8-GPU node; inter-node data-parallel gradient exchange moves the 2.5 GB shard per rank.
+    - 64-way inter-node ring all-reduce per shard: 2 * (63/64) * 2.5 GB / 50 GB/s ≈ 98 ms.
     - Sparse embedding traffic, assuming 100 IDs/sample and 256 bytes/vector: 131,072 * 100 * 256 bytes ≈ 3.4 GB/step before caching and sparse-gradient return.
     - With host-memory sharding plus hot-row GPU cache, budget roughly 20-50 ms for sparse lookup/update traffic.
-    - Step time estimate: 15 ms compute + 98 ms dense communication + 20-50 ms sparse traffic ≈ 130-160 ms.
-    - Throughput: 131,072 samples / 0.13-0.16 s ≈ 0.8-1.0M samples/s.
+    - Step time estimate: 44 ms compute + 98 ms dense communication + 20-50 ms sparse traffic ≈ 160-190 ms.
+    - Throughput: 131,072 samples / 0.16-0.19 s ≈ 0.69-0.82M samples/s.
 
     **Conclusion & Interpretation:**
-    - **Result: ~0.8-1.0M samples/s (Communication-Bound)**. The feasible strategy is CPU-sharded sparse embeddings with GPU hot-row caching plus tensor/data parallel dense MLP training; dense all-reduce and sparse embedding traffic dominate the step time.
+    - **Result: ~0.7-0.8M samples/s (Communication-Bound)**. The feasible strategy is CPU-sharded sparse embeddings with GPU hot-row caching plus intra-node TP and inter-node DP for the dense MLP; dense gradient exchange and sparse embedding traffic dominate the step time.
 status: published
 provenance: imported
 requires_explanation: true

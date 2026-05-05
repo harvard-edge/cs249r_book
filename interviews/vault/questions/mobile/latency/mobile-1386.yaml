@@ -12,7 +12,7 @@ scenario: You are architecting an on-device real-time visual assistant running e
 question: How would you schedule a real-time multimodal assistant on Hexagon NPU while avoiding shared memory bottlenecks?
 details:
   realistic_solution: |
-    Use a priority schedule, not just quantization. Give camera ISP DMA and audio DSP capture hard real-time priority with reserved bandwidth, run audio preprocessing continuously on the DSP, and run vision preprocessing in ISP/GPU tiles that write bounded ring buffers. The LLM uses W4A8 weights and two NPU modes: chunked prefill in short bursts that yield between camera frame deadlines, then steady decode slots paced to a TPOT budget. Speech output is buffered one phrase ahead, while decode DMA is rate-limited with QoS so model weight/KV reads cannot starve camera or audio streams.
+    Use a Hexagon-centric priority schedule, not just quantization. Treat camera, audio, and OS traffic as reserved background bandwidth, then give the NPU a fixed decode bandwidth budget. The LLM should use W4A8 weights stored once in LPDDR and processed in tiles, with chunked prefill bursts that yield between frame deadlines and steady decode slots paced to the TPOT budget. KV cache pages and activation tiles should be prefetched into local scratch before each decode slot, and decode DMA should be rate-limited with QoS so weight and KV reads cannot starve the camera or audio streams.
   common_mistake: |
     **The Pitfall:** Treating the NPU as a standalone black box.
     **The Rationale:** Candidates ignore memory bandwidth contention on the shared LPDDR5X bus from the camera ISP and DSP audio processing.
@@ -21,21 +21,22 @@ details:
     **Assumptions & Constraints:**
     - Peak LPDDR5X bandwidth: 68 GB/s.
     - ISP/DSP/OS background usage: 20 GB/s. Available for NPU: 48 GB/s.
-    - 7B Model (INT4): ~3.5 GB footprint.
+    - 7B model W4A8 weights: ~3.5 GB, resident in LPDDR and streamed by tile through the NPU.
     - NPU Effective Compute: 18 TOPS (40% utilization of 45 TOPS).
-    - Decode traffic assumption: one full INT4 weight stream plus about 0.1 GB KV/activation traffic per output token.
+    - Decode traffic planning allowance: one tiled sweep over W4 weights plus about 0.15 GB KV/activation/DMA traffic per output token.
     - Prompt size: 500 tokens.
 
     **Calculations:**
-    - Decode memory traffic per token = 3.5 GB weights + 0.1 GB KV/activations = 3.6 GB.
-    - Decode memory time = 3.6 GB / 48 GB/s = 75 ms/token.
+    - TPOT bandwidth budget: 48 GB/s * 0.080s = 3.84 GB/token.
+    - Decode memory traffic per token = 3.5 GB weights + 0.15 GB KV/activations = 3.65 GB.
+    - Decode memory time = 3.65 GB / 48 GB/s = 76 ms/token.
     - Decode compute per token = 2 * 7B ops = 14 GOP; compute time = 14e9 / 18e12 = 0.78 ms, so TPOT is memory-bound.
     - Prefill compute approximation = 500 tokens * 2 * 7B ops/token = 7.0 TOP.
     - Prefill compute time = 7.0 TOP / 18 TOPS = 389 ms, scheduled as 8 chunks of about 49 ms with yields between camera deadlines.
-    - TTFT budget = 389 ms prefill + 50 ms preprocessing + 50 ms speech/postprocessing + about 40 ms scheduling guard = 529 ms.
+    - TTFT budget = 389 ms prefill + 70 ms multimodal preprocessing + 40 ms first-token decode/postprocess + about 60 ms scheduling guard = 559 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: about 75 ms TPOT and 529 ms TTFT under reserved bandwidth.** W4A8 is necessary but not sufficient; the real design requirement is priority DMA/QoS plus chunked prefill and paced decode so multimodal streams keep their deadlines.
+    - **Result: about 76 ms TPOT and 559 ms TTFT under reserved bandwidth.** W4A8 is necessary but not sufficient; the design only fits if Hexagon decode is QoS-paced, KV/activation traffic stays within the allowance, and prefill is chunked so multimodal streams keep their deadlines.
 status: published
 provenance: imported
 requires_explanation: true

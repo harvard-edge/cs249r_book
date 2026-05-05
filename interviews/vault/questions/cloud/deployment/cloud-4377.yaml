@@ -8,11 +8,11 @@ competency_area: deployment
 bloom_level: create
 phase: both
 title: 'MI300X for Mixture-of-Experts: Expert Capacity and Memory Layout'
-scenario: 'A Mixtral 8×7B MoE model has 8 experts, each 7B parameters, with top-2 routing (2 experts activated per token). Full model size: 8 × 14GB (FP16) = 112GB. On an H100 (80GB), this requires 2-GPU tensor parallel to hold the model. On a single MI300X (192GB), the full model fits with 80GB spare.'
+scenario: A Mixtral 8×7B MoE model has 8 experts, each 7B parameters, with top-2 routing (2 experts activated per token). Full expert weight size is 8 × 14GB (FP16) = 112GB. One 80GB H100 cannot hold all experts, so H100 serving needs at least two GPUs. A single 192GB MI300X can hold all experts with about 80GB spare. Assume large-batch decode with batch 64 and 70% sustained HBM bandwidth.
 question: What serving configuration should you use for Mixtral 8×7B on H100 versus MI300X, and what decode throughput should each deliver?
 details:
   realistic_solution: |
-    Use expert parallelism rather than treating Mixtral like a dense 112GB model. On H100, place four experts on each of two 80GB GPUs, with dense/shared layers replicated or lightly tensor-parallel as needed. Tokens whose top-2 experts span GPUs require an activation exchange, but the payload is activations, not a full gradient or expert-weight AllReduce. On MI300X, keep all eight experts on one 192GB GPU and avoid cross-GPU routing. For a simple upper-bound decode estimate, assume large-batch serving is dominated by streaming the two active FP16 experts: 2 * 7B * 2 bytes = 28GB/token. Balanced H100 expert parallelism streams about half of that per GPU, so the bottleneck estimate is 3350GB/s / 14GB = 239 tokens/s before routing overhead. MI300X streams the full 28GB locally, giving 5300GB/s / 28GB = 189 tokens/s. These are bandwidth-ceiling estimates; real throughput also depends on batch size, router balance, dense-layer cost, kernel efficiency, and activation exchange.
+    Use expert parallelism rather than treating Mixtral like a dense tensor-parallel model. On H100, place four experts on each of two 80GB GPUs, with dense/shared layers replicated if they fit or lightly tensor-parallel if needed. Tokens whose top-2 experts span GPUs require an activation exchange, but the payload is activations, not full expert weights or a large AllReduce. On MI300X, keep all eight experts on one 192GB GPU and avoid cross-GPU routing. Under the prompt's large-batch model, active expert weight traffic is amortized across batch 64. The H100 pair has about 14GB/64 = 0.219GB/token on the bottleneck GPU, plus small activation exchange overhead; at 70% of 3,350GB/s, the ceiling is about 10.7K tok/s. A single MI300X streams both active experts locally, 28GB/64 = 0.438GB/token; at 70% of 5,300GB/s, the ceiling is about 8.5K tok/s. Treat these as rough serving ceilings, not guaranteed benchmarks.
   common_mistake: |
     **The Pitfall:** Treating MoE serving the same as dense model serving.
     **The Rationale:** Candidates ignore expert routing overhead and forget that inactive expert weights occupy memory without contributing to compute.
@@ -20,18 +20,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Top-2 routing activates 2 of 8 experts per token.
-    - Active expert weight traffic upper bound: 2 * 7B * 2 bytes = 28GB/token.
-    - H100 design: 2-GPU expert parallelism, four experts per GPU, about 14GB/token per GPU when routing is balanced.
-    - MI300X design: single GPU holds all 112GB of experts, about 28GB/token local expert traffic.
+    - Large-batch decode batch = 64; sustained HBM bandwidth = 70% of peak.
+    - Active expert weights per batch: 2 * 7B * 2 bytes = 28GB.
+    - H100 design: 2-GPU expert parallelism, four experts per GPU, about 14GB per batch on the bottleneck GPU when routing is balanced.
+    - MI300X design: single GPU holds all 112GB of experts, about 28GB per batch local expert traffic.
 
     **Calculations:**
-    - H100 bandwidth ceiling: 3350 GB/s / 14GB per token = 239 tok/sec for the 2-GPU service before routing and dense-layer overhead.
-    - MI300X bandwidth ceiling: 5300 GB/s / 28GB per token = 189 tok/sec before dense-layer and kernel overhead.
+    - H100 bottleneck traffic per token = 14GB / 64 = 0.219GB. Ceiling = (3350 * 0.70) / 0.219 = 10.7K tok/sec before dense-layer and routing overhead.
+    - MI300X traffic per token = 28GB / 64 = 0.438GB. Ceiling = (5300 * 0.70) / 0.438 = 8.5K tok/sec before dense-layer and kernel overhead.
     - Cross-GPU H100 routing moves activation tensors, not expert weights; for hidden size 8192 and FP16, activation payload is about 16KB/token, small compared with expert-weight traffic but still latency-sensitive at small batch.
-    - Cost per million tokens using the ceilings: MI300X = $5.50 / (189 * 3600) * 1M = $8.08; H100 pair = $7.00 / (239 * 3600) * 1M = $8.13.
+    - Cost per million tokens using the ceilings: MI300X = $5.50 / (8,500 * 3600) * 1M = $0.18; H100 pair = $7.00 / (10,700 * 3600) * 1M = $0.18.
 
     **Conclusion & Interpretation:**
-    - **Result: MoE expert-placement tradeoff.** H100 expert parallelism has the higher bandwidth ceiling, while single-GPU MI300X avoids cross-GPU routing and is roughly comparable on cost per token. Treat the numbers as serving ceilings, not guaranteed benchmark throughput.
+    - **Result: MoE expert-placement tradeoff.** Use 2-GPU H100 expert parallelism when you can tolerate routing exchange; use single-GPU MI300X when avoiding cross-GPU routing and simplifying placement matters. The throughput estimates are rough ceilings and must be validated with batch size, router balance, dense-layer cost, and kernel efficiency.
 status: published
 provenance: imported
 requires_explanation: true

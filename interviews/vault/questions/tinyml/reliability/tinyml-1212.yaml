@@ -11,7 +11,7 @@ title: Optimizing Side-Channel Defenses on nRF5340
 scenario: You are deploying a proprietary wake-word model. To prevent model extraction via power side-channel attacks, randomized dummy MAC operations (jitter) were added across all layers, causing a 50% compute overhead and violating the ~5mA active current constraint.
 question: How can you optimize this side-channel defense to maintain security while reducing compute overhead to meet power constraints?
 details:
-  realistic_solution: The correct approach is to analyze the side-channel vulnerability profile and apply dummy operations only to the most vulnerable layers (typically the first and last layers). The middle layers are highly non-linear and harder to exploit, allowing for a significant reduction in dummy operations while preserving model security.
+  realistic_solution: The correct approach is to profile side-channel leakage under the intended attack model, rank layers by observed leakage and sensitivity, and apply dummy operations only to the layers that materially reduce extraction risk. Early and late layers are common candidates, but the protected set must be chosen from measurement rather than a fixed rule. After retargeting the jitter, re-measure leakage, latency, and active current to confirm the defense still meets the security and ~5 mA power requirements.
   common_mistake: |
     **The Pitfall:** Applying dummy MAC jitter uniformly to every layer, disabling it entirely, or moving protected compute to a slower core without measuring leakage.
     **The Rationale:** Candidates fail to rank layers by side-channel risk. Early and late layers often expose input/output structure more directly and are easier to attack, but leakage depends on implementation details and any layer can leak.
@@ -21,17 +21,20 @@ details:
     - Base Compute: 2M MACs.
     - Cycle Cost: 2 cycles/MAC.
     - CPU Clock: 128 MHz.
-    - Current Constraint: ~5 mA.
+    - Base active current during inference: 4.6 mA. Current scales roughly with active runtime for the same clock/voltage.
+    - Current Constraint: about 5 mA average over the inference window.
 
     **Calculations:**
     - Base Time: 4M cycles / 128 MHz = 31.25 ms.
-    - Unoptimized Defense (50% overhead): +1M dummy MACs (+15.6 ms) = 46.8 ms total.
-    - Optimized Defense: Apply jitter only to vulnerable first/last layers (20% of MACs).
-    - Optimized Overhead: 50% of 400k MACs = 200k dummy MACs.
+    - Uniform defense: 50% overhead adds 1M dummy MACs = 2M cycles = 15.625 ms, for 46.875 ms total.
+    - Uniform-defense average current estimate: 4.6 mA * (46.875 / 31.25) = 6.9 mA, above the 5 mA budget.
+    - Optimized defense after leakage profiling: protect the layer subset responsible for most leakage, assumed here to be 20% of MACs.
+    - Optimized overhead: 50% jitter on 400k protected MACs = 200k dummy MACs.
     - New Total MACs: 2.2M MACs = 4.4M cycles / 128 MHz = 34.3 ms.
+    - Optimized average current estimate: 4.6 mA * (34.3 / 31.25) = 5.05 mA, close enough to require measurement and minor tuning such as reducing jitter rate or duty cycle.
 
     **Conclusion & Interpretation:**
-    - **Result: Energy-Bound.** Targeting dummy operations only at side-channel vulnerable layers cuts the defense energy overhead by 80%, satisfying the current constraint.
+    - **Result: profiling-targeted jitter cuts dummy MACs by 80% and brings current near the budget**. The design is acceptable only after leakage and current measurements verify that the selected layers still block the attack while staying at or below about 5 mA.
 status: published
 provenance: imported
 requires_explanation: false

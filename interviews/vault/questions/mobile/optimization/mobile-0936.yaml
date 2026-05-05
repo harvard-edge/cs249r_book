@@ -11,7 +11,10 @@ title: 'Kernel Fusion: Realize Fusion Plan for Production Mobile LLM Deployment'
 scenario: Realize the complete fusion plan for shipping a 1B INT4 LLM (500MB) to 10M users on A17 Pro (35 TOPS, 8GB) and Snapdragon 8 Gen 3 (45 TOPS, 16GB).
 question: How would you specify all fused op groups, their implementations, testing requirements, and expected latency for each platform?
 details:
-  realistic_solution: 'Platform-specific fusion implementations: (1) A17 Pro: Core ML .mlpackage with automatic ANE fusion. (2) Snapdragon: Qualcomm AI Engine (QNN SDK) with manual fusion specification. Test: compare output against FP32 reference, max error < 0.02.'
+  realistic_solution: |
+    Specify fusion by decode and prefill path, then implement per backend. Fuse RMSNorm + quantized linear for QKV and MLP projections; fuse INT4 dequant + matmul + bias/scale; fuse RoPE with Q/K preparation; use FlashAttention-style fused score, mask, softmax, and value accumulation for prefill; fuse residual add with the following norm where the backend supports it. On A17 Pro, package the graph through Core ML and verify which fusions the ANE compiler actually emits, with custom Metal kernels for unsupported attention or KV-cache paths. On Snapdragon, use QNN/HTP graph fusions or custom op packages for the same groups.
+
+    Testing must include layer-level FP32 reference comparisons, end-to-end golden prompts, perplexity or task-quality regression gates, long-context KV-cache tests, thermal soak, and p50/p95 latency on both platforms. Use tolerances by tensor type rather than a single global number, for example tight tolerances for logits rank stability and calibrated INT4 error bounds for fused matmuls.
   common_mistake: |
     **The Pitfall:** Specifying fusion without a numerical correctness testing plan or ignoring platform-specific APIs.
     **The Rationale:** Developers often assume fused ops are mathematically identical and that one fusion approach works across all hardware.
@@ -19,17 +22,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target: 1B INT4 LLM (~500MB weights) on A17 Pro (~51GB/s effective memory path for this workload) and Snapdragon (~77GB/s effective memory path).
-    - Report platform latency separately because the bandwidth and launch overhead assumptions differ.
+    - Decode latency is bounded by weight/KV memory traffic, kernel launch overhead, dequantization, matmul efficiency, and scheduler/thermal behavior.
+    - Report platform latency as a measured target range, not as a precise value from bandwidth alone.
 
     **Calculations:**
-    - RMSNorm + Linear fusion: saves 4KB per layer (at hidden_size=2048, FP16). Over 28 layers = 112KB saved.
-    - FlashAttention fusion during prefill avoids materializing one 512x512 score tile across 32 heads: 512 * 512 * 32 * 2B = 16,777,216 bytes = 16 MiB (~16.8 MB) per layer.
-    - Over 28 layers, avoided score-buffer traffic is about 448 MiB (~470 MB decimal) for that prefill tile shape.
-    - A17 Pro (51.2GB/s): Weight load 500MB / 51.2GB/s = ~10ms + 2ms overhead = 12ms (83 tok/sec).
-    - Snapdragon (77GB/s): Weight load 500MB / 77GB/s = ~6.5ms + 1.5ms overhead = 8ms (125 tok/sec).
+    - Weight-traffic lower bound on A17 Pro: 500MB / 51GB/s = about 9.8ms/token before KV reads, compute, launches, and runtime overhead.
+    - Weight-traffic lower bound on Snapdragon: 500MB / 77GB/s = about 6.5ms/token before the same overheads.
+    - Fusion reduces launch count and intermediate tensors. If a 28-layer model avoids roughly 3 small launches per layer and each launch/scheduling gap costs 20-40us, launch savings are 28 * 3 * 20-40us = 1.7-3.4ms/token.
+    - FlashAttention-style prefill should be validated by peak-memory counters: standard attention stores O(sequence^2 * heads) scores, while fused attention stores only active tiles plus running max/sum state. Do not convert that directly into decode latency without measurement.
+    - Practical latency targets after fused kernels and profiling: A17 Pro about 18-25ms/token p50 for decode; Snapdragon about 14-20ms/token p50, with p95 and thermal limits reported separately.
 
     **Conclusion & Interpretation:**
-    - **Result: A17 Pro ~12ms/token (~83 tok/sec); Snapdragon ~8ms/token (~125 tok/sec).** Both are bandwidth-sensitive, but the expected latency must be reported per platform rather than as a single blended 125 tok/sec result.
+    - **Result: Platform-Specific Fusion Plan With Measured Latency Ranges.** Bandwidth gives only a lower bound; the release spec should require the listed fused op groups, backend-specific implementations, numerical/quality gates, and profiled p50/p95 latency per platform.
 status: published
 provenance: imported
 requires_explanation: false

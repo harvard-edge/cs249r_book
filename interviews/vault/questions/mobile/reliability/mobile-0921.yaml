@@ -11,7 +11,7 @@ title: On-Device Training Checkpointing for Mobile Personalization
 scenario: An on-device personalization system trains nightly for 10 minutes and serves inferences asynchronously 24/7.
 question: How would you specify storage layout, checkpoint schedule, retention policy, and recovery paths for an on-device training system?
 details:
-  realistic_solution: 'Decouple the architecture into two explicitly separate state objects: (1) Inference State: Lightweight LoRA weights (fp32, 4MB) loaded instantly for serving. (2) Training State: The full heavy checkpoint (weights + Adam optimizer moments, 24MB). Apply distinct retention policies: keep only the latest serving weights, but hold a rolling window of 3 training checkpoints to prevent catastrophic corruption.'
+  realistic_solution: Use two state families with explicit restore order. The serving path owns serving/latest.lora (4MB), a manifest, checksum, and base-model version; inference loads only this last completed adapter. The training path writes train/ckpt-<generation>-<minute>.tmp containing LoRA weights plus optimizer state, fsyncs it, then atomically renames it to a committed checkpoint. Checkpoint at minutes 0, 3, 6, 9 and final commit, retain the latest three committed training checkpoints during the nightly window, and promote only a verified final adapter to serving/latest.lora. On crash, load serving/latest.lora for inference, then resume training from the newest valid committed checkpoint; if all training checkpoints fail checksum, discard in-progress training and keep the previous serving adapter.
   common_mistake: |
     **The Pitfall:** Refusing to structurally separate the inference model state from the heavy training optimizer state.
     **The Rationale:** Using standard server-side PyTorch checkpointing paradigms on a constrained mobile NAND flash system.
@@ -20,13 +20,14 @@ details:
     **Assumptions & Constraints:**
     - Base Model: 500 MB. Inference LoRA: 4 MB (FP32).
     - Optimizer State (Adam): 24 MB.
-    - Checkpoint Frequency: Every 3 minutes (3 checkpoints per 10-min window).
+    - Checkpoint Frequency: minutes 0, 3, 6, 9, plus final commit at minute 10.
     - Keep serving state separate from training state so 24/7 inference startup does not need optimizer state.
 
     **Calculations:**
     - Single Training Checkpoint Size: 4 MB (LoRA) + 24 MB (Optimizer) = 28 MB.
-    - Three checkpoints during a 10-minute window gives recovery points about every 3 minutes.
-    - Worst-case lost training progress after a crash: about 3 minutes instead of the full 10-minute session.
+    - Retaining the latest 3 committed training checkpoints gives recovery points at most about 3 minutes apart during the window.
+    - Worst-case lost training progress after a crash before final commit: about 3 minutes instead of the full 10-minute session.
+    - After final commit, the verified 4 MB LoRA adapter is promoted to the serving state and the optimizer checkpoints can be deleted or kept only until the next successful night.
     - Storage footprint for rolling recovery: 28 MB * 3 = 84 MB.
     - Serving startup reads only the 4 MB LoRA state, not the 28 MB training checkpoint.
 

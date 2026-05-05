@@ -12,7 +12,7 @@ scenario: Design a latency budget specification for a chat application using a 1
 question: What prompt length, decode length, GPU count, and batch-size constraints satisfy TTFT < 200ms and TPOT < 30ms for the 13B chat app?
 details:
   realistic_solution: |
-    A defensible single-GPU spec is max_prompt=2048, max_decode=512, GPU_count=1, decode_batch<=20, and prefill_microbatch=1 for max-length prompts. TPOT lower bound for the 13B model is 26GB / 3.35TB/s = 7.8ms/token; at batch 20 and 2560 active tokens/request, KV reads add about 12.5GB per decode step, or 3.7ms, leaving margin under the 30ms P95 TPOT target after kernel overhead. TTFT for a 2048-token prompt is about 2 * 13B * 2048 = 53TFLOPs; at 40% effective H100 utilization this is about 135ms, leaving roughly 65ms for tokenization, queueing, and network. Larger prefill batches or prompts longer than about 2.4K tokens would violate the 200ms TTFT budget.
+    A defensible single-GPU spec is max_prompt=2048, max_decode=512, GPU_count=1, decode_batch<=20, and prefill_microbatch=1 for max-length prompts. TPOT lower bound for the 13B model is 26GB / 3.35TB/s = 7.8ms/token; at batch 20 and 2560 active tokens/request, the resident KV footprint is about 39 GiB, so the batch limit is memory-driven and TPOT still has margin under 30ms after KV reads, kernels, and scheduler overhead. TTFT for a 2048-token prompt is about 2 * 13B * 2048 = 53TFLOPs; at 40% effective H100 utilization this is about 135ms, leaving roughly 65ms for tokenization, queueing, and network. If you reserve about 50ms for non-prefill overhead, the prompt cap is roughly 2.3K tokens; keep the published spec at 2048 for P95 headroom.
   common_mistake: |
     **The Pitfall:** Solving for TTFT and TPOT independently.
     **The Rationale:** Candidates fail to realize that while larger batches improve TTFT amortization, they consume memory that limits prompt/decode lengths and can degrade TPOT if the batch size becomes compute-bound.
@@ -37,6 +37,7 @@ details:
     - **TTFT for 2048 tokens:** 2 * 13B * 2048 = 53.2TFLOPs.
     - **Effective compute:** 989TFLOPS * 40% = 396TFLOPS.
     - **Prefill time:** 53.2TFLOPs / 396TFLOPS = 134ms, leaving about 66ms for queue/network/tokenization.
+    - **Prompt threshold with 50ms non-prefill budget:** 150ms * 396TFLOPS / (2 * 13B) = ~2,285 tokens, so a 2048-token cap leaves headroom.
 
     **Conclusion & Interpretation:**
     - **Spec: max_prompt=2048, max_decode=512, GPU_count=1, decode_batch<=20, prefill_microbatch=1 for max-length prompts.**

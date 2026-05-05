@@ -11,25 +11,27 @@ title: H100 Memory Budget for LoRA vs Full Fine-Tuning of a 7B Model
 scenario: You need to fine-tune a 7B parameter base model using LoRA on a single H100.
 question: 'Which approach fits on a single 80 GB H100: rank-16 LoRA or full fine-tuning of a 7B model?'
 details:
-  realistic_solution: 'Full fine-tune 7B (FP32): 7B × 4 bytes = 28 GB weights + 56 GB optimizer (Adam: 2 moments × 28 GB) + activations = ~120 GB — exceeds H100. LoRA rank-16: trainable params = 2 × rank × d_model × num_layers = 2 × 16 × 4096 × 32 = 4.19M params. Adapter memory: 4.19M × 4B = 16.8 MB weights + 33.6 MB optimizer. Frozen base (BF16): 7B × 2B = 14 GB. Total: ~14.05 GB — easily fits.'
+  realistic_solution: Assume single-GPU training with BF16 model weights, Adam, no optimizer offload, and only ordinary activation checkpointing. A full fine-tune needs the 7B BF16 weights (~14 GB), gradients (~14 GB), FP32 Adam moments (~56 GB), often FP32 master weights (~28 GB), plus activations, so it is roughly 110-120+ GB and does not fit an 80 GB H100. Rank-16 LoRA keeps the 7B base frozen in BF16 (~14 GB) and trains about 4.19M adapter params. Adapter weights, gradients, and Adam states are only tens of MB; with ~2 GB of activations, LoRA is about 16-17 GB plus framework/KV overhead and fits comfortably.
   common_mistake: |
     **The Pitfall:** Calculating LoRA memory as just the adapter parameters.
     **The Rationale:** Engineers forget that the massive frozen base model weights must still reside in GPU memory alongside the optimizer states for the adapters.
     **The Consequence:** Severely underestimating memory requirements, leading to unexpected OOMs when the base model is loaded.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Base model: 7B params (BF16, frozen).
-       - LoRA config: rank 16, 4096 dim, 32 layers.
-       - Batch size: 4, Seq len: 2048.
-    2. **Calculations:**
-       - LoRA params: 2 matrices * 16 * 4096 * 32 = 4,194,304 (~4.19M params).
-       - Adapter memory (FP32): 4.19M * 4 bytes = 16.8 MB.
-       - Adapter optimizer states (Adam): 16.8 MB * 2 = 33.6 MB.
-       - Base model memory (BF16 frozen): 7B * 2 bytes = 14 GB.
-       - Activations memory: ~2 GB.
-       - Total memory: 14 GB + 0.016 GB + 0.033 GB + 2 GB = 16.049 GB.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bound. Total memory is ~16.1 GB, comfortably fitting on an 80 GB GPU.**
+    **Assumptions & Constraints:**
+    - Single 80GB H100, BF16 base weights, Adam optimizer, no optimizer offload.
+    - LoRA config: rank 16, hidden dim 4096, 32 adapted layers.
+    - Batch size: 4, sequence length: 2048, activations about 2 GB with checkpointing.
+
+    **Calculations:**
+    - LoRA params = 2 matrices * 16 * 4096 * 32 = 4,194,304 params.
+    - Adapter weights at FP32 = 4.19M * 4 bytes = 16.8 MB.
+    - Adapter gradients + Adam moments + optional master copy are still under about 70 MB.
+    - Frozen base model memory = 7B * 2 bytes = 14 GB.
+    - LoRA total estimate = 14 GB base + about 0.07 GB adapter training state + about 2 GB activations = about 16.1 GB.
+    - Full fine-tune estimate = 14 GB BF16 weights + 14 GB gradients + 56 GB Adam moments + 28 GB FP32 master weights + activations = about 114 GB plus activations/framework overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: rank-16 LoRA fits on one 80GB H100; full fine-tuning does not under these assumptions.** Offload or more aggressive checkpointing can change the full fine-tune case, so the comparison must state those assumptions.
 status: published
 provenance: imported
 requires_explanation: false

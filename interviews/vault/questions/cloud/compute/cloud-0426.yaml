@@ -11,7 +11,8 @@ title: The Batch Size Sweet Spot
 scenario: You are serving a 7B LLM on a single H100. At batch=1, you measure 35 tokens/sec. At batch=64, you measure 1,800 tokens/sec. You must determine the cause of this 51x throughput increase with only 64x more work and identify the batch size where diminishing returns begin.
 question: Why does throughput increase 51x with a 64x batch size increase, and at what batch size do diminishing returns begin?
 details:
-  realistic_solution: 'At batch=1, LLM decode is deeply memory-bound (arithmetic intensity about 1 Op/Byte). The GPU reads all 14 GB of weights from HBM for each token, so throughput is limited by weight-read bandwidth. The ideal bandwidth-only ceiling is 3.35 TB/s / 14 GB = about 239 tokens/sec, while the measured 35 tokens/sec reflects real kernel overheads, memory access patterns, and decode inefficiencies. Increasing batch size reuses the same weight reads across multiple requests, increasing arithmetic intensity roughly linearly with batch size. The H100 ridge point is about 295 Ops/Byte, so the theoretical compute-bound transition would be near batch 295. In practice, VRAM/KV-cache capacity is hit earlier: KV cache per request at 2K context is about 0.5 GB, so batch 128 uses 14 GB weights + 128 * 0.5 GB = 78 GB, barely fitting in 80 GB. Practical diminishing returns begin around batch 128 because capacity blocks further useful batching before the ridge point is reached.'
+  realistic_solution: 'At batch=1, LLM decode is deeply memory-bound because each generated token streams about 14 GB of FP16 weights for only about 14 GFLOPs of matrix-vector work, or roughly 1 FLOP/Byte. The ideal weight-bandwidth ceiling is 3.35 TB/s / 14 GB = about 239 tokens/sec, while the measured 35 tokens/sec reflects real kernel overheads, memory access patterns, and decode inefficiencies. Increasing batch size turns the work into matrix-matrix style reuse: the same weight read serves B token positions, so arithmetic intensity rises roughly with batch size. The H100 ridge point is about 989 TFLOPS / 3.35 TB/s = 295 FLOP/Byte, so a pure roofline transition would be near B≈295. In practice, VRAM/KV-cache capacity arrives earlier: KV cache per request at 2K context is about 0.5 GB, so batch 128 uses 14 GB weights + 128 * 0.5 GB = 78 GB, barely fitting in 80 GB. Practical diminishing returns begin around batch 128 because capacity blocks further useful batching before the ridge point
+    is reached.'
   common_mistake: |
     **The Pitfall:** Assuming throughput should scale linearly with batch size indefinitely.
     **The Rationale:** Candidates know that larger batches are more efficient but fail to distinguish between the memory-bound regime (where linear scaling occurs) and the compute-bound regime (where throughput saturates).
@@ -24,8 +25,8 @@ details:
     - Total VRAM: 80 GB.
 
     **Calculations:**
-    - Batch=1 decode does roughly one model-weight read per generated token: 14 GFLOP-equivalent operations over 14 GB of FP16 weights, so AI ≈ 1 FLOP/Byte (memory-bound).
-    - Batch=B reuses the same weight read across B sequences, so AI ≈ B FLOPs/Byte.
+    - Batch=1 decode proxy: one generated token does about 2 × 7B multiply-add FLOPs = 14 GFLOPs while streaming about 14 GB of FP16 weights, so AI ≈ 1 FLOP/Byte.
+    - Batch=B decode reuses the same streamed weights across B token positions, so the proxy AI scales to about B FLOPs/Byte until other traffic and kernel effects dominate.
     - Hardware Ridge Point: 989 TFLOPS / 3.35 TB/s ≈ 295 FLOPs/Byte.
     - VRAM capacity limit at Batch 128: 14 GB (weights) + (128 * 0.5 GB KV Cache) = 78 GB.
 

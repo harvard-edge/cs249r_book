@@ -11,7 +11,8 @@ title: Optimizing Mixed-Precision Inference on Hailo-8
 scenario: You are deploying a large language model (LLM) for real-time inference on an edge device. Your current model was trained in FP32 and achieves satisfactory accuracy, but its latency and power consumption are too high. You decide to explore mixed-precision quantization to INT8.
 question: How would you adapt the FP32 LLM for mixed-precision inference on an INT8-optimized edge accelerator while evaluating accuracy, latency, and power tradeoffs?
 details:
-  realistic_solution: Employ Quantization-Aware Training (QAT) to maintain accuracy, utilizing layer-wise sensitivity analysis to identify the minimal subset of critical layers requiring higher precision. Since the edge hardware is strictly optimized for INT8 (with heavily penalized FP16/FP32 emulation), the pipeline must aggressively minimize graph breaks. Standard mixed-precision heuristics used on cloud GPUs are invalid here; maintaining 99% INT8 execution is required to prevent catastrophic emulation latency stalls.
+  realistic_solution: |
+    Start with post-training INT8 quantization and a calibration set, then use layer-wise sensitivity analysis or QAT only for layers that lose unacceptable accuracy. Evaluate each mixed-precision candidate on three axes: accuracy recovery versus the FP32 baseline, latency from measured end-to-end inference, and board power under sustained load. On an INT8-optimized accelerator, any FP16/FP32 fallback can create graph breaks, recasts, and software-emulated math, so keep higher precision to the smallest accuracy-critical subset and verify that the compiled graph still maps mostly to INT8 kernels. The final choice is the lowest-power, lowest-latency model that meets the accuracy target, not the model with the most floating-point layers preserved.
   common_mistake: |
     **The Pitfall:** Blindly applying cloud-centric mixed-precision ratios (e.g., leaving 20-30% of layers in FP16/32).
     **The Rationale:** Candidates assume that edge accelerators natively handle FP32 gracefully, ignoring the massive emulation penalties on integer-only dataflow engines.
@@ -24,13 +25,15 @@ details:
     - Target deployment: 90% INT8, 10% FP32
 
     **Calculations:**
+    - Fully INT8 latency for the same 100 GOPS would be 100 / 13,000 s = 0.00769 s = 7.69 ms.
     - 90 GOPS mapped to INT8 compute: 90 / 13,000 s = 0.0069 s = 6.9 ms.
     - 10 GOPS mapped to emulated FP32: (10 x 4) / 13,000 s = 0.0031 s = 3.1 ms.
     - Total execution: 6.9 ms + 3.1 ms = 10.0 ms.
-    - FP32 share of latency: 3.1 / 10.0 = 31%.
+    - Mixed-precision latency penalty versus fully INT8 = 10.0 / 7.69 = 1.30x.
+    - FP32 share of latency: 3.1 / 10.0 = 31%, even though it is only 10% of operations.
 
     **Conclusion & Interpretation:**
-    - **Result: 10 ms (Compute-Bound by Emulation)**. Just 10% FP32 operations consume over 30% of total inference time.
+    - **Result: 10 ms with a 1.30x latency penalty versus fully INT8.** Just 10% FP32 operations consume over 30% of total inference time, so mixed precision is justified only if it recovers enough accuracy without violating latency and power budgets.
 status: published
 provenance: imported
 requires_explanation: false

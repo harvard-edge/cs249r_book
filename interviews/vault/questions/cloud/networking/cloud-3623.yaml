@@ -11,24 +11,27 @@ title: TPU v5e AllReduce Ring Assumptions vs 2D Torus Bisection
 scenario: A TPU v5e pod (256 chips, 197 TFLOPS BF16) uses a 2D torus interconnect. The MXU training job shows AllReduce time of 2.1s but a colleague's ring-AllReduce analysis predicts 800ms.
 question: Diagnose why the measured TPU v5e AllReduce time is 2.1s when ring-AllReduce analysis predicts 800ms, and explain the interconnect property responsible?
 details:
-  realistic_solution: 'Ring-AllReduce assumes effective bandwidth equals link bandwidth. TPU torus: each chip has 4 links. Bisection of an NxN torus cuts 2N links in each direction (due to wrap-around). For a 16x16 torus (256 chips), unidirectional bisection BW = 32 * link_BW. Since 128 chips share these 32 links, the per-chip cross-bisection bandwidth is 32/128 = 1/4th of link_BW. A naive ring-AllReduce would see a 4x slowdown (800ms * 4 = 3.2s). The measured 2.1s is faster because XLA uses a topology-aware 2D AllReduce (reduce along rows, then columns), but it still cannot match the 800ms of a full non-blocking switch due to the fundamental bisection limits of the 2D torus.'
+  realistic_solution: 'The 800ms ring estimate assumes every chip can sustain full link bandwidth as if the fabric were non-blocking. A 256-chip TPU pod is closer to a 16x16 2D torus: each chip has four neighbor links, and traffic that crosses the middle of the torus is limited by bisection bandwidth. A vertical bisection of a 16x16 torus cuts 2×16 = 32 unidirectional links; those links are shared by the 128 chips on one side, so cross-bisection bandwidth per chip is 32/128 = 1/4 of a link. That explains why the measured 2.1s is far above 800ms. It is not a full 4× slowdown to 3.2s because XLA uses topology-aware 2D collectives that reduce along rows and columns and avoid making all traffic cross the same bisection at once.'
   common_mistake: |
     **The Pitfall:** Applying ring-AllReduce formulas to a 2D torus without accounting for bisection limits.
     **The Rationale:** Candidates treat all cluster topologies as non-blocking switches, ignoring that torus topologies force traffic to share limited physical links across the middle.
     **The Consequence:** Wildly inaccurate performance predictions and confusion when measured latency is much higher than theoretical ring math.
   napkin_math: |
     **Assumptions & Constraints:**
-    None.
+    - Model the 256-chip pod as a 16x16 2D torus.
+    - Let one TPU ICI link provide 112.5GB/s of unidirectional bandwidth.
+    - The colleague's 800ms estimate assumes effective per-chip bandwidth near one full link and ignores bisection sharing.
+
     **Calculations:**
-    - Single link bandwidth: 112.5 GB/s (ICI).
-    - Torus bisection (16x16 = 256 chips): Cutting the torus halves 32 links.
-    - Bisection bandwidth: 32 links * 112.5 GB/s = 3600 GB/s.
-    - Bisection per chip: 3600 GB/s / 128 chips = ~28.1 GB/s per chip.
-    - Topology bottleneck: 112.5 GB/s vs 28.1 GB/s is a 4x bandwidth reduction across the bisection.
-    - **Conclusion: A naive ring AllReduce takes 4x longer (3.2s). The measured 2.1s is the result of XLA's optimized 2D AllReduce partially mitigating the 2D torus bisection limit.**
+    - Bisection links for a 16x16 torus: 2 * 16 = 32 links.
+    - Bisection bandwidth: 32 links * 112.5GB/s = 3,600GB/s.
+    - Chips sharing one side of the bisection: 16 * 16 / 2 = 128 chips.
+    - Cross-bisection bandwidth per chip: 3,600GB/s / 128 = 28.1GB/s.
+    - Compared with a 112.5GB/s link-bandwidth assumption, the bisection path is about 112.5 / 28.1 = 4x more constrained.
+    - A topology-oblivious ring could therefore drift from 800ms toward 3.2s, while a topology-aware 2D collective can land between those points; 2.1s is consistent with partial mitigation but not with a non-blocking-ring model.
 
     **Conclusion & Interpretation:**
-    See calculations above.
+    - **Result: Bisection-bound AllReduce.** The discrepancy comes from applying a non-blocking ring model to a 2D torus whose bisection bandwidth gives only about one-quarter link bandwidth per chip for cross-torus traffic.
 status: published
 provenance: imported
 requires_explanation: false

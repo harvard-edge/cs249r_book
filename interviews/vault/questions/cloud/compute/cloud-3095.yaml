@@ -11,7 +11,7 @@ title: TPU v5e FFN Batch-Sequence Size for High Utilization
 scenario: You are tasked with analyzing compute utilization for a transformer FFN layer with hidden=4096 and FFN_dim=16384 on a TPU v5e (197 TFLOPS BF16, 819 GB/s, ridge point = 240 FLOPs/byte).
 question: What batch * sequence size is needed for the FFN layer to be compute-bound at ≥99% utilization on TPU v5e, and how do you derive it?
 details:
-  realistic_solution: To be compute-bound, Arithmetic Intensity (AI) must exceed the hardware ridge point. For a single 4096x16384 FFN matmul with BF16 input/output and weights loaded once, AI = (134.2M * BS) / (40,960 * BS + 134.2M). Hitting the 240 FLOPs/byte ridge requires BS about 259. If the design target is 3x the ridge point for high practical utilization, AI=720 requires BS about 922, so choosing the next convenient power-of-two batch*sequence size, 1024, is the practical answer.
+  realistic_solution: To answer the stated >=99% utilization criterion directly, use the roofline utilization model. For a single 4096x16384 FFN matmul with BF16 input/output and weights loaded once, AI = (134.2M * BS) / (40,960 * BS + 134.2M). The TPU v5e ridge point is 240 FLOPs/byte, so 99% of peak corresponds to AI = 0.99 * 240 = 237.6 FLOPs/byte, which gives BS about 256. To be strictly compute-bound, AI must reach the ridge point itself, giving BS about 259. In practice, choose the next convenient padded batch*sequence size, 256 for approximately 99% roofline utilization or 512 if the spec requires being clearly past the ridge.
   common_mistake: |
     **The Pitfall:** Calculating the exact batch size where AI equals the ridge point and stopping there.
     **The Rationale:** Candidates misinterpret the Roofline model, assuming that perfectly hitting the ridge point guarantees 100% compute utilization.
@@ -20,17 +20,18 @@ details:
     **Assumptions & Constraints:**
     - FFN dims: hidden=4096, FFN_dim=16384. Precision: BF16.
     - TPU v5e ridge point: 240 FLOPs/byte.
-    - Practical high-utilization target: 3x ridge, AI=720.
+    - Roofline utilization below the ridge is AI / ridge.
+    - Target utilization: >=99%, so target AI = 0.99 * 240 = 237.6 FLOPs/byte.
 
     **Calculations:**
     - FLOPs: 2 * BS * 4096 * 16384 = BS * 134.2M.
     - Memory Bytes: BS * 4096 * 2 (input) + 4096 * 16384 * 2 (weight) + BS * 16384 * 2 (output) = BS * 40,960 + 134.2M.
-    - To hit ridge point (AI=240): 240 = (134.2M * BS) / (40,960 * BS + 134.2M) => BS ≈ 259.
-    - To hit the high-utilization target (AI=720): 720 = (134.2M * BS) / (40,960 * BS + 134.2M) => BS ≈ 922.
-    - Practical padded shape: choose BS=1024.
+    - Solve AI=237.6: BS = 237.6 * 134.2M / (134.2M - 237.6 * 40,960) ≈ 256.
+    - Strict ridge point: AI=240 gives BS ≈ 259.
+    - Practical padded shape: BS=256 is the 99% roofline point; BS=512 is safely compute-bound.
 
     **Conclusion & Interpretation:**
-    - **Result: BS ≈ 922, practically 1024.** To operate well past the ridge point, use batch*sequence around 1024 for this FFN matmul.
+    - **Result: BS ≈ 256 for >=99% roofline utilization, or about 259 to cross the ridge.** A practical spec would use BS=256 for the stated threshold or BS=512 when it must be clearly compute-bound.
 status: published
 provenance: imported
 requires_explanation: true

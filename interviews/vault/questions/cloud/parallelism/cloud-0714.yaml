@@ -11,7 +11,7 @@ title: The Heterogeneous GPU Training
 scenario: Your cloud budget gets you 32 A100 80GB GPUs and 32 H100 80GB GPUs. An engineer proposes combining them into a single 64-GPU DDP training job for a 7B model. The H100 does a training step in 400 ms; the A100 takes 650 ms.
 question: What happens when you combine A100 and H100 GPUs in a single DDP training job, and how can you use both efficiently?
 details:
-  realistic_solution: 'With naive DDP, every step takes 650 ms (the A100 speed). Solutions: (1) Separate jobs — run two independent training jobs, one per GPU type, and merge checkpoints periodically. (2) Weighted data parallelism — give H100s larger micro-batches proportional to their speed (H100 gets batch=6, A100 gets batch=4), so both finish at the same time.'
+  realistic_solution: With naive synchronous DDP, every step waits for the slowest rank, so the mixed job runs at the A100 step time and wastes much of the H100 capacity. The standard efficient solution is to run separate homogeneous jobs or separate DDP groups per GPU type, then combine results through checkpoint averaging, curriculum partitioning, or an explicit training plan. A single heterogeneous job can work only with custom scheduling and correct gradient weighting for unequal per-rank work; it is not ordinary DDP.
   common_mistake: |
     **The Pitfall:** Believing DDP automatically averages or load-balances throughput across heterogeneous GPUs.
     **The Rationale:** Assuming the overall speed will simply be a mathematical average between the A100 and H100 speeds.
@@ -20,19 +20,18 @@ details:
     **Assumptions & Constraints:**
     - 32 H100s and 32 A100s in one synchronous DDP job.
     - At batch=4 per GPU, H100 step time is 400 ms and A100 step time is 650 ms.
-    - H100 step time scales roughly linearly with microbatch size near this operating point.
+    - Standard DDP assumes each rank participates in the same synchronized optimizer step.
 
     **Calculations:**
     - Naive DDP global batch: 64 GPUs * 4 samples/GPU = 256 samples.
     - Naive DDP synchronized step time: max(400 ms, 650 ms) = 650 ms, so throughput = 256 / 0.65 s = 394 samples/s.
-    - Weighted DDP assigns H100 batch=6 and A100 batch=4.
-    - H100 weighted step time: 400 ms * (6 / 4) = 600 ms; A100 step time remains 650 ms.
-    - Weighted synchronized step time: max(600 ms, 650 ms) = 650 ms.
-    - Weighted global batch: (32 * 6) + (32 * 4) = 320 samples.
-    - Weighted throughput: 320 / 0.65 s = 492 samples/s.
+    - Homogeneous H100 group throughput at batch=4: (32 * 4) / 0.400 s = 320 samples/s.
+    - Homogeneous A100 group throughput at batch=4: (32 * 4) / 0.650 s = 197 samples/s.
+    - Running them as separate jobs can use both pools without forcing H100 ranks to idle at every A100 barrier.
+    - Unequal per-rank microbatches inside one synchronized job require custom gradient scaling and scheduling, not default DDP.
 
     **Conclusion & Interpretation:**
-    - **Result: Weighted DDP achieves 492 samples/s, about 25% above naive DDP.** The job is still synchronized to the slowest rank, but larger H100 microbatches reduce wasted H100 capacity.
+    - **Result: naive mixed DDP is slowest-rank-bound at about 394 samples/s.** Use separate homogeneous jobs/groups, or build a custom heterogeneous training system that explicitly handles unequal work and gradient weighting.
 status: published
 provenance: imported
 requires_explanation: false

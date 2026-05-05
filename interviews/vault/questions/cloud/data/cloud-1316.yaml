@@ -11,24 +11,25 @@ title: Mitigating Gradient Inversion in Medical Federated Learning
 scenario: In a federated learning setup for a medical imaging model (ResNet-50, 25M parameters), clients (hospitals) train locally on 8x NVIDIA A100 nodes and send FP32 gradient updates to the central cloud aggregator. A security audit reveals that a malicious aggregator can perfectly reconstruct the raw 256x256 patient X-ray images from these updates when the local batch size is set to 1.
 question: Why do batch-size-1 federated gradients allow exact X-ray reconstruction, and what mitigation prevents it with under 1% accuracy loss?
 details:
-  realistic_solution: Do not rely on batch size alone as a privacy guarantee. Require larger local batches to reduce the one-sample gradient mapping, and add a real privacy control such as secure aggregation so the server never sees individual-client gradients, or DP-SGD with clipping and noise calibrated to a stated epsilon/delta budget after measuring accuracy impact.
+  realistic_solution: |
+    Batch-size-1 gradients can expose a nearly direct per-example signal, making gradient inversion far easier for a malicious aggregator. The mitigation that best fits an under-1% accuracy-loss budget is secure aggregation: the server receives only an aggregate across clients and cannot inspect a single hospital's gradient update. Larger local batches can reduce leakage, and DP-SGD can provide a formal privacy budget, but DP noise must be tuned and may cost more accuracy than secure aggregation.
   common_mistake: |
     **The Pitfall:** Assuming TLS/encryption in transit solves the privacy problem.
     **The Rationale:** Engineers treat the aggregator as inherently trusted because it sits inside the company's cloud VPC.
     **The Consequence:** The aggregator decrypts the packets to do the math, so a compromised or malicious aggregator can still attack the gradients. Batch size, architecture, and defenses affect recoverability, but encryption in transit does not protect gradients after receipt.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Image size: 256x256 = 65,536 pixels.
-    - With batch size 1, an observed gradient can expose a direct relationship to one image.
-    - With batch size B, the observed gradient is an aggregate over B images.
+    - A malicious aggregator sees client gradient updates after transport encryption is terminated.
+    - Batch size 1 ties the update to one image/label pair, making inversion highly identifiable.
+    - The accuracy budget is under 1%, so the preferred mitigation should not perturb training gradients.
 
     **Calculations:**
-    - For B=1, the attacker tries to fit one image to one gradient update.
-    - For B=16, the same update is a sum/average over 16 images, so the image unknowns rise to 16 * 65,536 = 1,048,576 pixel values before considering labels and model states.
-    - This makes inversion less identifiable, but it is not a proof of privacy; DP noise must be calibrated to a target epsilon/delta, or secure aggregation must hide individual updates.
+    - Batch size alone is not a privacy proof; it only mixes examples within one client's update.
+    - Secure aggregation changes the attack surface: the aggregator observes a sum over multiple clients rather than any individual hospital gradient, while the mathematical training update can remain unchanged.
+    - DP-SGD adds clipping and noise for formal privacy, but the noise level must be calibrated to epsilon/delta and validated against the 1% accuracy-loss budget.
 
     **Conclusion & Interpretation:**
-    - **Result: Identifiability Reduced, Not Eliminated.** Larger batches weaken exact reconstruction from individual gradients, while calibrated DP-SGD or secure aggregation provides the privacy mechanism.
+    - **Result: use secure aggregation for the tight accuracy budget.** Larger batches reduce identifiability but do not prevent a malicious aggregator from attacking visible client gradients; secure aggregation hides those individual updates with minimal expected accuracy impact.
 status: published
 provenance: imported
 requires_explanation: false

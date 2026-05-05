@@ -8,32 +8,27 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: 'Optimizing Distributed Training on NVIDIA H100: A Network Bandwidth Challenge'
-scenario: You are tasked with training a 1T-parameter LLM using mixed-precision (FP16) on a cluster of H100 GPUs. Nodes are interconnected through an Ethernet fabric with a bisection bandwidth of 400 Gbps. During initial tests, you observe that scaling beyond 16 GPUs across two nodes yields diminishing returns, suggesting a network bottleneck.
-question: How would you analyze the communication-computation ratio for 1T-parameter FP16 training on H100s and mitigate the 400 Gbps inter-node bottleneck?
+scenario: You are training a large FP16 LLM on 16 H100 GPUs across two 8-GPU nodes. The nodes are connected by an Ethernet fabric with 400 Gbps bisection bandwidth. Profiling shows a 16 GB gradient bucket must cross the inter-node link each step, and scaling beyond the two nodes has diminishing returns.
+question: How would you estimate whether the 16 GB gradient bucket is network-bound and reduce the 400 Gbps bottleneck?
 details:
-  realistic_solution: '1. Analyze Communication Patterns: Profile the model to understand the dominant communication operations (e.g., all-reduce for gradients). 2. Optimize Communication Primitives: Leverage highly optimized communication libraries like NVIDIA''s NCCL, ensuring it''s configured for the cluster''s network topology. 3. Model Parallelism: Implement hybrid parallelism strategies (e.g., combining data parallelism within a node with pipeline or tensor parallelism across nodes) to reduce the amount of data transferred between nodes. 4. Reduce Data Transfer: Use techniques like gradient accumulation, selective gradient updates, or sparsity-aware communication. 5. Network Topology Optimization: If possible, explore options for higher bisection bandwidth networking or more efficient node-to-node routing.'
+  realistic_solution: Estimate the inter-node transfer time for the measured gradient bucket and compare it with useful compute time in the same training step. Configure NCCL for the two-node topology, overlap gradient communication with backward compute, increase gradient accumulation to do more compute per synchronization, and use sharding or hybrid parallelism so less gradient data crosses the 400 Gbps link. If the ratio remains high, the run needs higher-bisection networking or fewer cross-node collectives.
   common_mistake: |
     **The Pitfall:** Overlooking the communication overhead of distributed training.
     **The Rationale:** Assuming scaling GPUs always yields linear speedup without checking the bisection bandwidth.
     **The Consequence:** Creating a severely network-bound training run where GPUs sit idle waiting for gradients.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model size: 1T parameters in FP16, so the gradient tensor is 1T * 2 bytes = 2 TB.
-    - Assume data-parallel gradient synchronization across 16 GPUs with a ring all-reduce.
-    - Inter-node fabric bisection: 400 Gbps = 50 GB/s raw; assume 40 GB/s effective.
-    - Per-token transformer training cost is about 6 * parameters FLOPs.
-    - Assume 4096 tokens per GPU per step across 16 GPUs, or 65,536 tokens per global step.
-    - Sustained training compute: 16 H100s at about 40% MFU = 6.3 PFLOPs/s.
+    - Measured gradient bucket crossing the two-node boundary: 16 GB per step.
+    - Inter-node fabric bisection: 400 Gbps = 50 GB/s raw; assume 40 GB/s effective after overhead.
+    - Useful backward compute remaining while this bucket can be overlapped: 0.25 seconds.
 
     **Calculations:**
-    - Ring all-reduce per-GPU communicated volume: 2 * (16 - 1) / 16 * 2 TB = 3.75 TB.
-    - Communication time across the constrained bisection: 3.75 TB / 40 GB/s = 93.75 seconds.
-    - Step compute: 6 * 1T * 65,536 = 393 PFLOPs.
-    - Compute time: 393 PFLOPs / 6.3 PFLOPs/s = 62.4 seconds.
-    - Comm-to-compute ratio before overlap: 93.75 / 62.4 = 1.50x.
+    - Inter-node transfer time lower bound: 16 GB / 40 GB/s = 0.40 seconds.
+    - Communication-to-overlappable-compute ratio: 0.40 / 0.25 = 1.6x.
+    - Since transfer time exceeds the compute window, at least 0.15 seconds is exposed communication unless the bucket is reduced, overlapped earlier, or sent over a faster fabric.
 
     **Conclusion & Interpretation:**
-    - **Result: Network-Bound for pure data parallelism over a 400 Gbps bisection.** Mitigate with tensor/pipeline/FSDP-style sharding, reduce-scatter/all-gather overlap, larger gradient accumulation, topology-aware placement, and higher-bisection fabric.
+    - **Result: the profiled bucket is network-bound over the 400 Gbps bisection.** Mitigate with overlap, smaller or sharded gradient payloads, larger gradient accumulation, topology-aware placement, and higher-bisection fabric.
 status: published
 provenance: imported
 requires_explanation: false

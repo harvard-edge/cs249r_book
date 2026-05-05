@@ -11,7 +11,7 @@ title: 'Model Size Estimation: Diagnose OOM Error During Fine-Tuning'
 scenario: 'A team hits OOM (out of memory) while fine-tuning a 13B model with batch size 8, sequence length 2048, using full FP16 training (no mixed precision). Memory profiler shows: weights 26GB, gradients 26GB, optimizer states 52GB — total 104GB.'
 question: Why does the 13B fine-tuning run OOM, and what minimum changes make it fit in 80GB?
 details:
-  realistic_solution: The run OOMs because full fine-tuning keeps resident weights, gradients, and Adam moments for every parameter. Under the scenario profiler convention, weights are 26GB, gradients are 26GB, and FP16 Adam m+v states are 52GB, for 104GB before activations and workspace. 8-bit Adam reduces optimizer states to about 26GB, so the model-state total becomes 26+26+26=78GB; that is barely under 80GB before activations, so it is not a robust single change unless batch/sequence or checkpointing also reduces runtime memory. LoRA trains only a small adapter fraction. At 2% trainable parameters, LoRA gradients are 0.26B×2B=0.52GB and FP16 Adam m+v is 0.26B×2B×2=1.04GB. Keeping the frozen base weights gives 26+0.52+1.04=27.56GB plus activations/workspace, making LoRA the safer minimum change.
+  realistic_solution: The run OOMs because full fine-tuning keeps resident weights, gradients, and Adam moments for every parameter. Under the scenario profiler convention, weights are 26GB, gradients are 26GB, and FP16 Adam m+v states are 52GB, for 104GB before activations and workspace. 8-bit Adam reduces the two optimizer moments to about 1 byte per parameter each, so the model-state total becomes 26+26+13+13 = 78GB; that is barely under 80GB before activations, so it is not a robust single change unless batch/sequence or checkpointing also reduces runtime memory. LoRA trains only a small adapter fraction. At 2% trainable parameters, LoRA has 13B × 0.02 = 0.26B trainable parameters. BF16 LoRA gradients need 0.26B × 2 bytes = 0.52GB, and FP16 Adam m+v need 0.26B × 2 bytes × 2 moments = 1.04GB. Keeping the frozen base weights gives 26+0.52+1.04 = 27.56GB plus activations/workspace, making LoRA the safer minimum change.
   common_mistake: |
     **The Pitfall:** Immediately switching to ZeRO-3.
     **The Rationale:** Candidates assume complex distributed training is required for all OOM errors without calculating basic optimizer state sizes.
@@ -24,8 +24,9 @@ details:
     **Calculations:**
        - Baseline Memory = 26 + 26 + 26 + 26 = 104GB (OOM).
        - 8-bit Adam = 26 (W) + 26 (G) + 13 (m) + 13 (v) = 78GB before activations/workspace, so it fits only tightly.
-       - LoRA gradients = 0.26B * 2B = 0.52GB.
-       - LoRA FP16 Adam states = 0.26B * 2B * 2 = 1.04GB.
+       - LoRA trainable params = 13B * 0.02 = 0.26B parameters.
+       - LoRA gradients = 0.26B parameters * 2 bytes/parameter = 0.52GB.
+       - LoRA FP16 Adam states = 0.26B parameters * 2 bytes/parameter * 2 moments = 1.04GB.
        - LoRA total model states = 26 (frozen W) + 0.52 (G) + 1.04 (Adam) = 27.56GB.
     **Conclusion & Interpretation:**
        - **Result: 27.56GB before activations (Memory-Capacity-Bound).** LoRA provides roughly 52GB of model-state headroom versus an 80GB GPU, while 8-bit Adam alone is a tight fit before runtime memory.

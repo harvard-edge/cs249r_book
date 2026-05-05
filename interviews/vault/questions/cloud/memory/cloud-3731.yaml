@@ -11,7 +11,7 @@ title: Multi-Level Memory Hierarchy Specification for 405B LLM Inference
 scenario: You are designing a tiered memory hierarchy system for serving Llama-3-405B (FP8 = 405GB) on a production cluster with H100s, NVMe SSDs, and DRAM. The model must serve 500 concurrent users with an 8192 token context.
 question: What tiered memory strategy or limits are required to serve 500 concurrent 8192-token users for Llama-3-405B FP8 on H100s?
 details:
-  realistic_solution: 'Model weights require 405GB FP8, so an 8x H100 node provides enough aggregate HBM for the model: 640GB total, leaving about 235GB for KV and runtime overhead. KV cache per token is 2 tensors × 126 layers × 8 KV heads × 128 dim × 1 byte = 258,048 bytes. For 500 users at 8192 tokens, KV alone is 500 × 8192 × 258,048 bytes ≈ 1057GB, so one 8x H100 node cannot serve the stated requirement fully in HBM. Required strategy: either shard across several nodes, offload cold KV pages to host DRAM/NVMe with latency-aware paging, reduce context/concurrency, or cap the hot HBM tier. As an HBM-only example, about 100 users at 8192 tokens need 211GB KV, and 405GB + 211GB = 616GB fits before overhead; this is a feasible cap, not the answer for all 500 users.'
+  realistic_solution: 'Model weights require 405GB FP8, so an 8x H100 node provides enough aggregate HBM for the model: 640GB total, leaving about 235GB for KV and runtime overhead. KV cache per token is 2 tensors × 126 layers × 8 KV heads × 128 dim × 1 byte = 258,048 bytes. For 500 users at 8192 tokens, KV alone is 500 × 8192 × 258,048 bytes ≈ 1057GB, so one 8x H100 node cannot serve the stated requirement fully in HBM. Required strategy: either shard across several nodes, offload cold KV pages to host DRAM/NVMe with latency-aware paging, reduce context/concurrency, or cap the hot HBM tier. The raw HBM-only KV cap is about 111 users before runtime overhead. Rounding down to about 100 users leaves roughly 24GB for allocator fragmentation, page tables, CUDA/NCCL workspaces, and batching overhead; this is a feasible HBM cap, not the answer for all 500 users.'
   common_mistake: |
     **The Pitfall:** Trying to fit the full model and all KV caches in GPU HBM without concurrency limits or CPU offload.
     **The Rationale:** Candidates size the cluster purely based on model weights and underestimate the massive KV cache required for 500 users at 8K context.
@@ -26,7 +26,7 @@ details:
     - 500 users * 8192 tokens * 258,048 bytes = ~1057GB KV cache.
     - Total for 500 users = 405GB model + 1057GB KV = 1462GB, which exceeds the 640GB HBM in one 8x H100 node.
     - HBM-only concurrency cap before overhead: 235GB available KV / (8192 * 258,048 bytes/user) = about 111 users.
-    - Practical example cap: 100 users gives 405GB + 211GB KV = 616GB before overhead.
+    - Practical safety cap: 100 users gives 405GB + 211GB KV = 616GB, leaving about 24GB for runtime overhead and fragmentation.
 
     **Conclusion & Interpretation:**
     - **Result: 500 Concurrent 8K Users Do Not Fit in One 8x H100 HBM Tier.** Use a lower hot-concurrency cap, shorter contexts, more GPU nodes, or KV offload. The 100-user case is only an example of an HBM-feasible limit.

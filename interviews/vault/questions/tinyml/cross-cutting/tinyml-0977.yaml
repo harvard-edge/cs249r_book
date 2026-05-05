@@ -8,10 +8,10 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: inference
 title: Latency Analysis of On-Device Privacy Guardrails
-scenario: To meet organizational accountability frameworks, a 3 MB FP32 privacy guardrail model is deployed to an ESP32-S3 smart microphone alongside a 250 KB INT8 wake-word model. The wake-word model runs in the SRAM utilizing the CPU's INT8 vector extensions, completing in 15ms. Because of SRAM limits, the 3 MB guardrail model is placed in the PSRAM, which operates over an SPI bus with a practical read bandwidth of 40 MB/s. When the guardrail is triggered, system latency jumps by 90ms, causing the audio buffer to overflow.
+scenario: To meet organizational accountability frameworks, a 3 MB FP32 privacy guardrail model is deployed to an ESP32-S3 smart microphone alongside a 250 KB INT8 wake-word model. The wake-word model runs in the 512 KB SRAM utilizing the CPU's INT8 vector extensions, completing in 15ms. Because of SRAM limits, the 3 MB guardrail model is placed in the PSRAM, which operates over an SPI bus with a practical read bandwidth of 40 MB/s. When the guardrail is triggered, system latency jumps by 90ms, causing the audio buffer to overflow.
 question: Why does the guardrail cause this specific latency bottleneck, and what is its minimum execution time floor due to memory fetches?
 details:
-  realistic_solution: The behavior occurs because the 3 MB guardrail is memory-bandwidth-bound, not primarily compute-bound. Since it does not fit in SRAM, each trigger must stream weights from external PSRAM over the SPI bus. At 40 MB/s, fetching 3 MB has a 75 ms lower bound before useful compute is counted; adding the stated 15 ms wake-word-class compute overhead explains the observed 90 ms latency. INT8 vector extensions do not solve this bottleneck by themselves, and quantizing a 3 MB FP32 model to INT8 would still be about 750 KB before additional pruning or compression, so it would not fit in 512 KB SRAM on quantization alone. The fix must reduce memory traffic, keep a much smaller guardrail in SRAM, compress/prune enough to fit, or restructure the trigger path to stream less data.
+  realistic_solution: The behavior occurs because the 3 MB guardrail is memory-bandwidth-bound, not primarily compute-bound. Since it does not fit in SRAM, the trigger path may need to stream most or all guardrail weights from external PSRAM over the SPI bus instead of reusing resident on-chip weights. At 40 MB/s, a worst-case full 3 MB stream has a 75 ms lower bound before useful compute is counted; adding the stated 15 ms wake-word-class compute overhead explains the observed 90 ms latency. INT8 vector extensions do not solve this bottleneck by themselves, and quantizing a 3 MB FP32 model to INT8 would still be about 750 KB before additional pruning or compression, so it would not fit in 512 KB SRAM on quantization alone. The fix must reduce trigger-path memory traffic, keep a much smaller guardrail in SRAM, compress/prune enough to fit, or restructure the trigger path to stream less data.
   common_mistake: |
     **The Pitfall:** Blaming the CPU clock speed or lack of FP32 vector extensions.
     **The Rationale:** Candidates assume FP32 compute is the bottleneck, failing to analyze the memory interface bandwidth.
@@ -23,7 +23,7 @@ details:
     - Compute overhead: 15 ms.
 
     **Calculations:**
-    - Minimum fetch time = 3 MB / 40 MB/s = 0.075 seconds = 75 ms.
+    - Worst-case minimum fetch time if the trigger streams the full guardrail from PSRAM = 3 MB / 40 MB/s = 0.075 seconds = 75 ms.
     - Total latency = 75 ms + 15 ms = 90 ms.
 
     **Conclusion & Interpretation:**

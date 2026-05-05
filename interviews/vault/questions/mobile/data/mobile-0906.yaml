@@ -11,7 +11,7 @@ title: 'Dataset Curation: Realize Training Data Requirements for On-Device LLM F
 scenario: Realize the complete data requirements for fine-tuning a 1B LLM for email composition assistance. The model must fit in memory during inference (4-bit quantized) and fine-tuning must complete in < 5 minutes in the background.
 question: What data and LoRA fine-tuning plan lets a 1B email assistant fit and train on mobile constraints within five minutes?
 details:
-  realistic_solution: '4-bit quantized 1B model is about 500MB for inference weights, but training still needs adapter weights, gradients, optimizer state, activations, framework buffers, and repeated full-model forward/backward passes. Use LoRA rather than full fine-tuning, keep the quantized base frozen, and make the five-minute target conditional: use a very small adapter, short sequences, one epoch, small microbatches, checkpointing, and early cancellation if the device is hot or on battery. With 50 examples at 512 tokens for 3 epochs, a 1B model is more plausibly a 10-30 minute background job on sustained mobile hardware, so a five-minute product SLA would need fewer tokens/epochs or server-assisted training.'
+  realistic_solution: Use a deliberately small, filtered personalization set rather than all mail. Collect only opted-in sent-message pairs such as prompt context plus accepted completion, remove quoted threads, signatures, attachments, PII-heavy examples, spam, and very long conversations, then cap the training set at about 48 examples of 256 tokens. Fine-tune rank-8 LoRA adapters on attention and MLP projection layers with the 4-bit base frozen, one epoch, microbatch 1-2, gradient accumulation, activation checkpointing, thermal/battery gates, and an atomic adapter checkpoint at completion. This gives about 12K training tokens and a small adapter state, making a five-minute mobile background job plausible on sustained hardware; larger sets should be staged over multiple nights or trained server-side.
   common_mistake: |
     **The Pitfall:** Trying to fine-tune the full model on-device instead of using parameter-efficient adapters like LoRA.
     **The Rationale:** Candidates fail to account for the massive memory requirements of optimizer states and activations for full-parameter updates.
@@ -19,23 +19,23 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 1B parameters (4-bit quantized = 500MB).
-    - LoRA: Rank-16, 2M parameters (FP16).
-    - Data: 50 examples, 512 tokens each.
-    - Training pass: 3 epochs.
+    - LoRA: Rank-8, about 1M trainable parameters (FP16).
+    - Data: 48 filtered examples, 256 tokens each.
+    - Training pass: 1 epoch.
     - Sustained training throughput after memory, kernel, and thermal overhead: 0.25-1.0 TFLOPS effective.
 
     **Calculations:**
-    - Memory floor: 500MB base weights + 4MB LoRA weights + 4MB LoRA gradients.
-    - AdamW state for 2M LoRA params in FP32 moments: 2M * 2 moments * 4 bytes = 16MB; master weights add another ~8MB if used.
-    - Activations, dequant buffers, framework workspace, and batches can add hundreds of MB, so plan for roughly 1-2GB during training rather than 584MB.
-    - Tokens: 50 * 512 * 3 epochs = 76,800 tokens.
-    - Compute (requires full model pass): 6 FLOPs/param/token * 1B params * 76,800 tokens = 460.8 TFLOPs.
-    - Time at 1.0 effective TFLOPS: 460.8 seconds = 7.7 minutes.
-    - Time at 0.25 effective TFLOPS: 1843 seconds = 30.7 minutes.
-    - To meet 5 minutes at 1.0 effective TFLOPS, token budget must be <= 300s * 1e12 / (6e9) = 50,000 token-updates.
+    - Memory floor: 500MB base weights + 2MB LoRA weights + 2MB LoRA gradients.
+    - AdamW state for 1M LoRA params in FP32 moments: 1M * 2 moments * 4 bytes = 8MB; FP32 master weights add about 4MB if used.
+    - Activations, dequant buffers, framework workspace, and microbatches can add hundreds of MB, so reserve roughly 1-2GB during training.
+    - Tokens: 48 * 256 * 1 epoch = 12,288 training tokens.
+    - Compute requires full frozen-base forward/backward through the adapted layers; using a rough full-model bound: 6 FLOPs/param/token * 1B params * 12,288 tokens = 73.7 TFLOPs.
+    - Time at 1.0 effective TFLOPS: 73.7 seconds.
+    - Time at 0.25 effective TFLOPS: 294.9 seconds = 4.9 minutes.
+    - A 50-example, 512-token, 3-epoch plan would be 76,800 tokens, or 6.25x more work, and would miss the five-minute target on slower sustained hardware.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound and not guaranteed within 5 minutes**. The 50-example, 3-epoch plan is more plausibly 8-31 minutes depending on sustained throughput; fitting a five-minute SLA requires fewer token-updates, fewer epochs, a smaller adapter/model, or off-device training.
+    - **Result: Small-Data LoRA Plan Fits the Five-Minute Target**. A curated 48-example, 256-token, one-epoch rank-8 run is about 74 TFLOPs and stays under five minutes at the stated sustained throughput floor; larger personalization sets must be split across background windows or moved off device.
 status: published
 provenance: imported
 requires_explanation: false

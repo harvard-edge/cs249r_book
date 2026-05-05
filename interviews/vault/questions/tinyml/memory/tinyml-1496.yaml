@@ -11,8 +11,8 @@ title: Huffman Encoding for Weight Compression on Cortex-M4
 scenario: A 200KB INT8 CNN model needs to be compressed to fit alongside a 700KB firmware on a 1MB flash device. The weight histogram shows 60% of values cluster around 0 (±3), 30% in ±10, and 10% are outliers.
 question: Estimate the compression ratio achievable with Huffman encoding and assess the runtime decompression cost?
 details:
-  realistic_solution: Using the three coarse histogram buckets, the entropy is H = -0.60×log2(0.60) - 0.30×log2(0.30) - 0.10×log2(0.10) = 1.295 bits per bucket symbol. A Huffman code for these three buckets would have code lengths of roughly 1, 2, and 2 bits, for an average of 0.60×1 + 0.30×2 + 0.10×2 = 1.4 bits per bucket label. Because the actual weights are still INT8 values inside each bucket, the encoded stream must also identify values within the bucket or use a second-stage codebook, so 1.4 bits/value is an optimistic lower-bound style estimate rather than a guaranteed final file size. Under that optimistic estimate, compression ratio is 8/1.4 = 5.7×, so 200KB compresses to about 35KB and easily fits with 700KB firmware. Runtime decompression for the full model is 200K weights × 5 cycles/weight = 1.0M cycles; at 168MHz this is 1.0M / 168M = 0.006s, or about 6ms per inference if every weight is decoded once. The flash fit is plausible, but feasibility still depends on the actual symbol
-    table, per-layer decode buffering, and whether the added decode time fits the latency budget.
+  realistic_solution: |
+    The three histogram buckets are not enough to claim a 5.7x compression ratio for raw INT8 weights. They only describe a bucket label stream: a Huffman code with lengths about 1, 2, and 2 bits gives an average bucket-label cost of 0.60×1 + 0.30×2 + 0.10×2 = 1.4 bits/value. The actual encoded weight stream must still encode the exact INT8 value inside each bucket or use an explicit second-stage codebook. With a simple bound, the near-zero bucket needs about ceil(log2 7) = 3 bits/value for values -3..3, the ±10 bucket needs about 4 bits/value for the remaining in-range values, and outliers may need the raw 8-bit value. That gives roughly 0.60×(1+3) + 0.30×(2+4) + 0.10×(2+8) = 5.2 bits/weight before headers and tables, or only 8/5.2 = 1.54x compression. A 200KB model would compress to about 130KB, so the flash footprint with 700KB firmware is about 830KB and fits in 1MB, but not with the previously claimed margin. Runtime decompression remains 200K weights × 5 cycles/weight = 1.0M cycles; at 168MHz this is about 6ms if every weight is decoded once.
   common_mistake: |
     **The Pitfall:** Only calculating the compression ratio and ignoring the on-device decompression requirements.
     **The Rationale:** Candidates forget that decompression at inference time on a Cortex-M4 adds cycle latency and requires a large decompression buffer in SRAM.
@@ -24,17 +24,18 @@ details:
     - Decompression Target Hardware: 168 MHz CPU.
 
     **Calculations:**
-    - Coarse bucket entropy (H): -0.60*log2(0.60) - 0.30*log2(0.30) - 0.10*log2(0.10) = ~1.295 bits/bucket-symbol.
-    - Example Huffman lengths for 3 buckets: common bucket = 1 bit, two rarer buckets = 2 bits.
-    - Average bucket code length: 0.60*1 + 0.30*2 + 0.10*2 = 1.4 bits/value for the bucket label.
-    - Optimistic compression ratio from 8-bit weights: 8 bits / 1.4 bits = ~5.7x before codebook and within-bucket value overhead.
-    - Optimistic compressed size: 200 KB / 5.7 = ~35 KB.
-    - Total flash footprint: 700 KB + 35 KB = 735 KB < 1,024 KB.
+    - Example bucket-label Huffman lengths: common bucket = 1 bit, two rarer buckets = 2 bits.
+    - Average bucket-label length: 0.60*1 + 0.30*2 + 0.10*2 = 1.4 bits/value.
+    - Exact value bits still required inside each bucket: near-zero values need ~3 bits, midrange values need ~4 bits, outliers use ~8 bits.
+    - Estimated total bits/weight: 0.60*(1+3) + 0.30*(2+4) + 0.10*(2+8) = 5.2 bits/weight before headers and code tables.
+    - Estimated compression ratio from 8-bit weights: 8 / 5.2 = ~1.54x.
+    - Estimated compressed size: 200 KB / 1.54 = ~130 KB.
+    - Total flash footprint: 700 KB + 130 KB = 830 KB < 1,024 KB, before alignment and decoder tables.
     - Decompression cost: 200K weights * 5 cycles/weight = 1.0M cycles.
     - Time: 1.0M cycles / 168M cycles/s = 0.006 s = ~6 ms per inference.
 
     **Conclusion & Interpretation:**
-    - **Result: likely flash-feasible, with about ~6 ms decode overhead under the stated cost model.** The compression estimate is optimistic because the coarse histogram does not fully specify all INT8 symbol probabilities, and runtime feasibility still depends on decode buffering and the latency target.
+    - **Result: likely flash-feasible, but closer to ~1.5x compression than 5.7x under this representation, with about ~6 ms decode overhead under the stated cost model.** Runtime feasibility still depends on decode buffering, tables, alignment, and the latency target.
 status: published
 provenance: imported
 requires_explanation: false

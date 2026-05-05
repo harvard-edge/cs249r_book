@@ -11,7 +11,7 @@ title: Throughput Collapse in Fallback Model Degradation
 scenario: An NLP inference service runs on a cloud node with a single GPU. Under heavy load, the system triggers a quality-of-service degradation ladder to shed load, switching from its primary 30-billion parameter model running at a batch size of 16, to a much smaller 7-billion parameter fallback model. To minimize response latency for the fallback model, the system processes requests immediately at a batch size of 1. However, during a production incident, this degradation strategy actually reduced the total cluster throughput (tokens/second) by nearly 4x, exacerbating the queue buildup and causing a complete outage.
 question: Why does switching from a batched 30B model to a batch-1 7B fallback reduce total tokens/second instead of shedding load?
 details:
-  realistic_solution: The system's throughput collapses because both scenarios are severely memory-bandwidth bound, meaning the limiting factor is the time it takes to read model weights from HBM. The arithmetic intensity of both models at small batch sizes is far below the GPU's ridge point. While the 7B model is smaller and faster to load per forward pass, serving it at batch size 1 means the memory bandwidth cost is paid for a single token. In contrast, the 30B model amortizes its weight loading over 16 tokens per pass. To properly shed load, the degradation ladder must maintain batching on the fallback model to ensure actual throughput improvements.
+  realistic_solution: The system's throughput collapses because autoregressive decode often becomes memory-bandwidth and kernel-overhead limited at small batches. The 7B fallback is cheaper per token than the 30B model, but batch-1 serving destroys weight/KV reuse and leaves the GPU underutilized, so aggregate tokens/second can fall even while single-request latency improves. A safer degradation ladder should cap admission, preserve micro-batching on the fallback path, and shed or queue low-priority traffic rather than immediately draining every request at batch size 1 during an incident.
   common_mistake: |
     **The Pitfall:** Assuming smaller models inherently guarantee higher throughput regardless of batching.
     **The Rationale:** Candidates assume that because the 7B model is roughly 4x smaller and requires fewer FLOPs, it will inherently have higher throughput and alleviate the overload. They fail to identify that autoregressive inference is memory-bandwidth bound.
@@ -19,19 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Autoregressive decoding at small batch sizes is often dominated by repeated weight access and low arithmetic intensity.
-    - Use a simplified proportional model: throughput benefit from batching is roughly proportional to batch size when weight reads dominate.
-    - Ignore exact GPU bandwidth and kernel-efficiency constants because they cancel in the comparison.
+    - Batch size changes utilization, memory reuse, and scheduling overhead; it does not imply a universal linear tokens/sec formula.
+    - Use only a qualitative roofline-style comparison because exact throughput depends on GPU, kernels, sequence lengths, and KV-cache behavior.
 
     **Calculations:**
-    - Primary model FP16 weights = 30B * 2 bytes = 60 GB, amortized over batch 16.
-    - Fallback model FP16 weights = 7B * 2 bytes = 14 GB, amortized over batch 1.
-    - Relative throughput proxy = batch size / weight bytes read per decode step.
-    - Primary proxy = 16 / 60 = 0.267 tokens per GB-weight step.
-    - Fallback proxy = 1 / 14 = 0.071 tokens per GB-weight step.
-    - Primary-to-fallback ratio = 0.267 / 0.071 = about 3.7x.
+    - Primary FP16 weights are roughly 30B * 2 bytes = 60 GB; fallback FP16 weights are roughly 7B * 2 bytes = 14 GB.
+    - The fallback has about 4.3x fewer weights, but batch size falls from 16 to 1, increasing per-request launch overhead and reducing arithmetic intensity.
+    - In a bandwidth-sensitive decode workload, the smaller model can still deliver lower aggregate tokens/sec if batch-1 execution fails to saturate HBM bandwidth and tensor units.
+    - Mitigation is operational as well as model-level: keep controlled batching on fallback, apply admission control, and shed low-priority work before queues saturate.
 
     **Conclusion & Interpretation:**
-    - **Result: batch-1 fallback can deliver about 3.7x lower throughput in this memory-bound proxy**. The exact tokens/sec depends on GPU, kernels, KV cache, and scheduling, but losing batching can outweigh the smaller model size.
+    - **Result: batch-1 fallback can reduce total throughput despite lower per-token model cost**. The incident response should preserve batching and load shedding instead of optimizing only single-request latency.
 status: published
 provenance: imported
 requires_explanation: false

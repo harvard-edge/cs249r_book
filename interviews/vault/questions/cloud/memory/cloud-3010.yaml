@@ -11,7 +11,7 @@ title: 'KV-Cache: Specification — KV Cache Budget for Multi-Model Serving'
 scenario: 'Write the KV cache specification for a multi-model serving setup on a single H100: Model A (7B, 30 concurrent) and Model B (3B, 70 concurrent). Both use bf16. Define memory partitioning, priority policy, and overflow handling.'
 question: For two GQA-8 models on a single H100 budgeting 128 KiB/token and up to 2048 active tokens per request, what KV-cache partitioning, priority policy, and overflow handling should you use?
 details:
-  realistic_solution: Reserve memory first for model weights, then partition the remaining HBM by each model's concurrency target. Model A needs 30 * 2048 * 128 KiB = 7.5 GiB of KV cache; Model B needs 70 * 2048 * 128 KiB = 17.5 GiB. With about 20GB for weights and a 5GB runtime/fragmentation reserve, this leaves ample shared burst capacity on an 80GB H100. Use hard minimum reservations for each model, a shared overflow pool for unused KV pages, priority admission for latency-critical Model A traffic, and reject or queue lower-priority requests once a model exhausts both its reservation and the shared pool.
+  realistic_solution: Reserve memory first for model weights, then partition the remaining HBM by each model's concurrency target. Model A needs 30 * 2048 * 128 KiB = 7.5 GiB of KV cache; Model B needs 70 * 2048 * 128 KiB = 17.5 GiB. With about 18.6 GiB for bf16 weights, 25 GiB for protected KV reservations, and a 5 GiB runtime/fragmentation reserve, an 80 GiB H100 leaves about 31 GiB before safety caps. Use hard minimum reservations for each model, expose only about 24-26 GiB as a shared overflow pool, keep 5-7 GiB unallocated as an OOM guard, give Model A priority for overflow pages, and reject or queue requests once a model reaches both its reservation and its overflow cap.
   common_mistake: |
     **The Pitfall:** Miscalculating the per-token KV cache size or failing to account for multi-model HBM sharing.
     **The Rationale:** Candidates forget the factor of 2 for K and V, or fail to specify eviction policies when one model's requests surge.
@@ -21,15 +21,17 @@ details:
     - GQA-8 model (32 layers, 8 KV heads, head_dim=128, FP16/BF16 2 bytes).
     - Model A: 30 concurrent requests, 2048 active tokens/request.
     - Model B: 70 concurrent requests, 2048 active tokens/request.
-    - Approximate weights: 7B bf16 = 14GB, 3B bf16 = 6GB.
-    - Runtime/fragmentation reserve: 5GB.
+    - Approximate weights: 7B bf16 = 14GB and 3B bf16 = 6GB, or about 18.6GiB total.
+    - Runtime/fragmentation reserve: 5GiB minimum.
 
     **Calculations:**
     - KV per token = 32 layers * 2 (K,V) * 8 heads * 128 dim * 2 bytes = 131,072 bytes = 128 KiB.
     - Model A reservation = 30 * 2048 * 128 KiB = 7.5 GiB.
     - Model B reservation = 70 * 2048 * 128 KiB = 17.5 GiB.
-    - Baseline HBM = 14GB + 6GB weights + 7.5GiB + 17.5GiB KV + 5GB reserve = about 50GB.
-    - Remaining HBM can be used as a shared overflow pool, subject to per-model caps.
+    - Protected KV reservations = 7.5GiB + 17.5GiB = 25GiB.
+    - Baseline HBM = 18.6GiB weights + 25GiB protected KV + 5GiB reserve = 48.6GiB.
+    - Remaining before additional safety headroom = 80GiB - 48.6GiB = 31.4GiB.
+    - Concrete policy: expose 24-26GiB as shared overflow pages, reserve the rest as an OOM guard, cap Model B overflow first, and admit Model A overflow ahead of Model B during contention.
 
     **Conclusion & Interpretation:**
     - **Result: Partitioned KV Budget (Memory-Bound)**. Guarantee the 7.5GiB and 17.5GiB reservations, use shared free pages for bursts, prefer high-priority Model A traffic during contention, and queue or shed Model B overflow before either model can evict protected KV pages from the other.

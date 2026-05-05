@@ -11,7 +11,7 @@ title: MHA vs GQA Decoding Bottlenecks
 scenario: You are deploying a 7B parameter LLM on an NPU targeting an interactive chat application. The system has 45 TOPS INT8 compute and a shared 12-16 GB LPDDR5X memory pool between the CPU, GPU, and NPU. During auto-regressive decoding with a 2048-token context, you observe that the NPU compute utilization drops to under 5% when using standard Multi-Head Attention (MHA), resulting in slow token generation.
 question: Why does the NPU sit idle despite having 45 TOPS available, and why does Grouped-Query Attention (GQA) significantly increase the token generation rate?
 details:
-  realistic_solution: During decoding, every single generated token requires loading the entire KV cache and model weights from the shared LPDDR5X memory into the NPU's SRAM. Standard MHA stores separate Key and Value vectors for every single query head, creating a massive memory footprint per token that saturates the memory bus before the NPU can perform any meaningful work. GQA solves this by sharing a single KV head across multiple query heads (e.g., 4 queries per KV head), slashing the total KV cache size by 75% and directly alleviating the LPDDR5X memory bandwidth bottleneck, allowing the NPU to process generation steps much faster.
+  realistic_solution: During decoding, each generated token must attend over the accumulated KV cache, and that cache is repeatedly read through shared LPDDR5X when it does not fit in fast local memory. Standard MHA stores separate Key and Value vectors for every query head, creating a large per-token KV bandwidth demand that can leave the NPU waiting for memory despite ample TOPS. GQA shares fewer KV heads across the same query heads, reducing KV-cache size and bandwidth directly, so more of each decode step can be spent on useful NPU work.
   common_mistake: |
     **The Pitfall:** Assuming the NPU's compute capacity is insufficient to calculate attention scores.
     **The Rationale:** Candidates fail to identify that auto-regressive decoding is strictly memory-bandwidth bound, not compute-bound.
@@ -20,18 +20,19 @@ details:
     **Assumptions & Constraints:**
     - Hardware: 45 TOPS INT8, shared LPDDR5X.
     - Batch size: 1. Context length: 2048 tokens.
-    - Model: 7B params (~7 GB INT8).
     - MHA Topology: 32 layers, 32 heads, 128 head dim.
+    - KV cache stored in FP16 or BF16: 2 bytes/value.
 
     **Calculations:**
     - MHA KV cache size = batch * layers * sequence * 2 (K,V) * heads * head_dim * bytes.
     - MHA KV cache size = 1 * 32 * 2048 * 2 * 32 * 128 * 2 bytes = 1,073,741,824 bytes ≈ 1.0 GiB.
-    - Approximate per-token DRAM stream if weights and full attention history are not resident: ~7 GB weights + ~1.0 GiB KV cache ≈ ~8 GB.
     - Attention score/value work across all layers = 2 (QK) * heads * sequence * head_dim * 2 ops/MAC * layers ≈ 1.07 GOPS, small compared with the memory stream on a 45 TOPS NPU.
-    - GQA with 8 KV heads instead of 32 reduces KV cache traffic by 4x: ~1.0 GiB / 4 ≈ 256 MiB.
+    - MHA KV traffic alone is therefore about 1.0 GiB per generated token when the full history is read from DRAM.
+    - GQA with 8 KV heads instead of 32 reduces KV cache size and traffic by 4x: ~1.0 GiB / 4 ≈ 256 MiB.
+    - The model weights may be resident, tiled, streamed, or cached depending on the backend; they are not the basis for this KV-cache bandwidth estimate.
 
     **Conclusion & Interpretation:**
-    - **Result: ~7.25 GB Weight+KV Stream After GQA (Memory-Bound)**. Under this simplified bandwidth model, GQA reduces the KV portion from ~1.0 GiB to ~256 MiB, cutting total per-token traffic from roughly 8 GB to roughly 7.25 GB and improving token rate by relieving memory pressure.
+    - **Result: KV-Cache Bandwidth Reduction.** GQA cuts the decode-time KV traffic from about 1.0 GiB to about 256 MiB for this context, improving token generation by reducing memory stalls rather than by increasing peak TOPS.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: You are architecting an edge NVR (Network Video Recorder) system using
 question: How would you design the Hailo-8 memory hierarchy and streaming strategy for 4 1080p30 streams without stalling PCIe?
 details:
   realistic_solution: |
-    The correct architecture exploits the Hailo-8's spatial dataflow paradigm by pinning the entire 45MB model's weights into the distributed on-chip SRAM. The host DRAM is used strictly as a ring buffer for incoming frames and final bounding box outputs. By streaming the 4 video feeds sequentially into the dataflow pipeline, intermediate activations remain entirely on-chip, decoupling the compute throughput from host memory latency.
+    The correct architecture exploits the Hailo-8's spatial dataflow paradigm without assuming the entire 45MB model is resident on chip. Keep host DRAM as the backing store for frame rings, compiled graph segments, and outputs, while the compiler schedules weights and activations as tiles through limited on-chip buffers. Stream the 4 video feeds through a stable dataflow schedule so each layer's working set is prefetched and consumed without reloading the full model per frame.
   common_mistake: |
     **The Pitfall:** Treating the dataflow accelerator like a traditional GPU and proposing layer-by-layer execution.
     **The Rationale:** Assuming intermediate activations must be constantly spilled and reloaded from host DRAM due to the lack of on-board device DRAM.
@@ -22,16 +22,16 @@ details:
     - Streams: 4x 1080p at 30 fps.
     - PCIe Gen3 x4: ~3.2 GB/s practical bandwidth.
     - Model: 45MB weights.
-    - Compiled dataflow keeps weights and intermediates resident or streams weights once per scheduled graph, not once per frame.
+    - Compiled dataflow tiles weights and intermediates through on-chip buffers; the full 45MB model is not assumed to fit on chip.
 
     **Calculations:**
     - Input payload: 4 * (1920 * 1080 * 3 bytes) * 30 fps = 746,496,000 bytes/s = ~746 MB/s for all four streams.
-    - Resident-weight strategy: load the 45 MB compiled graph once at startup or on model change, then stream frames and compact outputs during steady state.
+    - Tiled dataflow strategy: keep the compiled schedule stable, then stream weight/activation tiles, frames, and compact outputs during steady state.
     - Bad design check: reloading 45 MB weights for every frame would be 45 MB * 120 fps = 5.4 GB/s, exceeding the ~3.2 GB/s PCIe budget before frame input is counted.
-    - Steady-state frame traffic with resident weights is ~746 MB/s plus metadata, which fits within ~3.2 GB/s with headroom for protocol overhead.
+    - Steady-state frame traffic is ~746 MB/s plus scheduled tile traffic and metadata, which remains PCIe-safe only if the compiler avoids full-model reloads per frame.
 
     **Conclusion & Interpretation:**
-    - **Result: Keep Weights Resident and Stream Frames (PCIe-Safe)**. PCIe becomes infeasible only if weights or large intermediates are reloaded per frame; the design must separate one-time model traffic from steady-state input traffic.
+    - **Result: Compiler-Tiled Streaming (PCIe-Safe)**. PCIe becomes infeasible if weights or large intermediates are reloaded naively per frame; the design depends on compiler-managed tiling through on-chip buffers and steady streaming from host memory.
 status: published
 provenance: imported
 requires_explanation: true

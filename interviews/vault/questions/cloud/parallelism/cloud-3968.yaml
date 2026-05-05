@@ -11,7 +11,7 @@ title: Overlapping Collective Permute with MoE Expert Computation on TPU
 scenario: Your MoE model uses collective_permute to route tokens to expert chips on a TPU v5e pod. XLA profiles show collective_permute takes 12ms per MoE layer, and expert computation takes 8ms.
 question: Can overlap still work between ICI transfers and expert computation on TPU v5e?
 details:
-  realistic_solution: 'XLA''s approach to overlap on TPU: (1) XLA analyzes data dependencies in the HLO graph and identifies computation independent of collective_permute output. (2) Non-MoE layers between MoE layers can be scheduled during collective_permute. (3) XLA uses ''async collectives''. (4) TPU''s ICI shares bandwidth with HBM access, so heavy computation can slow down ICI transfers. (5) Effective overlap on TPU: 40-60% of collective_permute can be hidden, vs 80-90% on GPU.'
+  realistic_solution: Overlap can still work on TPU v5e, but only when XLA can find independent work. XLA can lower collective_permute as an async collective, schedule computation that does not consume the routed tokens while the ICI transfer is in flight, and then insert the wait at the first true dependency. The amount hidden depends on the HLO dependency graph, expert placement, token balance, and whether expert compute competes with ICI/HBM bandwidth. If the 8ms expert computation depends entirely on the 12ms routed-token output, it cannot hide that transfer; if there is independent expert or non-MoE work, up to that independent work duration can be overlapped.
   common_mistake: |
     **The Pitfall:** Assuming TPU cannot overlap compute and communication because it lacks a separate DMA engine like GPU's copy engine.
     **The Rationale:** Candidates often know GPUs use dedicated copy engines for overlap and assume the lack of this on TPU means strict serialization.
@@ -20,21 +20,17 @@ details:
     **Assumptions & Constraints:**
     - collective_permute takes 12ms.
     - Expert computation takes 8ms.
-    - TPU hides 60% of communication.
-    - GPU hides 90% of communication.
+    - Overlap requires compute that is independent of the collective_permute output.
+    - No fixed TPU-vs-GPU hidden percentage is implied by the prompt.
 
     **Calculations:**
-    - Unoverlapped Time: 12ms + 8ms = 20ms.
-    - TPU Overlap: 12ms * 60% = 7.2ms hidden.
-    - TPU Exposed: 12ms - 7.2ms = 4.8ms.
-    - TPU Total Time: 4.8ms exposed + 8ms compute = 12.8ms per layer.
-    - GPU Overlap: 12ms * 90% = 10.8ms hidden.
-    - GPU Exposed: 12ms - 10.8ms = 1.2ms.
-    - GPU Total Time: 1.2ms exposed + 8ms compute = 9.2ms per layer.
-    - Slowdown relative to GPU time: (12.8ms - 9.2ms) / 9.2ms = 39%.
-    - Extra time as a share of TPU time: (12.8ms - 9.2ms) / 12.8ms = 28%.
+    - If the expert computation depends on routed tokens, critical path = 12ms transfer + 8ms expert compute = 20ms.
+    - If XLA can schedule 8ms of independent compute during the transfer, critical path = max(12ms transfer, 8ms independent compute) + dependent work that remains.
+    - In the best case for the stated numbers, exposed transfer is 12ms - min(12ms, 8ms) = 4ms.
+    - In the worst case, exposed transfer is the full 12ms because no independent work exists before the wait.
+    - Therefore the hidden amount is schedule- and workload-dependent, from 0ms to at most 8ms for this layer model.
 
     **Conclusion & Interpretation:**
-    - **Result: 39% Slower Than GPU in This Layer Model (Communication-Bound).** TPU still overlaps part of the transfer, but the larger exposed communication makes the modeled layer 12.8ms instead of 9.2ms.
+    - **Result: Conditional Overlap, Not a Fixed Percentage.** TPU v5e can overlap collective_permute with independent work through XLA async scheduling, but the exposed communication is determined by the dependency graph and memory-system contention.
 status: published
 provenance: imported

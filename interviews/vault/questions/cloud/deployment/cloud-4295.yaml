@@ -11,7 +11,7 @@ title: Chunked Prefill Scheduling Window
 scenario: Your disaggregated prefill cluster uses chunked prefill to prevent long requests from monopolizing a GPU. You set a fixed chunk size of 512 tokens. A product requirement says TTFT must be under 200 ms for all requests regardless of input length.
 question: What chunk scheduling policy would keep TTFT under 200 ms for inputs up to 32k tokens?
 details:
-  realistic_solution: 'For a 32k-token input with 512-token chunks, you need 64 chunks. If 512 tokens take about 5 ms of compute plus 1 ms scheduling, serialized latency is 64 × 6 ms = 384 ms, which misses the 200 ms SLO. Use adaptive chunking: keep small chunks for short prompts and increase long-prompt chunks to 4096 tokens or run chunks across multiple prefill GPUs when queueing permits. With a consistent 200k tok/s compute model, a 4096-token chunk takes about 20.5 ms compute plus 1 ms scheduling, so 8 serialized chunks take about 172 ms. Use admission control or parallel prefill when the measured per-chunk time would exceed the SLO.'
+  realistic_solution: 'For a 32k-token input with 512-token chunks, you need 64 chunks. If 512 tokens take about 5 ms of compute plus 1 ms scheduling, serialized latency is 64 × 6 ms = 384 ms, which misses the 200 ms SLO. Use a deadline-aware adaptive policy: keep small chunks for short prompts, use larger chunks when they improve measured throughput, prioritize requests by TTFT deadline, and split long prompts across multiple prefill GPUs when serialized chunk time cannot meet the deadline. If measured throughput still implies more than 200 ms, enforce admission control, degrade the max context, or return an async path; a batch-size threshold alone is underdetermined without arrival rate and per-chunk timing.'
   common_mistake: |
     **The Pitfall:** Setting chunk size based on memory only, ignoring inter-chunk scheduling latency.
     **The Rationale:** Multiple chunks serialized across prefill GPUs introduces queuing delay between chunks — the inter-chunk scheduling latency can dominate TTFT for long inputs.
@@ -22,11 +22,11 @@ details:
        - Chunk overhead: 5 ms compute + 1 ms scheduling = 6 ms per chunk (for 512 tokens).
     2. **Calculations:**
        - At 512-token chunks: 32k / 512 = 64 chunks.
-       - Total prefill latency: 64 chunks × 6 ms = 384 ms (Violates SLO).
-       - Implied compute throughput from 512-token chunks: 512 / 5 ms = 102.4k tok/s, so 4096 tokens would take 40 ms compute and 8 chunks would take 328 ms. Larger chunks alone would not meet the SLO under that measured rate.
-       - If the larger chunk saturates a 200k tok/s prefill GPU, 4096 tokens take 4096 / 200k = 20.5 ms compute plus 1 ms scheduling.
-       - Total latency with saturated 4096-token chunks: 8 × 21.5 ms = 172 ms.
-    3. **Conclusion & Interpretation:** **Dynamic chunk sizing meets the 200 ms SLO only if larger chunks improve measured throughput enough; otherwise use parallel prefill or reject/defer long prompts.**
+       - Total prefill latency: 64 chunks × 6 ms = 384 ms (violates SLO).
+       - Implied compute throughput from 512-token chunks: 512 / 5 ms = 102.4k tok/s.
+       - At that same measured rate, a 4096-token chunk takes about 40 ms compute plus 1 ms scheduling; 8 serialized chunks take about 328 ms.
+       - Therefore larger serialized chunks alone do not prove the SLO is met; the scheduler must use measured chunk time, queueing delay, and available parallel prefill capacity.
+    3. **Conclusion & Interpretation:** **A deadline-aware adaptive scheduler can meet the 200 ms SLO only when measured throughput and queueing allow it; otherwise use parallel prefill, admission control, or a lower max context.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: Designing a 3.5GB On-Device RAG System for Personal Documents
 scenario: Design an on-device RAG system that enables a personal knowledge assistant to search 10,000 personal documents and generate responses. Total memory budget is 3.5GB. The design must support documents up to 5000 tokens, 256-dim embeddings, and a sub-2-second end-to-end response time.
 question: How should an on-device RAG system fit document search and LLM generation within memory and response-time constraints?
 details:
-  realistic_solution: 'Fit the system by budgeting memory and constraining answer length. Use an INT8 256-dim embedding model (~22MB), a 10K-vector HNSW index (~10MB before graph overhead), an INT4 1B LLM (~500MB), compressed document storage (~150MB if the average compressed token cost is about 3 bytes), and a KV cache sized for the actual context. For a 1B-class model with roughly 24 layers and 2048 hidden width, a 1024-token FP16 KV cache is about 2 * 24 * 2048 * 2 * 1024 = 201MB, still leaving ample room inside 3.5GB. The latency constraint is dominated by decode: at 20 tok/s, a 100-token answer takes 5s and cannot meet the SLA. The design must cap responses around 35-40 tokens, stream immediately after prefill, and use retrieval snippets small enough to keep prefill under the remaining budget.'
+  realistic_solution: 'Fit the system by budgeting memory and constraining answer length. Use an INT8 256-dim embedding model (~22MB), a 10K-vector HNSW index (~10MB before graph overhead), an INT4 1B LLM (~500MB), compressed document storage, and a KV cache sized for the actual context. If compressed document text averages about 3 bytes/token, 10,000 documents of 5,000 tokens each would be about 150MB, but chunk metadata, raw text retention, and HNSW graph overhead should be explicitly budgeted; the design still needs headroom inside 3.5GB. For a 1B-class model with roughly 24 layers and 2048 hidden width, a 1024-token FP16 KV cache is about 2 * 24 * 2048 * 2 * 1024 = 201MB. The latency constraint is dominated by decode: at 20 tok/s, a 100-token answer takes 5s and cannot meet the SLA. The design must cap responses around 35-40 tokens, stream immediately after prefill, and use small retrieved snippets.'
   common_mistake: |
     **The Pitfall:** Using cloud-scale models for mobile constraints.
     **The Rationale:** Candidates often propose massive 1536-dim embeddings or full FP16 models, consuming 10x the memory budget.
@@ -19,13 +19,14 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 1B LLM (INT4) = ~500 MB.
-    - Embedding model + HNSW vectors + compressed docs = ~182 MB before index graph overhead.
+    - Embedding model + vectors + compressed worst-case document text = ~22 MB + 10 MB + 150 MB = ~182 MB before HNSW graph, chunk metadata, and optional raw-text overhead.
     - Approximate KV cache: 2 * 24 layers * 2048 hidden * 2 bytes * 1024 tokens = ~201 MB.
     - Total Memory Budget = 3.5 GB.
     - SLA = 2.0 seconds end-to-end. NPU text generation = 20 tok/s.
 
     **Calculations:**
-    - System memory = 500 MB + 182 MB + 201 MB = ~883 MB plus HNSW overhead, fitting the 3.5 GB budget.
+    - Base system memory = 500 MB + 182 MB + 201 MB = ~883 MB before HNSW graph, metadata, raw-text retention, allocator, and app overhead.
+    - Even with several hundred MB of index/text overhead, this can fit inside 3.5 GB only if documents are compressed/chunked and raw duplicate storage is controlled.
     - Reserve ~100 ms for query embedding/search and ~150-200 ms for prefill of compact retrieved snippets.
     - Remaining decode budget ≈ 2.0s - 0.3s = 1.7s.
     - Max generated tokens ≈ 1.7s * 20 tok/s = ~34 tokens. With a faster 0.2s retrieval+prefill path, the cap is ~36 tokens.

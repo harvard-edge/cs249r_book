@@ -11,7 +11,7 @@ title: The Real-Time Driver Monitoring Dilemma
 scenario: You are the Staff ML Systems Engineer for an automotive Tier 1 supplier. Your team is developing a driver monitoring system on a Jetson AGX Orin. The baseline MobileNetV2-based model correctly detects driver drowsiness in 25ms. The product team now wants to add 'cell phone use' detection to the same model. A naive approach of adding a second classification head and retraining increases model size by only 15%, but latency jumps to 40ms. Profiling shows the model is heavily compute-bound.
 question: How do you solve this problem and ship both features while staying within a hard 33ms real-time budget?
 details:
-  realistic_solution: The correct approach is to use a Mixture-of-Experts (MoE) architecture. The model is compute-bound, so the goal is to add functionality without increasing the number of floating-point operations (FLOPs) executed per inference. Instead of a dense multi-task model that evaluates shared layers plus both task-specific heads on every frame, train two efficient expert paths, one for drowsiness and one for phone-use/distraction detection. A tiny, inexpensive gating network routes each frame to the relevant expert. Since only the gating network and one expert path are active per inference, the executed compute remains close to the 25ms baseline rather than the 40ms dense multi-head model. This allows the system to scale capabilities without scaling per-frame compute cost.
+  realistic_solution: The correct approach is to use a Mixture-of-Experts (MoE) architecture with an explicit latency budget. The model is compute-bound, so adding both task paths to every frame raises executed FLOPs and produced the measured 40ms miss. Instead, keep each expert path at roughly the single-task MobileNetV2 compute budget and add a tiny gating network that routes each frame to either the drowsiness expert or the phone-use/distraction expert. The baseline is 25ms, leaving 8ms of slack under the 33ms deadline; the gate and routing overhead must fit inside that slack. If profiling keeps gate overhead to about 1-2ms, the active path is about 26-27ms, while the dense multi-head design remains 40ms because it evaluates extra compute every frame.
   common_mistake: |
     **The Pitfall:** Assuming parameter counts scale linearly with latency on accelerators.
     **The Rationale:** Engineers assume adding parameters proportionally increases latency, failing to account for arithmetic intensity or exploring MoE routing.
@@ -24,9 +24,10 @@ details:
 
     **Calculations:**
     - Proposed Architecture: Mixture-of-Experts (MoE).
-    - Active Expert Execution: ~25ms, assuming each expert path is sized like the original single-task baseline.
-    - MoE Gating Network Overhead: ~1ms.
-    - Only one expert is evaluated per frame, so Total MoE Latency: 25ms + 1ms = 26ms.
+    - Deadline slack over baseline = 33ms - 25ms = 8ms.
+    - Keep each expert path near the original single-task MobileNetV2 compute budget, so active expert execution is about 25ms.
+    - Budget the gate and routing overhead at <= 2ms; this must be verified in profiling because the model is compute-bound.
+    - Only one expert is evaluated per frame, so Total MoE Latency: 25ms + 1-2ms = about 26-27ms.
     - Naive dense multi-head latency: 40ms, because extra task logic is evaluated every frame.
 
     **Conclusion & Interpretation:**

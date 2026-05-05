@@ -11,7 +11,7 @@ title: GEMV vs GEMM Dataflow for M=1 and M=1024
 scenario: You are designing a custom GEMM kernel for a systolic-array-like accelerator. The operation is $C_{M \times N} = A_{M \times K} \times B_{K \times N}$ where M=1, K=4096, N=4096.
 question: Which dataflow minimizes total data movement for this specific GEMV shape, and how does the answer change when M increases to 1024?
 details:
-  realistic_solution: For M=1, weight-stationary is optimal because B dominates data volume. For M=1024, output-stationary becomes optimal to maximize parallelism and reuse.
+  realistic_solution: 'For M=1, weight-stationary is strongly favored because B dominates data volume and the input/output vectors are tiny. For M=1024, the problem becomes a real GEMM: output-stationary or a hybrid tiled dataflow becomes attractive to keep partial sums local, but the exact optimum depends on array shape, tile sizes, and on-chip buffer capacity. The answer should be framed as a shift in tradeoff, not a universal switch.'
   common_mistake: |
     **The Pitfall:** Picking output-stationary as the default for all GEMMs.
     **The Rationale:** Forgetting how the M=1 degeneracy changes the data reuse patterns.
@@ -24,10 +24,11 @@ details:
     **Calculations:**
     - B size: 4096 x 4096 x 2 bytes = 33,554,432 bytes = 32 MiB.
     - M=1: A is 1 x 4096 x 2 bytes = 8 KiB; C is 1 x 4096 x 2 bytes = 8 KiB. B dominates, so keeping weights stationary minimizes rereads.
-    - M=1024: A is 1024 x 4096 x 2 bytes = 8 MiB; C is 1024 x 4096 x 2 bytes = 8 MiB; B remains 32 MiB. Output-stationary improves C accumulation locality and exposes much more parallel work.
+    - M=1024: A is 1024 x 4096 x 2 bytes = 8 MiB; C is 1024 x 4096 x 2 bytes = 8 MiB; B remains 32 MiB. Keeping partial sums local becomes more valuable, while B still has substantial reuse across M.
+    - The best M=1024 dataflow is therefore often output-stationary or hybrid tiling, but it depends on whether the accelerator can hold useful B tiles and C accumulators on chip.
 
     **Conclusion & Interpretation:**
-    - **Result: M=1 favors weight-stationary dataflow because the 32 MiB B matrix dwarfs the 8 KiB input/output vectors. At M=1024, output-stationary becomes more attractive because A and C are each 8 MiB and the larger GEMM has enough parallelism to keep output accumulators local.**
+    - **Result: M=1 favors weight-stationary dataflow because the 32 MiB B matrix dwarfs the 8 KiB input/output vectors. At M=1024, the answer shifts toward output-stationary or hybrid tiling because C accumulation locality matters, but the exact optimum is hardware- and tile-dependent.**
 status: published
 provenance: imported
 requires_explanation: false

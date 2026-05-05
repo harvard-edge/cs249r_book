@@ -7,11 +7,11 @@ topic: disaggregated-serving
 competency_area: deployment
 bloom_level: apply
 phase: inference
-title: Batching Strategy Across Prefill Nodes
+title: Length Buckets for 50-8192 Token Prefill
 scenario: Requests arrive at a router with variable input lengths (50-8192 tokens, Zipf-distributed). Your prefill pool has 8 GPUs.
 question: How would you batch 50-8192-token prefill requests on 8 GPUs to maximize throughput while keeping TTFT variation within 3x?
 details:
-  realistic_solution: 'Length-bucketed batching: sort incoming requests into length buckets. Batch requests within the same bucket together. Short requests are padded at most 2.56x, not 163x. Within each bucket, use continuous batching to avoid waiting for a full batch.'
+  realistic_solution: 'Use length buckets with admission control: for example <=128, <=256, <=512, <=1024, <=2048, <=4096, and <=8192 tokens. Batch only within a bucket, use continuous batching inside each bucket, and dispatch a partial batch when its oldest request approaches the TTFT budget. Reserve at least one prefill slot or weighted queue share for short buckets so long prompts cannot head-of-line-block 50-token requests. Adjacent buckets differ by at most 2x in padded work, leaving scheduling slack for queueing while keeping TTFT variation within the 3x target.'
   common_mistake: |
     **The Pitfall:** Padding all requests to the maximum length in a batch.
     **The Rationale:** It simplifies the implementation of batching logic to treat all sequences uniformly.
@@ -19,15 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Batching 50 to 8192 tokens across 8 GPUs.
-    - Compare one mixed batch of 7 short requests and 1 long request against length-bucketed batches.
+    - Use power-of-two-ish buckets: 128, 256, 512, 1024, 2048, 4096, 8192.
+    - Compare padding waste and TTFT control against one mixed batch of 7 short requests and 1 long request.
 
     **Calculations:**
     - Naive padding for 7 x 50-token requests plus 1 x 8192-token request: (7*50 + 8192) / (8*8192) = 8542 / 65536 = 13.0% payload tokens overall, and only 350 / 57344 = 0.6% useful work on the short requests.
     - Bucketed padding separates the 7 short requests into a <=128-token bucket: 350 / (7*128) = 39.1% useful compute for that short-request batch.
-    - The long request still runs in an 8192-token bucket, so overall gain depends on the live mix of short and long buckets and how continuously the scheduler fills each bucket.
+    - A request is padded by at most about 2x within a bucket instead of up to 8192/50 = 164x across the whole range.
+    - TTFT variation is controlled by queue policy, not padding alone: dispatch partial batches on age deadlines and reserve short-bucket capacity so the short queue is not blocked behind 4096-8192-token prefill work.
 
     **Conclusion & Interpretation:**
-    - **Result: higher short-request efficiency with bounded padding (Compute-Bound)**. Bucketing can materially improve throughput and TTFT variance, but the exact gain is an illustrative estimate that depends on bucket composition, scheduling policy, and utilization.
+    - **Result: higher short-request efficiency with bounded padding (Compute-Bound)**. Bucketing improves throughput, while per-bucket age deadlines and reserved short-bucket capacity are what cap TTFT variation within the 3x target.
 status: published
 provenance: imported
 requires_explanation: true

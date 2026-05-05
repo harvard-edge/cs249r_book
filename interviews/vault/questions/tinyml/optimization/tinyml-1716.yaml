@@ -11,7 +11,7 @@ title: Throughput Impact of I/O Overlap on Microcontrollers
 scenario: 'A Cortex-M4 at 120 MHz processes incoming audio in a 4-stage pipeline: ADC sample (3 ms), filter+windowing (2 ms), inference (10 ms), SPI transmit (5 ms). The pipeline shares a single 64 KB SRAM bank, and DMA transfers contend with CPU loads on bus arbitration - empirically each DMA-active ms costs 8% extra CPU time. Two SRAM banks could double-buffer to eliminate contention but only if the chip has dual-bank SRAM (Cortex-M4 reference part has unified bank).'
 question: Evaluate the realized throughput gain from double-buffering, accounting for DMA bus contention, and identify whether the chip's single-bank SRAM bottlenecks the maximum overlap?
 details:
-  realistic_solution: Sequential baseline without overlap is 3 + 2 + 10 + 5 = 20 ms per frame, or 50 fps. With double-buffering, ADC and SPI run on DMA, but filter and inference both run on the single Cortex-M4 CPU and serialize into a 12 ms CPU stage. Ignoring contention, steady-state frame time is max(ADC=3 ms, CPU=12 ms, SPI=5 ms) = 12 ms, giving 83.3 fps and an ideal speedup of 20 / 12 = 1.67x. For the stated worst-case schedule, the 3 ms ADC DMA and 5 ms SPI DMA overlap the CPU stage for 8 DMA-active ms. With an 8% per-active-ms CPU-time penalty, the CPU stage becomes 12 ms + (8 * 0.08 ms) = 12.64 ms. Realized throughput is 1000 / 12.64 = 79.1 fps, and realized speedup is 20 / 12.64 = 1.58x. The single-bank SRAM is a bottleneck relative to ideal overlap because DMA traffic stretches the CPU stage, but the CPU stage remains the dominant limiter.
+  realistic_solution: Sequential baseline without overlap is 3 + 2 + 10 + 5 = 20 ms per frame, or 50 fps. With double-buffering, ADC and SPI run on DMA, but filter and inference both run on the single Cortex-M4 CPU and serialize into a 12 ms CPU stage. Ignoring contention, steady-state frame time is max(ADC=3 ms, CPU=12 ms, SPI=5 ms) = 12 ms, giving 83.3 fps and an ideal speedup of 20 / 12 = 1.67x. For the stated worst-case schedule, the 3 ms ADC DMA and 5 ms SPI DMA overlap the CPU stage for 8 DMA-active ms. With an 8% per-active-ms CPU-time penalty, the shared SRAM/bus path stretches the CPU stage to 12 ms + (8 * 0.08 ms) = 12.64 ms. Realized throughput is 1000 / 12.64 = 79.1 fps, and realized speedup is 20 / 12.64 = 1.58x. The limitation is not double-buffering as a concept; it is DMA/CPU bus contention through the single SRAM bank. A dual-bank design could preserve the ideal 12 ms frame time if it removed that contention.
   common_mistake: |
     **The Pitfall:** Computing the overlap speedup as max(stage_i) = max(3,2,10,5) = 10 ms.
     **The Rationale:** without recognising that filter and inference both run on the single CPU core and serialise into a 12 ms CPU stage - a Cortex-M4 cannot run two CPU tasks concurrently. A second slip is applying the DMA contention tax to ADC or SPI (the non-binding stages) instead of to the binding 12 ms CPU window.
@@ -20,19 +20,20 @@ details:
     **Assumptions & Constraints:**
     - Sequential baseline: 20 ms (3 ADC + 2 filter + 10 inference + 5 SPI).
     - Serial CPU stages: filter + inference = 12 ms.
-    - DMA contention tax: each DMA-active ms overlapping the CPU adds 0.08 ms to the CPU stage.
+    - DMA contention tax: each DMA-active ms overlapping the CPU adds 0.08 ms to the CPU stage through shared SRAM/bus arbitration.
+    - Hypothetical dual-bank SRAM removes that contention; the stated chip has one shared bank.
 
     **Calculations:**
     - Ideal overlap = max(3 ADC, 12 CPU, 5 SPI) = 12 ms.
     - Ideal throughput = 1000 / 12 = 83.3 fps.
     - Overlapping DMA time during CPU window = 8 ms.
-    - Taxed CPU stage = 12 ms + (8 ms * 0.08) = 12.64 ms.
+    - Taxed CPU stage on the shared SRAM path = 12 ms + (8 ms * 0.08) = 12.64 ms.
     - Realized throughput = 1000 / 12.64 = 79.1 fps.
     - Ideal speedup = 20 / 12 = 1.67x.
     - Realized speedup = 20 / 12.64 = 1.58x.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.58x Speedup (Memory-Bandwidth Bound)**. The single-bank SRAM contention reduces the ideal 1.67x speedup to 1.58x by stretching the binding CPU stage from 12 ms to 12.64 ms.
+    - **Result: 1.58x Speedup (Memory-Bandwidth Bound)**. The realized gain is 1.58x, below the ideal 1.67x, because DMA/CPU contention on the shared single-bank SRAM path stretches the binding CPU stage from 12 ms to 12.64 ms.
 status: published
 provenance: llm-draft
 requires_explanation: true

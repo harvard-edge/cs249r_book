@@ -11,19 +11,24 @@ title: Diagnosing P0 Inference Starvation
 scenario: You are debugging a K8s fleet of 64x H100 nodes. A critical P0 LLM scaling event times out after 60s waiting for a Redis-backed model weights lock. Logs show the lock is currently held by a P2 background data-compaction pod. However, the P2 pod has not made progress for 45 minutes because a steady influx of P1 exploratory training workloads are continuously preempting its CPU cycles.
 question: Why is the P0 job starved, and how do you resolve this at a system level?
 details:
-  realistic_solution: 'Diagnose this as priority inversion. Implement Priority Inheritance in the lock manager: temporarily boost the priority of the P2 job holding the lock to P0, allowing it to acquire K8s CPU time, complete its critical section, and release the lock.'
+  realistic_solution: |
+    Diagnose this as priority inversion caused by a low-priority Kubernetes pod holding a Redis-backed lock while being starved of CPU. Resolve it at the system level by ensuring lock holders can make bounded progress: assign the compaction lock-holder workload an appropriate PriorityClass and reserved CPU, protect it from disruption while in the critical section, or redesign the workflow to avoid a long-held global Redis lock. Kubernetes will not automatically boost a P2 pod to P0 through lock-manager priority inheritance, so the fix must come from scheduling/resource policy or eliminating the starvation-prone lock.
   common_mistake: |
     **The Pitfall:** Killing the P1 jobs manually or simply increasing the P0 pod's priority.
     **The Rationale:** Candidates focus on the symptoms (P1 taking resources, P0 needing resources) rather than the underlying dependency mechanism.
     **The Consequence:** Fails to address the root cause, leading to recurring priority inversion and system instability.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - P0 job waits on a lock held by a P2 job.
-       - P2 job is continuously preempted by P1 jobs.
-    2. **Calculations:**
-       - Without inheritance: P0 wait is unbounded because P2 holds the lock but receives no CPU while P1 work keeps preempting it.
-       - With inheritance: P0 Wait Time = P2 critical section execution (~200 ms) + context switch overhead (<10 ms).
-    3. **Conclusion & Interpretation:** **Result: Priority inversion with starvation, not deadlock.** Priority inheritance bounds P0 wait time by allowing the P2 lock holder to bypass P1 and release the lock.
+    **Assumptions & Constraints:**
+    - P0 job waits on a Redis-backed lock held by a P2 pod.
+    - The P2 lock holder is continuously preempted by P1 workloads and cannot finish its critical section.
+    - Kubernetes pod priority affects scheduling and preemption, but it does not provide automatic lock-level priority inheritance.
+
+    **Calculations:**
+    - Current behavior: P0 wait is unbounded because the P2 pod holds the lock but receives too little CPU to release it.
+    - Bounded-progress policy: reserve enough CPU and scheduling priority for the lock holder so its critical section can complete within its expected runtime instead of waiting behind unrelated P1 work.
+
+    **Conclusion & Interpretation:**
+    - **Result: Priority inversion with starvation, not deadlock.** Fix the scheduling/resource policy for lock holders or remove the long-held Redis lock so a lower-priority background pod cannot block P0 indefinitely.
 status: published
 provenance: imported
 requires_explanation: false

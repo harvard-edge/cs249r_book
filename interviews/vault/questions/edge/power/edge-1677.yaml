@@ -11,7 +11,7 @@ title: Architecting Thermal Resilient Video Analytics
 scenario: You are designing an on-premise video analytics appliance for a non-climate-controlled factory floor using a chassis with two Qualcomm Cloud AI 100 accelerators. The ambient temperature frequently reaches 45°C, causing the cards to hit their 75W TDP limits faster and thermally throttle their sustained performance from 400 TOPS INT8 down to 250 TOPS.
 question: How would you schedule 30 HD camera streams across two Cloud AI 100 cards to meet latency SLAs under 45°C thermal throttling?
 details:
-  realistic_solution: Use a thermal-aware scheduler with explicit per-card admission control. At 45°C, assign 15 streams to each Cloud AI 100 and run fixed microbatches sized to the SLA, such as batches of 5 streams every 33ms instead of allowing unbounded queues. Keep model residency pinned on both cards, monitor die temperature and queue age, and rebalance only by moving whole camera streams rather than individual frames. If either card approaches its throttle threshold or queue age exceeds the SLA budget, first reduce analytics frequency for low-priority streams, then switch those streams to a smaller INT8 fallback model, and finally cap admission until the thermal margin recovers.
+  realistic_solution: Use a thermal-aware scheduler with explicit per-card admission control. At 45°C, budget each Cloud AI 100 at 250 TOPS sustained and assign 15 streams per card only if the model mix fits that cap. A safe full-rate card policy is 7 streams on the 700 GOP primary model and 8 on the 400 GOP fallback model; allow an eighth primary stream only if measured thermal slack permits. Run fixed microbatches sized to the SLA, keep model residency pinned on both cards, monitor die temperature and queue age, and rebalance by moving whole camera streams rather than individual frames. If queue age grows, demote low-priority streams to fallback or reduced analytics frequency before admitting more work.
   common_mistake: |
     **The Pitfall:** Designing static load balancers or ignoring memory bandwidth heat generation.
     **The Rationale:** Candidates assume performance remains constant or fail to realize that high memory bandwidth utilization significantly contributes to the overall thermal envelope.
@@ -28,10 +28,12 @@ details:
     - Primary model demand = 900 FPS * 700 GOP/frame = 630 TOP/s, which exceeds the 500 TOP/s throttled budget.
     - Per-card primary demand at 15 streams/card = 15 * 30 * 700 GOP = 315 TOP/s, above the 250 TOP/s/card sustained budget.
     - Fallback demand = 900 FPS * 400 GOP/frame = 360 TOP/s total, or 180 TOP/s/card, leaving 70 TOP/s/card headroom.
-    - A mixed policy can keep at most floor(500 TOP/s / 700 GOP) = 714 primary FPS, so at 30 FPS it supports 23 primary streams plus 7 fallback streams within the throttled compute budget.
+    - If x of 30 streams stay on primary and the rest use fallback, demand = 30 * (700x + 400(30 - x)) GOP/s = 360 TOP/s + 9x TOP/s.
+    - Throttled budget constraint: 360 + 9x <= 500, so x <= 15.5 streams total.
+    - Balanced per-card policy: 8 primary + 7 fallback streams/card costs 8 * 30 * 700 + 7 * 30 * 400 = 252 TOP/s/card, slightly above the 250 TOP/s cap; use 7 primary + 8 fallback for margin at 7 * 30 * 700 + 8 * 30 * 400 = 243 TOP/s/card, or allow one card to run 8 primary only if measured slack permits.
 
     **Conclusion & Interpretation:**
-    - **Result: 15 streams/card with fallback thresholds (Thermal-Bound)**. All 30 streams require fallback at full rate, or at most 23 streams can remain on the 700 GOP primary model while 7 use the 400 GOP fallback under the 500 TOP/s sustained limit.
+    - **Result: Thermal-Aware Mixed Model Scheduling**. Under the 500 TOP/s sustained limit, all-primary inference is infeasible; a safe full-rate schedule keeps about 14 primary streams and 16 fallback streams across the two cards, with demotion thresholds tied to queue age and measured thermal margin.
 status: published
 provenance: imported
 requires_explanation: true

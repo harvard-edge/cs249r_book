@@ -7,12 +7,12 @@ topic: kv-cache-management
 competency_area: architecture
 bloom_level: analyze
 phase: both
-title: Orin Cache Line Fetch
-scenario: An edge inference device manages a KV cache expanding by 64KB per token. PagedAttention transfers blocks from LPDDR5 to computing cores via 32-byte cache lines.
+title: KV Cache Block Sizing for Edge Inference
+scenario: An edge inference device manages a KV cache expanding by 64KB per token. PagedAttention fetches token blocks from LPDDR5 to computing cores; each block fetch has a 5us synchronization overhead.
 question: Design a block sizing strategy to minimize the 5us synchronization overhead per block fetch while keeping memory fragmentation under 10% for a 500-token chat?
 details:
   realistic_solution: |
-    Applying a PagedAttention strategy, choose the largest block size that still keeps worst-case internal fragmentation below 10% for the 500-token active cache. A 64-token block would waste up to 63 tokens, or 4.032MB, which exceeds the 3.2MB limit. A 32-token block wastes at most 31 tokens, or 1.984MB, while reducing the 500-token cache to 16 block fetches. Thus 32-token, 2MB blocks are the largest power-of-two choice that satisfies the fragmentation cap and minimizes 5us fetch synchronization among the tested block sizes.
+    Applying a PagedAttention strategy, choose the largest block size that still keeps worst-case internal fragmentation below 10% for the 500-token active cache. The active KV cache is 500 * 64KB = 32MB, so the waste cap is 3.2MB. A 64-token block can waste up to 63 tokens, or 63 * 64KB = 4032KB = 3.94MB, which exceeds the cap. A 32-token block can waste at most 31 tokens, or 1984KB = 1.94MB, while reducing the 500-token cache to ceil(500 / 32) = 16 block fetches. Thus 32-token blocks, about 2MB when full, are the largest power-of-two choice that satisfies the fragmentation cap and minimizes 5us fetch synchronization among valid block sizes.
   common_mistake: |
     **The Pitfall:** Using massive block sizes (e.g., 1000 tokens) to minimize synchronization.
     **The Rationale:** Candidates over-optimize for latency by minimizing synchronization calls, completely failing to validate the strict memory fragmentation constraints required on edge devices.
@@ -23,17 +23,19 @@ details:
     - Sequence length: 500 tokens.
     - Maximum allowed memory fragmentation: < 10%.
     - Sync Barrier Cost: 5 \u00b5s per block fetch.
+    - Candidate block sizes are powers of two; worst-case internal waste is block_size - 1 tokens.
 
     **Calculations:**
     - Total active memory: 500 tokens * 64 KB = 32 MB.
     - Maximum fragmentation limit: 10% of 32 MB = 3.2 MB.
     - 64-token candidate: 63 unused tokens * 64 KB = 4032 KB = 3.94 MB, which exceeds 3.2 MB.
     - 32-token candidate: 31 unused tokens * 64 KB = 1984 KB = 1.94 MB, which is under 3.2 MB.
+    - Fully occupied 32-token block size: 32 * 64 KB = 2048 KB = 2 MB.
     - Blocks needed for 500 tokens with 32-token blocks: ceil(500 / 32) = 16 blocks.
     - Synchronization overhead: 16 * 5 us = 80 us = 0.08 ms, versus 500 * 5 us = 2.5 ms for single-token blocks.
 
     **Conclusion & Interpretation:**
-    - **Result: 32-token blocks yield at most 1.94MB waste and 0.08ms sync (Synchronization-Bound)**. This is the largest power-of-two block size that satisfies the 10% fragmentation cap under the stated model.
+    - **Result: 32-token blocks yield at most 1.94MB waste and 0.08ms sync (Fragmentation-Capped Synchronization Tradeoff)**. This is the largest power-of-two block size whose worst-case token waste stays below the 3.2MB, 10% fragmentation cap.
 status: published
 provenance: llm-draft
 requires_explanation: true

@@ -11,7 +11,7 @@ title: Diagnosing Distillation Accuracy Drift and CPU Bottlenecks on ESP32-S3
 scenario: You deployed a lightweight student model via knowledge distillation onto an ESP32-S3. After flashing, the on-device accuracy is 5% lower than observed in PyTorch, and the system is hitting catastrophic CPU bottlenecks during peak sensor input.
 question: How should the engineering team systematically diagnose the distillation accuracy drop and CPU bottleneck on the ESP32-S3 architecture?
 details:
-  realistic_solution: 'The diagnosis must trace the deployment pipeline to identify hardware execution mismatches. First, perform runtime verification by dumping intermediate activation tensors from the ESP32-S3 and comparing them against the PyTorch output to isolate exactly where precision diverges. Second, audit the floating-point logic: if the soft targets require FP32 precision, verify the ESP32-S3 FPU is explicitly enabled. If it drops to unoptimized software emulation, it fundamentally explains both the degraded precision and the CPU bottleneck.'
+  realistic_solution: Diagnose the problem as a deployment mismatch before retraining the student. First, reproduce the PyTorch result with the exported model on a desktop runtime, then compare preprocessing, normalization, label mapping, temperature scaling, and calibration data against the ESP32-S3 build. Dump intermediate tensors from the device and compare them layer by layer to isolate where the 5% accuracy loss begins. Separately profile the CPU path with operator-level timing to find whether unsupported ops, float kernels, dequantize/requantize churn, cache/PSRAM traffic, or sensor ISR load is causing the bottleneck. The ESP32-S3 does not provide the kind of hardware FP32 acceleration assumed by larger MCUs, so keep inference on supported int8 or fixed-point kernels and reserve any FP32 teacher/soft-target logic for training or offline validation.
   common_mistake: |
     **The Pitfall:** Immediately initiating retraining loops to solve hardware execution errors.
     **The Rationale:** Candidates assume the student architecture lacks capacity and blindly initiate hyperparameter tuning without diagnosing the physical deployment substrate.
@@ -19,15 +19,15 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - ESP32-S3 running at 240 MHz.
-    - Model contains 100,000 float MACs.
+    - Model contains 100,000 MACs on a slow float or fallback kernel path.
 
     **Calculations:**
-    - Unoptimized floating-point software emulation requires ~50 cycles/MAC.
+    - A slow unsupported/floating-point kernel path can cost ~50 cycles/MAC.
     - Execution: 100,000 MACs * 50 cycles = 5,000,000 cycles.
     - Latency: 5,000,000 cycles / 240,000,000 Hz = 20.8 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound Emulation**. Executing the model via software emulation destroys the real-time deadline (>20ms per pass), proving the hardware FPU must be properly engaged.
+    - **Result: a fallback float/software path can consume ~20.8 ms before sensor and runtime overhead.** This does not prove an FPU should be enabled; it shows why the team must identify unsupported kernels and move deployment inference to supported int8/fixed-point paths on ESP32-S3.
 status: published
 provenance: imported
 requires_explanation: false

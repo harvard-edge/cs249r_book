@@ -11,26 +11,27 @@ title: Optimizing LLM Training Data Efficiency on NVIDIA H100
 scenario: You are designing a training pipeline for a 500B parameter model on a cluster of GPUs (989 TFLOPS FP16, 3.35 TB/s memory bandwidth). Your current data loading strategy involves pre-fetching an enormous dataset, but you are encountering the 'data wall problem' where GPU utilization is consistently below 50% due to I/O bottlenecks and redundant data processing.
 question: How would you leverage data efficiency techniques to address I/O bottlenecks and optimize the Information-Compute Ratio (ICR)?
 details:
-  realistic_solution: Implement an intelligent data sampling strategy using coreset selection or active learning to identify the most informative data points for each training step. Utilize the high memory bandwidth to accelerate loading of these smaller, highly relevant data subsets. Employ a tiered storage approach with fast local SSDs for frequently accessed data. Explore synthetic data generation to offload real data processing.
+  realistic_solution: |
+    Improve ICR by reducing bytes read per useful gradient update, not by relying on peak H100 TFLOPS. Use deduplication, quality filters, coreset selection, curriculum sampling, and active-learning or loss-based replay to keep high-information examples while dropping redundant samples that consume I/O without improving learning. Cache the selected hot shards on local SSD/NVMe, pre-tokenize or pre-transform examples, overlap host loading with GPU compute, and monitor tokens/sec, storage throughput, GPU stall time, and validation gain per token. Synthetic data should be used only when it fills measured coverage gaps and passes quality filters; otherwise it can worsen ICR by adding low-value bytes.
   common_mistake: |
     **The Pitfall:** Focusing exclusively on model-centric optimizations like batch size tuning or mixed precision.
     **The Rationale:** The standard playbook for low utilization is to tweak PyTorch/CUDA parameters.
     **The Consequence:** The true bottleneck (data supply chain and I/O starvation) goes ignored, leaving massive amounts of expensive hardware idling while waiting for batches.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Peak GPU compute is 989 TFLOPS FP16.
-    - Current utilization is 50% because batches arrive late.
-    - A revised data policy could raise measured utilization to 90%, but only if profiling confirms I/O stalls are removed.
+    - Current training reads 100 TB/day from storage.
+    - Profiling shows 40% of sampled records are duplicates, near-duplicates, or low-information repeats.
+    - Data-efficiency filters retain 60 TB/day of higher-value data for the same number of useful training steps.
+    - Storage throughput and preprocessing, not HBM peak bandwidth, are the bottleneck.
 
     **Calculations:**
-    - Current utilized compute = 989 * 0.50 = 494.5 TFLOPS.
-    - Target utilized compute = 989 * 0.90 = 890.1 TFLOPS.
-    - Absolute gain = 890.1 - 494.5 = 395.6 TFLOPS.
-    - Relative gain over current useful compute = 395.6 / 494.5 = 80%.
-    - The utilization gain comes from reducing redundant samples and smoothing input delivery, not from an unsupported fixed bandwidth target.
+    - Bytes removed = 100 TB/day - 60 TB/day = 40 TB/day.
+    - I/O reduction = 40 TB / 100 TB = 40%.
+    - If useful validation gain is unchanged, ICR improves by 100 TB / 60 TB = 1.67x because the same compute gets comparable learning signal from fewer bytes.
+    - The freed I/O budget can be used for harder slices, replay, or prefetch headroom instead of repeatedly reading redundant samples.
 
     **Conclusion & Interpretation:**
-    - **Result: A 50% to 90% utilization improvement is a 40 percentage-point gain, or 80% more useful compute than the current baseline.** Coreset and curriculum sampling should be justified by measured stall reduction and ICR improvement.
+    - **Result: 40% less data read and up to 1.67x better ICR.** Coreset, active selection, caching, and pipeline overlap should be justified by measured reductions in I/O stalls and by validation gain per byte, not by peak accelerator compute.
 status: published
 provenance: imported
 requires_explanation: false

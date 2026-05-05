@@ -11,7 +11,7 @@ title: End-to-End Congestion Budget for Training Iteration
 scenario: You are writing the SLA for a 1024-H100 training cluster. Assume a 400ms training iteration and an ideal 80ms ring AllReduce for a 2GB gradient over 50GB/s links.
 question: How would you allocate the <5% communication-overhead SLA budget across ECMP imbalance, ECN/DCQCN, PFC, retransmissions, and software?
 details:
-  realistic_solution: 'Use the 5% SLA as an extra-latency budget, not as a new AllReduce target. With a 400ms iteration, the total allowed overhead is 20ms beyond the ideal 80ms ring AllReduce. A defensible example split is: ECMP imbalance 4ms, ECN/DCQCN rate reduction 5ms, PFC pauses 3ms, retransmissions 4ms, and host/NCCL software overhead 4ms. The shares are policy targets for diagnosis: ECN gets the largest slice because rate recovery can affect multiple packets after a mark; PFC is kept smaller because pauses should be rare; ECMP, retransmits, and software each get enough budget to be observable but not mask chronic congestion. Instrument each component per iteration and alert on repeated budget violations.'
+  realistic_solution: 'Use the 5% SLA as an extra-latency budget, not as a new AllReduce target. With a 400ms iteration, the total allowed communication overhead beyond the ideal 80ms ring AllReduce is 20ms. A defensible policy split is: ECMP imbalance 4ms, ECN/DCQCN rate reduction 5ms, PFC pauses 3ms, retransmissions 4ms, and host/NCCL software overhead 4ms. This split is not mathematically implied by the inputs; it is an operating budget for observability and alerting. ECN gets the largest slice because rate recovery can affect multiple packets after a mark, PFC is kept smaller because pauses should be rare, and the other buckets get enough budget to diagnose without masking chronic congestion.'
   common_mistake: |
     **The Pitfall:** Setting an aggregate 5% target without allocating sub-budgets.
     **The Rationale:** It's common to define a high-level SLA but fail to instrument the individual network mechanisms that contribute to latency.
@@ -23,9 +23,10 @@ details:
     - Target overhead: <5% of iteration time.
 
     **Calculations:**
-    - Ideal ring AllReduce: 2 * (1023/1024) * 2GB / 50GB/s = 79.9ms, rounded to 80ms.
-    - Total Target Overhead: 5% of a 400ms iteration = 20ms total budget.
-    - Budget Allocation:
+    - Ring AllReduce communication time model: 2 * (P-1)/P * message_size / bandwidth.
+    - With P=1024, message_size=2GB, bandwidth=50GB/s: 2 * (1023/1024) * 2GB / 50GB/s = 79.9ms, rounded to the stated 80ms ideal.
+    - Total target overhead beyond the ideal: 5% of a 400ms iteration = 20ms.
+    - Illustrative policy allocation, not a computed requirement:
       - ECMP imbalance: 4ms (20%)
       - ECN/DCQCN rate reduction: 5ms (25%)
       - PFC pauses: 3ms (15%)
@@ -33,7 +34,7 @@ details:
       - Software overhead (NCCL): 4ms (20%)
 
     **Conclusion & Interpretation:**
-    - **Conclusion:** A 5% overhead target is extremely aggressive (requires shaving ~3-5ms per component) compared to typical 8-12% real-world overheads.
+    - **Conclusion:** The ring formula gives the ideal baseline; the 20ms split is a policy budget used to instrument and diagnose overhead sources per iteration.
 status: published
 provenance: imported
 requires_explanation: true

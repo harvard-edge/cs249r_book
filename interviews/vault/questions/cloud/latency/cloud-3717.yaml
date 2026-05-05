@@ -8,10 +8,10 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: Speculative Decoding Acceptance Rate Impact on H100 Inference Throughput
-scenario: You implement speculative decoding on an H100 with a 70B target model and a 7B draft model. The draft model generates k=5 candidate tokens. The target model verifies in one forward pass. The draft acceptance rate is a=0.8. The target model alone generates 30 tok/s.
+scenario: You implement speculative decoding on an H100 with a 70B target model and a 7B draft model. The draft model generates k=5 candidate tokens at 4ms per token. The target verifies all candidates in one 33.3ms forward pass. The draft acceptance rate is a=0.8. The target model alone generates 30 tok/s.
 question: What throughput improvement should speculative decoding deliver with k=5 and a=0.8 versus 30 tok/s target-only decoding?
 details:
-  realistic_solution: Expected accepted draft tokens per speculative step is the truncated geometric expectation a + a^2 + ... + a^k = 2.69 for k=5, a=0.8. Counting the target model's correction or bonus token, the step emits about 3.69 tokens. Use measured or profiled pass times rather than deriving forward latency from raw parameter bytes. If a 7B draft produces each candidate in about 4ms and batched target verification takes about one 33ms target pass, the cycle is roughly 53ms and delivers about 70 tok/s, or about 2.3x over 30 tok/s. The exact speedup is sensitive to draft and verification latency, so capacity planning should validate those times on hardware.
+  realistic_solution: For speculative decoding with k=5 and independent acceptance probability a=0.8, the expected emitted tokens per verify cycle are 1 + a + a^2 + a^3 + a^4 + a^5 = 3.69. This counts accepted draft tokens plus the target model's correction or bonus token. With the stated 7B draft latency of 4ms/token, draft generation costs 5 × 4ms = 20ms. Target verification costs one 33.3ms target pass, so the cycle is 53.3ms and delivers 3.69 / 0.0533 = 69.2 tok/s, or 69.2 / 30 = 2.31x over target-only decoding. The result depends on measured draft and verify latency, not acceptance rate alone.
   common_mistake: |
     **The Pitfall:** Assuming speculative decoding blindly improves throughput by a factor of K.
     **The Rationale:** Candidates forget that speedup is a function of both the mathematical acceptance rate and the computational cost of the draft model relative to the target.
@@ -21,12 +21,12 @@ details:
        - Acceptance rate (a): 0.8.
        - Draft tokens (k): 5.
        - Target baseline: 30 tok/s (~33.3ms per forward pass).
-       - Draft latency assumption: about 4ms per generated draft token from profiling, not from raw weight bytes.
+       - Draft latency: 4ms per generated draft token from profiling, not from raw weight bytes.
+       - Target verification latency: one target forward pass = 33.3ms.
     2. **Calculations:**
-       - Expected accepted draft tokens: E[accepted] = 0.8 + 0.8^2 + 0.8^3 + 0.8^4 + 0.8^5 = 2.69.
-       - Expected emitted tokens, including target correction/bonus token: E[emitted] = 1 + E[accepted] = 3.69 tokens.
+       - Expected emitted tokens: E[emitted] = 1 + 0.8 + 0.8^2 + 0.8^3 + 0.8^4 + 0.8^5 = 3.69 tokens.
        - Draft time for 5 candidates: 5 * 4ms = 20ms.
-       - Target verification time: about one target forward pass = 1 / 30 tok/s = 33.3ms.
+       - Target verification time: one target forward pass = 33.3ms.
        - Total cycle time: 20ms + 33.3ms = 53.3ms.
        - Cycle throughput: 3.69 tokens / 0.0533s = 69.2 tokens/s.
     3. **Conclusion & Interpretation:**

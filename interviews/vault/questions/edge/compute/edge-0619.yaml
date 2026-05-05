@@ -11,7 +11,10 @@ title: The Autonomous Perception Deadlock
 scenario: You are the Principal Engineer for perception systems at a leading autonomous vehicle company. Your team is designing the next-generation compute module, which has a strict, non-negotiable thermal design power (TDP) of 30W to ensure passive cooling.
 question: How would you choose a perception model for the 30W passively cooled module using effective TOPS/W rather than FLOPs alone?
 details:
-  realistic_solution: The correct L6+ approach is to formulate a hardware-aware evaluation framework. The goal is not just to pick the model with fewer FLOPs, but the one that yields the highest *effective* performance-per-watt on the target hardware.
+  realistic_solution: |
+    Select the model by measured effective TOPS/W on the 30W module, not by nominal FLOPs. For each candidate, run the real perception pipeline at batch 1 with deployed precision, camera pre/post-processing, memory layout transforms, and scheduler overhead enabled. Record latency, sustained power, achieved operations per second, accuracy, and deadline miss rate.
+
+    A lower-FLOP model can still lose if its operators do not map to the accelerator, spill activations to DRAM, or force CPU/GPU synchronization. The preferred model is the one that meets the frame deadline with thermal steady-state power under 30W and has the best measured effective throughput per watt at the required accuracy.
   common_mistake: |
     **The Pitfall:** Focusing solely on peak TOPS or total FLOPs.
     **The Rationale:** Candidates ignore the memory wall and hardware utilization, failing to calculate *effective* TOPS/W.
@@ -19,18 +22,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - TDP limit: 30W; Orin limit at 30W: ~137 INT8 TOPS, ~100 GB/s
-    - Detector workload: 5 TOP per frame, 50MB INT8 model/activation traffic per frame
+    - Candidate detector workload after deployment pruning/quantization: 5 tera-operations per frame.
+    - Estimated model/activation traffic: 50MB per frame.
     - Target: 30 FPS (33.3ms)
 
     **Calculations:**
-    - Compute time = 5 TOP / 137 TOPS = 0.0365s = 36.5ms.
+    - Peak-bound compute time = 5 TOP/frame / 137 TOPS = 0.0365s = 36.5ms.
     - Memory time = 50MB / 100GB/s = 0.5ms.
-    - Roofline latency estimate = max(36.5ms, 0.5ms) plus scheduling overhead, so the model is compute-limited at this power mode and misses 33.3ms.
-    - Pruning 15% reduces work to 4.25 TOP/frame.
-    - Pruned compute time = 4.25 TOP / 137 TOPS = 31.0ms; memory time remains about 0.5ms before any activation changes.
+    - Roofline lower bound = max(36.5ms, 0.5ms) before scheduling overhead, so this candidate cannot be accepted from peak specs alone.
+    - Measured effective TOPS/W = measured frame operations / (measured latency * measured power). For example, a 5 TOP frame at 40ms and 30W achieves 5 / (0.040 * 30) = 4.17 effective TOPS/W.
+    - Required effective throughput for 30 FPS is 5 TOP/frame * 30 frame/s = 150 TOPS sustained, or 5.0 effective TOPS/W at 30W.
 
     **Conclusion & Interpretation:**
-    - **Result: A 15% structured reduction is the minimum compute-side fix on these assumptions.** It only works if accuracy holds and runtime overhead stays under about 2ms; otherwise choose a model with better measured effective TOPS/W, not merely fewer nominal FLOPs.
+    - **Result: choose by measured effective TOPS/W.** A candidate requiring 150 sustained TOPS on a 137 peak-TOPS power mode is not viable unless measured runtime efficiency, pruning, or architecture changes reduce real work enough while preserving accuracy. Do not claim a fixed 15% reduction as the minimum without a measured roofline and latency profile.
 status: published
 provenance: imported
 requires_explanation: true

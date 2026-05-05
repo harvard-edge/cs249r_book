@@ -9,7 +9,7 @@ bloom_level: create
 phase: inference
 title: The OS Scheduler's Dilemma
 scenario: You're designing a complex multi-modal mobile AI application that simultaneously uses a vision model (on GPU/NPU) and an audio model (on CPU). Both need low-latency, real-time inference.
-question: How does the mobile OS scheduler interact with these heterogeneous workloads, and what challenges arise in ensuring QoS?
+question: How would you design scheduler and QoS controls for concurrent mobile vision and audio inference?
 details:
   realistic_solution: |
     Treat audio, CPU dispatch, and accelerator work as separate QoS domains rather than trying to force everything with user-space thread affinity. The audio callback should run through the platform's real-time audio path with bounded work, preallocated buffers, and priority appropriate for low-latency audio; it should not be blindly pinned to big cores, because that can increase power and thermal pressure. Vision work should use the GPU/NPU runtime queues and driver/HAL mechanisms, with CPU dispatcher threads kept responsive through task groups, cpusets, priority tuning, and avoiding blocking calls. Coordinate with the platform power/DVFS hints so the CPU, memory bus, and accelerator clocks are raised for the active multimodal session, while accepting that GPU/NPU scheduling is mediated by drivers and cannot be made real-time simply by applying SCHED_FIFO to a user-space dispatcher.
@@ -19,17 +19,17 @@ details:
     **The Consequence:** Unpredictable thermal throttling, severe OS jitter, and CPU-thread preemption that stalls GPU/NPU dispatching.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Prime Core Power: 1.5W @ 2.8GHz.
-    - Little Core Power: 0.3W @ 1.8GHz.
-    - Total Memory Bandwidth: 50 GB/s.
-    - Task Bandwidth Demand: Vision = 30 GB/s, Audio CPU Threads = 10 GB/s.
+    - Audio callback period: 10 ms, with a 2 ms CPU budget to avoid underruns.
+    - Vision inference period: 33 ms for 30 FPS, with CPU dispatch plus GPU/NPU queue submission on the critical path.
+    - Scheduler jitter from preemption, DVFS ramp, and memory pressure must stay below the remaining slack.
 
     **Calculations:**
-    - Peak Bandwidth Demand: 30 GB/s + 10 GB/s = 40 GB/s.
-    - Bus Saturation: 40 GB/s / 50 GB/s = 80%.
+    - Audio slack = 10 ms period - 2 ms work = 8 ms, but long blocking calls or page faults can consume it in one event.
+    - Vision slack = 33 ms frame period - accelerator runtime - CPU dispatch time; if dispatch waits behind lower-priority CPU work, the GPU/NPU may sit idle while the frame deadline expires.
+    - QoS design therefore separates domains: real-time audio thread with bounded work, responsive CPU dispatcher threads, accelerator queues managed through HAL/runtime priorities, and power/DVFS hints for the active session.
 
     **Conclusion & Interpretation:**
-    - **Result: 80% bus saturation (Contention-Bound)**. High memory bus utilization leaves minimal headroom, exacerbating OS scheduling jitter and breaking real-time SLAs.
+    - **Result: Deadline-Driven QoS Design**. The challenge is not only aggregate bandwidth; it is preventing scheduler jitter, blocking, and DVFS transitions from consuming the per-stream latency slack.
 status: published
 provenance: imported
 requires_explanation: true

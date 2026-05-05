@@ -11,27 +11,26 @@ title: Expert Parallelism All-to-All Overlap in Mixture-of-Experts Training
 scenario: You train a 1.8T Mixture-of-Experts model (128 experts, top-2 routing) across 128 H100 GPUs. Each MoE layer requires All-to-All communication to route tokens to their assigned expert GPUs. The All-to-All takes 8ms per MoE layer, and expert computation takes 6ms. The model has 32 MoE layers.
 question: How would you overlap the 8 ms All-to-All routing with 6 ms expert compute across 32 MoE layers?
 details:
-  realistic_solution: 'Inter-layer overlap (pipeline the communication): (1) Split each MoE layer''s All-to-All into dispatch (tokens to experts) and combine (expert outputs back). (2) While experts compute on layer L, start the dispatch All-to-All for layer L+1 simultaneously. This requires knowing L+1''s routing decisions early — run the gating network (tiny MLP, <0.1ms) for L+1 during L''s expert computation. (3) Double-buffer token assignments: two sets of dispatch buffers, alternating per layer. (4) Additionally, overlap the combine All-to-All of layer L with the non-MoE layers (attention) between L and L+1. Architecture: gate(L+1) || expert_compute(L) || dispatch_A2A(L+1) || combine_A2A(L). With 8ms A2A and 6ms compute + 0.1ms gate: serial = 14ms/layer, pipelined = max(8, 6.1) = 8ms/layer. 1.75x speedup.'
+  realistic_solution: 'Do not overlap a layer''s dispatch All-to-All with that same layer''s expert compute, because expert compute depends on dispatched tokens. Legal overlap comes from pipelining independent work across microbatches or adjacent nondependent phases: while microbatch i is in expert compute for layer L, dispatch microbatch i+1 for layer L using precomputed routing, and where the graph permits it, overlap combine communication with following dense work. Use separate CUDA/HIP streams, double-buffered dispatch/combine buffers, backpressure on expert queues, and correctness barriers before any consumer reads expert outputs. With only one microbatch and no dense work, the 8 ms dispatch plus 6 ms compute remains serial per layer; overlap benefits require a stream of microbatches or explicit independent work.'
   common_mistake: |
     **The Pitfall:** Trying to overlap All-to-All with expert computation within the same layer.
     **The Rationale:** Candidates recognize the need for overlap but fail to account for data dependencies (the All-to-All output IS the expert input).
     **The Consequence:** The proposed architecture is logically impossible and fails to execute.
   napkin_math: |
     **Assumptions & Constraints:**
-    - All-to-All routing: 8 ms.
+    - All-to-All routing/dispatch before expert compute: 8 ms.
     - Expert computation: 6 ms.
-    - Gating for the next layer is small enough to fit inside the 6 ms compute window.
+    - Same-layer dispatch and expert compute have a hard dependency.
     - 32 MoE layers.
 
     **Calculations:**
-    - Serial time: 32 layers x (8 ms + 6 ms) = 448 ms.
-    - Steady-state pipelined stage time: max(8 ms communication, 6 ms compute) = 8 ms.
-    - Pipeline time with one final compute drain: 32 x 8 ms + 6 ms = 262 ms.
-    - Speedup: 448 ms / 262 ms = 1.71x.
-    - Time saved: 448 ms - 262 ms = 186 ms per step.
+    - Single-microbatch lower bound per MoE layer = 8 ms dispatch + 6 ms expert compute = 14 ms.
+    - Across 32 layers with no other overlap opportunity, lower-bound time = 32 * 14 ms = 448 ms.
+    - With enough microbatches and legal cross-microbatch pipelining, steady-state throughput can approach max(8 ms, 6 ms) = 8 ms per microbatch-layer after fill.
+    - That throughput bound is not the elapsed time for one 32-layer sample; it is the best steady-state rate when dependencies are satisfied by different microbatches.
 
     **Conclusion & Interpretation:**
-    - **Result: Communication-Bound Pipeline**. The 8 ms All-to-All sets the steady-state layer time, and inter-layer pipelining gives about a 1.71x speedup under these assumptions.
+    - **Result: communication-bound overlap is possible only across independent microbatches or phases.** For one dependency chain, the 448 ms serial bound remains; a saturated pipeline can approach an 8 ms steady-state stage time but must still pay fill/drain and combine/barrier costs.
 status: published
 provenance: imported
 requires_explanation: true

@@ -7,29 +7,29 @@ topic: transformer-systems-cost
 competency_area: architecture
 bloom_level: create
 phase: both
-title: The Router Bottleneck in MoE Serving
+title: Expert Weight Bandwidth Bottleneck in MoE Serving
 scenario: You deploy a Mixtral 8x7B model on a single GPU. Because it only uses ~13B active parameters per token, the math should be fast. However, your profiling shows that generating a token takes 2x longer than a standard dense 13B model.
-question: What architectural component of the MoE model is destroying your memory bandwidth?
+question: What part of MoE serving is destroying memory bandwidth?
 details:
-  realistic_solution: The MoE router network introduces extreme memory fragmentation. A dense model fetches weights sequentially, maximizing HBM burst bandwidth. MoE dynamically selects experts per token, forcing sparse, random memory accesses. HBM throughput drops precipitously for non-sequential reads, bottlenecking the system on memory fetch rather than FLOPs. Mitigation requires Expert-Parallel Batching to group tokens by expert, transforming random reads back into sequential bursts.
+  realistic_solution: The router MLP is usually small; the bandwidth loss comes from the expert weight access and token dispatch pattern it induces. A dense model streams one contiguous set of MLP weights with stable batches. In MoE decoding, tokens fan out to different experts, creating smaller per-expert batches plus gather/scatter traffic and less contiguous expert-weight reads. The system becomes memory-bandwidth-bound rather than FLOP-bound. Mitigation requires expert batching or expert-parallel serving that groups tokens by expert and keeps hot expert weights accessed in larger, more sequential chunks.
   common_mistake: |
     **The Pitfall:** Blaming the router network math.
     **The Rationale:** Candidates assume that because MoE introduces a new routing layer, the computational overhead of this routing mechanism must be the bottleneck.
     **The Consequence:** They ignore the memory hierarchy and fail to identify that sparse, random memory access is the true culprit, leading to misguided optimization efforts.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Dense 13B decoding streams weights in a predictable layer order, so kernels can use large contiguous HBM reads.
-    - Mixtral activates only a subset of experts per token, but token-to-expert choices fragment memory access and reduce batching efficiency.
+    - Dense 13B decoding streams one predictable MLP weight set per layer, so kernels can use large contiguous HBM reads.
+    - Mixtral activates only a subset of experts per token, but token-to-expert choices fragment expert access and reduce per-expert batch size.
     - The observed profile is 2x slower than a dense 13B model.
 
     **Calculations:**
-    - Active parameters alone do not determine latency; both models may read a similar active-weight footprint per token.
-    - Dense access pattern: contiguous reads and stable kernel shapes keep effective bandwidth high.
-    - MoE access pattern: router-selected experts scatter reads across expert weight blocks and reduce per-expert batch size, lowering effective bandwidth.
-    - A 2x latency regression is consistent with the effective bandwidth roughly halving, even though the active FLOP count looks comparable.
+    - If dense 13B decoding is mostly weight-bandwidth-bound, token latency is roughly active bytes read / effective HBM bandwidth.
+    - MoE has a comparable active-weight footprint per token, but routing splits the batch across experts and adds dispatch/gather work.
+    - Example: if fragmentation and smaller expert batches lower effective HBM bandwidth from B to about B/2, then the same active bytes take about 2x longer to read.
+    - The router compute is not the large cost; the router decisions create the scattered expert access pattern.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bandwidth-Bound**. The router is expensive because it selects fragmented expert weight paths, not because the router MLP itself is large. Expert-parallel batching helps by grouping tokens by expert and restoring more sequential memory access.
+    - **Result: Expert-access memory bandwidth bottleneck.** The router induces fragmented expert weight reads and gather/scatter traffic, while the router network itself is not the main compute cost.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,24 +11,29 @@ title: The Functional Safety Redundancy Cost
 scenario: 'Your autonomous vehicle perception system must meet ISO 26262 ASIL-D. The safety architecture requires a redundant perception path: if the primary neural network fails, a secondary path must independently detect obstacles within 50ms. Your primary path runs on the GPU at 25ms. The naive approach is to duplicate everything, but the CFO says the BOM increase is unacceptable.'
 question: How would you design an ASIL-D redundant perception path within 50ms without duplicating the GPU, model, and sensor hardware?
 details:
-  realistic_solution: Architect an asymmetric redundancy framework utilizing disparate hardware components. Deploy a deterministic, classical computer vision algorithm (or highly quantized lightweight proxy model) onto a deeply isolated secondary ASIC or CPU core. This guarantees true functional independence while eliminating the massive financial burden of full hardware mirroring.
+  realistic_solution: |
+    Build an asymmetric, independent secondary perception path rather than a duplicate primary stack. Keep the primary neural network on the GPU, but run a diverse obstacle-detection path on an isolated safety MCU, DSP, ISP, radar processor, or lockstep CPU partition with its own memory, power supervision, watchdog, and runtime. The secondary path can use radar returns, low-resolution camera features from an ISP tap, optical flow, stereo disparity, or a tiny quantized proxy model, but it must not depend on the GPU driver, primary model weights, or primary scheduler.
+
+    Run the secondary path in parallel so it is already producing obstacle decisions when the watchdog detects a primary fault. A safety arbiter compares heartbeats and plausibility checks, declares the GPU path unhealthy within a few milliseconds, and switches to the conservative secondary output within the 50ms requirement. This preserves fail-operational independence without duplicating every sensor, model, and GPU.
   common_mistake: |
     **The Pitfall:** Utilizing the same primary compute unit to run a secondary backup model.
     **The Rationale:** Engineers prioritize BOM cost reduction, incorrectly assuming algorithmic diversity on the same silicon satisfies safety mandates.
     **The Consequence:** A catastrophic single-point-of-failure; a voltage spike or driver crash instantly nullifies both the primary and redundant pathways, directly violating ISO 26262 ASIL-D compliance.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Primary path latency: 25ms.
-    - Hard safety deadline: obstacle decision within 50ms of the input frame.
-    - Failure detection and switchover latency: 5ms from a hardware watchdog/arbitrator.
+    - Primary path latency: 25ms on the GPU.
+    - Hard safety deadline: independent obstacle decision within 50ms of the input frame.
+    - Failure detection plus arbitration latency: 5ms from a hardware watchdog/arbitrator.
+    - Secondary path runs continuously in parallel on independent compute.
 
     **Calculations:**
-    - If the secondary path starts only after failure detection, its compute budget is 50ms - 5ms = 45ms.
-    - If the secondary path runs in parallel, the safety decision arrives after max(primary failure detection, secondary compute) + switchover.
-    - A 10ms asymmetric secondary path plus 5ms switchover = 15ms, which is inside the 50ms deadline and independent of the 25ms GPU path.
+    - If the secondary path starts only after failure detection, its compute budget is 50ms - 5ms = 45ms, but startup and sensor acquisition make this fragile.
+    - If the secondary path runs in parallel, the failover decision time is max(secondary_compute_time, failure_detection_time) + switchover_time.
+    - Example: 35ms secondary obstacle path plus 5ms detection/arbitration = 40ms from frame arrival, inside the 50ms deadline.
+    - The 25ms primary latency is not added to failover time because the secondary path is concurrent; the arbiter only needs to detect that the primary output is missing or implausible.
 
     **Conclusion & Interpretation:**
-    - **Result: 45ms secondary budget after detection, 15ms achieved with parallel proxy (Latency-Bound)**. The asymmetric path satisfies the 50ms safety window without treating an unrelated 30 FPS frame time as failure-detection latency.
+    - **Result: parallel asymmetric redundancy meets the 50ms safety window.** The key properties are independence, diversity, watchdog arbitration, and conservative switchover; running another model on the same GPU would not remove the single point of failure.
 status: published
 provenance: imported
 requires_explanation: true

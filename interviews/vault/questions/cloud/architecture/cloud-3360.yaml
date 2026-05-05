@@ -11,7 +11,7 @@ title: Scaling a 1 Trillion Parameter Mixture of Experts Model on NVIDIA A100s
 scenario: Your team is tasked with deploying a 1 trillion parameter Mixture of Experts (MoE) Language Model, where each expert has 10 billion parameters. The model needs to handle a peak inference load of 10,000 queries per second (QPS) with an average token generation latency of 50ms. Each input sequence is 1024 tokens, and output sequence is 512 tokens. Assume a router selects 2 experts per token.
 question: How would you design and size a cost-minimal MoE inference system for 10,000 QPS at 50 ms token latency?
 details:
-  realistic_solution: Size the system from both throughput and per-token latency. Store the 1T FP16 parameters across at least 25 A100 80GB GPUs, but treat that as a floor only; at 10,000 QPS with 1024-token prefill and 512-token decode, the active top-2 experts create hundreds of PFLOP/s of sustained work. A cost-minimal design would shard experts with expert parallelism, replicate hot experts to reduce all-to-all traffic, and use data-parallel serving replicas sized to sustained rather than peak TFLOPS. Use batching for prefill, smaller latency-bounded batches for decode, capacity-aware routing for tail latency, and quantization or FP8/INT8 where quality permits. The design should explicitly budget network all-to-all and KV-cache memory, because adding GPUs only for parameter storage will not meet the 50 ms/token decode SLA.
+  realistic_solution: Size the system from both throughput and per-token latency. Store the 1T FP16 parameters across at least 25 A100 80GB GPUs, but treat that as a storage floor only. At 10,000 QPS with 1024-token prefill and 512-token decode, top-2 routing over 10B-parameter experts implies roughly 614,400 TFLOP/s of sustained active-expert work before routing, attention, KV-cache, and communication overhead. At about 109 TFLOP/s sustained per A100 under a 35% efficiency assumption, the compute floor is about 5,600 A100s, so the serving design needs many replicas, expert parallelism, hot-expert replication, locality-aware routing, and separate batching policies for prefill and decode. A cost-minimal architecture would then reduce that floor with quantization or FP8/INT8 where quality permits, control all-to-all traffic, and budget KV-cache memory instead of sizing from parameter storage alone.
   common_mistake: |
     **The Pitfall:** Underestimating dynamic expert load balancing and neglecting tail latency due to cold experts or network overhead.
     **The Rationale:** Assuming uniform expert activation and ignoring communication costs for routing tokens across GPUs.
@@ -27,11 +27,11 @@ details:
     - Parameter storage floor = 1T * 2 bytes = 2 TB; 2 TB / 80 GB = 25 A100s before replicas, KV cache, and fragmentation.
     - Active compute per token ≈ 2 * 20B = 40 GFLOPs.
     - Token workload = 10,000 * (1024 + 512) = 15.36M tokens/sec across prefill and decode.
-    - Sustained compute needed ≈ 15.36M * 40 GFLOPs = 614 PFLOP/s.
-    - Sustained compute per A100 ≈ 312 * 0.35 = 109 TFLOP/s, so compute sizing ≈ 614,000 / 109 ≈ 5630 A100s before communication overhead.
+    - Sustained compute needed ≈ 15.36M * 40 GFLOPs/s = 614,400,000 GFLOPs/s = 614,400 TFLOP/s (614.4 PFLOP/s).
+    - Sustained compute per A100 ≈ 312 * 0.35 = 109 TFLOP/s, so compute sizing ≈ 614,400 / 109 ≈ 5,637 A100s before attention, routing, KV-cache, and all-to-all overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: Throughput and communication bound, not storage-only.** The 25-GPU storage floor is far below the thousands of A100s implied by the active-token workload; a practical cost-minimal design depends on batching, expert replication, quantization, and routing locality to reduce compute and all-to-all overhead while preserving the 50 ms/token decode SLA.
+    - **Result: throughput, communication, and KV-cache bound, not storage-only.** The 25-GPU storage floor is far below the compute floor implied by the active-token workload; a practical cost-minimal design depends on batching, expert replication, quantization, and routing locality while preserving the 50 ms/token decode SLA.
 status: published
 provenance: imported
 requires_explanation: true

@@ -12,23 +12,27 @@ scenario: You're training a 32-layer transformer and running out of memory. Your
 question: For a 32-layer transformer, how much memory does gradient checkpointing every k layers save, and what compute overhead does it add?
 details:
   realistic_solution: |
-    Without checkpointing, training stores activations for all 32 layers. With checkpointing every k layers, a simple segment model stores about ceil(32/k) checkpoint activations plus a working buffer for up to k layers during recomputation, so activation memory scales as ceil(32/k) + k layer-activation units rather than 32. The extra compute is the non-checkpointed forward work that must be replayed during backward: about 32 - ceil(32/k) layer-forwards. Under a common assumption that backward costs about two forward passes, the wall-time overhead is roughly (32 - ceil(32/k)) / (3 × 32). The best k depends on the memory target and accepted recompute; k=4, 5, 6, and 8 all land near the same 12-layer activation footprint in this simplified model, with k=4 having the least recompute among that group.
+    Without checkpointing, training stores activations for all 32 layers. With checkpointing every k layers, a simple segment model stores the segment boundaries plus a working buffer while replaying each segment during backward, so peak activation memory is approximately (ceil(32/k) + k) layer-activation units instead of 32. Recompute is also segment-based: in each segment, the forward activations between checkpoints are replayed during backward, so the added work is roughly one extra forward for the non-boundary layers, not an exact universal formula. Under the common approximation that backward costs about two forward passes, replaying about 24-28 layer-forwards adds roughly 25-30% step time. The best k depends on the memory target, micro-batch size, implementation, and accepted recompute.
   common_mistake: |
     **The Pitfall:** Believing gradient checkpointing eliminates all activation memory.
     **The Rationale:** Candidates don't understand that checkpointing trades recomputation for memory by storing activations only at specific boundaries.
     **The Consequence:** They miscalculate memory requirements and fail to optimize the checkpointing interval $k$, leading to excessive recomputation overhead.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 32-layer transformer.
-       - Activation memory baseline: 128 MB/layer.
-    2. **Calculations:**
-       - Baseline (No Checkpointing): 32 layers * 128 MB = 4,096 MB (4 GB) activations. Recompute overhead: 0%.
-       - Simplified checkpoint memory: (ceil(32/k) + k) * 128 MB.
-       - k=4: (8 + 4) * 128 MB = 1,536 MB. Savings = 1 - 1,536/4,096 = 62.5%. Extra replay = 32 - 8 = 24 layer-forwards, or ~24/(3*32) = 25% training-step overhead if backward is ~2x forward cost.
-       - k=6: (6 + 6) * 128 MB = 1,536 MB. Savings = 62.5%. Extra replay = 32 - 6 = 26 layer-forwards, or ~27% training-step overhead under the same assumption.
-       - k=8: (4 + 8) * 128 MB = 1,536 MB. Savings = 62.5%. Extra replay = 28 layer-forwards, or ~29% training-step overhead.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory/Compute Trade-off.** For this 32-layer, 128 MB/layer example, k=4 reduces activation memory from 4.0 GB to 1.5 GB and adds about 25% training-step overhead under the stated cost model. Other k values can have similar memory but more recompute, so "optimal" must be tied to the chosen memory target and compute budget.
+    **Assumptions & Constraints:**
+    - 32-layer transformer.
+    - Activation memory baseline: 128 MB/layer.
+    - Illustrative segment checkpointing model: store checkpoint boundaries and replay segment interiors during backward.
+    - Baseline step cost is approximated as 1 forward + 2 backward-equivalent forward costs = 3 full forward equivalents.
+
+    **Calculations:**
+    - Baseline activation memory: 32 * 128 MB = 4,096 MB.
+    - Approximate checkpoint peak: (ceil(32/k) boundary activations + k-layer working buffer) * 128 MB.
+    - k=4: (8 + 4) * 128 MB = 1,536 MB, saving 62.5%. Replay is about 32 - 8 = 24 layer-forwards, adding ~24/(3*32) = 25% step time.
+    - k=6: (ceil(32/6) + 6) * 128 MB = (6 + 6) * 128 MB = 1,536 MB, saving 62.5%. Replay is about 32 - 6 = 26 layer-forwards, adding ~27%.
+    - k=8: (4 + 8) * 128 MB = 1,536 MB, saving 62.5%. Replay is about 32 - 4 = 28 layer-forwards, adding ~29%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Approximate Memory/Compute Trade-off.** In this simplified model, k=4, 6, and 8 all land near 1.5 GB of activation peak, while larger segments replay more work. Treat the numbers as planning estimates; the exact peak and overhead depend on the framework's checkpoint boundaries and retained tensors.
 status: published
 provenance: imported
 requires_explanation: false

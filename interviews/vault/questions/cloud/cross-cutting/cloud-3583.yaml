@@ -12,8 +12,8 @@ scenario: 'Your team is deploying a large language model (LLM) for a high-stakes
   compromising the depth of analysis, especially for thinly represented intersectional subgroups?'
 question: How would you compare sequential versus distributed fairness evaluation on MI300X while preserving deep intersectional subgroup analysis?
 details:
-  realistic_solution: 'A realistic solution involves a hybrid distributed evaluation architecture. Utilize the MI300X''s 192 GB HBM3 and 5.3 TB/s bandwidth for holding and rapidly processing large mini-batches of evaluation data on each node. Implement data parallelism where different MI300X instances (or even different GPUs within an instance if multi-GPU setups are considered) simultaneously evaluate distinct data subsets or specific subgroups. Employ optimized data structures and custom kernels (potentially in ROCm/HIP) to accelerate the computation of fairness metrics, leveraging the 1,307 TFLOPS FP16 sparse performance where applicable (e.g., for sparse representations of subgroup indicators or metric aggregations). A tiered evaluation strategy would also be key: performing rapid, high-level fairness checks frequently, and then triggering deeper, more computationally intensive intersectional analyses only for models or updates that show potential disparities, using dynamic resource
-    allocation from the cluster.'
+  realistic_solution: |
+    Compare sequential evaluation as the simpler baseline and distributed evaluation as the lower wall-clock option. A sequential MI300X job can preserve full subgroup depth by scanning the whole dataset and maintaining exact counts, confusion matrices, and confidence intervals for every intersectional slice, but its runtime grows with dataset size and repeated subgroup passes. A distributed design should shard rows across MI300X workers, compute local subgroup counts and metric numerators/denominators, then all-reduce those aggregates so no thin subgroup is dropped. It improves wall-clock time by parallelizing scans and local reductions, not by assigning one device per subgroup. Preserve depth with a global subgroup dictionary, minimum-count flags, uncertainty intervals, and drill-down jobs for rare intersections whose estimates are wide.
   common_mistake: |
     **The Pitfall:** Underestimating the computational and I/O overhead of comprehensive fairness evaluations with high-cardinality attributes.
     **The Rationale:** Teams fail to design pipelines that fully leverage the available memory bandwidth and compute parallelism of accelerators like the MI300X.
@@ -22,19 +22,19 @@ details:
     **Assumptions & Constraints:**
     - Evaluation dataset: 500 GB.
     - Data sample size: 1 KB (500 million samples).
-    - Bandwidth (single MI300X): 5.3 TB/s.
-    - Compute: ~100 FP16 operations per sample.
+    - Effective end-to-end scan rate after storage read, decode, tokenization, and metric updates: 20 GB/s per MI300X.
+    - Distributed design uses 8 MI300X workers with balanced row sharding.
+    - Local metric reductions produce 2 GB of subgroup aggregate state per worker before all-reduce.
 
     **Calculations:**
-    - Sequential single-MI300X scan time lower bound: 500 GB / 5.3 TB/s = ~0.094 seconds if data is already local and read once.
-    - Distributed 8-MI300X scan lower bound with perfect partitioning: (500 GB / 8) / 5.3 TB/s = ~0.012 seconds per device.
-    - Total operations: 500 million * 100 = 5e10 FP16 ops.
-    - Even at 10 TFLOPS sustained dense-equivalent metric throughput, compute time is 5e10 / 1e13 = ~0.005 seconds, below the scan time.
-    - Add aggregation overhead for subgroup counts, confusion matrices, and confidence intervals; this grows with subgroup cardinality but is small if metrics are reduced locally before all-reduce.
-    - Thin intersectional groups should not be dropped in the distributed design; preserve raw counts and uncertainty intervals so rare groups are flagged for deeper offline review.
+    - Sequential single-worker scan time = 500 GB / 20 GB/s = 25 seconds for one pass.
+    - Distributed per-worker data = 500 GB / 8 = 62.5 GB.
+    - Distributed scan time per worker = 62.5 GB / 20 GB/s = 3.125 seconds before synchronization.
+    - Aggregate state to all-reduce = 8 * 2 GB = 16 GB, much smaller than rescanning the 500 GB dataset per subgroup.
+    - Thin intersectional groups are preserved because workers reduce exact local counts and uncertainty terms before the global all-reduce.
 
     **Conclusion & Interpretation:**
-    - **Result: Scan- and Aggregation-Bound.** Distributed evaluation can reduce the scan lower bound from ~0.094s to ~0.012s under ideal locality, but end-to-end time is set by data movement, local reductions, all-reduce, and preserving intersectional subgroup statistics.
+    - **Result: about 25 seconds sequential versus about 3.1 seconds plus all-reduce distributed.** Distributed evaluation improves wall-clock time through row sharding and local aggregation while preserving deep intersectional analysis through exact global reductions and uncertainty reporting.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,7 +9,7 @@ bloom_level: create
 phase: inference
 title: Global Scale Real-Time Two-Tower Recommendation
 scenario: We are re-architecting a recommendation retrieval system to support 50 billion candidates globally, served from 12+ datacenters. We want to use a massive 500B parameter two-tower model to improve relevance.
-question: How would you design the embedding table distribution and serving infrastructure on TPU v5e pods to ensure sub-50ms p99 latency while maximizing TPU High-Bandwidth Memory (HBM) utilization?
+question: How would you decouple item embeddings from the TPU serving path while meeting sub-50ms p99 latency for a 50B-candidate two-tower recommender?
 details:
   realistic_solution: Completely decouple the user and item towers for inference. The item tower's embeddings for the 50B candidates must be pre-computed strictly offline via batch jobs and loaded into a globally distributed, sharded in-memory vector database (e.g., ScaNN / Vertex Vector Search). The TPUs are reserved exclusively for executing the user tower in real-time, utilizing Tensor Parallelism to fit the user weights across multiple chips and broadcasting the resulting query vector to the fast ANN retrieval tier.
   common_mistake: |
@@ -24,9 +24,9 @@ details:
        - SLA: <50ms p99; the TPU path must leave budget for ANN lookup and cross-service RPC.
     2. **Calculations:**
        - User tower weights (INT8): 100B * 1 byte = 100 GB.
-       - Minimum chips by usable HBM: ceil(100 GB / 12 GB) = 9 chips; choose a 16-chip slice for topology headroom and power-of-two tensor parallelism.
-       - Full-precision item vectors: 50B * 256 * 4 bytes = 51.2 TB before ANN index structures, replication, metadata, and caching.
-       - With INT8/PQ-style compression, raw vector payload can be closer to 50B * 256 * 1 byte = 12.8 TB, but the ANN service still lives in a sharded retrieval tier, not TPU HBM.
+       - Minimum chips by usable HBM: ceil(100 GB / 12 GB) = 9 chips, so a practical user-tower slice needs at least 9 v5e chips plus topology and runtime headroom.
+       - Full-precision item vectors: 50 billion * 256 dimensions * 4 bytes = 51.2e12 bytes, or 51.2 decimal TB, before ANN index structures, replication, metadata, and caching.
+       - With INT8/PQ-style compression, raw vector payload can be closer to 50 billion * 256 * 1 byte = 12.8e12 bytes, or 12.8 decimal TB, but the ANN service still lives in a sharded retrieval tier, not TPU HBM.
        - Feasible p99 budget target: reserve roughly 20-25ms for TPU user-tower execution, 5-10ms for RPC/fanout, and 10-15ms for ANN top-K, leaving a small tail-latency margin under 50ms.
     3. **Conclusion & Interpretation:**
        - **Result: Offline item compute plus a sharded ANN tier.** The user tower needs multi-chip TP with HBM headroom, while the 12.8-51.2 TB item-vector footprint is a retrieval-system memory problem, not a TPU-HBM placement problem.

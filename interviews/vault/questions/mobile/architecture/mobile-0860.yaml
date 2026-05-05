@@ -21,16 +21,15 @@ details:
     **The Consequence:** Leaving SE blocks in for Hexagon (doubling latency) or removing them for ANE (sacrificing 1.5% accuracy for negligible speedup).
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - MV3-Large total SE FLOPs: ~3M FLOPs (1.4% of total 0.22G FLOPs).
-       - A17 Pro ANE Compute: 35 TOPS.
-       - Hexagon HTP Compute: 45 TOPS.
-       - Peak-throughput math is only a lower bound; measured latency is dominated by op lowering, memory movement, and dispatch for tiny SE fragments.
+       - SE blocks are small arithmetic fragments, so their latency risk is dominated by op lowering, graph partitioning, dispatch, memory movement, and fallback.
+       - Relevant SE ops include global average pooling, small FC/1x1 layers, sigmoid or h-sigmoid, reshape/broadcast, and channel-wise multiply.
+       - The correct decision uses per-backend profiling, not peak TOPS arithmetic.
     2. **Calculations:**
-       - A17 Pro ANE lower-bound compute time: 3,000,000 ops / 35,000,000,000,000 ops/s = 0.000086ms = 0.086µs.
-       - Hexagon lower-bound compute time: 3,000,000 ops / 45,000,000,000,000 ops/s = 0.000067ms = 0.067µs.
-       - These lower bounds are far below practical per-block overheads, so they should not be used as predicted latency.
-       - Example dispatch sensitivity: if 12 unsupported SE fragments each add 0.1ms through fallback or synchronization, added latency is 12 x 0.1ms = 1.2ms.
-       - If the SE subgraph stays fused or scheduled on the accelerator, the measured overhead may instead be a small fraction of a millisecond.
+       - For each backend, measure: full MobileNetV3 latency, latency with SE disabled or replaced, and the number of graph partitions/fallback islands.
+       - SE overhead = measured_latency_with_SE - measured_latency_without_SE, after keeping quantization and input shape fixed.
+       - If all SE ops stay in the accelerator graph, overhead is usually limited to the measured subgraph cost and memory traffic.
+       - If SE creates CPU fallback islands, added latency includes accelerator dispatch + CPU execution + synchronization + tensor copies for each island.
+       - Removal is justified on Hexagon only when measured fallback/synchronization overhead exceeds the accuracy benefit; otherwise keep the trained SE design.
     3. **Conclusion & Interpretation:**
        - **Result: Dispatch-Bound Risk. Keep SE on ANE when profiling confirms accelerator execution; profile SE placement on Hexagon and remove or replace it only if fallback/synchronization overhead exceeds the accuracy benefit.**
 status: published

@@ -11,24 +11,28 @@ title: Coreset Selection Pipeline for LLM Pre-training at Scale
 scenario: You are pre-training a 30B LLM. To maximize the Information-Compute Ratio (ICR) within a 3T token compute budget, you score the perplexity of a raw 15T token corpus using a 2B reference model. You have 256 H100 GPUs.
 question: How would you design the 15T-to-3T coreset scoring pipeline, identify its bottlenecks, and estimate scoring plus training time?
 details:
-  realistic_solution: Perplexity scoring is heavily compute-bound (a single forward pass over full sequences). The architecture should use an embarrassingly parallel worker pool, streaming the 15T tokens directly from object storage to GPU memory in large batches. No inter-GPU communication is needed. At 256 H100s, the scoring pass is about 5.5 days at 50% MFU, and the 30B training run on the selected 3T tokens is about 54.9 days at 45% MFU, for roughly 60.4 days total.
+  realistic_solution: Perplexity scoring is mostly compute-bound if the input pipeline can keep GPUs fed. Use an embarrassingly parallel worker pool that shards the 15T-token corpus, streams large contiguous ranges from object storage, batches scoring on GPU, and writes scores plus document IDs to a sortable store for selecting the 3T-token coreset. The main bottlenecks to manage are object-storage throughput, small-file metadata overhead, shuffle/sort pressure, and GPU starvation from uneven shards. At 256 H100s, scoring is about 5.5 days at 50% MFU, and the 30B training run is about 54.9 days at 45% MFU, for roughly 60.4 days total.
   common_mistake: |
     **The Pitfall:** Assuming perplexity scoring is memory-bandwidth bound like autoregressive generation.
     **The Rationale:** Candidates fail to realize scoring is a prefill-only operation with massive arithmetic intensity.
     **The Consequence:** Designing an overly complex cross-node memory architecture when embarrassingly parallel streaming is optimal.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Scoring Compute: 2B params on 15T tokens (1 forward pass).
-       - Training Compute: 30B params on 3T tokens.
-       - Cluster: 256 H100s (989 TFLOPS FP16 peak).
-       - MFU: 50% for scoring, 45% for training.
-    2. **Calculations:**
-       - Scoring FLOPs = 2 * 2e9 * 15e12 = 6.0e22 FLOPs = 60,000,000 PFLOPs.
-       - Training FLOPs = 6 * 30e9 * 3e12 = 5.4e23 FLOPs = 540,000,000 PFLOPs.
-       - Cluster Peak = 256 * 989e12 = 253.18 PFLOPS.
-       - Scoring Time = 60,000,000 / (253.18 * 0.50) ≈ 473,971s (~5.49 days).
-       - Training Time = 540,000,000 / (253.18 * 0.45) ≈ 4,739,711s (~54.86 days).
-    3. **Conclusion & Interpretation:** **The 5.5-day perplexity scoring overhead yields a massive Information-Compute Ratio boost, completing the optimal pipeline in ~60.4 days total.**
+    **Assumptions & Constraints:**
+    - Scoring compute: 2B params on 15T tokens, one forward pass, about 2 FLOPs/parameter/token.
+    - Training compute: 30B params on 3T tokens, about 6 FLOPs/parameter/token.
+    - Cluster: 256 H100s at 989 TFLOP/s FP16 peak.
+    - MFU: 50% for scoring, 45% for training.
+
+    **Calculations:**
+    - Scoring FLOPs = 2 * 2e9 * 15e12 = 6.0e22 FLOPs = 6.0e7 PFLOP.
+    - Training FLOPs = 6 * 30e9 * 3e12 = 5.4e23 FLOPs = 5.4e8 PFLOP.
+    - Cluster peak = 256 * 989e12 = 2.5318e17 FLOP/s = 253.18 PFLOP/s.
+    - Scoring time = 6.0e22 / (2.5318e17 * 0.50) = 473,971s = 5.49 days.
+    - Training time = 5.4e23 / (2.5318e17 * 0.45) = 4,739,711s = 54.86 days.
+    - Total compute time = 5.49 + 54.86 = 60.35 days, assuming storage and shuffling do not starve the GPUs.
+
+    **Conclusion & Interpretation:**
+    - **Result: roughly 5.5 days of scoring plus 54.9 days of training.** The pipeline is only compute-time optimal if object storage, sharding, and score sorting sustain the required GPU utilization.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: 'Transformer Cost Evaluation: GPT-2 vs LLaMA-7B Inference Cost'
 scenario: An evaluation is being conducted to compare the inference cost per 1M tokens for GPT-2 large (774M params, BF16) versus LLaMA-7B (7B params, INT4) on a standard GPU instance ($2.50/hr). Both generate 100-token responses at batch=1.
 question: What are the decode throughput, request latency, and cost per 1M tokens for GPT-2 large BF16 versus LLaMA-7B INT4?
 details:
-  realistic_solution: 'GPT-2 large BF16: 1.548 GB. Decode latency: 1.548 GB / 3.35 TB/s = 0.462 ms/token. 100 tokens: 46.2 ms/req. Throughput: 21.6 req/s. Cost: $0.32 per 1M tokens. LLaMA-7B INT4: 3.5 GB (4 bits/param). Decode: 3.5 GB / 3.35 TB/s + 10% dequantization overhead = 1.045 ms + 0.105 ms = 1.15 ms/token. 100 tokens: 115 ms. Throughput: 8.7 req/s. Cost: $0.80 per 1M tokens. GPT-2 large is 2.5x cheaper per token, but LLaMA-7B delivers vastly superior quality. INT4 dequantization overhead heavily impacts the theoretical bandwidth savings.'
+  realistic_solution: 'Use a simple batch-1 decode roofline proxy: each generated token streams the model weights once from HBM, with a 10% INT4 dequantization latency penalty for LLaMA. GPT-2 large BF16 weights are 774M * 2B = 1.548 GB, so decode time is 1.548 GB / 3350 GB/s = 0.462 ms/token. That is 2160 decode tokens/s, so a 100-token response is about 46.2 ms/request, or 21.6 req/s. At $2.50/hr, cost is $2.50 / (2160 tok/s * 3600 s/hr) * 1M = $0.32 per 1M tokens. LLaMA-7B INT4 weights are 7B * 0.5 bytes = 3.5 GB, so bandwidth time is 1.045 ms/token; with 10% dequantization overhead, use 1.15 ms/token. That is about 870 decode tokens/s, 115 ms per 100-token request, 8.7 req/s, and $0.80 per 1M tokens. Under this simplified serving model, GPT-2 large is about 2.5x cheaper per generated token, while LLaMA-7B is the higher-quality model.'
   common_mistake: |
     **The Pitfall:** Comparing FP16 model bandwidth cost vs INT4 without accounting for dequantization overhead.
     **The Rationale:** Engineers assume INT4 strictly scales linearly with bandwidth reduction.
@@ -23,20 +23,23 @@ details:
     - LLaMA-7B INT4 weights: 3.5 GB.
     - Response length: 100 generated tokens.
     - Dequantization overhead: +10% latency penalty for INT4 after the bandwidth-limited decode time.
+    - This is a roofline proxy for batch-1 decode, not an exact transformer latency model.
 
     **Calculations:**
     - GPT-2L latency per token: 1.548 GB / 3350 GB/s = 0.000462s = 0.462 ms/token.
     - GPT-2L 100-token request latency: 0.462 ms/token * 100 = 46.2 ms/request.
-    - GPT-2L throughput: 1 / 0.0462s = 21.6 req/s = 2160 tok/s.
+    - GPT-2L decode throughput: 1 / 0.000462s = 2160 tok/s.
+    - GPT-2L request throughput for 100-token responses: 2160 / 100 = 21.6 req/s.
     - GPT-2L cost/1M tokens: $2.50 / (2160 tok/s * 3600 s/hr) * 1M = $0.32.
     - LLaMA-7B INT4 bandwidth latency: 3.5 GB / 3350 GB/s = 0.001045s = 1.045 ms/token.
     - LLaMA-7B with dequantization: 1.045 ms/token * 1.10 = 1.15 ms/token.
     - LLaMA-7B 100-token request latency: 1.15 ms/token * 100 = 115 ms/request.
-    - LLaMA-7B throughput: 1 / 0.115s = 8.7 req/s = 870 tok/s.
+    - LLaMA-7B decode throughput: 1 / 0.00115s = 870 tok/s.
+    - LLaMA-7B request throughput for 100-token responses: 870 / 100 = 8.7 req/s.
     - LLaMA-7B cost/1M tokens: $2.50 / (870 tok/s * 3600 s/hr) * 1M = $0.80.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute/Bandwidth Trade-off (Compute-Bound)**. LLaMA is 2.5x more expensive but delivers a 9x larger parameter model.
+    - **Result: Bandwidth-Proxy Cost Comparison.** GPT-2 large is about $0.32/M tokens and LLaMA-7B INT4 is about $0.80/M tokens under the stated batch-1 model; the larger model costs about 2.5x more per generated token.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,7 @@ title: 'Distributed LLM Training on AMD MI300X: Interconnect Bottlenecks'
 scenario: You are designing a large-scale distributed training system for an LLM across multiple AMD MI300X accelerators. Your cluster utilizes InfiniBand HDR for node-to-node communication. The LLM training involves frequent collective operations, particularly all-reduce for gradient synchronization.
 question: Why might a fat-tree interconnect outperform a torus or Dragonfly topology for MI300X LLM all-reduce, and what topology bottlenecks limit scalability?
 details:
-  realistic_solution: A comprehensive answer would explain that Fat-tree offers non-blocking communication up to a certain scale due to its high bisection bandwidth, making it ideal for all-reduce operations that require simultaneous communication between many nodes. In contrast, Torus and Dragonfly topologies, while cost-effective, have lower bisection bandwidth and can suffer from increased hop counts and congestion for global collectives, leading to performance degradation as the MI300X accelerators saturate the network with their 5.3 TB/s HBM3 bandwidth. The solution should involve analyzing how the MI300X's high memory and bandwidth demands exacerbate these topological limitations during gradient synchronization.
+  realistic_solution: A comprehensive answer would explain that fat-tree offers higher non-blocking bisection bandwidth up to its design scale, making it better suited to all-reduce operations that require many nodes to communicate at once. Torus and Dragonfly topologies can be cost-effective, but global collectives may see lower effective bandwidth because of narrower cuts, extra hops, routing contention, and oversubscribed links. MI300X HBM bandwidth affects how quickly accelerators can produce and consume gradients, but the limiting quantity for cross-node synchronization is the network injection and bisection bandwidth, not device-memory bandwidth.
   common_mistake: |
     **The Pitfall:** Failing to quantify the network congestion mechanisms specific to different topologies.
     **The Rationale:** Candidates don't relate bisection bandwidth limitations directly to the MI300X's high data throughput (5.3 TB/s) during global gradient exchanges.
@@ -21,16 +21,16 @@ details:
     - Compare 32 MI300X nodes with 100 GB of gradient data per node.
     - Each HDR link carries about 25 GB/s.
     - A non-blocking fat-tree gives each node one effective uplink for collective traffic, so aggregate injection is 32 * 25 = 800 GB/s and bisection is provisioned to match it.
-    - A 4x8 2-D torus has a minimum bisection of 2 cuts * 4 links per cut * 25 = 200 GB/s for traffic crossing the narrow dimension.
+    - A 4x8 2-D torus cut across the 8-node dimension has 4 wrap links in each direction, or about 8 * 25 = 200 GB/s of bidirectional bisection bandwidth.
 
     **Calculations:**
-    - In an all-reduce, roughly half of the nodes' payload must cross a bisection for a balanced split: 16 * 100 GB = 1600 GB.
-    - Fat-tree bisection time lower bound: 1600 GB / 800 GB/s = 2.0 seconds.
-    - Torus bisection time lower bound: 1600 GB / 200 GB/s = 8.0 seconds.
-    - The torus also adds hop-count and routing contention, so this is an optimistic lower bound for the torus.
+    - Ring all-reduce per-node network volume is approximately 2 * (P - 1) / P * S = 2 * 31 / 32 * 100 GB = 193.75 GB per node.
+    - On a non-blocking fat-tree, a per-node lower bound is 193.75 GB / 25 GB/s = 7.75 seconds before protocol overhead.
+    - On the torus, traffic crossing the narrow cut is limited to about 200 GB/s, or 200 / 16 = 12.5 GB/s average for each node on one side during cut-heavy phases.
+    - A cut-limited lower bound for those phases is therefore 193.75 GB / 12.5 GB/s = 15.5 seconds, before extra hop count and routing contention.
 
     **Conclusion & Interpretation:**
-    - **Result: Network Topology Bottleneck**. Under the same payload and link rate, the torus bisection lower bound is 4x slower than the fat-tree, which explains why global all-reduce scalability is limited by topology.
+    - **Result: Network Topology Bottleneck**. Under the same gradient payload and link rate, the torus can expose about half the effective per-node bandwidth across its narrow cut, while a properly provisioned fat-tree can keep global all-reduce closer to injection-rate limits.
 status: published
 provenance: imported
 requires_explanation: false

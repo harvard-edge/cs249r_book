@@ -11,7 +11,7 @@ title: Cloud AI 100 8B LLM Serving at 20 RPS Under 1 Second
 scenario: You are architecting an on-premise factory automation agentic system deployed on a single Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). The compound pipeline involves a lightweight router model, a dense retriever, and an 8-billion parameter LLM orchestrator. Given a peak load of 20 requests per second where each request requires a 1000-token prompt processing and 50 tokens of generation.
 question: How would you serve the router, retriever, and 8B LLM on one Cloud AI 100 to handle 20 RPS within 1 second, and what bottlenecks dominate?
 details:
-  realistic_solution: Keep the router, retriever, and INT8 8B LLM resident in memory, but treat the single accelerator as compute-tight and bandwidth-sensitive rather than merely capacity-bound. The dominant bottlenecks are, in order, prefill compute for the 1000-token prompts, LPDDR4x bandwidth during autoregressive decode, and batching/queuing needed to keep 20 RPS under a 1-second SLA. Use continuous batching for decode, chunked prefill so long prompts do not starve decode steps, admission control, and prompt/retrieval caching where possible. The rough compute load is 336 TOPS, or 84% of the 400 TOPS peak, leaving limited margin for router/retriever overhead and scheduling inefficiency.
+  realistic_solution: Keep the router, retriever, and INT8 8B LLM resident in memory, but treat the single accelerator as compute-tight and bandwidth-sensitive rather than merely capacity-bound. The dominant bottlenecks are, in order, prefill compute for the 1000-token prompts, LPDDR4x bandwidth during autoregressive decode, and batching/queuing needed to keep 20 RPS under a 1-second SLA. Use continuous batching for decode, chunked prefill so long prompts do not starve decode steps, admission control, and prompt/retrieval caching where possible. A rough dense-transformer estimate puts LLM math near 336 TOPS before router/retriever overhead, so the system has little practical margin against a 400 TOPS peak.
   common_mistake: |
     **The Pitfall:** Focusing solely on memory capacity while ignoring memory bandwidth and compute during prefill.
     **The Rationale:** Candidates see that the models easily fit into 32GB RAM and assume the problem is solved, overlooking the severe bandwidth bottleneck of autoregressive generation.
@@ -23,15 +23,17 @@ details:
     - Target: 20 RPS.
     - Prompt processing: 1000 tokens per request.
     - Generation: 50 tokens per request.
+    - Order-of-magnitude dense-transformer estimate: each token costs about 2 operations per parameter, so an 8B-parameter pass is about 16 GOP/token.
 
     **Calculations:**
-    - Prefill Compute per request = 1000 tokens * 8B params * 2 ops/param = 16 TOP.
-    - At 20 RPS, prefill demands 320 TOPS.
-    - Generation Compute per request = 50 tokens * 8B params * 2 ops/param = 0.8 TOP.
-    - Total compute = 336 TOPS (84% of the 400 TOPS capacity).
+    - Prefill compute per request = 1000 tokens * 16 GOP/token = 16,000 GOP = 16 TOP.
+    - At 20 RPS, prefill demand is 16 TOP/request * 20 request/s = 320 TOPS.
+    - Decode compute per request = 50 tokens * 16 GOP/token = 800 GOP = 0.8 TOP.
+    - Total LLM compute = (16 + 0.8) TOP/request * 20 request/s = 336 TOPS, before router, retriever, scheduling loss, and memory stalls.
     - Generated-token rate = 20 RPS * 50 tokens = 1000 tokens/s.
     - Unbatched decode weight traffic lower bound = 1000 decode passes/s * 8 GB/pass = 8000 GB/s.
-    - With continuous batching of about 20 active requests, decode needs about 50 batched decode passes/s, so weight traffic lower bound is 50 * 8 GB = 400 GB/s before KV-cache and activation traffic.
+    - With continuous batching of about 20 active requests, decode needs about 50 batched decode passes/s, so the weight-read lower bound is 50 * 8 GB = 400 GB/s.
+    - This 400 GB/s is not a full memory model; it ignores KV-cache traffic, activations, router/retriever reads, and any implementation-specific weight reuse.
 
     **Conclusion & Interpretation:**
     - **Result: compute load is about 336 TOPS, and batched decode still implies roughly 400 GB/s of weight-read traffic before overhead.** The serving design is dominated by prefill compute, LPDDR4x decode bandwidth, and batching/queuing effects; continuous batching and chunked prefill are required to have a chance at the 1-second SLA.

@@ -8,26 +8,29 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: Diagnosing Mobile LLM Out-of-Memory Deployment
-scenario: A 7B parameter LLM designed for cloud deployment in FP16 is targeted for a mobile application on a flagship edge device. Initial loading attempts trigger out-of-memory (OOM) errors.
-question: How would you diagnose the potential reasons for the memory errors and outline a plan to determine if this model, or a derivative, can be successfully deployed on the specified hardware?
+scenario: A 7B parameter LLM designed for cloud deployment in FP16 is targeted for a mobile app on a flagship phone with 12 GB physical RAM, about 9 GB usable by the app, and a 1024-token context target. Initial loading attempts trigger out-of-memory (OOM) errors.
+question: How would you diagnose the OOM cause and decide whether the 7B model or a smaller derivative can deploy on this phone?
 details:
-  realistic_solution: "Deployment demands ruthless quantitative hardware profiling to determine structural viability. \n1. **Mathematical Isolation:** Calculate base FP16 weight density and dynamic inference activations (e.g. attention KV blocks). The core FP16 layout inherently exceeds common mobile RAM ceilings before generation logic begins.\n2. **Quantization Mapping:** Assess W8A16 or strictly W4A16 Post-Training Quantization (PTQ) passes required to shoehorn the model. INT8 drops static footprints by 2x, bringing parameters into realistic execution ranges.\n3. **Compiler Tracing:** Extract OS overhead maps explicitly confirming how many Gigabytes are reserved safely for pure generation.\n"
+  realistic_solution: |
+    Diagnose the OOM by separating static weights, dynamic KV cache, activations, runtime scratch buffers, and OS/app headroom. On this phone, FP16 7B weights alone need about 14 GB, so the base model cannot load inside a 9 GB usable envelope. INT8 weights reduce the static footprint to about 7 GB, but viability still depends on measured KV-cache size for the 1024-token context, allocator overhead, and whether all operators stay on supported mobile runtimes. The deployment plan should test an INT8 or 4-bit weight-only derivative with a bounded context window, profile peak resident memory during prefill and decode, and fall back to a distilled smaller model if latency, accuracy, or memory headroom is insufficient.
   common_mistake: |
     **The Pitfall:** Architecting hardware limits based purely on parameter dimensions, wildly ignoring precision scaling and execution footprints.
     **The Rationale:** Cloud ML engineers calculate theoretical compute topology exclusively, fundamentally underestimating edge OS application limits and KV memory overheads.
     **The Consequence:** Pushing multi-gigabyte models down to clients only to trigger catastrophic runtime OOM exceptions the millisecond a token is generated.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware Limit: ~12 GB physical LPDDR5X (usable OS payload much smaller, ~9 GB).
-       - Baseline Weights: 7 Billion parameters configured natively in FP16.
-       - Generation footprint: Intermediate KV activations require ~1 GB margin.
-    2. **Calculations:**
-       - FP16 Baseline: 7,000,000,000 * 2 bytes/param = 14 GB base static weights.
-       - Execution Envelope: 14 GB weights + 1 GB KV cache = 15 GB (Immediate Hard OOM).
-       - Re-mapped Quantization (INT8): 7,000,000,000 * 1 byte/param = 7 GB base weights.
-       - Reduced Envelope: 7 GB weights + 1 GB KV cache = 8 GB total execution footprint.
-    3. **Conclusion & Interpretation:**
-       **Result: 15 GB required vs 12 GB available (Memory-Capacity-Bound).** FP16 mathematically ruptures absolute OS capacity limits; structural downcasting to INT8 is physically required to boot.
+    **Assumptions & Constraints:**
+    - Phone memory: 12 GB physical, about 9 GB usable by the app.
+    - Baseline model: 7B parameters in FP16.
+    - Target context: 1024 tokens, plus activations, runtime scratch, and OS/app headroom.
+
+    **Calculations:**
+    - FP16 weights: 7B params * 2 bytes/param = 14 GB, before KV cache or activations.
+    - INT8 weights: 7B params * 1 byte/param = 7 GB, before KV cache, activations, and runtime buffers.
+    - 4-bit weight-only storage: 7B params * 0.5 bytes/param = 3.5 GB before quantization metadata.
+    - If KV cache and runtime buffers consume even 1-2 GB, INT8 is marginal in a 9 GB app envelope; 4-bit or a distilled derivative leaves more headroom.
+
+    **Conclusion & Interpretation:**
+    **Result: FP16 is not deployable on the specified phone.** INT8 may load only with tight context and measured overhead; a 4-bit or distilled derivative is the stronger deployment candidate.
 status: published
 provenance: imported
 requires_explanation: false

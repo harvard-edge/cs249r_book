@@ -8,10 +8,10 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: Cached Model Switching for Edge Inference
-scenario: You are deploying a dynamic 15-model computer vision pipeline onto an edge server with a 32 GB LPDDR4x accelerator. Each specialized model is 4 GB (INT8), totaling 60 GB, which cannot fit simultaneously in the accelerator or host RAM.
+scenario: You are deploying a dynamic 15-model computer vision pipeline onto an edge server with 32 GB of shared LPDDR4x system memory and a separate accelerator. Each specialized model is 4 GB (INT8), totaling 60 GB, so the full corpus cannot remain resident in memory at once.
 question: How would you serve 15 unpredictable 4 GB models across 8 parallel workers without OOMs or long cold starts?
 details:
-  realistic_solution: Treat `mmap` as a process-sharing tool, not as a way to make 60 GB fit in 32 GB of accelerator memory. Store all 15 models in shared file-backed host mappings so 8 workers do not duplicate host pages, then maintain an accelerator-resident cache for only the hot model subset. Add admission control so at most the resident models are served concurrently; requests for nonresident models either queue, route to a CPU/fallback tier, or trigger an asynchronous load after evicting a cold model. Reduce pressure with INT8/structured compression where possible, prefetch predicted next models, and batch requests per resident model to amortize load cost. This avoids OOMs by bounding accelerator residency instead of pretending every model can execute zero-copy from host memory.
+  realistic_solution: Treat `mmap` as a process-sharing tool, not as a way to make 60 GB fit in 32 GB of system memory or accelerator memory. Keep the 60 GB corpus on SSD as file-backed model artifacts, map only the admitted hot subset into shared host pages, and maintain a separate accelerator-resident cache for models currently serving requests. Add admission control so at most the cached models are served concurrently; requests for nonresident models either queue, route to a smaller fallback tier, or trigger an asynchronous load after evicting a cold model. Prefetch predicted next models and batch requests per resident model to amortize load cost. This avoids OOMs by bounding both host and accelerator residency.
   common_mistake: |
     **The Pitfall:** Proposing a naive LRU caching strategy where models are fully copied on demand.
     **The Rationale:** Candidates use standard caching logic, failing to account for process-level memory duplication.
@@ -19,16 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Total model size: 15 * 4 GB = 60 GB.
+    - Shared system memory budget: 32 GB before OS, workers, and activations.
     - PCIe Gen4 bandwidth: 16 GB/s.
 
     **Calculations:**
-    - Total model corpus: 60 GB, so all models cannot reside in 32 GB accelerator memory at once.
-    - Maximum full 4 GB models resident before runtime overhead: floor(32 GB / 4 GB) = 8 models; reserve memory for activations and buffers, so the practical cache is smaller.
+    - Total model corpus: 60 GB, so all models cannot reside in 32 GB system memory or accelerator memory at once.
+    - Maximum full 4 GB models in a resident hot cache before overhead: floor(32 GB / 4 GB) = 8 models; reserve memory for OS, workers, activations, and staging, so a practical hot cache might be 4-6 models.
     - Naive cold load via PCIe Gen4: 4 GB / 16 GB/s = 250 ms of transfer time, plus initialization.
-    - `MAP_SHARED` prevents 8 host workers from creating 8 private copies of the same file-backed weights, but accelerator memory still needs an explicit resident-model cache and eviction policy.
-    - If models are compressed or pruned to 2 GB, a 6-model resident cache uses about 12 GB, leaving accelerator memory for activations, queues, and prefetch staging.
+    - `MAP_SHARED` prevents 8 host workers from creating 8 private copies of an admitted model, but it does not make all 60 GB resident.
+    - A 5-model hot cache uses 5 * 4 GB = 20 GB before overhead, leaving about 12 GB for runtime memory, queues, and prefetch staging.
 
     **Conclusion & Interpretation:**
-    - **Result: Bounded Resident Cache, Not Zero-Copy Execution**. The design avoids OOMs by limiting accelerator-resident models and hides some cold-starts with prefetching; `mmap` alone cannot make 60 GB execute from a 32 GB accelerator.
+    - **Result: Bounded Hot Cache With Spill/Fallback**. The design avoids OOMs by limiting host and accelerator residency and hides some cold-starts with prefetching; `mmap` alone cannot make 60 GB execute from a 32 GB memory budget.
 status: published
 provenance: imported

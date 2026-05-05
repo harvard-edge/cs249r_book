@@ -19,18 +19,20 @@ details:
     **The Consequence:** The TTFT of interactive requests soars to multiple seconds, completely failing the user experience requirement.
   napkin_math: |
     **Assumptions & Constraints:**
-    - MoE Parameters: 1B total, 8 experts (125M per expert).
-    - Active Parameters: 2 experts (250M active params).
-    - Format: INT4 (0.5 bytes/param).
-    - Target tokens: 20 tok/sec.
-    - Bandwidth: 51.2 GB/s.
+    - MoE parameters: 1B total, 8 experts, about 125M parameters per expert.
+    - INT4 expert size: 125M * 0.5 bytes = 62.5 MB per expert.
+    - Two active experts per token, but expert weights should be resident or cached across many tokens, not dynamically loaded as a full per-token payload.
+    - Streaming transcription target: 20 tok/sec, or 50ms/token.
+    - Interactive assistance target: about 100ms time to first token.
 
     **Calculations:**
-    - Memory per Token: 250M params * 0.5 bytes = 125 MB.
-    - Memory Bandwidth Check: 125 MB * 20 tok/sec = 2.5 GB/s (5% of 51.2 GB/s bandwidth).
+    - Expert residency footprint: 8 * 62.5 MB = 500 MB for all experts, before shared layers and KV caches.
+    - Active expert working set for one token: 2 * 62.5 MB = 125 MB, which is a cache-residency pressure point rather than a valid "memory per token" cost.
+    - FIFO blocking example: four streaming sessions with 4-token decode quanta consume 4 sessions * 4 tokens * 50ms/token = 800ms before an interactive request starts.
+    - Preemptible token-boundary scheduling limits the wait to roughly one token quantum, about 50ms, plus dispatch overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.5 GB/s (Memory-Bound)**. Easily fits bandwidth, but dynamic loading of different 125MB expert chunks trashing the SRAM cache kills latency.
+    - **Result: Scheduling-bound with expert-residency pressure.** The bottleneck is not a simple per-token bandwidth formula; it is whether the scheduler can keep hot experts and KV state resident while preempting long streaming decodes quickly enough for interactive deadlines.
 status: published
 provenance: imported
 requires_explanation: true

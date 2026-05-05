@@ -11,7 +11,7 @@ title: Accelerator Selection for Large Language Model Inference on AMD MI300X
 scenario: Your team is deploying a 70 billion parameter FP16 LLM for real-time inference with a batch size of 1 for low latency. You are evaluating an AMD MI300X accelerator with 192 GB HBM3, 1,300 TFLOPS FP16 sparse performance, and 5.3 TB/s memory bandwidth.
 question: How suitable is the MI300X for batch-1 FP16 inference of a 70B LLM compared with CPUs or previous-generation GPUs?
 details:
-  realistic_solution: A candidate should break down the problem into memory, compute, and bandwidth requirements. For memory, 70B parameters * 2 bytes/param (FP16) = 140 GB, which fits on the MI300X's 192 GB HBM3. For bandwidth, they should consider the memory access patterns (loading weights) and compare against 5.3 TB/s. Emphasize that LLM inference is often memory-bound, especially with smaller batch sizes, making HBM bandwidth crucial.
+  realistic_solution: A candidate should break down the problem into memory capacity, per-token HBM traffic, compute, and KV-cache growth. For memory, 70B parameters * 2 bytes/param (FP16) = 140 GB, which fits on the MI300X's 192 GB HBM3 with limited headroom for KV cache and runtime buffers. For batch-1 decode, the relevant bandwidth model is not allocating 140 GB each token; it is repeatedly reading resident weight shards through HBM with little batch reuse, plus reading KV cache that grows with context length. This makes MI300X more suitable than CPUs or older GPUs for low-latency serving, but real latency depends on kernels, KV traffic, quantization, and batching policy.
   common_mistake: |
     **The Pitfall:** Focusing solely on peak TFLOPS without considering memory bandwidth limits.
     **The Rationale:** Candidates underestimate the memory footprint and the bandwidth demands of batch-1 generation.
@@ -24,9 +24,9 @@ details:
 
     **Calculations:**
     - Memory Footprint: 70B * 2 bytes = 140 GB (fits in 192 GB).
-    - Batch-1 decode has limited cross-request reuse, so a lower-bound weight pass is roughly 140 GB per generated token before KV-cache traffic.
-    - Bandwidth-only lower-bound latency: 140 GB / 5300 GB/s = ~26 ms per generated token, assuming resident weights and ideal streaming.
-    - Compute lower bound per generated token: about 2 * 70B = 140 GFLOPs; at 1,300 TFLOPS peak this is ~0.11 ms, so compute peak is not the limiting estimate at batch 1.
+    - Batch-1 decode has limited batch reuse, so an approximate per-token HBM traffic model includes up to one streaming read of the 140 GB resident weights plus context-dependent KV-cache reads.
+    - Ideal bandwidth floor for that weight-read term: 140 GB / 5300 GB/s = ~26 ms per generated token before KV-cache traffic, collectives, and kernel inefficiency.
+    - Dense-matmul arithmetic per generated token is roughly 2 * 70B = 140 GFLOPs; at 1,300 TFLOPS peak this is ~0.11 ms, so peak compute is not the limiting roofline term in this simplified batch-1 model.
 
     **Conclusion & Interpretation:**
     - **Result: Memory-bandwidth-sensitive batch-1 decode.** The MI300X has enough HBM capacity for FP16 weights and a strong bandwidth lower bound, but real latency depends on KV-cache traffic, kernel efficiency, and scheduling rather than a simple bandwidth/model-size tokens-per-second formula.

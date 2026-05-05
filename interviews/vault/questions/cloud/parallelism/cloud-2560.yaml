@@ -12,7 +12,7 @@ scenario: For a 30B model on 64 GPUs, you can use (A) FSDP across all 64 GPUs, (
 question: 'For a 30B model on 64 GPUs, which strategy has the best communication efficiency: full FSDP, node-local FSDP plus DDP, or TP plus FSDP?'
 details:
   realistic_solution: |
-    Option B, node-local FSDP plus cross-node DDP, has the best communication efficiency under the stated model. Full FSDP across all 64 GPUs makes parameter all-gathers and gradient reduce-scatter operations cross node boundaries for every layer, so slow inter-node links sit on the critical path. With node-local FSDP plus DDP, the heavy FSDP collectives stay inside each 8-GPU NVLink node and the cross-node work is one DDP gradient all-reduce over the replicated 60 GB model state. TP plus FSDP also keeps tensor-parallel collectives in-node, but its FSDP group spans the 8 nodes, so parameter all-gather and gradient sharding traffic still crosses the slow network. In this simplified comparison, B sends about 105 GB per node per step across the inter-node network, versus about 157.5 GB for C, so B is the better answer.
+    Option B, node-local FSDP plus cross-node DDP, has the best communication efficiency under the stated model. Full FSDP across all 64 GPUs makes parameter all-gathers and gradient reduce-scatter operations cross node boundaries for every layer, so slow inter-node links sit on the critical path. With node-local FSDP plus DDP, the heavy FSDP collectives stay inside each 8-GPU NVLink node and the cross-node work is one DDP gradient all-reduce over the replicated 60 GB model state. TP plus FSDP also keeps tensor-parallel collectives in-node, but its FSDP group spans the 8 nodes, so parameter all-gather and gradient sharding traffic still cross the slow network. Under a simple ring-collective estimate, B sends about 105 GB per node per step across the inter-node network; C is higher because it requires cross-node FSDP collectives for parameter all-gather and gradient reduce-scatter, so B is the better answer.
   common_mistake: |
     **The Pitfall:** Assuming TP+FSDP is always the most efficient hybrid strategy.
     **The Rationale:** Candidates know TP is fast intra-node, but forget that FSDP inter-node still requires all-gathering the full 60GB model across slow 12.5GB/s links.
@@ -24,11 +24,11 @@ details:
 
     **Calculations:**
     - Option A (full FSDP across 64 GPUs): FSDP all-gather/reduce-scatter traffic repeatedly crosses nodes, so it is dominated by slow inter-node collectives and is the least attractive of the three.
-    - Option B (FSDP in-node + DDP cross-node): cross-node DDP all-reduce per node = 2 * (8 - 1) / 8 * 60 GB = 105 GB. Time = 105 GB / 12.5 GB/s = 8.4s.
-    - Option C (TP in-node + FSDP cross-node): simplified cross-node FSDP volume per node = 3 * (8 - 1) / 8 * 60 GB = 157.5 GB. Time = 157.5 GB / 12.5 GB/s = 12.6s.
+    - Option B (FSDP in-node + DDP cross-node): one cross-node DDP ring all-reduce over 60 GB gradients costs about 2 * (8 - 1) / 8 * 60 GB = 105 GB per node. Ideal time = 105 GB / 12.5 GB/s = 8.4s before overlap.
+    - Option C (TP in-node + FSDP cross-node): the exact total depends on FSDP prefetching, recomputation, and overlap. A simple lower-bound-style estimate with forward parameter all-gather, backward parameter all-gather, and gradient reduce-scatter gives 3 * (8 - 1) / 8 * 60 GB = 157.5 GB per node before tensor-parallel traffic.
 
     **Conclusion & Interpretation:**
-    - **Result: Communication-Bound**. Hybrid FSDP+DDP (Option B) is the most efficient because it restricts the heaviest all-gather operations to fast NVLink and only performs gradient sync across the slow inter-node links.
+    - **Result: Communication-Bound**. Hybrid FSDP+DDP (Option B) is the most efficient because it restricts the heaviest parameter all-gathers to fast NVLink and leaves only the DDP gradient sync on the slow inter-node links.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: A Mixture-of-Experts (MoE) model with 8 experts (top-2 routing) has ex
 question: Why does offloading inactive MoE experts to CPU DRAM cause 5x P99 latency in continuous batching at 200 QPS?
 details:
   realistic_solution: |
-    The sparsity is per-token, not per-batch. With continuous batching at 200 QPS and batch sizes of 32-64 tokens, different tokens route to different experts, so the union of experts touched by a batch is usually all 8 experts. The CPU-offloading scheme therefore has to move most experts across PCIe for nearly every batch, even though each individual token only uses 2 experts. For a model where each expert is 10B parameters (20 GB in FP16), loading the 6 experts not already resident on GPU is 120 GB / 12 GB/s = 10 seconds per batch, which is catastrophic. The correct approach is to keep all expert weights resident in GPU HBM, or shard them across GPUs using expert parallelism, and exploit activation sparsity for compute savings rather than per-token weight loading.
+    The sparsity is per-token, not per-batch. With continuous batching at 200 QPS and decode batches around 32-64 tokens, different tokens route to different experts, so the batch-level union often touches most or all experts. The CPU-offloading scheme therefore risks moving many expert weights across PCIe for a batch even though each individual token only uses 2 experts. If each expert is very large, for example 10B parameters or about 20 GB in FP16, loading the 6 experts not already resident would move 120 GB; at 12 GB/s that is a 10 second upper-bound transfer before compute. The exact P99 amplification depends on cache residency and routing distribution, but the direction is decisive: keep expert weights resident in GPU HBM or shard them across GPUs using expert parallelism, and exploit activation sparsity for compute savings rather than per-token weight loading.
   common_mistake: |
     **The Pitfall:** Conflating per-token sparsity with per-batch sparsity.
     **The Rationale:** Candidates think "if each token only uses 2 of 8 experts, we only need to load 2 experts at a time," completely ignoring what happens when hundreds of tokens are batched together.
@@ -21,17 +21,17 @@ details:
     **Assumptions & Constraints:**
     - 8 experts, top-2 routing without replacement.
     - Continuous-batching decode step contains 32 tokens.
-    - Expert weights: 20 GB each in FP16.
+    - Illustrative large-expert case: 10B parameters per expert, or 20 GB each in FP16.
     - PCIe Gen4 bandwidth: 12 GB/s.
 
     **Calculations:**
     - Probability a given expert is not picked by one token = 6/8 = 0.75.
     - Probability that expert is not picked by any of 32 tokens = 0.75^32 ≈ 0.0001.
-    - Expected untouched experts in the batch = 8 * 0.75^32 ≈ 0.0008, so the expected number of touched experts is about 7.999.
-    - If only 2 experts are resident and the other needed experts are loaded from CPU, about 6 experts must be transferred.
-    - Transfer size = 6 * 20 GB = 120 GB.
-    - Transfer time = 120 GB / 12 GB/s = 10 seconds.
+    - Expected untouched experts in the batch = 8 * 0.75^32 ≈ 0.0008, so the expected batch touches nearly all experts under uniform independent routing.
+    - This is an expectation, not a guarantee for every continuous-batching step; skewed routing or cache residency can change the exact count.
+    - In the worst case where only 2 experts are resident and 6 more are needed, transfer size = 6 * 20 GB = 120 GB.
+    - Illustrative transfer time = 120 GB / 12 GB/s = 10 seconds before compute.
     **Conclusion & Interpretation:**
-    - **Result: IO-Bound.** Per-token activation sparsity does not translate into batch-level weight sparsity; continuous batches touch nearly every expert and make CPU weight paging untenable.
+    - **Result: IO-Bound.** Per-token activation sparsity does not reliably translate into batch-level weight sparsity; continuous batches often touch most experts, so CPU weight paging creates a large P99 latency tail.
 status: published
 provenance: imported

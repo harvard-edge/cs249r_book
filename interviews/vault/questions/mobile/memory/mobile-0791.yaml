@@ -18,16 +18,16 @@ details:
     **The Consequence:** They wrongly attempt to optimize the arithmetic intensity of the model, failing to fix the memory access patterns that are the actual bottleneck.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: INT4 3B (1.5GB weights).
-    - LPDDR5 max bandwidth: ~34 GB/s.
-    - Batch Size 1 = 20 tok/s.
-    - A single decode token streams roughly the model weights once, before KV-cache and activation overheads.
+    - Model: INT4 3B with a large weight and KV-cache working set.
+    - Foreground chat alone runs at 20 tok/s.
+    - Foreground plus background summarizer drops total throughput to 12 tok/s.
+    - The system is memory-locality-limited, so useful bandwidth depends on access order, cache/TLB behavior, and scheduler grouping.
 
     **Calculations:**
-    - Foreground stream lower-bound bandwidth: 1.5 GB/token * 20 tok/s = 30 GB/s, already close to a 34 GB/s LPDDR5 budget.
-    - Adding a background sequence adds a second KV-cache stream and scheduler interleaving, so effective useful bandwidth can fall due to non-contiguous reads and cache/TLB misses.
-    - If useful bandwidth drops to about 18 GB/s, the weight-streaming lower-bound throughput is 18 GB/s / 1.5 GB/token = 12 tok/s.
-    - This is a simplified bandwidth model; the key point is that the bottleneck is bytes moved per token, not available MAC units.
+    - If batching improved compute efficiency, adding the summarizer would raise or at least preserve total tokens/sec.
+    - Instead, total throughput falls from 20 tok/s to 12 tok/s, a 40% drop.
+    - The drop is consistent with interleaved decode streams disrupting contiguous weight access and adding a second KV-cache working set.
+    - The relevant metric is measured memory-stall time and useful bandwidth per token from traces, not a fixed "model size per token" formula.
 
     **Conclusion & Interpretation:**
     - **Result: Bandwidth/Locality-Bound**. Total decode speed drops because the summarizer increases memory traffic and disrupts contiguous weight and KV-cache access, so batching only helps if the scheduler preserves locality.

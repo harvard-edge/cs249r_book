@@ -11,23 +11,25 @@ title: mmap Page Fault Contention Stalls the UI
 scenario: You are using `mmap` to load a 100 MB model on Android. The model loads instantly, which is great. However, during the first few seconds of inference, the UI thread occasionally stalls for 50-100ms. You are running inference on a background thread.
 question: Why is a background memory read stalling the foreground UI?
 details:
-  realistic_solution: You hit the **mmap Page Fault I/O Contention**. 100 MB model = 25,000 page faults (at 4 KB/page). If each random read takes 0.1ms, that's 2.5 seconds of sustained I/O saturation. The UI thread's read request is statistically guaranteed to get stuck
+  realistic_solution: You are likely seeing mmap page-fault and I/O contention, not foreground CPU starvation. mmap makes mapping cheap, but the first touch of cold model pages can fault and block on storage; a background inference thread that faults many pages can occupy the I/O path, evict shared cache, and hold runtime locks or shared mappings that the UI also needs. Intermittent 50-100 ms stalls come from bursts of blocked faults or lock waits on the UI path, so fix it by prefetching/warming pages off the critical path, using sequential access where possible, avoiding main-thread touches of cold mappings, and measuring page faults plus lock contention.
   common_mistake: |
     **The Pitfall:** Assuming the CPU is completely saturated.
     **The Rationale:** Candidates often think the background thread is using 100% of the CPU and starving the UI thread.
     **The Consequence:** They miss the underlying I/O contention and propose thread priority fixes that won't resolve the 100ms hard locks.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Memory to Load: 100 MB model.
+    - Memory to Map: 100 MB model.
     - Page Size: 4 KB/page.
-    - Random Read Time: 0.1ms per read.
+    - Cold Page Count: 100 MB / 4 KB ≈ 25,000 possible pages.
+    - UI-visible stall target: 50-100 ms.
 
     **Calculations:**
-    - Page Faults: 100 MB / 4 KB = 25,000 page faults.
-    - I/O Time: 25,000 * 0.1ms = 2500ms.
+    - The 25,000 pages are an upper bound on cold pages in the mapping, not proof that all pages fault serially on one critical path.
+    - If a burst of background faults or a shared lock blocks the UI for 50-100 ms, that is enough to miss 3-6 frames at 60 FPS.
+    - Even a small subset of cold page faults can create such bursts when storage, decompression, page-cache eviction, or runtime locks are contended.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.5s (I/O-Bound)**. 2.5 seconds of sustained I/O saturation, meaning UI read requests are statistically guaranteed to get stuck.
+    - **Result: Intermittent Fault Contention**. The mmap itself is cheap, but cold first-touch faults and shared I/O/runtime contention can intermittently block the foreground path long enough to produce 50-100 ms UI stalls.
 status: published
 provenance: imported
 requires_explanation: false

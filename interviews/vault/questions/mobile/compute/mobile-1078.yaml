@@ -12,23 +12,25 @@ scenario: You are migrating the Gemini Nano model (3 billion parameters, 8-bit q
 question: Why does the highly efficient TPU not provide a proportional speedup for decoding, and what is its theoretical compute limit?
 details:
   realistic_solution: |
-    Autoregressive decoding is a memory-bandwidth bound matrix-vector operation. For a 3B 8-bit model, a decode step needs roughly 6 GOPs of compute and streams about 3 GB of weights from shared memory. The 7.5 TOPS TPU has a theoretical compute limit of about 7,500 GOP/s / 6 GOP/token = 1,250 tokens/sec, so compute is not the limiting resource. Actual generation is far lower because the TPU spends most of the decode step waiting on LPDDR5X weight reads and KV-cache traffic.
+    Prefill batches many tokens into large matrix-matrix operations, so the TPU can keep its compute units busy. Autoregressive decoding is mostly a one-token-at-a-time matrix-vector workload: each step performs roughly 6 GOPs for a 3B-parameter 8-bit model while reading the model weights and KV state from shared LPDDR5X. The 7.5 TOPS TPU therefore has a compute-only ceiling of about 7,500 GOP/s / 6 GOP/token = 1,250 tokens/sec, but that ceiling is not achievable in decode. Actual generation is far lower because the accelerator waits on sustained memory bandwidth and small-batch scheduling overhead rather than running out of arithmetic throughput.
   common_mistake: |
     **The Pitfall:** Assuming a custom ASIC with higher TOPS will uniformly accelerate all phases of execution.
     **The Rationale:** Candidates fail to distinguish between the compute-bound prefill phase and the memory-bandwidth bound decoding phase.
     **The Consequence:** They mistakenly attribute the lack of speedup to driver overhead or thermal throttling.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model memory footprint: 3B parameters * 1 byte (8-bit) = 3 GB.
-    - Compute required per token: 3B params * 2 ops (MAC) = 6 Giga-operations (GOPs).
+    - Model memory footprint: 3B parameters x 1 byte (8-bit) = 3 GB.
+    - Decode compute required per token: 3B multiply-accumulates x 2 ops/MAC = about 6 GOPs.
+    - Decode runs at batch size 1, so weights are effectively streamed for each generated token rather than amortized across a long prompt batch.
 
     **Calculations:**
-    - TPU theoretical compute limit: 7.5 TOPS (7500 GOPs) / 6 GOPs per token = 1250 tokens/sec.
-    - Memory traffic per token: about 3 GB of weights, plus KV-cache reads.
-    - If effective shared-memory bandwidth during decode is 30-60 GB/s, the bandwidth limit is roughly 10-20 tokens/sec before other runtime overhead.
+    - TPU compute-only ceiling: 7.5 TOPS = 7,500 GOP/s.
+    - Compute-only token rate: 7,500 GOP/s / 6 GOP/token = 1,250 tokens/sec.
+    - Weight traffic per decode step: about 3 GB of 8-bit weights, plus KV-cache reads.
+    - If effective shared-memory bandwidth during decode is 30-60 GB/s, weight streaming alone limits throughput to roughly 10-20 tokens/sec before runtime overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 1250 tok/s theoretical compute limit, ~10-20 tok/s memory-bound practical limit**. The large gap is why the TPU accelerates compute-heavy prefill but does not provide a proportional speedup for single-token decoding.
+    - **Result: 1,250 tok/s compute ceiling, ~10-20 tok/s memory-bound practical range**. The large gap is why the TPU accelerates compute-heavy prefill but does not provide a proportional speedup for single-token decoding.
 status: published
 provenance: imported
 requires_explanation: false

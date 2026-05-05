@@ -20,19 +20,19 @@ details:
     **Assumptions & Constraints:**
     - 141B params FP16 = 282GB.
     - Node VRAM = 8 * 80GB = 640GB.
-    - EP=8 places one expert per GPU.
-    - One MoE layer routes 256 * 2048 = 524,288 tokens with top-2 routing.
-    - Hidden size = 4096, FP16 activations = 2 bytes/value.
-    - Effective NVSwitch bandwidth = 900 GB/s.
+    - EP=8 places experts across GPUs; dense attention can still use TP.
+    - MoE communication moves routed activations, not the 141B parameters.
+    - Hidden size = 4096, FP16 activations = 2 bytes/value, so one routed token activation is about 8 KB.
+    - Top-2 routing sends each token to two experts and later returns the expert outputs.
 
     **Calculations:**
-    - Activation per token = 4096 * 2 bytes = 8192 bytes.
-    - Routed payload = 524,288 tokens * 2 experts * 8192 bytes ≈ 8.6 GB sent to experts.
-    - Return payload after expert compute is similar, so total All-to-All traffic ≈ 17.2 GB per MoE layer.
-    - Communication time lower bound = 17.2 GB / 900 GB/s ≈ 19 ms before contention and imbalance.
+    - Pure TP shards every expert computation across all 8 GPUs, so expert-heavy layers pay collective communication around large expert matrix multiplies.
+    - EP routes each token activation to the GPU that owns the selected expert; traffic scales with tokens * selected experts * hidden size, not with active parameter count.
+    - Per routed activation payload ≈ 4096 * 2 bytes = 8 KB, plus a similar return payload after expert compute.
+    - Communication is therefore dominated by All-to-All activation exchange and load balance, while expert weights stay resident on their owning GPUs.
 
     **Conclusion & Interpretation:**
-    - **Result: Communication is material but bounded by routed activation volume, not by moving all weights.** Hybrid TP for dense layers plus EP for experts is better than pure TP because it avoids repeatedly splitting every expert's weights across GPUs, but the design still needs batching, load balancing, and NVSwitch-aware placement.
+    - **Result: use hybrid TP plus EP.** Communication remains material, but it is bounded by routed activation volume rather than by moving or tensor-parallelizing all expert weights; the design still needs batching, load balancing, and NVSwitch-aware placement.
 status: published
 provenance: imported
 requires_explanation: false

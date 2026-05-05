@@ -11,7 +11,7 @@ title: Optimizing KV-Cache on Snapdragon 8 Gen 3 for LLMs with Long Contexts
 scenario: You are deploying a 7-billion parameter LLM on a mobile NPU. The application requires supporting user queries with dynamic context lengths up to 4096 tokens.
 question: How would you design a comprehensive KV-cache management strategy for a 7B LLM on a mobile NPU to efficiently support 4096-token contexts?
 details:
-  realistic_solution: Implement a paged attention mechanism with adaptive page size to optimize for NPU memory access patterns. Use dynamic memory allocation that provisions memory based on current demand. Implement an eviction policy (modified LRU/LFU) that prioritizes retention of 'hot' tokens and evicts completed sequences. Explore mixed-precision quantization (e.g., INT4/INT8) for the KV-cache values to further compress memory.
+  realistic_solution: Implement paged KV allocation with fixed admission limits per request, so the runtime allocates cache pages only for active tokens and rejects or chunks requests that would exceed the mobile memory budget. Evict KV pages only for completed sequences or for context that is no longer needed under an explicit sliding-window or summarization policy; do not evict arbitrary "hot" tokens from an active autoregressive sequence. Use KV-cache quantization where quality allows and profile page sizes against the NPU/compiler memory layout.
   common_mistake: |
     **The Pitfall:** Statically allocating the full 4096-token KV-cache for all active sequences upfront.
     **The Rationale:** Engineers default to pre-allocation to avoid dynamic runtime memory overhead.
@@ -26,9 +26,10 @@ details:
     - Per token per layer: 2 (K+V) * 32 heads * 128 head_dim * 1 byte = 8,192 bytes.
     - Per token across all layers: 8,192 bytes * 32 layers = 262,144 bytes, or 256 KiB.
     - 4096-token context: 262,144 bytes/token * 4096 tokens = 1,073,741,824 bytes, or 1.0 GiB.
+    - On a mobile device with shared LPDDR, a single 1.0 GiB KV cache is a major budget item before weights, activations, runtime buffers, and other apps are counted.
 
     **Conclusion & Interpretation:**
-    - **Result: about 1.0 GiB for an INT8 4096-token KV cache.** The strategy should avoid preallocating this full amount for every request and should use dynamic allocation, context limits, and KV-cache quantization where quality allows.
+    - **Result: about 1.0 GiB for one INT8 4096-token KV cache.** The strategy should set admission limits, allocate pages on demand, evict only completed or intentionally truncated contexts, and use quantization or chunking where quality allows.
 status: published
 provenance: imported
 requires_explanation: true

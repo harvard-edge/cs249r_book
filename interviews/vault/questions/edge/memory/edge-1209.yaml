@@ -19,16 +19,17 @@ details:
     **The Consequence:** Selecting hardware with insufficient RAM or failing to implement memory-saving techniques like gradient checkpointing, resulting in catastrophic OOM errors.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hardware: 32 GB RAM. Weights: 7 GB.
-    - Architecture: Batch=16, Seq=2048, Dim=4096, 32 layers.
+        - Hardware memory is approximated in decimal GB for consistency. Weights: 7 GB.
+        - Architecture: Batch=16, Seq=2048, Dim=4096, 32 layers.
+        - Per-layer saved activation estimate from the scenario: Batch * Seq * Dim * 12 bytes.
 
     **Calculations:**
-    - Free Memory: 32 GB - 7 GB = 25 GB.
-    - Memory per Layer: 16 * 2048 * 4096 * 12 bytes = 1,610,612,736 bytes = 1.61 GB decimal, or 1.50 GiB.
-    - Standard Activation Memory: 1.61 GB * 32 = 51.5 GB decimal, or 48.0 GiB (> 25 GB free = OOM).
-    - Gradient Checkpointing every 4 layers stores 8 segment boundaries instead of 32 layer outputs.
-    - Stored Checkpoints: 8 * 1.61 GB = 12.9 GB.
-    - Approximate Total Memory: 7 GB weights + 12.9 GB checkpoints = 19.9 GB, plus temporary recompute/workspace buffers during backward.
+        - Free memory before activations: 32 GB - 7 GB = 25 GB.
+        - Saved activation per layer: 16 * 2048 * 4096 * 12 bytes = 1.61 GB.
+        - Without checkpointing: 32 * 1.61 GB = 51.5 GB of saved activations, which exceeds the 25 GB remaining budget.
+        - Checkpoint every 4 layers means retaining 8 boundary tensors and recomputing the 3 interior layers per segment during backward.
+        - Stored checkpoint activations: 8 * 1.61 GB = 12.9 GB.
+        - Approximate total before optimizer/runtime buffers: 7 GB weights + 12.9 GB checkpoints = 19.9 GB, leaving about 12.1 GB for temporary recompute workspaces and system overhead.
 
     **Conclusion & Interpretation:**
     - **Result: Standard training OOMs; checkpointing fits with headroom (Activation Memory-Bound)**. The tradeoff is recomputing intermediate activations inside each 4-layer segment during backward.

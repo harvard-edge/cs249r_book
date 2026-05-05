@@ -12,7 +12,7 @@ scenario: 'You are designing the feature store infrastructure for a production M
 question: What complete feature store infrastructure would you build for 10 model families, 500M users, 1M catalog items, and 500K requests/s?
 details:
   realistic_solution: |
-    Build a federated feature store with a shared offline lake/warehouse for all historical features, an online KV tier for low-latency serving, and per-model namespaces for model-specific features. Keep the 50 common user features in a shared online Redis/KV cluster, keep hot model-specific user features only for active users, and keep cold or rarely used model-specific features in an SSD/object-backed store with async promotion. Store catalog-item features in a separate item-feature KV/index because item access is skewed and cacheable. Shard by user_id or item_id with consistent hashing, replicate hot shards across AZs, and front the online store with per-service request coalescing and local caches for top items.
+    Build a federated feature store with a shared offline lake/warehouse for all historical features, an online KV tier for low-latency serving, and per-model namespaces for model-specific features. Keep the 50 common user features in a shared online Redis/KV cluster, keep hot model-specific user features only for active users, and keep cold or rarely used model-specific features in an SSD/object-backed store with async promotion. Store catalog-item features in a separate item-feature KV/index because item access is skewed and cacheable. Shard by user_id or item_id with consistent hashing, replicate hot shards across AZs, and front the online store with per-service request coalescing and local caches for top items. Define freshness tiers: request/session features update synchronously or within seconds, user aggregates within minutes, catalog features hourly or daily. Keep offline-online reconciliation, point-in-time joins, backfill/replay from the event log, and versioned feature definitions so training and serving stay consistent.
   common_mistake: |
     **The Pitfall:** Building one monolithic feature store for all use cases.
     **The Rationale:** Different model families have completely different latency, freshness, and access pattern requirements.
@@ -27,8 +27,8 @@ details:
 
     **Calculations:**
     - Common user features: 500M * 50 * 4B = 100 GB raw; 300 GB online with 3x overhead.
-    - Active model-specific user features: 100M * 150 * 4B * 10 = 600 GB raw; 1.8 TB online with 3x overhead.
-    - Catalog-item features: 1M * 200 * 4B = 0.8 GB raw; ~2.4 GB with overhead, but replicate/cache because reads are hot.
+    - Active model-specific user features: assume 100M active users may be served by any of 10 families, but each request reads one family's 150 features; online storage across all family namespaces is 100M * 150 * 4B * 10 = 600 GB raw, or 1.8 TB with 3x overhead.
+    - Catalog-item features: 1M * 200 * 4B = 0.8 GB raw; ~2.4 GB with overhead, so keep the full item set online and replicate/cache top items because 500K RPS creates hot-key pressure.
     - Total online primary capacity: 300 GB + 1.8 TB + 2.4 GB = ~2.1 TB.
     - With 2 replicas and 30% headroom: 2.1 TB * 2 * 1.3 = ~5.5 TB provisioned.
     - Per-request raw read: (200 user + 200 item) * 4B = 1.6 KB.

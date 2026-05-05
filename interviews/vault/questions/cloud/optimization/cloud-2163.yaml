@@ -12,7 +12,7 @@ scenario: You are architecting a training recipe for a 40B model on 1,024 GPUs a
 question: What complete training configuration would you choose for the 40B model on 1,024 GPUs, and how would you justify it quantitatively?
 details:
   realistic_solution: '**Precision**: BF16 mixed precision with FP32 master weights; consider FP8 only after a stability bakeoff on this architecture. **Optimizer**: AdamW with β1=0.9, β2=0.95, weight_decay=0.1. Per-param training memory before sharding: BF16 weights (2B) + BF16 gradients (2B) + FP32 master weights (4B) + FP32 Adam m (4B) + FP32 Adam v (4B) = 16 bytes/param, so 40B × 16 = 640 GB total parameter/optimizer/gradient state. **Parallelism**: use ZeRO-3/FSDP to shard weights, gradients, and optimizer state, plus tensor parallelism TP=4 within nodes and pipeline or sequence parallelism as needed for activations. The sharded state is only ~0.625 GB/GPU if spread across all 1,024 GPUs, but activations, temporary buffers, and communication overlap dominate the actual memory plan, so checkpoint attention/MLP blocks and validate with a memory trace. **Batch size**: start with 512K tokens and ramp toward 2-4M tokens as stability allows. **LR schedule**: WSD — warmup 2K steps to peak
-    3×10⁻⁴, stable phase until 80% of tokens, then linear decay to 3×10⁻⁵. WSD allows extending if more data becomes available. **Checkpoints**: every 1,000 steps (~30 min). Async checkpointing to NVMe tier first, then background copy to PFS. Keep last 5 checkpoints for rollback. Estimated total time: 6 × 40B × 5T / (1024 × 989T × 0.4) ≈ 2.96 × 10⁶ s ≈ 34 days.'
+    3×10⁻⁴, stable phase until 80% of tokens, then linear decay to 3×10⁻⁵. WSD allows extending if more data becomes available. **Checkpoints**: every 1,000 steps (~30 min). Async checkpointing to NVMe tier first, then background copy to PFS. Keep last 5 checkpoints for rollback. Estimated dense-transformer compute time is a FLOPs-based lower bound: 6 × 40B × 5T / (1024 × 989T × 0.4) ≈ 2.96 × 10⁶ s ≈ 34 days before extra communication stalls, checkpoint stalls, eval, and failed-step recovery.'
   common_mistake: |
     **The Pitfall:** Copying an academic recipe without adapting it to specific hardware topology.
     **The Rationale:** Pre-existing recipes seem safe, ignoring the intricacies of memory bandwidth, cluster size, and failure rates.
@@ -20,17 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 40B parameters, 5T tokens.
-    - 1,024 GPUs (989 TFLOPS peak, ~40% utilization).
+    - 1,024 GPUs (989 TFLOPS peak, ~40% sustained MFU after ordinary forward/backward/optimizer overhead).
 
     **Calculations:**
     - Parameter-state memory before sharding: 40B × 16 bytes = 640 GB for weights, gradients, master weights, and Adam states.
     - Full ZeRO-3/FSDP sharding across 1,024 GPUs gives 640 GB / 1,024 = 0.625 GB/GPU for those states before padding and communication buffers.
     - Activation memory is not included in the 0.625 GB/GPU figure; use TP=4 plus activation checkpointing/sequence parallelism and verify peak memory with profiling.
     - Total FLOPS = 6 × 40e9 × 5e12 = 1.2e24.
-    - Time = 1.2e24 / (1024 × 989e12 × 0.4) ≈ 2.96e6 seconds (34 days).
+    - FLOPs-based lower-bound time = 1.2e24 / (1024 × 989e12 × 0.4) ≈ 2.96e6 seconds (34 days).
+    - This estimate does not include additional wall-clock losses from communication imbalance, checkpoint drains, validation runs, data stalls, or restarts; those should be budgeted separately with measured utilization.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory & Compute-Bound.** The training recipe is plausible only when sharded parameter states are combined with activation checkpointing, topology-aware TP/PP, BF16 stability checks, and measured communication overlap.
+    - **Result: Memory & Compute-Bound.** The recipe is plausible only when sharded parameter states are combined with activation checkpointing, topology-aware TP/PP, BF16 stability checks, and measured communication overlap; the 34-day figure is a lower-bound planning estimate, not a guaranteed schedule.
   options:
     - Use BF16 AdamW with FP32 master weights, ZeRO-3/FSDP sharding, TP=4 within nodes, activation checkpointing, a 512K-to-2-4M token batch ramp, WSD learning-rate schedule, and async checkpointing
     - Train entirely on one data-parallel group with no tensor parallelism or activation checkpointing because ZeRO-3 makes the 640 GB optimizer state only 0.625 GB/GPU

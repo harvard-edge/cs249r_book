@@ -11,7 +11,7 @@ title: The Embedding Sharding Strategy
 scenario: Your production DLRM has 50 embedding tables totaling 400 GB. Table sizes range from 200 MB to 80 GB. You have 8 GPUs with 80 GB HBM each. A naive row-parallel sharding splits every table equally across all 8 GPUs. The system runs, but GPU utilization is only 25% and All-to-All communication dominates the profile.
 question: Why does row-parallel sharding cause massive communication bottlenecks here, and how do you fix it?
 details:
-  realistic_solution: 'Row-parallel sharding of all 50 tables across 8 GPUs means every forward pass requires an All-to-All collective to redistribute embeddings. For a 200 MB table, the All-to-All overhead far exceeds the compute. The fix is a mixed sharding strategy: Table-wise placement for small tables, Column-wise sharding for medium tables, and Row-wise sharding for large tables.'
+  realistic_solution: 'Naively row-sharding every table creates 400 table fragments and turns many embedding lookups into cross-GPU exchanges: each GPU owns only 1/8 of each table, so batches frequently need remote rows and then must gather or redistribute embedding vectors for the downstream interaction network. That overhead is especially wasteful for the many small 200MB-scale tables, where table-wise placement would fit easily on one GPU and avoid collectives. Use mixed sharding: table-wise placement for small tables, column-wise or table-wise placement for medium tables when it reduces exchange volume, and row-wise sharding only for the few large tables that exceed practical per-GPU capacity.'
   common_mistake: |
     **The Pitfall:** Assuming uniform sharding is universally optimal.
     **The Rationale:** Candidates blindly apply "split everything evenly" rules, forgetting small embeddings incur massive communication penalties.
@@ -22,8 +22,9 @@ details:
 
     **Calculations:**
     - Naive row-wise sharding: 50 tables * 8 GPUs = 400 table fragments.
-    - Every lookup batch may need remote rows and an All-to-All exchange, even for small tables where local compute is tiny.
-    - Table-wise placement for small tables removes their All-to-All traffic; column-wise or row-wise sharding should be reserved for tables large enough to justify the communication.
+    - Because each GPU owns only 1/8 of every table, a batch with features from many tables must route lookup IDs to the owner shards and gather the resulting embedding vectors for feature interaction.
+    - The communication pattern is a lookup scatter/gather or All-to-All-style exchange across GPUs; it is not justified for small 200MB-scale tables that could be placed whole on one GPU.
+    - Table-wise placement for small tables removes those unnecessary remote lookups; column-wise or row-wise sharding should be reserved for tables large enough to justify the communication.
 
     **Conclusion & Interpretation:**
     - **Result: Interconnect-Bound Under Uniform Row Sharding**. Mixed sharding reduces unnecessary collectives, but the exact communication reduction must be measured from lookup volume and table placement rather than inferred from fragment count.

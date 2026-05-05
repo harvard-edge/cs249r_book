@@ -11,7 +11,7 @@ title: Tail Tolerance with Backup Requests at Scale
 scenario: You serve a 13B model across 64 MI300X GPUs. Each request is routed to one GPU. Your SLA requires P999 < 200ms but current P999 is 1.2s.
 question: How would you design backup requests to bring P999 below 200ms on the 64-GPU MI300X service, and what extra GPU cost would that add?
 details:
-  realistic_solution: 'Design: (1) Track running latency percentiles and queue depth per GPU. (2) Choose a backup threshold that leaves enough time before the 200ms SLA, such as ~90-100ms if a healthy backup usually finishes in 45-90ms. (3) If the primary has not responded by that threshold, send one backup to a least-loaded GPU on an independent queue path. (4) Return the first completed response and cancel the other request promptly. With a P95 trigger, about 5% of requests launch backups. If the average backup consumes about one normal 45ms inference, incremental GPU work is about 5%, or roughly $6.40/hr on a 64-GPU fleet at $2/hr/GPU. If cancellation is slow and backups run closer to 90ms, budget up to 10%, or $12.80/hr.'
+  realistic_solution: 'Design: (1) Track running latency percentiles and queue depth per GPU. (2) Choose a backup threshold that leaves enough time before the 200ms SLA, such as ~90-100ms if a healthy backup usually finishes in 45-90ms. (3) If the primary has not responded by that threshold, send one backup to a least-loaded GPU on an independent queue path. (4) Return the first completed response and cancel the other request promptly. With a P95 trigger, about 5% of requests launch backups. If each triggered backup consumes about 45ms of extra GPU execution and a normal request also consumes about 45ms, duplicated execution adds about 5% more GPU-seconds. On a 64-GPU fleet at $2/hr/GPU, that is 0.05 * 64 * $2 = $6.40/hr of incremental capacity. If cancellation is slow and backups average 90ms, budget up to 10%, or $12.80/hr.'
   common_mistake: |
     **The Pitfall:** Sending backup requests immediately or waiting too long.
     **The Rationale:** Candidates either waste 2x compute by sending backups at request start, or set the threshold too high, causing backups to arrive after the SLA deadline.
@@ -21,13 +21,17 @@ details:
     - 64 MI300X GPUs, $2/hr each.
     - P50 = 45ms, backup issued around P95 (90ms).
     - 5% of requests trigger a backup.
-    - Average useful backup execution after trigger: about one normal 45ms inference.
+    - Average extra backup execution after trigger: about 45ms before the losing copy is cancelled.
+    - Baseline fleet is provisioned near the 64-GPU steady-state work rate.
 
     **Calculations:**
     - Backup threshold leaves ~110ms before the 200ms SLA, enough for a healthy 45-90ms backup path.
-    - Incremental GPU-seconds: 5% triggered backups * 45ms average backup work / 45ms normal work = 5%.
-    - Monetary cost: 64 GPUs * $2/hr * 5% = $6.40/hr.
-    - Slow cancellation upper bound: if backups average 90ms, overhead = 5% * 90/45 = 10%, or $12.80/hr.
+    - For R requests/sec, baseline GPU work is R * 45ms GPU-sec/sec.
+    - Extra backup work is 0.05 * R * 45ms GPU-sec/sec.
+    - Incremental utilization ratio = extra work / baseline work = (0.05 * R * 45ms) / (R * 45ms) = 5%.
+    - Fleet baseline cost: 64 GPUs * $2/hr = $128/hr.
+    - Incremental capacity cost at the same utilization target: 5% * $128/hr = $6.40/hr.
+    - Slow cancellation upper bound: if backups average 90ms, overhead = (0.05 * R * 90ms) / (R * 45ms) = 10%, or $12.80/hr.
 
     **Conclusion & Interpretation:**
     - **Result: about 5% extra GPU work, or $6.40/hr, with a conservative 10%/$12.80/hr upper bound.** Backup requests can bring P999 under 200ms only if the backup path is independent and usually completes within the remaining SLA budget.

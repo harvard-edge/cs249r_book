@@ -7,11 +7,12 @@ topic: energy-per-operation
 competency_area: power
 bloom_level: create
 phase: inference
-title: Energy-Aware Wake Vision Architecture on Exynos 2400
+title: Energy-Aware Always-On Wake Vision Cascade
 scenario: You are designing a continuous audio-visual wakeword system for a smartphone. The system must process an always-on 10 fps video stream while strictly adhering to a 50 mW continuous power budget.
 question: How would you design a 50 mW always-on wake vision cascade while minimizing DRAM access?
 details:
-  realistic_solution: The architecture must aggressively prioritize data locality and minimize DRAM access over simply minimizing MACs. A cascading system should start with an ultra-low-power trigger model that fits entirely within the NPU's SRAM, executing depthwise separable convolutions to maximize the compute-to-memory ratio. Only upon a positive trigger should the system wake up a heavier validation model that accesses the shared LPDDR5X, heavily utilizing INT4 quantization to reduce the memory footprint and the energy cost per weight fetch.
+  realistic_solution: |
+    The architecture must prioritize data locality, duty cycling, and bounded DRAM access over simply minimizing MACs. Use a cascade where an ultra-low-power trigger runs every 10 fps frame from SRAM-resident weights and a small rolling image buffer, then a heavier validator wakes only on positive triggers. Keep preprocessing in place, reuse tiles in local memory, gate clocks between frames, and choose the lowest validated precision for each stage; quantization is useful, but the core design requirement is that continuous operation avoids streaming large weights from DRAM.
   common_mistake: |
     **The Pitfall:** Focusing solely on reducing MAC operations.
     **The Rationale:** Candidates often minimize the theoretical compute operations to meet power budgets, ignoring the massive relative energy cost of accessing shared memory.
@@ -19,16 +20,16 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target power budget: 50 mW.
-    - Energy cost: about 1 pJ for an INT8 MAC, about 100 pJ for a 32-bit DRAM access.
+    - Energy cost: about 1 pJ for an INT8-equivalent operation, about 100 pJ per 32-bit DRAM read.
     - Naive model: 10M INT8 parameters = 10 MB of weights, reread once per 10 fps frame.
     - Cascade: 100 KB SRAM-resident trigger every frame; 10M-param validator runs on 1% of frames.
 
     **Calculations:**
     - Naive weight bandwidth = 10 MB/frame * 10 frames/s = 100 MB/s.
-    - Naive DRAM weight-read power = (100 MB/s / 4 bytes/access) * 100 pJ = 2.5 mW for weight reads only.
+    - Naive DRAM weight-read power = (100 MB/s / 4 bytes per 32-bit read) * 100 pJ/read = 2.5 mW for weight reads only.
     - Trigger compute power = 1 GOPS * 1 pJ/op = 1 mW, with near-zero continuous DRAM weight traffic.
     - Validator average weight bandwidth = 10 MB * 10 fps * 1% = 1 MB/s.
-    - Validator DRAM weight-read power = (1 MB/s / 4 bytes/access) * 100 pJ = 0.025 mW.
+    - Validator DRAM weight-read power = (1 MB/s / 4 bytes per 32-bit read) * 100 pJ/read = 0.025 mW.
     - Sensor, resize, controller, activations, and wake overhead still need budget, so assume 10-20 mW outside weight reads.
 
     **Conclusion & Interpretation:**

@@ -11,7 +11,7 @@ title: 'Model Size Estimation: Diagnose Memory Pressure Causing Swapping on Jets
 scenario: A Jetson Orin deployment running 3 models (total 28GB weights FP16) on 32GB LPDDR5 shows 50% performance degradation after 2 hours. htop shows swap usage at 1GB (to NVMe SSD at 3.5 GB/s). Diagnose and quantify the fix.
 question: Why does the Jetson Orin with 28GB FP16 weights on 32GB LPDDR5 start swapping and slow down 50%, and what quantified fix eliminates it?
 details:
-  realistic_solution: '28GB weights + 3GB OS + 2GB CUDA = 33GB > 32GB, so the system has at least a 1GB memory deficit and swapping is expected. The observed 1GB swap usage explains why latency degrades: active pages are being served from NVMe instead of LPDDR5, although the exact 50% slowdown depends on access frequency and cannot be derived from the given bandwidth alone. Quantified fix: quantize the largest 14GB FP16 model to INT8, reducing it to about 7GB and saving 7GB. New footprint: 21GB weights + 3GB OS + 2GB CUDA = 26GB, leaving about 6GB headroom under the 32GB limit and eliminating swap.'
+  realistic_solution: '28GB weights + 3GB OS + 2GB CUDA = 33GB > 32GB, so the system has at least a 1GB memory deficit and swapping is expected. The observed 1GB swap usage explains why latency degrades: active pages are being served from NVMe instead of LPDDR5, although the exact 50% slowdown depends on access frequency and cannot be derived from the given bandwidth alone. For a concrete fix, assume the three FP16 models are 14GB, 8GB, and 6GB. Quantize the 14GB model to INT8, reducing it to about 7GB and saving 7GB. New footprint: 7+8+6=21GB weights plus 3GB OS and 2GB CUDA = 26GB, leaving about 6GB headroom for fragmentation and runtime variation if CUDA memory remains stable.'
   common_mistake: |
     **The Pitfall:** Attempting to reduce model precision immediately without first isolating the system-level memory bottleneck.
     **The Rationale:** Candidates see OOM issues and blindly apply quantization, ignoring potential OS-level memory fragmentation or swap thrashing.
@@ -19,16 +19,18 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Total LPDDR5: 32 GB.
+       - Current weights: 14 GB + 8 GB + 6 GB = 28 GB FP16.
        - Current usage: 28 GB weights + 3 GB OS + 2 GB CUDA = 33 GB.
        - Overflow: 1 GB swapped to NVMe (3.5 GB/s read).
     2. **Calculations:**
        - Memory deficit = 33 GB - 32 GB = 1 GB, matching the observed swap usage.
        - A full 1 GB NVMe read would take 1 GB / 3.5 GB/s = 0.286s, but actual slowdown depends on page access patterns, so do not convert this into an average latency without trace data.
-       - Quantizing the largest model (14 GB) from FP16 to INT8 saves 7 GB.
-       - New memory footprint = 21 GB + 5 GB = 26 GB.
+       - Quantizing the largest 14 GB FP16 model to INT8 makes it about 7 GB and saves 7 GB.
+       - New weights = 7 GB + 8 GB + 6 GB = 21 GB.
+       - New memory footprint = 21 GB weights + 3 GB OS + 2 GB CUDA = 26 GB.
        - Headroom after fix = 32 GB - 26 GB = 6 GB.
     3. **Conclusion & Interpretation:**
-       - **Result: 26 GB footprint with 6 GB headroom.** By saving 7 GB, the deployment fits in LPDDR5 and avoids the NVMe swap path causing the observed performance drop.
+       - **Result: 26 GB footprint with 6 GB headroom.** By saving 7 GB, the deployment fits in LPDDR5 and avoids the NVMe swap path, with remaining margin for fragmentation only if runtime allocations stay near the stated OS/CUDA estimates.
 status: published
 provenance: imported
 requires_explanation: false

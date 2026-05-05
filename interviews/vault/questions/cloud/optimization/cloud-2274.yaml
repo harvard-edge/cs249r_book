@@ -11,7 +11,7 @@ title: The Caching Allocator Fragmentation Trap
 scenario: Your serving system runs a 13B model. System tools report 45GB used, and PyTorch telemetry shows 30GB allocated. Yet when you try to allocate a 20GB KV-cache buffer, PyTorch throws an OOM error despite 50GB appearing 'free' on the device.
 question: Why does the allocation fail, and what is the role of PyTorch's caching allocator in this failure?
 details:
-  realistic_solution: 'PyTorch''s caching allocator (CUDACachingAllocator) never returns memory to the CUDA driver by default. When tensors are freed, their CUDA blocks go into a free list, fragmented by size. The 15GB in the cache is split across many small blocks (e.g., thousands of 2MB and 8MB fragments from previous forward passes). The 20GB KV-cache needs a single contiguous allocation that no combination of cached fragments can satisfy. Diagnosis: `torch.cuda.memory_stats()` shows `allocated_bytes`, `reserved_bytes`, and `num_alloc_retries`. Fix: (1) `torch.cuda.empty_cache()` returns all cached blocks to the CUDA driver (but causes re-allocation overhead), (2) Pre-allocate the KV-cache at startup before fragmentation occurs, (3) Use `max_split_size_mb` environment variable to limit block splitting, (4) Use memory-pool-aware allocation like vLLM''s PagedAttention which manages KV-cache in fixed-size blocks.'
+  realistic_solution: 'PyTorch''s CUDACachingAllocator distinguishes allocated tensor memory from memory reserved by PyTorch but currently held in allocator pools. System tools can show memory that appears free from the model''s point of view, while PyTorch has reserved blocks split across size classes and streams. A 20GB KV-cache request can fail when the allocator cannot find or obtain a sufficiently large available block from its pools or from the driver after accounting for reserved memory, fragmentation, and other process usage. Diagnosis: `torch.cuda.memory_stats()` shows `allocated_bytes`, `reserved_bytes`, inactive split blocks, and `num_alloc_retries`. Fix: (1) `torch.cuda.empty_cache()` can return unused cached blocks to the CUDA driver, at reallocation cost, (2) pre-allocate the KV-cache at startup before allocator fragmentation, (3) tune allocator splitting such as `max_split_size_mb`, and (4) use memory-pool-aware KV management like vLLM''s PagedAttention.'
   common_mistake: |
     **The Pitfall:** Confusing system 'used memory' with PyTorch's actual allocated memory.
     **The Rationale:** Failing to understand that PyTorch uses a caching memory allocator that holds onto freed CUDA blocks instead of returning them to the driver.
@@ -20,14 +20,15 @@ details:
     1. **Assumptions & Constraints:**
        - System Used Memory: 45GB.
        - PyTorch Allocated Memory: 30GB.
-       - Free List (Caching Allocator): 15GB, highly fragmented.
-       - Requested Allocation: 20GB contiguous.
+       - Difference between system-used and allocated memory: 15GB reserved/cached by PyTorch.
+       - Device tools also report 50GB apparently free, but that is not the same as one immediately usable PyTorch allocation.
+       - Requested Allocation: 20GB KV-cache buffer.
     2. **Calculations:**
-       - Largest contiguous block available ≈ 50MB.
-       - Total cached free memory is 15GB, which is already less than the 20GB request.
-       - Even if enough total memory exists outside the allocator, the allocator cannot satisfy this request from cached fragments because the largest cached block is only ~50MB.
+       - Cached/reserved-but-unallocated memory visible to PyTorch = 45GB system used - 30GB allocated = 15GB.
+       - The new request is 20GB, so the allocator cannot satisfy it from cached free blocks alone.
+       - It must either release cached blocks and obtain a large new allocation from the driver, or fail if fragmentation, stream ordering, or other reservations prevent that.
     3. **Conclusion & Interpretation:**
-       - **Result: OOM Error (Fragmentation-Bound).** The 20GB allocation fails because PyTorch's 15GB cache is heavily fragmented, meaning no single contiguous block is large enough.
+       - **Result: OOM Error (Allocator-Fragmentation/Reservation-Bound).** The failure comes from the allocator's reserved-vs-allocated state and fragmented free pools, not from a literal lack of physical contiguous GPU memory.
 status: published
 provenance: imported
 requires_explanation: false

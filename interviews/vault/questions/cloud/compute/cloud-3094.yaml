@@ -11,7 +11,7 @@ title: 'Systolic Array Realization: Memory Layout for TPU Batch Inference'
 scenario: 'You are determining the optimal memory layout for a BF16 feed-forward matmul on TPU v5e: X is 32768x8192, W is 8192x32768, and C is 32768x32768.'
 question: Which weight layout should TPU v5e use for the 8192x32768 feed-forward layer, and how much does layout affect bandwidth and performance?
 details:
-  realistic_solution: Use the XLA layout that makes the contracting dimension of W (8192) feed the systolic array contiguously inside 128x128 tiles; in row/column terms, store W so each 128x128 K-by-N tile can be read as contiguous vectors rather than strided columns. Do not hand-force a CPU-style layout unless profiling shows XLA picked a bad transpose. For this matmul, X is 512 MiB, W is 512 MiB, and C is 2 GiB, so minimum HBM traffic is about 3 GiB. FLOPs are 2*32768*8192*32768 = 17.59T, giving an ideal compute time of 89ms versus about 3.9ms of HBM time. Layout affects bandwidth materially only if it causes extra transposes or rereads; otherwise it is a small percentage effect on a compute-bound matmul.
+  realistic_solution: Use the XLA tiled layout that feeds the contracting dimension K=8192 contiguously into 128x128 systolic tiles while tiling the N=32768 output columns. In row/column terms, the important property is not a CPU-style row-major label; it is that each W KxN tile can be read without strided gathers or an extra transpose. Do not hand-force a layout unless profiling shows XLA inserted a bad transpose. For this matmul, X is 512 MiB, W is 512 MiB, and C is 2 GiB, so minimum HBM traffic is about 3 GiB. FLOPs are 2*32768*8192*32768 = 17.18T, giving an ideal compute time of about 87ms versus about 3.9ms of HBM time. Layout affects bandwidth materially only if it causes extra transposes or rereads; otherwise this is a compute-bound matmul and layout differences are secondary.
   common_mistake: |
     **The Pitfall:** Applying CPU-centric row-major reasoning to TPU hardware.
     **The Rationale:** Candidates often default to CPU memory layout patterns, assuming simple row-major or column-major is best.
@@ -26,9 +26,9 @@ details:
     **Calculations:**
     - Minimum HBM traffic: 512 MiB + 512 MiB + 2048 MiB = 3072 MiB = 3 GiB.
     - Bandwidth Time: 3 GiB / 819 GB/s = about 3.9 ms.
-    - FLOPs: 2 * 32768 * 8192 * 32768 = 17.59 TFLOPs.
-    - Compute Time: 17.59 TFLOPs / 197 TFLOPs/s = 89 ms.
-    - AI = 17.59T / 3.22GB = about 5460 FLOPs/byte.
+    - FLOPs: 2 * 32768 * 8192 * 32768 = 17.18 TFLOPs.
+    - Compute Time: 17.18 TFLOPs / 197 TFLOPs/s = 87 ms.
+    - AI = 17.18T / 3.22GB = about 5330 FLOPs/byte.
     - One extra full transpose/read-write of W adds about 1 GiB traffic, or roughly 1.3 ms at peak bandwidth.
 
     **Conclusion & Interpretation:**

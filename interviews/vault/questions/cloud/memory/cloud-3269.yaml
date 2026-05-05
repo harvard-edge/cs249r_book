@@ -12,7 +12,7 @@ scenario: You are the lead ML Systems engineer responsible for deploying a large
 question: How would you design KV-cache paging and eviction on MI300X to maximize concurrent 128k-token contexts with 64 KB of KV per token?
 details:
   realistic_solution: |
-    A realistic solution would use paged attention with blocks sized in tokens, for example 16-token pages. At 64 KB per token, each page is about 1 MB, which is large enough for efficient HBM transfers while avoiding a contiguous 8 GB allocation per full 128k context. Reserve HBM for weights and runtime buffers first, then admit only the number of full-length contexts whose KV pages fit in the remaining pool. Eviction should operate at prefix/page granularity: keep active decode tails resident, evict reusable but idle prefixes by recency and priority, and avoid evicting pages needed by currently decoding requests. Batching should group requests with resident pages to use MI300X bandwidth efficiently.
+    A realistic solution would use paged attention with blocks sized in tokens, for example 16-token pages. At 64 KB per token, each page is about 1 MB, which is large enough for efficient HBM transfers while avoiding a contiguous 8 GB allocation per full 128k context. Reserve HBM for weights and runtime buffers first, then admit only the number of full-length contexts whose KV pages fit in the remaining pool. Eviction should operate at prefix/page granularity with explicit priorities: never evict pages for active decode tails, prefer keeping shared prefixes and soon-to-decode requests resident, and reclaim least-recently-used pages from idle or low-priority contexts first. Batching should group requests with resident pages to use MI300X bandwidth efficiently.
   common_mistake: |
     **The Pitfall:** Allocating contiguous memory for the entire context window.
 
@@ -29,10 +29,11 @@ details:
     - Theoretical Max Contexts (Full): 192 GB HBM / 8.19 GB = ~23 contexts.
     - Example 16-token page: 16 * 64 KB = 1 MB per page.
     - Pages per 128k context: 128,000 / 16 = 8,000 pages.
-    - Practical capacity is below 23 after reserving memory for weights, runtime buffers, and allocator slack.
+    - Example practical pool: if weights, runtime buffers, and allocator slack reserve 80 GB, then KV capacity is 192 GB - 80 GB = 112 GB.
+    - Practical full-context capacity: 112 GB / 8.19 GB = ~13 full 128k contexts, with leftover pages for shorter prompts or shared prefixes.
 
     **Conclusion & Interpretation:**
-    - **Result: ~23 full 128k contexts before overhead (Memory-Bound)**. Paging does not change the full-context lower bound; it improves usable concurrency by reducing fragmentation and by letting the scheduler mix shorter or partially resident contexts safely.
+    - **Result: ~23 full 128k contexts before overhead, or ~13 with an 80 GB non-KV reserve (Memory-Bound)**. Paging does not change the full-context lower bound; it improves usable concurrency by reducing fragmentation and by reclaiming least-useful idle pages while protecting decode-active pages.
 status: published
 provenance: imported
 requires_explanation: true

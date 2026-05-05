@@ -8,11 +8,11 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Tensor G3 On-Device ML Compiler Design for Real-time Vision
-scenario: Your team is tasked with deploying a cutting-edge real-time object detection model, initially trained in TensorFlow, onto Android smartphones powered by the Google Tensor G3. The model must achieve a sustained inference rate of 60 FPS while consuming minimal power.
+scenario: Your team is tasked with deploying a TensorFlow real-time object detection model onto Android smartphones powered by Google Tensor G3. The model must sustain 60 FPS with minimal power, and the target build should use a TFLite INT8 path whose ops are supported by the Tensor G3 TPU delegate or an Android NNAPI delegate without CPU fallback.
 question: How would you compile and optimize a TensorFlow object detector for TFLite/TPU on Tensor G3 to sustain 60 FPS?
 details:
-  realistic_solution: 'A robust solution involves using TensorFlow Lite''s compiler stack. This includes: 1. **Ahead-of-Time Compilation (AOT):** Convert the TensorFlow model to a TFLite flatbuffer, enabling static graph analysis. 2. **Operator Lowering:** Map high-level TensorFlow operations to Tensor G3-specific TPU instructions or highly optimized CPU/GPU kernels where TPU support is unavailable or inefficient. 3. **TPU Delegation:** Utilize the TFLite delegate mechanism to offload compatible operations to the Tensor G3''s on-device TPU. This might involve fusing operations into larger TPU-compatible units. 4. **Constant Folding & Dead Code Elimination:** During compilation, identify and pre-compute constant values and remove unused parts of the graph. 5. **Quantization:** Apply post-training quantization (PTQ) to INT8 or even quantization-aware training (QAT) for maximum performance and memory efficiency. 6. **Memory Optimization:** Employ strategies like buffer reuse and efficient memory
-    layout (e.g., NHWC for TPU) to manage the memory effectively. 7. **Profile-Guided Optimization:** Use real-world inference data to identify bottlenecks.'
+  realistic_solution: |
+    Convert the TensorFlow graph to a fully quantized TFLite INT8 flatbuffer with static input shapes and a representative calibration set, then inspect delegate placement before optimizing. The key release gate is that convolution, depthwise convolution, detection head, resize, NMS, and activation ops are either supported by the Tensor G3 TPU/NNAPI delegate or intentionally fused/replaced so they do not fall back to CPU in the 16.67ms frame budget. Use NHWC layouts, operator fusion, constant folding, buffer reuse, preallocated tensors, and camera/inference pipelining. Profile on device with Android tracing and TFLite benchmark tools to confirm per-op latency, delegate coverage, thermal behavior, and sustained 60 FPS rather than relying on peak TOPS.
   common_mistake: |
     **The Pitfall:** Failing to deeply integrate with the TPU architecture and defaulting to CPU fallback.
     **The Rationale:** Overlooking aggressive quantization (e.g., INT8) or dynamic shape optimization.
@@ -20,14 +20,15 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target frame rate: 60 FPS (<= 16.67 ms per frame).
-    - Typical model compute: 100 GOPs per inference.
-    - Tensor G3 Capacity: 7.5 TOPS.
+    - Frame budget: 16.67 ms, including pre/post-processing and synchronization.
+    - Example detector compute: 100 GOP per inference if all heavy ops stay on the accelerated delegate.
 
     **Calculations:**
-    - Required throughput: 100 GOPs * 60 FPS = 6000 GOPS (6 TOPS).
+    - Sustained work rate for the example detector = 100 GOP * 60 FPS = 6,000 GOP/s = 6 TOPS-equivalent.
+    - Any unsupported op on CPU consumes part of the 16.67 ms frame budget directly, so delegate coverage and post-processing latency must be measured per frame.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound.** The 7.5 TOPS TPU has sufficient theoretical capacity, but leaves a narrow 1.5 TOPS margin for delegate overhead, memory access, and any CPU/GPU fallback.
+    - **Result: Feasible only with full INT8 delegate coverage and low post-processing overhead.** The raw throughput estimate is a sizing check, not proof of 60 FPS; CPU fallback, NMS latency, or memory copies can dominate.
 status: published
 provenance: imported
 requires_explanation: true

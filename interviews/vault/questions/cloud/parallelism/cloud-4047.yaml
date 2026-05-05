@@ -8,10 +8,10 @@ competency_area: parallelism
 bloom_level: create
 phase: training
 title: Gradient Synchronization for ZeRO Stage 3
-scenario: ZeRO Stage 3 partitions model parameters, gradients, and optimizer states across GPUs. Forward and backward passes require all-gather of parameters before each layer and reduce-scatter of gradients after.
+scenario: ZeRO Stage 3 partitions model parameters, gradients, and optimizer states across GPUs. Assume the 30B FP16 parameters are evenly distributed across 60 layers, so each layer has about 1GB of parameters. Forward and backward passes require all-gather of parameters before each layer and reduce-scatter of gradients after.
 question: What is the ZeRO-3 per-layer communication schedule and cost for a 64-GPU, 30B-parameter, 60-layer training run?
 details:
-  realistic_solution: The 30B parameters (60GB FP16) spread across 60 layers give about 1GB of parameters per layer. The per-layer ZeRO-3 schedule requires an AllGather before the forward layer, an AllGather before the backward layer, and a ReduceScatter after the backward gradient is produced. Each primitive moves (N-1)/N × layer_size bytes over the bus. With 64 GPUs, this is 63/64 × 1GB per operation, so the per-layer traffic is 3 × 63/64 × 1GB ≈ 2.95GB. Across 60 layers, total iteration traffic is about 177GB, before considering overlap with compute.
+  realistic_solution: The 30B parameters (60GB FP16) spread evenly across 60 layers give about 1GB of parameters per layer. Under that assumption, the per-layer ZeRO-3 schedule requires an AllGather before the forward layer, an AllGather before the backward layer, and a ReduceScatter after the backward gradient is produced. Each primitive moves (N-1)/N × layer_size bytes over the bus. With 64 GPUs, this is 63/64 × 1GB per operation, so the per-layer traffic is 3 × 63/64 × 1GB ≈ 2.95GB. Across 60 layers, total iteration traffic is about 177GB, before considering overlap with compute.
   common_mistake: |
     **The Pitfall:** Applying the 2*(N-1)/N AllReduce factor to AllGather and ReduceScatter independently.
     **The Rationale:** Candidates double-count traffic by forgetting that AllReduce is composed of ReduceScatter + AllGather, and each alone only moves (N-1)/N data.
@@ -20,10 +20,11 @@ details:
     **Assumptions & Constraints:**
     - Model: 30B parameters = 60GB FP16.
     - GPUs (N): 64. Layers: 60.
+    - Parameters are assumed evenly distributed, so each layer has 60GB / 60 = 1GB of FP16 parameters.
 
     **Calculations:**
     - Traffic per layer: AllGather (fwd) + AllGather (bwd) + ReduceScatter.
-    - Cost: 3 * (63/64) * 1 GB = ~2.95 GB per layer.
+    - Conditional per-layer cost: 3 * (63/64) * 1 GB = ~2.95 GB per layer.
     - Total iteration traffic: 60 layers * 2.95 GB = ~177.2 GB.
 
     **Conclusion & Interpretation:**

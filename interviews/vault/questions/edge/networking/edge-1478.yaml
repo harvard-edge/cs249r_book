@@ -12,7 +12,7 @@ scenario: You are designing the inference architecture for an industrial gateway
 question: How would you route 8 concurrent 60 FPS streams across four Coral Edge TPUs while minimizing latency and PCIe contention?
 details:
   realistic_solution: |
-    Implement a device-aware routing strategy with static affinity: assign two camera streams to each Edge TPU and keep a small per-device FIFO so models and tensor arenas stay resident. Use load-aware spillover only when a TPU queue crosses a latency threshold, because spillover adds host-device transfer contention. Since 8 streams at 60 FPS require 480 inferences per second and the four TPUs only provide about 400 FPS at 10 ms per inference, the scheduler must also enforce admission control, downsample to 50 FPS per stream, or add capacity.
+    Implement a device-aware routing strategy with static affinity: assign two camera streams to each Edge TPU and keep a small per-device FIFO so models and tensor arenas stay resident. Route each camera to its assigned TPU by default, monitor queue depth and deadline misses per TPU, and allow spillover only for short bursts because cross-device spillover increases PCIe switch traffic and can reload tensor arenas. This policy minimizes latency and PCIe contention, but the capacity math shows the offered 480 FPS load exceeds the four-TPU service rate, so admission control or added capacity is still required.
   common_mistake: |
     **The Pitfall:** Using standard cloud load balancing techniques like simple round-robin.
     **The Rationale:** Candidates ignore the stateful nature of Edge TPUs and the severe penalty of PCIe host-to-device transfers.
@@ -29,7 +29,7 @@ details:
     - Deficit: 480 - 400 = 80 FPS.
 
     **Conclusion & Interpretation:**
-    - **Result: 80 FPS Deficit (Compute-Bound)**. A stable routing policy is two streams per TPU, but each TPU receives 120 FPS and can serve only 100 FPS. The minimum mitigation is reducing each stream to 50 FPS, cutting total demand to 400 FPS, or adding a fifth TPU to provide 500 FPS capacity.
+    - **Result: static two-stream affinity plus overload control (Routing-Then-Capacity Bound)**. The routing policy minimizes PCIe churn, but each TPU receives 2 * 60 = 120 FPS and can serve only 100 FPS. Queue monitoring must trigger frame dropping, admission control, or added TPU capacity before latency grows without bound.
 status: published
 provenance: imported
 requires_explanation: true

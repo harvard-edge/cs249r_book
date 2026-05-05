@@ -12,25 +12,26 @@ scenario: You are tasked with training a 1 trillion parameter LLM on a cluster o
 question: How would you combine data, tensor, and pipeline parallelism on the cluster for a 1T-parameter LLM with a 2 PB training footprint?
 details:
   realistic_solution: |
-    Use an explicit 3D layout: tensor parallelism inside high-bandwidth accelerator groups, pipeline parallelism across groups of layers, and data parallelism across complete TP x PP replicas. For example, use TP=8 within each tightly coupled node or island, PP=128 across layer groups for one model replica, and DP=16 replicas for throughput and global batch size, with ZeRO-style sharding of optimizer and gradient state inside each DP group when supported. Avoid placing fine-grained TP collectives across slow inter-node links; use inter-node bandwidth mainly for pipeline sends and DP gradient synchronization.
+    First define whether the 2 PB footprint is per model replica or the already-sharded total job footprint. If it is per replica, tensor and pipeline parallelism must provide enough capacity for one replica before adding DP, because ordinary DP replicates model state and activations. Keep TP inside high-bandwidth accelerator groups, use PP across layer groups to spread the remaining footprint, and add DP only when extra accelerators are available for throughput and global batch size. ZeRO/FSDP-style sharding can reduce DP replication, but that assumption must be explicit in the layout.
   common_mistake: |
     **The Pitfall:** Applying naive tensor parallelism across nodes without sufficient inter-node bandwidth.
     **The Rationale:** Candidates focus entirely on memory capacity (192GB per chip) and forget that TP is extremely communication-heavy.
     **The Consequence:** The training process becomes entirely communication-bound over the slower inter-node network, wasting the massive 1,307 TFLOPS compute capacity.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Stated training footprint is approximately 2 PB, including weights and activations.
+    - Stated training footprint is approximately 2 PB for one model replica, including weights and activations, before adding ordinary DP replicas.
     - 192 GB HBM3 per accelerator.
     - Use the footprint as the capacity planning input rather than recomputing a smaller baseline from weights alone.
 
     **Calculations:**
-    - Raw capacity floor = 2 PB / 192 GB = 2,000,000 GB / 192 GB ≈ 10,417 accelerators.
+    - Raw capacity floor for one replica = 2 PB / 192 GB = 2,000,000 GB / 192 GB ≈ 10,417 accelerators.
     - Add 10% headroom for fragmentation, communication buffers, and scheduler placement: 10,417 * 1.10 ≈ 11,459 accelerators.
-    - Example 3D shape: TP=8, PP=128, DP=12 gives 8 * 128 * 12 = 12,288 accelerators.
-    - Per-accelerator average footprint = 2,000,000 GB / 12,288 ≈ 163 GB, leaving about 29 GB headroom on a 192 GB device.
+    - Minimum-capacity sharding product for one replica is therefore TP * PP >= 11,459 before DP.
+    - Example capacity shape: TP=8 and PP=1536 gives TP * PP = 12,288 accelerators for one replica, with average footprint 2,000,000 GB / 12,288 ≈ 163 GB per accelerator.
+    - Adding ordinary DP=12 would replicate this footprint 12 times and require about 147,456 accelerators unless optimizer/activation state is explicitly sharded across DP ranks.
 
     **Conclusion & Interpretation:**
-    - **Result: a 12,288-accelerator 3D layout such as TP=8, PP=128, DP=12 fits the stated 2 PB footprint with headroom.** TP should stay intra-node, PP should span layer groups, and DP should replicate the full pipeline for throughput.
+    - **Result: a 12,288-accelerator TP/PP layout can fit one 2 PB replica with headroom, but it does not also justify DP=12.** Add DP only with additional capacity or with an explicit ZeRO/FSDP assumption that changes the replicated-memory model.
 status: published
 provenance: imported
 requires_explanation: true

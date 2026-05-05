@@ -12,24 +12,26 @@ scenario: You are deploying an LLM on an NVIDIA GPU. During profiling, you notic
 question: How do AOT compilation, operator lowering, and constant folding improve LLM inference on an H100?
 details:
   realistic_solution: |
-    An ML framework compiler performs deep transformations: AOT compilation eliminates runtime interpretation and optimizes for SMs/Tensor Cores. Operator lowering maps math to highly efficient H100-specific intrinsic functions or fused CUDA kernels, maximizing the 989 TFLOPS compute and reducing redundant memory transfers. Constant folding evaluates constant expressions at compile time, freeing up compute resources.
+    AOT compilation fixes shapes and emits an optimized executable ahead of serving time, removing runtime graph interpretation, dynamic dispatch, and repeated autotuning from the hot path. Operator lowering maps high-level matmuls, attention, normalization, and elementwise expressions to H100-friendly Tensor Core kernels or fused CUDA/Triton kernels, which reduces intermediate HBM reads and writes for the same graph. Constant folding precomputes static masks, position tables, scale factors, and shape-dependent expressions so those operations do not consume launch slots, bandwidth, or compute during inference.
   common_mistake: |
     **The Pitfall:** Overlooking the interplay between the H100's high compute and finite memory bandwidth.
     **The Rationale:** Engineers assume general compiler optimizations suffice without addressing specific memory-bound bottlenecks.
     **The Consequence:** Operations become memory-bound, stranding the massive TFLOPS capacity of the hardware.
   napkin_math: |
     1. **Assumptions & Constraints:**
+       - Same profiled subgraph before and after compilation.
        - Subgraph compute: 100 TFLOPs.
-       - Unfused subgraph memory access: 0.5 TB across repeated reads/writes of intermediates.
-       - Fused subgraph memory access: 0.2 TB after keeping intermediates on chip.
+       - Baseline memory access from unfused intermediates: 0.5 TB.
+       - Lowered/fused memory access after keeping intermediates on chip: 0.2 TB.
        - Hardware: 989 TFLOPS, 3.35 TB/s bandwidth.
     2. **Calculations:**
        - Theoretical Compute Time = 100 TFLOPs / 989 TFLOPS = 0.101 seconds.
        - Unfused Memory Time = 0.5 TB / 3.35 TB/s = 0.149 seconds, so the baseline is memory-bound.
        - Fused Memory Time (0.2 TB) = 0.2 TB / 3.35 TB/s = 0.060 seconds.
-       - Post-fusion runtime is bounded by max(0.101 s compute, 0.060 s memory) = 0.101 seconds.
+       - Post-lowering/fusion runtime is bounded by max(0.101 s compute, 0.060 s memory) = 0.101 seconds.
+       - AOT and constant folding do not change the 100 TFLOPs directly; they remove launch/runtime overhead and static work around this same subgraph.
     3. **Conclusion & Interpretation:**
-       - **Result: Baseline Memory-Bound, Post-Fusion Compute-Bound**. Operator fusion removes enough HBM traffic that memory time falls below compute time, reducing the estimated bottleneck from 0.149 s to 0.101 s.
+       - **Result: Baseline Memory-Bound, Post-Lowering Compute-Bound**. Lowering and fusion reduce HBM traffic for the same graph, while AOT compilation and constant folding remove runtime overhead and static operations.
 status: published
 provenance: imported
 requires_explanation: false

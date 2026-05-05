@@ -11,7 +11,7 @@ title: The MoE Memory Bandwidth Tax
 scenario: A team replaces a 40B dense model with an 8x40B MoE model (Top-1 routing, 40B active parameters per token). Both models require ~80 GFLOPs per token. They are deployed on an 8x H100 cluster (3.35 TB/s per GPU). At batch size 128, the dense model achieves 500 tokens/sec. The team expects the MoE to match this since the active compute is identical. Instead, MoE throughput drops to roughly 120 tokens/sec.
 question: Why does the 8x40B MoE with the same active FLOPs as the 40B dense model drop from 500 to 120 tokens/sec?
 details:
-  realistic_solution: Throughput at batch size 128 is determined by the roofline model and by expert reuse. The dense 40B model applies one 80GB weight set to the whole batch. In the MoE, top-1 routing sends the 128 tokens across 8 separate 40B experts, so each expert sees only about 16 tokens of effective batch. If the routed experts are resident in HBM but their weights must be read for their assigned tokens during the step, the batch touches about 8 expert weight sets instead of one dense weight set. That lowers arithmetic intensity and adds routing/dispatch overhead, shifting the MoE toward the memory-bandwidth-bound region even though the active FLOPs per token are the same.
+  realistic_solution: Throughput at batch size 128 is determined by the roofline model, expert reuse, and communication overhead. The dense 40B model applies one 80GB weight set to the whole batch, so each weight stream is reused across 128 tokens. In the MoE, top-1 routing spreads those 128 tokens across 8 separate 40B experts, so each expert sees only about 16 tokens of effective batch. That reduces reuse of each expert's resident weights, makes the per-expert GEMMs smaller and less efficient, and adds dispatch/all-to-all/load-balance overhead. The active FLOPs per token can match the dense model while the achieved tokens/sec drops because the MoE has lower effective arithmetic intensity and more routing overhead.
   common_mistake: |
     **The Pitfall:** Assuming that equal active FLOPs implies equal throughput, ignoring the severe arithmetic intensity drop caused by loading multiple experts.
     **The Rationale:** Loading multiple experts drops arithmetic intensity.
@@ -26,11 +26,11 @@ details:
 
     **Calculations:**
     - Dense batch work = 128 tokens * 80 GFLOPs/token = 10.24 TFLOPs.
-    - Dense weight traffic per step ≈ 80 GB, so dense AI ≈ 10.24 TFLOPs / 80 GB = 128 FLOPs/Byte.
-    - MoE batch work is still 10.24 TFLOPs, but the batch touches 8 resident expert weight sets.
-    - MoE weight traffic per step ≈ 8 * 80 GB = 640 GB, so MoE AI ≈ 10.24 TFLOPs / 640 GB = 16 FLOPs/Byte.
-    - Bandwidth-limited token rate estimate = 3.35 TB/s / (640 GB / 128 tokens) ≈ 670 tokens/sec before communication and kernel inefficiency.
-    - Applying realistic expert dispatch, all-to-all, load imbalance, and less efficient per-expert GEMMs can plausibly reduce this toward the observed ~120 tokens/sec.
+    - Dense weight traffic per batch step is roughly one 80 GB weight stream if weights are reused across the batch, so dense AI ≈ 10.24 TFLOPs / 80 GB = 128 FLOPs/Byte, ignoring activations and cache effects.
+    - With uniform top-1 routing, each expert processes only about 16 tokens, so the same 80 GB expert stream is amortized over 16 tokens instead of 128.
+    - Expert-local AI falls by about 8x: 16 tokens * 80 GFLOPs/token / 80 GB ≈ 16 FLOPs/Byte.
+    - Equivalently, if the step touches all 8 experts, the batch-level upper-bound traffic intuition is 8 * 80 GB = 640 GB for the same 10.24 TFLOPs of active work.
+    - At 16 FLOPs/Byte, the MoE is far below the H100 ridge point, and dispatch/all-to-all, load imbalance, and smaller per-expert GEMMs further reduce achieved throughput.
 
     **Conclusion & Interpretation:**
     - **Result: Lower Effective Arithmetic Intensity.** The problem is not that every token uses 640GB of weights; it is that the batch is fragmented across experts, so there is far less reuse of each expert's weights and additional routing overhead. Equal active FLOPs therefore do not imply equal throughput.

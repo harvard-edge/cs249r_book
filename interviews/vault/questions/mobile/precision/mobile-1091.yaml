@@ -12,7 +12,7 @@ scenario: You are deploying a 7-billion parameter LLM on a mobile TPU capable of
 question: Why does 3-bit AWQ quantization cause a severe compute bottleneck on the mobile TPU architecture?
 details:
   realistic_solution: |
-    The mobile TPU is heavily optimized for native 8-bit or 16-bit precision, while 3-bit weights usually require inefficient packing formats that do not map cleanly to the accelerator's fast paths. The weights must be unpacked, bitmasked, shifted, and often expanded to a supported type such as INT8 before matrix multiplication. This can trade memory savings for extra instruction overhead, irregular access patterns, and poor accelerator utilization.
+    The mobile TPU is heavily optimized for native 8-bit or 16-bit precision, while 3-bit weights usually require packing formats that do not map cleanly to the accelerator's fast matrix kernels. Before the multiply, the runtime often has to unpack groups of 3-bit values, apply scales/zero-points, and materialize or emulate a supported representation such as INT8. That conversion work adds scalar or custom-kernel overhead, irregular memory access, and poor utilization. The result can be compute-bound unpacking and dequantization even though the packed model fits in memory.
   common_mistake: |
     **The Pitfall:** Assuming aggressive sub-4-bit quantization linearly lowers inference latency by scaling down memory bandwidth.
     **The Rationale:** Candidates accurately calculate bandwidth savings but entirely neglect the lack of native hardware support for custom bit-widths.
@@ -20,17 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 7B parameters.
-    - 3-bit packed footprint: 7B * 3 bits = 21 Gbits = 2.625 GB.
-    - INT8 expanded footprint for compute: 7 GB.
-    - Available memory bandwidth: 25 GB/s under mobile system load.
+    - 3-bit packed footprint: 7B x 3 bits = 21 Gbits = 2.625 GB.
+    - The TPU has native fast paths for INT8/FP16, not arbitrary 3-bit matrix multiply.
+    - 3-bit values must be unpacked and scaled before or during the native compute kernel.
 
     **Calculations:**
-    - Packed 3-bit weight traffic: 2.625 GB / 25 GB/s = 105 ms if used directly.
-    - Expanded INT8 traffic after unpacking: 7 GB / 25 GB/s = 280 ms equivalent traffic.
-    - Expansion overhead: 7 GB - 2.625 GB = 4.375 GB of additional on-chip/off-chip movement and conversion work.
+    - Storage savings versus INT8: 7 GB - 2.625 GB = 4.375 GB.
+    - Packing density is not equal to accelerator throughput: every group of packed weights needs bit extraction, sign/zero-point handling, and scaling.
+    - If that unpack/dequantize path is not fused into a native high-throughput kernel, the added instructions and temporary data movement can dominate the saved DRAM traffic.
+    - Therefore the bottleneck is the unsupported-bit-width emulation path, not the nominal packed model size.
 
     **Conclusion & Interpretation:**
-    - **Result: Inefficient emulation/unpacking bottleneck**. The 3-bit format saves storage, but the accelerator often pays conversion and data-movement overhead before using native kernels, so latency can regress instead of improving.
+    - **Result: Inefficient Emulation/Unpacking Bottleneck**. The 3-bit format saves storage, but latency can regress when the TPU must emulate it through unpacking and dequantization before native INT8/FP16 execution.
 status: published
 provenance: imported
 requires_explanation: false

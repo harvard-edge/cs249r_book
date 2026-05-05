@@ -11,7 +11,7 @@ title: Sizing Dataloader Workers and Prefetch Batches
 scenario: You are training a Vision Transformer on a node with 1 GPU and a 32-core CPU. Profiling shows the GPU forward/backward pass takes 80ms per batch of 64 images. Data loading and heavy augmentation take 5ms per image on a single CPU thread. Storage occasionally experiences 500ms disk latency spikes.
 question: How many CPU dataloader workers and prefetched batches are needed to match the 80ms GPU step and hide 500ms disk spikes?
 details:
-  realistic_solution: Allocate exactly 4 CPU workers to balance the GPU step time, and configure a prefetch buffer depth of at least 7 batches to ensure the GPU always has data during maximum I/O stalls.
+  realistic_solution: Use the single-thread augmentation profile to size workers, then add headroom and validate with GPU idle time. A batch needs 64 * 5ms = 320ms of CPU work, so about 4 fully efficient workers are the lower bound for an 80ms GPU step; in practice start around 4-6 workers and tune for CPU overhead, storage behavior, and augmentation variance. Prefetch depth should cover the batches consumed during a worst 500ms disk stall, plus any batches already in flight or held by workers. Since 500ms / 80ms = 6.25, use at least 7 ready batches as the stall-coverage component, then account for the framework's queue-depth semantics.
   common_mistake: |
     **The Pitfall:** Setting `num_workers` to the maximum available CPU cores (e.g., 32) and leaving the prefetch factor at default.
     **The Rationale:** Engineers assume "more is better" for CPU threads to prevent GPU starvation.
@@ -24,11 +24,14 @@ details:
 
     **Calculations:**
     - CPU Batch Time: 64 * 5ms = 320ms/thread.
-    - Minimum Workers: 320ms / 80ms = 4 workers.
-    - Batches Consumed in Spike: 500ms / 80ms = 6.25 batches.
+    - CPU work per batch: 64 * 5ms = 320ms on one fully utilized worker.
+    - Lower-bound worker count: 320ms / 80ms = 4 perfectly efficient workers.
+    - Practical worker count: start around 4-6 workers, then tune from measured GPU idle time because IPC, Python overhead, cache misses, and augmentation variance reduce ideal scaling.
+    - Batches consumed during a disk spike: 500ms / 80ms = 6.25 batches, so the ready-batch buffer needs at least 7 batches just to cover the stall window.
+    - Total queue depth must also account for batches already assigned to workers or in flight, depending on the dataloader's prefetch semantics.
 
     **Conclusion & Interpretation:**
-    - **Result: 4 workers (I/O-Bound)**. Minimum 4 workers and 7 batches prefetch required to prevent GPU starvation.
+    - **Result: sizing rule, not an exact constant (I/O-Bound)**. Four workers is an ideal lower bound, while 4-6 is a reasonable starting range; prefetch should cover at least 7 ready batches for the 500ms stall plus in-flight consumption.
 status: published
 provenance: imported
 requires_explanation: false

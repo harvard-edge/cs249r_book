@@ -11,7 +11,8 @@ title: Prefill-Decode Ratio Optimization for LLM Serving Fleet
 scenario: A disaggregated serving fleet runs a 70B model. Traffic analysis shows average prompt length is 256 tokens and average output length is 512 tokens.
 question: What optimal prefill-to-decode GPU ratio would you choose to maximize GPU utilization for a 70B model with 256-token prompts and 512-token outputs?
 details:
-  realistic_solution: Use comparable request service rates for the two stages. With the stated roofline assumptions, one H100 prefill worker handles about 1 / 0.036s = 27.8 requests/sec for 256-token prompts. A decode H100 at batch 64 emits about 64 / 0.0418s = 1531 tokens/sec, so 512-token outputs consume 1531 / 512 ≈ 3 requests/sec. To balance saturated stages, provision roughly 27.8 / 3 ≈ 9 decode GPUs per prefill GPU. Treat this as an approximate capacity ratio; batching, scheduling overhead, KV bandwidth, and traffic variance can move the production ratio.
+  realistic_solution: |
+    Use measured stage capacities, not a token-count ratio or a raw-parameter FLOP formula. Benchmark the 70B prefill worker at the target prompt length and the decode worker at the intended batch size, then balance request rates: decode GPUs per prefill GPU = prefill_req_per_sec_per_gpu * output_tokens / decode_tokens_per_sec_per_gpu. For example, if a prefill H100 handles about 25 requests/sec for 256-token prompts and a decode H100 sustains about 1,600 output tokens/sec at the production batch size, 512-token outputs require 25 * 512 / 1,600 = 8 decode GPUs per prefill GPU. Start around 1:8, keep elastic pools, and tune with real scheduler overhead, KV transfer time, and traffic variance.
   common_mistake: |
     **The Pitfall:** Setting the ratio purely based on prompt-to-output token counts (256:512 = 1:2).
     **The Rationale:** Prefill compute scales as O(seq_len^2) due to attention, while decode is O(1) per token and memory-bound. The compute imbalance requires roofline analysis.
@@ -19,17 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 70B model, 256-token prompt, 512-token output.
-    - H100 GPU (989 TFLOPS, 3.35 TB/s bandwidth). Decode batch size 64.
+    - H100 decode is typically memory-bandwidth and batching sensitive.
+    - Use stage benchmark assumptions instead of deriving latency from 2 * tokens * params.
+    - Example benchmark: prefill H100 = 25 requests/sec at 256-token prompts; decode H100 = 1,600 output tokens/sec at the chosen batch size.
 
     **Calculations:**
-    - Prefill service time: 2 * 256 tokens * 70B params / 989 TFLOP/s ≈ 36ms/req.
-    - Prefill service rate: 1 / 0.036s ≈ 27.8 req/sec per prefill H100.
-    - Decode per-step memory time at batch 64: about 41.8ms to produce one token for each of 64 active requests.
-    - Decode token rate: 64 tokens / 0.0418s ≈ 1531 tokens/sec per decode H100.
-    - Decode request rate for 512-token outputs: 1531 / 512 ≈ 3.0 req/sec per decode H100.
-    - Balanced capacity ratio: 27.8 / 3.0 ≈ 9.3 decode H100s per prefill H100.
+    - Decode request rate per H100 = 1,600 output tokens/sec / 512 tokens/request = 3.125 requests/sec.
+    - Balanced capacity ratio = prefill request rate / decode request rate = 25 / 3.125 = 8 decode H100s per prefill H100.
+    - Equivalent formula: 25 prefill req/sec * 512 output tokens/req / 1,600 decode tok/sec = 8.
+    - If measured decode throughput falls to 1,300 tok/sec, ratio becomes 25 * 512 / 1,300 = 9.8.
+    - If measured prefill throughput falls to 20 req/sec, ratio becomes 20 * 512 / 1,600 = 6.4.
 
     **Conclusion & Interpretation:**
-    - **Result: Approximate Capacity Imbalance.** Start around 1 prefill H100 to 9 decode H100s, then tune with measured batching, scheduler overhead, and saturation behavior.
+    - **Result: Stage-Capacity Balance.** Start near 1 prefill H100 to 8 decode H100s under the example benchmark, but treat the ratio as an empirical capacity target because decode batching, memory layout, and scheduler overhead can move it materially.
 status: published
 provenance: imported

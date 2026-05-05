@@ -12,9 +12,9 @@ scenario: 'A flagship mobile AI system features a Snapdragon 8 Gen 3 with 16GB L
 question: What bandwidth conflicts arise when these workloads run together, and what scheduler changes are needed?
 details:
   realistic_solution: |
-    Use one sustained-bandwidth budget and schedule the workloads by priority. The LLM consumes 1.5GB per decode token; at the requested 19.5ms TPOT that is 1.5GB / 0.0195s = 76.9GB/s, which already occupies essentially the full 77GB/s peak bus before system traffic. Speech should be modeled from its actual inference cadence: 100ms audio windows imply 10 full 1B INT8 passes/s, or 10GB/s. YOLO-s adds 11MB × 30fps = 0.33GB/s, depth adds 10MB × 60fps = 0.6GB/s, and the system reserve is 3GB/s. Running all together would demand 90.8GB/s, so it is unschedulable.
+    Use one sustained-bandwidth budget and schedule the workloads by priority instead of assuming the LLM streams its full 1.5GB footprint for every token. Model the optimized LLM assistant as an active decode workload with about 320MB of DRAM traffic per token after kernel tiling, cache reuse, and fused dequantization; at 19.5ms TPOT that is 320MB / 0.0195s = 16.4GB/s. Speech should be modeled from its streaming cadence: assume 100MB of active recurrent/attention state read per 10ms frame, or 10GB/s. YOLO-s adds 11MB × 30fps = 0.33GB/s, depth adds 10MB × 60fps = 0.6GB/s, and the system reserve is 3GB/s. The simultaneous steady budget is therefore about 30.3GB/s, below 77GB/s, but the conflict is latency isolation: bursts from camera/depth or background copies can steal priority and push LLM or speech frames past their deadlines.
 
-    A feasible policy is to give speech a hard real-time slice and run LLM decode in the remaining bandwidth while suspending camera/depth during active assistant turns. With speech plus system reserve active, LLM receives 77 - 10 - 3 = 64GB/s, so LLM TPOT becomes 1.5GB / 64GB/s = 23.4ms. If the assistant must preserve 19.5ms TPOT, the scheduler has to pause speech recognition as well during short decode bursts and run the LLM in an exclusive foreground mode, which still contends with the 3GB/s system reserve and yields about 1.5GB / 74GB/s = 20.3ms. The concrete scheduler change is therefore admission control: camera and depth are disabled during LLM decode, speech is either guaranteed with a slower LLM SLA or paused for an exclusive LLM latency mode.
+    A feasible policy is hierarchical QoS: P0 speech keeps a hard 10GB/s real-time reservation, P1 active LLM decode reserves 20GB/s with preemptive dispatch, P2 camera/depth run only from the remaining budget, and P3 background copies are throttled or stopped during assistant turns. If measured P95 TPOT rises, the scheduler first preempts background copies, then drops camera/depth frames or resolution; it should not pause speech unless the product explicitly enters a push-to-talk mode. This policy resolves contention with priority and admission control while preserving continuous speech.
   common_mistake: |
     **The Pitfall:** Failing to calculate aggregate bandwidth requirements.
     **The Rationale:** Candidates often list bandwidth requirements without checking if their sum exceeds the 77 GB/s system limit, or without designing a concrete scheduling policy.
@@ -22,23 +22,23 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Snapdragon 8 Gen 3 with 77 GB/s bandwidth limit.
-    - Workloads: LLM (1.5GB, 19.5ms TPOT), Speech (10GB/s), YOLO (0.33GB/s), Depth (0.6GB/s), System (3GB/s).
+    - Workloads: optimized LLM active decode (320MB/token at 19.5ms TPOT), Speech (10GB/s), YOLO (0.33GB/s), Depth (0.6GB/s), System (3GB/s).
 
     **Calculations:**
-    - LLM peak (3B INT4, 1.5GB): 1.5GB / 0.0195s = 76.9 GB/s.
-    - Speech (1B INT8, 1GB): 10 passes/s * 1GB = 10 GB/s.
+    - LLM active decode traffic: 0.320GB / 0.0195s = 16.4 GB/s.
+    - LLM reservation with margin: 20 GB/s.
+    - Speech streaming reservation: 100MB active state per 10ms frame = 10 GB/s.
     - YOLO (11M INT8, 11MB): 11MB * 30fps = 0.33 GB/s.
     - Depth (5M FP16, 10MB): 10MB * 60fps = 0.6 GB/s.
     - System baseline: 3 GB/s.
-    - Total bandwidth: 76.9 + 10 + 0.33 + 0.6 + 3 = 90.8 GB/s.
+    - Simultaneous steady bandwidth: 16.4 + 10 + 0.33 + 0.6 + 3 = 30.33 GB/s.
+    - Reserved QoS bandwidth: 20 + 10 + 0.33 + 0.6 + 3 = 33.93 GB/s, leaving 43.07 GB/s for burst headroom and best-effort work.
 
-    - Feasible speech-preserving policy: suspend YOLO/depth, reserve 10GB/s speech + 3GB/s system, leave 64GB/s for LLM.
-    - LLM TPOT under speech-preserving policy: 1.5GB / 64GB/s = 23.4ms.
-    - Exclusive LLM foreground policy: suspend speech/YOLO/depth, leave 77 - 3 = 74GB/s for LLM.
-    - LLM TPOT under exclusive policy: 1.5GB / 74GB/s = 20.3ms.
+    - Scheduler policy: P0 speech 10GB/s, P1 LLM 20GB/s, P2 camera/depth best effort within frame deadlines, P3 background copies preemptible.
+    - If LLM P95 rises, reclaim bandwidth by stopping P3 first, then reducing P2 camera/depth resolution or frame rate.
 
     **Conclusion & Interpretation:**
-    - **Result: 90.8 GB/s > 77 GB/s (Memory-Bandwidth Bound)**. The scheduler must use admission control: suspend camera/depth during LLM decode, then choose between speech-preserving mode at ~23.4ms TPOT or exclusive LLM mode at ~20.3ms TPOT.
+    - **Result: About 30.33 GB/s steady, 33.93 GB/s reserved.** The system is not continuously bandwidth-oversubscribed under the stated active-traffic model, but it still needs priority scheduling and admission control so bursty camera/depth/copy traffic cannot violate speech or LLM latency.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: 'Queueing Theory Specification: Design a Latency SLO Budget'
 scenario: Specify a complete latency budget for a three-tier inference system serving Claude-Haiku-scale requests. Total P99 SLO = 500ms. Arrival rate λ=1000 req/s.
 question: How would you allocate the 500ms P99 latency budget across the load balancer, router, and GPU tiers, and size each M/M/c tier?
 details:
-  realistic_solution: 'Allocate the 500ms P99 budget by giving tiny budgets to lightweight tiers and most of the budget to GPU service: LB 5ms, router 15ms, GPU 480ms. For the LB, one worker at μ=100,000 req/s has ρ=0.01 and P99 well below 5ms. For the router, one worker at μ=10,000 req/s has ρ=0.10 and P99 well below 15ms. For the GPU tier, assume each worker has mean service 50ms, so μ=20 req/s. The offered load is a=λ/μ=50 Erlangs, so c must exceed 50. Using Erlang C with c=51 gives ρ=1000/(51*20)=0.98, P(wait)≈0.84, and P99 queue wait ≈ ln(0.84/0.01)/(1020-1000)=222ms. Adding 50ms service gives about 272ms, under the 480ms GPU budget. Thus a mathematical minimum is LB=1, router=1, GPU=51 workers; in production, add headroom above 51 for burst and model error.'
+  realistic_solution: 'Allocate the 500ms P99 budget by giving tiny budgets to lightweight tiers and most of the budget to GPU service: LB 5ms, router 15ms, GPU 480ms. For the LB, one worker at μ=100,000 req/s has an M/M/1 P99 of about 0.047ms. For the router, one worker at μ=10,000 req/s has P99 about 0.51ms. For the GPU tier, assume each worker has mean service 50ms, so μ=20 req/s and offered load is 50 Erlangs. Use Erlang C for queue wait and then the exact exponential-service response tail mixture. c=51 is stable but has an estimated response P99 around 530ms, exceeding the 480ms GPU budget. c=52 gives P(wait)≈0.70 and response P99 around 326ms, so a defensible mathematical sizing is LB=1, router=1, GPU=52 workers. In production, add headroom above 52 for burst and model error.'
   common_mistake: |
     **The Pitfall:** Allocating latency budgets by equal thirds across all tiers.
     **The Rationale:** Candidates avoid complex queueing theory math and default to evenly distributing the SLA.
@@ -26,15 +26,15 @@ details:
     **Calculations:**
     - LB with c=1: ρ = 1000/100000 = 0.01, so P99 is far below 5ms.
     - Router with c=1: ρ = 1000/10000 = 0.10, so P99 is far below 15ms.
+    - LB M/M/1 P99 = -ln(0.01)/(100000-1000) = 0.047ms < 5ms.
+    - Router M/M/1 P99 = -ln(0.01)/(10000-1000) = 0.51ms < 15ms.
     - GPU offered load a = λ/μ_gpu = 1000/20 = 50 Erlangs; c must be greater than 50 for stability.
-    - Check c=51: ρ = 1000/(51*20) = 0.980.
-    - Erlang C gives P(wait) ≈ 0.84.
-    - M/M/c queue tail: P(Wq > t) = P(wait) * exp(-(cμ-λ)t).
-    - P99 queue wait = ln(0.84/0.01)/(1020-1000) = 222ms.
-    - GPU P99 response ≈ 222ms + 50ms = 272ms < 480ms.
+    - For M/M/c, P(Wq > t) = P(wait) * exp(-(cμ-λ)t), and response time adds an independent Exp(μ) service time.
+    - c=51: Erlang C P(wait)≈0.84, queue tail rate cμ-λ=20/s. Because the queue tail rate equals μ, response tail is exp(-20t)*(1+0.84*20t); P99 response ≈ 530ms, so c=51 misses the 480ms GPU budget.
+    - c=52: P(wait)≈0.70 and queue tail rate = 40/s. Response tail is (1-Pw)exp(-20t)+Pw*(40exp(-20t)-20exp(-40t))/(40-20); solving tail=0.01 gives P99 response ≈ 326ms.
 
     **Conclusion & Interpretation:**
-    - **Result: LB=1, router=1, and GPU=51 workers is the mathematical minimum under these assumptions.** Production sizing should add headroom above the minimum because 98% GPU utilization leaves little margin.
+    - **Result: LB=1, router=1, and GPU=52 workers is the mathematical minimum under these assumptions.** Production sizing should add headroom above the minimum because high GPU utilization leaves little margin.
 status: published
 provenance: imported
 requires_explanation: true

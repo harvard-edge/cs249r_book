@@ -11,7 +11,8 @@ title: On-Premise Guardrail Architecture for Legal Summarization
 scenario: You are tasked with designing a secure, on-premise document summarization pipeline for legal contracts. The system must include strict responsible AI guardrails, specifically PII redaction and hallucination detection, before surfacing summaries to users. The entire pipeline must be deployed on a single accelerator constrained to 32 GB LPDDR4x, 400 TOPS INT8, and 75W.
 question: How would you allocate hardware resources between the main summarization model and guardrails to meet a 2-second end-to-end latency SLA?
 details:
-  realistic_solution: The optimal design quantizes the main summarization model (e.g., an 8B parameter model) to INT8, occupying ~8.5 GB. Instead of using LLMs for guardrails, architect a system using small, specialized INT8 models (e.g., DeBERTa for hallucination, lightweight NER for PII) running concurrently where possible. PII redaction runs pre-summarization, and hallucination detection runs post-summarization. By relying heavily on INT8 compilation, the 400 TOPS capability is maximized, keeping the total memory footprint well under the 32 GB constraint.
+  realistic_solution: |
+    Use most accelerator memory for the INT8 summarization model and KV cache, but reserve a small fixed budget for specialized guardrails: about 8.5 GB for an INT8 8B model, about 0.25 GB for NER and hallucination classifiers, and the remaining memory for runtime buffers and KV cache. Run PII redaction before summarization and hallucination checks after summarization; only overlap guardrail work with tokenization, retrieval, or other non-decoder work because the decoder is the SLA bottleneck. This allocation fits memory, but the 2-second SLA is met only if the compiled decoder can finish the requested output in under roughly 1.8 seconds, leaving about 200 ms for guardrails and orchestration. If profiling shows the 8B decoder cannot hit that budget, the correct tradeoff is to use a smaller main model, reduce max output tokens, or increase effective throughput rather than adding larger guardrail models.
   common_mistake: |
     **The Pitfall:** Designing pipelines that chain multiple large LLMs for each guardrail task.
     **The Rationale:** Candidates default to using full-size LLMs for simple tasks and fail to utilize INT8 capabilities, proposing FP16 models.
@@ -21,17 +22,18 @@ details:
     - SLA: 2-second latency.
     - Hardware: 32 GB LPDDR4x, 400 TOPS INT8.
     - 8B main model INT8 size: ~8.5 GB.
-    - Guardrail models: INT8 DeBERTa/NER ~220 MB total.
+    - Guardrail models: INT8 DeBERTa/NER ~250 MB total.
+    - Leave about 200 ms of the SLA for PII redaction, hallucination scoring, and orchestration.
 
     **Calculations:**
-    - Total static memory = 8.5 GB + 0.22 GB = 8.72 GB.
-    - Available memory for KV cache = 32 GB - 8.72 GB = 23.28 GB.
-    - Batch-1 decoder generation streams most weights once per generated token; bandwidth floor = 8.5 GB / 100 GB/s = 85 ms/token.
-    - Main model bandwidth floor for 50 tokens = 50 * 85 ms = 4.25 seconds before guardrails.
-    - Lightweight guardrails add about 0.22 GB / 100 GB/s = 2.2 ms of bandwidth floor plus classifier compute, so they are not the dominant term.
+    - Static model memory = 8.5 GB + 0.25 GB = 8.75 GB.
+    - Memory left for KV cache, activations, and runtime buffers = 32 GB - 8.75 GB = 23.25 GB.
+    - Latency budget for the main summarizer = 2.0 s - 0.2 s = 1.8 s.
+    - For a 50-token response, the required average decode rate is 50 / 1.8 = 27.8 tokens/s or faster.
+    - The guardrail allocation is small enough that memory is not the limiting factor; measured decoder tokens/s determines whether the SLA is feasible.
 
     **Conclusion & Interpretation:**
-    - **Result: Batch-1 generation misses the 2-second SLA under this bandwidth-floor model.** Keep guardrails as small specialized INT8 models, but meeting the SLA requires a smaller/faster main model, fewer generated tokens, higher effective bandwidth, or batching that improves weight reuse.
+    - **Result: Allocate about 8.75 GB to models and preserve the rest for KV/runtime state, but require a profiled decode rate of at least 28 tokens/s for 50-token summaries.** If the 8B INT8 model cannot sustain that rate, the SLA cannot be met on this hardware without reducing the main model size, output length, or workload.
 status: published
 provenance: imported
 requires_explanation: true

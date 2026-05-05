@@ -12,26 +12,27 @@ scenario: You are deploying an on-device translation system using an encoder-dec
 question: How should an encoder-decoder model be optimized on a mobile NPU for memory-bound autoregressive decoding?
 details:
   realistic_solution: |
-    Autoregressive decoding is often memory-bandwidth bound because each generated token drives repeated weight reads plus growing KV-cache reads from shared LPDDR memory. Use INT8 weight quantization when it is supported by the mobile NPU delegate, keep dequantization fused with matmuls, and treat KV-cache compression or quantization as a validated accuracy/perf tradeoff rather than a default. Also deploy Grouped Query Attention, sliding-window attention, or cache eviction to reduce KV-cache traffic during long outputs.
+    Autoregressive decoding is often memory-bandwidth bound because each generated token touches decoder layers and a growing KV cache in shared LPDDR memory. Use INT8 weight quantization when it is supported by the mobile NPU delegate, keep dequantization fused with matmuls, and treat KV-cache compression or quantization as a validated accuracy/perf tradeoff rather than a default. Also deploy Grouped Query Attention, sliding-window attention, or cache eviction to reduce KV-cache traffic during long outputs. Mixed precision is the recommended starting point, not a guaranteed optimum; the final split must come from profiling decoder layer traffic and cache behavior.
   common_mistake: |
     **The Pitfall:** Misdiagnosing the decoder as compute-bound.
     **The Rationale:** Candidates suggest reducing the number of layers to save FLOPs, failing to distinguish the compute-heavy nature of the encoder from the memory-bandwidth-bound nature of the decoder.
     **The Consequence:** Failed latency optimizations that do not address the actual I/O bottleneck.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model size: 1.5B parameters.
+    - Model size: 1.5B total parameters with a 500M-parameter decoder subgraph.
     - Target throughput: 40 tokens/sec.
-    - Approximate weight traffic per decode token if weights are streamed once: FP16 = 3GB, INT8 = 1.5GB.
-    - KV-cache traffic also grows with generated length and must fit in the remaining bandwidth.
+    - NPU sustained memory-bandwidth budget available to the decoder: 50 GB/s after other system traffic.
+    - Approximate decoder weight traffic per token if the active decoder layer weights must be streamed from DRAM: FP16 = 1.0 GB, INT8 = 0.5 GB.
+    - KV-cache traffic grows with generated length and must fit in the same bandwidth budget.
 
     **Calculations:**
-    - FP16 Weight Bandwidth: 3GB/token * 40 tokens/sec = 120 GB/s before KV-cache reads.
-    - INT8 Weight Bandwidth: 1.5GB/token * 40 tokens/sec = 60 GB/s before KV-cache reads.
-    - Approximate Compute: 1.5B MACs/token * 2 ops/MAC * 40 tokens/sec = 120 GOPS, far below multi-TOPS peak compute.
-    - KV-cache Mitigation: GQA or cache compression reduces the extra per-token attention reads so the INT8 path has bandwidth headroom.
+    - FP16 decoder-weight traffic upper bound: 1.0 GB/token * 40 tokens/sec = 40 GB/s before KV-cache reads.
+    - INT8 decoder-weight traffic upper bound: 0.5 GB/token * 40 tokens/sec = 20 GB/s before KV-cache reads.
+    - Approximate dense decoder compute lower bound: 2 * 500M ops/token * 40 tokens/sec = 40 GOPS, far below multi-TOPS peak compute.
+    - KV-cache mitigation with GQA, sliding windows, or cache compression keeps the growing attention-state traffic from consuming the remaining bandwidth headroom.
 
     **Conclusion & Interpretation:**
-    - **Result: about 60 GB/s weight traffic before KV reads (Memory-Bandwidth Bottleneck)**. Quantization helps, but the publishable optimization is weight-traffic reduction plus careful KV-cache management, not INT8 alone.
+    - **Result: INT8 reduces a pessimistic decoder-weight traffic bound from ~40 GB/s to ~20 GB/s before KV reads.** Quantization helps, but the publishable optimization is mixed precision plus careful KV-cache management, not INT8 alone.
 status: published
 provenance: imported
 requires_explanation: false

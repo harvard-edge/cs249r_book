@@ -11,7 +11,7 @@ title: Evaluating MMD Drift Detection Scale
 scenario: You operate a RAG system serving 1,200 embedding queries/sec (~10^8 daily queries) using a 1024-dimensional model. To monitor drift, your team proposes computing exact Maximum Mean Discrepancy (MMD) with an RBF kernel between a 100,000-sample reference set and the full daily window of 10^8 queries. The drift job must run nightly on a single A100 (312 TFLOPs FP16) and finish within a 1-hour SLA.
 question: Can exact nightly MMD between 100,000 reference embeddings and 10^8 daily queries finish on one A100 in 1 hour, and what should you use instead?
 details:
-  realistic_solution: Reject the exact quadratic MMD calculation. Instead, project the embeddings using Random Fourier Features (RFF) to approximate the RBF kernel, or use the linear-time unbiased MMD estimator. RFF allows MMD calculation as the distance between linear mean embeddings, reducing time complexity from O(N^2) to O(N).
+  realistic_solution: Reject the exact quadratic MMD calculation. Instead, project the embeddings using Random Fourier Features (RFF) to approximate the RBF kernel and compare linear mean embeddings in O((N+M)r), or use a linear-time unbiased MMD estimator in O(N+M). Exact nightly MMD cannot finish inside the 1-hour SLA on one A100.
   common_mistake: |
     **The Pitfall:** Focusing purely on systems engineering (e.g., chunking the matrix to avoid GPU OOM errors).
     **The Rationale:** Engineers often assume that OOM is the only barrier and that the GPU can compute any mathematically simple operation given enough time.
@@ -28,11 +28,11 @@ details:
     - Full exact MMD also includes within-sample terms, adding N^2 ≈ 10^10 and M^2 ≈ 10^16 evaluations, so the live-window term dominates.
     - Exact FLOPs ≈ 10^16 * 2,048 ≈ 2.05e19 FLOPs.
     - Ideal time = 2.05e19 / 312e12 ≈ 65,700 seconds ≈ 18.3 hours, so it misses the 1-hour SLA.
-    - With RFF using r=4096 features, feature mapping costs about (N + M) * d * r * 2 ≈ 8.4e14 FLOPs, followed by a cheap mean-vector reduction.
-    - Ideal RFF mapping time ≈ 8.4e14 / 312e12 ≈ 2.7 seconds, before practical overheads.
+    - With RFF using r=4096 features, feature mapping plus streaming aggregation is O((N+M)r) after projection and avoids all-pairs kernel materialization.
+    - A linear-time unbiased MMD estimator pairs samples and evaluates O(N+M) kernel terms instead of O(M^2 + NM + N^2) terms.
 
     **Conclusion & Interpretation:**
-    - **Result: Exact MMD misses the nightly SLA (Compute Bottleneck)**. Use RFF mean embeddings or a linear-time MMD estimator; the approximation changes the job from an all-pairs kernel computation into a streaming feature aggregation.
+    - **Result: Exact MMD misses the nightly SLA (Compute Bottleneck)**. Use RFF mean embeddings or a linear-time MMD estimator; the replacement changes the job from an all-pairs exact kernel computation into a streaming approximate estimate.
 status: published
 provenance: imported
 requires_explanation: false

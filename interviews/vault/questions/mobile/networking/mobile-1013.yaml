@@ -11,7 +11,7 @@ title: 'Network Bandwidth Bottlenecks: Optimize LLM TPOT via Weight Quantization
 scenario: 'A 3B FP16 LLM shows TPOT=88ms. Target is TPOT < 30ms. Evaluate three quantization strategies: (A) INT8 weight-only, (B) INT4 weight-only, (C) INT4 + INT4 KV-cache.'
 question: Which quantization strategy gets a 3B FP16 LLM on A17 Pro from 88 ms TPOT to under 30 ms?
 details:
-  realistic_solution: Strategy B (INT4 weight-only) is the optimal path. Generative decoding on mobile is strictly bounded by memory bandwidth. Moving from FP16 to INT4 halves the weight footprint again compared to INT8, cleanly clearing the <30ms target. Furthermore, quantizing the KV cache to INT4 offers a mathematically negligible performance gain for single-batch mobile decoding, making the immense engineering complexity of Strategy C unjustifiable.
+  realistic_solution: Strategy B (INT4 weight-only) is the optimal path. In the simplified mobile decode budget, the dominant DRAM term is the sequential weight stream; FP16 is about 6GB, INT8 is about 3GB, and INT4 is about 1.5GB. INT4 weight-only clears the <30ms target with practical margin. KV-cache quantization can help capacity and long-context cases, but at the stated short context its bandwidth contribution is small relative to the weight stream, so Strategy C adds engineering complexity without being needed for this SLA.
   common_mistake: |
     **The Pitfall:** Assuming INT4 KV-cache quantization provides a proportional TPOT speedup alongside INT4 weight quantization.
     **The Rationale:** Engineers assume KV-cache size dictates decoding latency equally heavily as the primary weight matrices.
@@ -21,19 +21,19 @@ details:
     - Hardware: 68 GB/s effective memory bandwidth.
     - Model size: 3B parameters (FP16 = 6 GB, INT8 = 3 GB, INT4 = 1.5 GB).
     - Target TPOT: < 30 ms.
-    - Decode is batch 1 at 128-token context with 32 layers and hidden size 4096.
+    - Decode is batch 1 at a short 128-token context; KV-cache traffic is treated as a small measured add-on rather than the primary TPOT driver.
 
     **Calculations:**
-    - FP16 TPOT: 6 GB / 68 GB/s = 88.2 ms.
-    - (A) INT8 Weights: 3 GB / 68 GB/s = 44.1 ms.
-    - (B) INT4 Weights: 1.5 GB / 68 GB/s = 22.1 ms.
-    - FP16 KV read per generated token at 128 context: 32 layers * 128 positions * 4096 hidden * 2 (K/V) * 2 bytes = 67.1 MB.
-    - INT4 KV read at the same context: 32 layers * 128 positions * 4096 hidden * 2 (K/V) * 0.5 bytes = 16.8 MB.
-    - (B) INT4 weights + FP16 KV: (1.5 GB + 0.067 GB) / 68 GB/s = 23.0 ms.
-    - (C) INT4 weights + INT4 KV: (1.5 GB + 0.017 GB) / 68 GB/s = 22.3 ms.
+    - FP16 weight-stream lower bound: 6 GB / 68 GB/s = 88.2 ms.
+    - (A) INT8 weight-stream lower bound: 3 GB / 68 GB/s = 44.1 ms.
+    - (B) INT4 weight-stream lower bound: 1.5 GB / 68 GB/s = 22.1 ms.
+    - Short-context FP16 KV add-on example: 20 MB / 68 GB/s = 0.29 ms.
+    - Short-context INT4 KV add-on example: 5 MB / 68 GB/s = 0.07 ms.
+    - (B) INT4 weights + FP16 KV example: 22.1 + 0.29 = 22.39 ms.
+    - (C) INT4 weights + INT4 KV example: 22.1 + 0.07 = 22.17 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound**. INT8 weight-only misses the target at 44.1ms. INT4 weight-only is sufficient at about 23.0ms including FP16 KV traffic. INT4 KV quantization improves TPOT by only about 0.7ms at this context length, so Strategy B is the release answer unless memory capacity or much longer context is the primary concern.
+    - **Result: Memory-Bound**. INT8 weight-only misses the target at 44.1ms. INT4 weight-only is sufficient at about 22.4ms with an illustrative short-context FP16 KV add-on. INT4 KV quantization saves only about 0.2ms in this budget, so Strategy B is the release answer unless memory capacity or much longer context is the primary concern.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,10 +8,10 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Watchdog Timer Integration with Inference
-scenario: Your Cortex-M33 (nRF5340, 128 MHz) runs a 12-layer anomaly detection model. Inference takes 85 ms. The system's Independent Watchdog Timer (IWDG) is set to 100 ms because the safety spec requires a response within 100 ms. Your test engineer reports that the watchdog fires randomly during normal inference — about 1 in 50 runs. The model isn't hanging.
+scenario: Your Cortex-M33 (nRF5340, 128 MHz) runs a 12-layer anomaly detection model. Inference takes 85 ms. The nRF watchdog peripheral is set to 100 ms because the safety spec requires a response within 100 ms. Your test engineer reports that the watchdog fires randomly during normal inference — about 1 in 50 runs. The model isn't hanging.
 question: Why does an 85 ms nRF5340 inference randomly trip a 100 ms watchdog, and where should the watchdog be kicked?
 details:
-  realistic_solution: 'Average inference (85ms) leaves only 15ms margin to the 100ms watchdog. Worst-case add-ons such as BLE interrupt servicing (+5ms), flash wait states on cache miss (+16ms), and I-cache cold-start after context switch (+0.78ms) sum to 106.78ms, which can exceed the watchdog deadline even though the model is not hung. The reported 1-in-50 rate is an observation from testing, not something derived from the timing numbers alone. Fix: kick the watchdog at a deterministic point before the 100ms deadline with margin, such as after layer 6 if profiling shows both intervals around the kick remain below 100ms in worst case. The register write is negligible, but the placement must be validated with worst-case interrupts and cache behavior. Do not simply increase the watchdog timeout if the safety spec requires 100ms response.'
+  realistic_solution: 'Average inference (85ms) leaves only 15ms margin to the 100ms nRF watchdog timeout. Worst-case add-ons such as BLE interrupt servicing (+5ms), flash wait states on cache miss (+16ms), and I-cache cold-start after context switch (+0.78ms) sum to 106.78ms, which can exceed the watchdog deadline even though the model is not hung. The reported 1-in-50 rate is an observation from testing, not something derived from the timing numbers alone. Fix: feed the watchdog at a deterministic profiled point before the 100ms deadline with margin, such as after layer 6 only if profiling shows both intervals around the feed remain below 100ms in worst case. Do not simply increase the watchdog timeout if the safety spec requires 100ms response.'
   common_mistake: |
     **The Pitfall:** Increasing the watchdog timeout to 200 ms to "give the software more room."
     **The Rationale:** Engineers treat the watchdog as an arbitrary software annoyance rather than a hard constraint dictated by external safety requirements.
@@ -25,13 +25,11 @@ details:
     **Calculations:**
     - Worst-case latency: 85 + 5 + 16 + 0.78 = 106.78 ms.
     - The observed 1/50 reset rate is a test result; timing data only shows that some worst-case runs can exceed 100 ms.
-    - Mid-kick at layer 6: each half is ~42.5 ms average if the 12 layers are balanced.
-    - Worst-case per-half budget must include interrupts/cache effects that can occur in that half; using half of 106.78 ms as a rough balanced estimate gives ~53.39 ms.
-    - Margin per kick under that balanced estimate: 100 ms - 53.39 ms = 46.61 ms.
-    - Overhead of mid-kick: 1 WDT register write = 3 cycles = 23 ns.
+    - A deterministic mid-inference feed is safe only if the measured worst-case time before the feed and after the feed are each below 100 ms with margin.
+    - Layer 6 is a candidate placement, not proof of safety; profiling must include interrupts, cache misses, and flash wait states on the actual firmware.
 
     **Conclusion & Interpretation:**
-    - **Result: Kick Before the Worst-Case Deadline**. A mid-inference kick prevents false resets only if profiling proves every interval between kicks remains below 100 ms with margin.
+    - **Result: Feed Before the Worst-Case Deadline**. A mid-inference watchdog feed prevents false resets only if profiling proves every interval between feeds remains below the 100 ms nRF watchdog timeout with margin.
 status: published
 provenance: imported
 requires_explanation: false
