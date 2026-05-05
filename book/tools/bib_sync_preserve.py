@@ -1,38 +1,37 @@
 #!/usr/bin/env python3
-"""Run ``betterbib sync`` safely while preserving and propagating citekeys.
+"""WARNING: reviewed bibliography migration helper only.
+
+Run ``betterbib sync`` with a reviewed per-entry merge.
 
 This helper is the automation layer for bibliography refreshes in the repo.
 It does four things per ``.bib`` file:
 
 1. Run ``betterbib sync --in-place`` on a temp copy of the file.
-2. Infer any citekey renames from the synced entries.
-3. Write the synced bibliography back and apply exact citekey replacements
+2. Compare the original and synced entries, keeping only same-work updates.
+3. Infer any accepted citekey renames and apply exact citekey replacements
    to companion ``.qmd``, ``.tex`` and ``.md`` files in the same content tree.
 4. Run the repo bib mechanical fix + lint checks on the updated bibliography.
 
-The helper is conservative:
-    - if the sync output changes entry count, duplicates keys, or produces
-      ambiguous renames, the file is rejected
+The helper is deliberately reviewed:
+    - same-work sync updates are accepted
+    - radical record swaps are rejected and the original entry is kept
     - only exact citekey tokens are rewritten in companion prose files
-    - crossrefs inside BibTeX entries are updated only when the value is an
-      exact renamed citekey
 
-The command is intended to be driven by ``./book/binder bib update``.
+The command is intended to be driven by ``./book/binder bib update`` and
+should not be run unattended.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
+from difflib import SequenceMatcher
 import re
-import shutil
 import subprocess
 import sys
 import tempfile
-from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Sequence
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -41,10 +40,17 @@ if str(BOOK) not in sys.path:
     sys.path.insert(0, str(BOOK))
 
 from tools.bib_lint import parse_bib  # noqa: E402
+from tools.bib_lint import format_entry  # noqa: E402
+from tools.bib_lint import validate_entry  # noqa: E402
 
 
 TEXT_EXTS = {".qmd", ".tex", ".md", ".markdown", ".mkd"}
 CITE_KEY_CHARS = r"A-Za-z0-9_.:\-"
+VOLUME_CHUNK_SIZE = 40
+CHUNKED_BIBS = {
+    "book/quarto/contents/vol1/backmatter/references.bib",
+    "book/quarto/contents/vol2/backmatter/references.bib",
+}
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,18 @@ def _field(entry, *names: str) -> str:
         if field and field.value.strip():
             return field.value.strip()
     return ""
+
+
+def _title_similarity(orig, new) -> float:
+    a = _norm_token(_field(orig, "title"))
+    b = _norm_token(_field(new, "title"))
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def _title_tokens(entry) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", _field(entry, "title").lower()))
 
 
 def _entry_signatures(entry) -> set[str]:
@@ -152,6 +170,22 @@ def _similarity_score(orig, new, index_hint: bool) -> int:
     for sig in shared:
         prefix = sig.split(":", 1)[0]
         best = max(best, rank.get(prefix, 0))
+    title_sim = _title_similarity(orig, new)
+    overlap = len(_title_tokens(orig) & _title_tokens(new))
+    if title_sim >= 0.25:
+        best = max(best, int(title_sim * 50))
+    if overlap >= 1:
+        best += overlap * 4
+    if overlap >= 2:
+        best += 6
+    if overlap >= 3:
+        best += 6
+    if _norm_token(_field(orig, "year")) and _norm_token(_field(orig, "year")) == _norm_token(_field(new, "year")):
+        best += 14
+    if _normalize_authors(_field(orig, "author")) and _normalize_authors(_field(orig, "author")) == _normalize_authors(_field(new, "author")):
+        best += 16
+    if _norm_token(_field(orig, "journal", "booktitle", "publisher")) and _norm_token(_field(orig, "journal", "booktitle", "publisher")) == _norm_token(_field(new, "journal", "booktitle", "publisher")):
+        best += 8
     if orig.entry_type == new.entry_type:
         best += 5
     if index_hint:
@@ -159,7 +193,7 @@ def _similarity_score(orig, new, index_hint: bool) -> int:
     return best
 
 
-def _match_entries(original: Sequence, synced: Sequence) -> list[tuple[int, int]]:
+def _match_entries(original: Sequence, synced: Sequence) -> list[tuple[int, int, int]]:
     """Greedily pair original and synced entries by stable identity."""
     if len(original) != len(synced):
         raise ValueError(
@@ -176,13 +210,13 @@ def _match_entries(original: Sequence, synced: Sequence) -> list[tuple[int, int]
 
     used_orig: set[int] = set()
     used_new: set[int] = set()
-    pairs: list[tuple[int, int]] = []
+    pairs: list[tuple[int, int, int]] = []
     for score, i, j in scored:
         if i in used_orig or j in used_new:
             continue
         used_orig.add(i)
         used_new.add(j)
-        pairs.append((i, j))
+        pairs.append((score, i, j))
 
     if len(pairs) != len(original):
         missing_orig = [i for i in range(len(original)) if i not in used_orig]
@@ -191,7 +225,232 @@ def _match_entries(original: Sequence, synced: Sequence) -> list[tuple[int, int]
             "could not pair all entries after sync; "
             f"unmatched original indexes={missing_orig}, synced indexes={missing_new}"
         )
-    return sorted(pairs)
+    return sorted(pairs, key=lambda item: item[1])
+
+
+def _entry_field_map(entry) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for field in entry.fields:
+        out[field.name.lower()] = field.value.strip()
+    return out
+
+
+def _entry_diff_summary(orig, new) -> list[str]:
+    old_fields = _entry_field_map(orig)
+    new_fields = _entry_field_map(new)
+    names = sorted(set(old_fields) | set(new_fields))
+    changed: list[str] = []
+    for name in names:
+        if old_fields.get(name, "") != new_fields.get(name, ""):
+            changed.append(name)
+    return changed
+
+
+def _merge_same_work_entry(orig, new):
+    """Merge a synced entry with its original fallback fields."""
+    merged_fields: list = []
+    seen: set[str] = set()
+    for field in new.fields:
+        merged_fields.append(field)
+        seen.add(field.name.lower())
+    for field in orig.fields:
+        name = field.name.lower()
+        if name in seen:
+            continue
+        if not field.value.strip():
+            continue
+        merged_fields.append(field)
+        seen.add(name)
+    return type(orig)(
+        entry_type=new.entry_type,
+        key=new.key,
+        fields=merged_fields,
+        raw=new.raw,
+        start_line=new.start_line,
+    )
+
+
+def _entry_error_messages(entry) -> list[str]:
+    return [
+        v.message
+        for v in validate_entry(entry)
+        if v.severity == "error"
+    ]
+
+
+def _entry_batches(entries: Sequence, chunk_size: int) -> list[list]:
+    if chunk_size <= 0:
+        raise ValueError("chunk size must be positive")
+    return [list(entries[i : i + chunk_size]) for i in range(0, len(entries), chunk_size)]
+
+
+def _render_entries(entries: Sequence) -> str:
+    return "\n\n".join(format_entry(entry) for entry in entries).rstrip() + "\n"
+
+
+def _review_entry_pairs(
+    original_entries: Sequence,
+    synced_entries: Sequence,
+    *,
+    reserved_keys: set[str] | None = None,
+    global_original_keys: set[str] | None = None,
+) -> tuple[list, list[Rename], list[str]]:
+    if len(original_entries) != len(synced_entries):
+        raise RuntimeError(
+            f"entry count changed from {len(original_entries)} to {len(synced_entries)}"
+        )
+    merged_entries: list = []
+    renames: list[Rename] = []
+    diagnostics: list[str] = []
+    original_keys = {e.key for e in original_entries}
+    if len(original_keys) != len(original_entries):
+        raise RuntimeError("original file contains duplicate citekeys")
+
+    merged_key_set: set[str] = set()
+    reserved_keys = reserved_keys or set()
+    global_original_keys = global_original_keys or set()
+    for i, (old, new) in enumerate(zip(original_entries, synced_entries)):
+        if _same_work(old, new):
+            merged_new = _merge_same_work_entry(old, new)
+            new_errors = _entry_error_messages(merged_new)
+            fallback = None
+            fallback_errors: list[str] = []
+            if new_errors and old.entry_type != new.entry_type:
+                fallback = type(old)(
+                    entry_type=old.entry_type,
+                    key=new.key,
+                    fields=merged_new.fields,
+                    raw=new.raw,
+                    start_line=new.start_line,
+                )
+                fallback_errors = _entry_error_messages(fallback)
+            if new_errors and fallback_errors:
+                if old.key != new.key:
+                    if new.key in reserved_keys or (
+                        new.key in global_original_keys and new.key != old.key
+                    ):
+                        chosen = old
+                        diagnostics.append(
+                            f"REJECT {old.key} -> {new.key} "
+                            f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'}, "
+                            f"key-conflict; lint={'; '.join(new_errors)})"
+                        )
+                    else:
+                        chosen = old
+                        diagnostics.append(
+                            f"REJECT {old.key} -> {new.key} "
+                            f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'}, "
+                            f"lint={'; '.join(new_errors)})"
+                        )
+                else:
+                    chosen = old
+                    diagnostics.append(
+                        f"REJECT {old.key} "
+                        f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'}, "
+                        f"lint={'; '.join(new_errors)})"
+                    )
+            elif new_errors and fallback is not None:
+                merged_new = fallback
+                new_errors = fallback_errors
+                if old.key != new.key:
+                    if new.key in reserved_keys or (
+                        new.key in global_original_keys and new.key != old.key
+                    ):
+                        chosen = old
+                        diagnostics.append(
+                            f"REJECT {old.key} -> {new.key} "
+                            f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'}, "
+                            f"key-conflict; lint={'; '.join(fallback_errors)})"
+                        )
+                    else:
+                        chosen = merged_new
+                        renames.append(Rename(old=old.key, new=new.key))
+                        diagnostics.append(
+                            f"ACCEPT {old.key} -> {new.key} "
+                            f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'}, "
+                            f"type-fallback={old.entry_type})"
+                        )
+                else:
+                    chosen = merged_new
+                    diagnostics.append(
+                        f"ACCEPT {old.key} "
+                        f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'}, "
+                        f"type-fallback={old.entry_type})"
+                    )
+            elif old.key != new.key:
+                if new.key in reserved_keys or (
+                    new.key in global_original_keys and new.key != old.key
+                ):
+                    chosen = old
+                    diagnostics.append(
+                        f"REJECT {old.key} -> {new.key} "
+                        f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'}, "
+                        f"key-conflict)"
+                    )
+                else:
+                    chosen = merged_new
+                    renames.append(Rename(old=old.key, new=new.key))
+                    diagnostics.append(
+                        f"ACCEPT {old.key} -> {new.key} "
+                        f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'})"
+                    )
+            else:
+                chosen = merged_new
+                changed = _entry_diff_summary(old, new)
+                diagnostics.append(
+                    f"ACCEPT {old.key} (changed fields: {', '.join(changed) or 'none'})"
+                )
+        else:
+            chosen = old
+            diagnostics.append(
+                f"REJECT {old.key} -> {new.key} "
+                f"(changed fields: {', '.join(_entry_diff_summary(old, new)) or 'none'}, "
+                f"index={i})"
+            )
+        if chosen.key in merged_key_set:
+            raise RuntimeError(f"merged output would duplicate citekey `{chosen.key}`")
+        merged_key_set.add(chosen.key)
+        reserved_keys.add(chosen.key)
+        merged_entries.append(chosen)
+    return merged_entries, renames, diagnostics
+
+
+def _same_work(orig, new) -> bool:
+    if _normalize_doi(_field(orig, "doi")) and _normalize_doi(_field(orig, "doi")) == _normalize_doi(_field(new, "doi")):
+        return True
+    if _norm_token(_field(orig, "eprint", "arxiv", "archiveprefix")) and _norm_token(_field(orig, "eprint", "arxiv", "archiveprefix")) == _norm_token(_field(new, "eprint", "arxiv", "archiveprefix")):
+        return True
+    shared = _entry_signatures(orig) & _entry_signatures(new)
+    if any(
+        sig.split(":", 1)[0]
+        in {"doi", "arxiv", "title-year", "title-authors", "title-venue",
+            "title-year-authors", "title-year-venue"}
+        for sig in shared
+    ):
+        return True
+
+    title_sim = _title_similarity(orig, new)
+    overlap = len(_title_tokens(orig) & _title_tokens(new))
+    year_same = _norm_token(_field(orig, "year")) == _norm_token(_field(new, "year"))
+    authors_same = _normalize_authors(_field(orig, "author")) == _normalize_authors(_field(new, "author"))
+    venue_same = _norm_token(_field(orig, "journal", "booktitle", "publisher")) == _norm_token(_field(new, "journal", "booktitle", "publisher"))
+    if title_sim >= 0.9 and (year_same or authors_same or venue_same):
+        return True
+    if title_sim >= 0.4 and overlap >= 2:
+        return True
+    if title_sim >= 0.25 and overlap >= 3:
+        return True
+    if overlap >= 4:
+        return True
+    return False
+
+
+def _is_chunked_bib(bib_path: Path) -> bool:
+    try:
+        rel = bib_path.resolve().relative_to(REPO).as_posix()
+    except ValueError:
+        return False
+    return rel in CHUNKED_BIBS
 
 
 def _find_bib_files(args: Sequence[str]) -> list[Path]:
@@ -243,34 +502,6 @@ def _run_betterbib_sync(temp_bib: Path) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
     )
-
-
-def _extract_rename_map(original: str, synced: str) -> tuple[list[Rename], list[str]]:
-    orig_entries, _ = parse_bib(original)
-    new_entries, _ = parse_bib(synced)
-
-    if len(orig_entries) != len(new_entries):
-        raise ValueError(
-            f"entry count changed from {len(orig_entries)} to {len(new_entries)}"
-        )
-
-    orig_keys = [e.key for e in orig_entries]
-    new_keys = [e.key for e in new_entries]
-    if len(set(orig_keys)) != len(orig_keys):
-        raise ValueError("original file contains duplicate citekeys; refusing to sync")
-    if len(set(new_keys)) != len(new_keys):
-        raise ValueError("sync output contains duplicate citekeys; refusing to sync")
-
-    pairs = _match_entries(orig_entries, new_entries)
-    renames: list[Rename] = []
-    diagnostics: list[str] = []
-    for i, j in pairs:
-        old = orig_entries[i]
-        new = new_entries[j]
-        if old.key != new.key:
-            renames.append(Rename(old=old.key, new=new.key))
-            diagnostics.append(f"{old.key} -> {new.key}")
-    return renames, diagnostics
 
 
 def _replace_qmd_md(text: str, renames: Sequence[Rename]) -> str:
@@ -358,6 +589,33 @@ def _rollback(backups: dict[Path, str]) -> None:
         path.write_text(text, encoding="utf-8")
 
 
+def _sync_entries(
+    entries: Sequence,
+    *,
+    label: str,
+    reserved_keys: set[str] | None = None,
+    global_original_keys: set[str] | None = None,
+) -> tuple[list, list[Rename], list[str]]:
+    temp_text = _render_entries(entries)
+    with tempfile.TemporaryDirectory(prefix="betterbib-sync-chunk-") as td:
+        temp_bib = Path(td) / "chunk.bib"
+        temp_bib.write_text(temp_text, encoding="utf-8")
+        result = _run_betterbib_sync(temp_bib)
+        if result.returncode != 0:
+            stderr = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(
+                f"betterbib sync failed for {label}" + (f": {stderr}" if stderr else "")
+            )
+        synced_text = temp_bib.read_text(encoding="utf-8")
+    synced_entries, _ = parse_bib(synced_text)
+    return _review_entry_pairs(
+        entries,
+        synced_entries,
+        reserved_keys=reserved_keys,
+        global_original_keys=global_original_keys,
+    )
+
+
 def sync_one(bib_path: Path, dry_run: bool = False) -> bool:
     """Sync one bibliography file and propagate citekey renames."""
     bib_path = bib_path.resolve()
@@ -366,27 +624,33 @@ def sync_one(bib_path: Path, dry_run: bool = False) -> bool:
         return False
 
     original = bib_path.read_text(encoding="utf-8")
-    with tempfile.TemporaryDirectory(prefix="betterbib-sync-") as td:
-        temp_bib = Path(td) / bib_path.name
-        temp_bib.write_text(original, encoding="utf-8")
-        result = _run_betterbib_sync(temp_bib)
-        if result.returncode != 0:
-            stderr = result.stderr.strip() or result.stdout.strip()
-            print(f"FAIL {bib_path}: betterbib sync failed")
-            if stderr:
-                print(stderr)
-            return False
-        synced = temp_bib.read_text(encoding="utf-8")
+    original_entries, original_preamble = parse_bib(original)
+    global_original_keys = {e.key for e in original_entries}
+    chunked = _is_chunked_bib(bib_path)
+    batches = _entry_batches(original_entries, VOLUME_CHUNK_SIZE) if chunked else [list(original_entries)]
 
+    merged_entries: list = []
+    renames: list[Rename] = []
+    diagnostics: list[str] = []
+    reserved_keys: set[str] = set()
     try:
-        renames, diagnostics = _extract_rename_map(original, synced)
-    except Exception as exc:  # conservative: reject ambiguous sync output
+        for batch_index, batch in enumerate(batches, start=1):
+            label = f"{bib_path} chunk {batch_index}/{len(batches)}"
+            merged_batch, batch_renames, batch_diagnostics = _sync_entries(
+                batch,
+                label=label,
+                reserved_keys=reserved_keys,
+                global_original_keys=global_original_keys,
+            )
+            merged_entries.extend(merged_batch)
+            renames.extend(batch_renames)
+            diagnostics.extend(batch_diagnostics)
+    except Exception as exc:
         print(f"FAIL {bib_path}: {exc}")
         return False
 
     root = _bib_companion_root(bib_path)
     companion_files = _tracked_text_files(root)
-    # Back up only the files we might touch.
     backups: dict[Path, str] = {bib_path: original}
     for path in companion_files:
         old = path.read_text(encoding="utf-8")
@@ -394,7 +658,12 @@ def sync_one(bib_path: Path, dry_run: bool = False) -> bool:
         if new != old:
             backups[path] = old
 
-    print(f"{bib_path}: {len(renames)} citekey rename(s)")
+    accepted = sum(1 for line in diagnostics if line.startswith("ACCEPT"))
+    rejected = sum(1 for line in diagnostics if line.startswith("REJECT"))
+    print(
+        f"{bib_path}: {accepted} accepted citekey rename(s), "
+        f"{rejected} rejected entr{'y' if rejected == 1 else 'ies'}"
+    )
     for line in diagnostics:
         print(f"  {line}")
 
@@ -404,7 +673,12 @@ def sync_one(bib_path: Path, dry_run: bool = False) -> bool:
         return True
 
     try:
-        bib_path.write_text(synced, encoding="utf-8")
+        merged = ""
+        if original_preamble and original_preamble[0].strip():
+            merged = original_preamble[0].rstrip() + "\n\n"
+        merged += _render_entries(merged_entries).rstrip() + "\n"
+        if merged != original:
+            bib_path.write_text(merged, encoding="utf-8")
         fixed = _run_bib_mechanical_fix(bib_path)
         if fixed.returncode != 0:
             raise RuntimeError(
