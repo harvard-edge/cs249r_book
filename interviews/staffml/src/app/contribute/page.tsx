@@ -304,7 +304,7 @@ export default function ContributePage() {
             />
             <datalist id="topic-list">
               {allTopics.map(t => (
-                <option key={t.id} value={t.id}>{t.name} ({t.area})</option>
+                <option key={`${t.area}::${t.id}`} value={t.id}>{t.name} ({t.area})</option>
               ))}
             </datalist>
           </div>
