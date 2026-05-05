@@ -64,6 +64,7 @@ class NapkinMath:
     a100_tdp_w = A100_TDP.m_as(watt)
     gpt3_ops = GPT3_TRAINING_OPS.magnitude
     gpt3_days = GPT3_TRAINING_DAYS_REF.magnitude
+    gpt3_accelerators = 1024
     elec_per_kwh = CLOUD_ELECTRICITY_PER_KWH.magnitude
 
     gemm_n = 4096
@@ -76,7 +77,7 @@ class NapkinMath:
     gemm_intensity = gemm_n / 3
     train_mem_gb = model_params_b * 1e9 * bytes_per_param / 1e9
     a100_tdp_kw = a100_tdp_w / 1000
-    elec_cost = gpt3_days * hours_per_day * a100_tdp_kw * elec_per_kwh
+    elec_cost = gpt3_days * gpt3_accelerators * hours_per_day * a100_tdp_kw * elec_per_kwh
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(ridge > 200, f"Ridge point {ridge} too low")
@@ -95,9 +96,10 @@ class NapkinMath:
     a100_tdp_str = fmt(a100_tdp_w, precision=0, commas=False)
     gpt3_ops_str = md_math(sci_latex(gpt3_ops, precision=2))
     gpt3_days_str = f"~{gpt3_days:,.0f}"
+    gpt3_accelerators_str = f"{gpt3_accelerators:,}"
     elec_rate_str = f"{elec_per_kwh:.2f}"
     a100_kw_str = f"{a100_tdp_kw:.1f}"
-    elec_cost_str = f"~\\${elec_cost:,.0f}"
+    elec_cost_str = f"~USD {elec_cost:,.0f}"
     napkin_model_b_digit_str = f"{model_params_b}"
 ```
 
@@ -107,9 +109,9 @@ The constants in this appendix are not just for auditing—they are designed for
 
 **Is this workload compute bound or memory-bound?** Divide peak FLOPS by memory bandwidth to get the *ridge point* (@sec-machine-foundations-roofline-model-2529). For an H100: `{python} NapkinMath.h100_tflops_str` TFLOPS / `{python} NapkinMath.h100_bw_str` TB/s $\approx$ `{python} NapkinMath.ridge_str` FLOP/byte. Any operation with arithmetic intensity above `{python} NapkinMath.ridge_str` FLOP/byte is compute bound; below it, memory bound. A large general matrix multiply (GEMM) with $n=$ `{python} NapkinMath.gemm_n_str` has intensity $n/3 \approx$ `{python} NapkinMath.gemm_intensity_str` FLOP/byte (compute bound). A single-token autoregressive decode has intensity $\approx 1$ FLOP/byte (deeply memory bound).
 
-**How much memory does training a `{python} NapkinMath.model_b_str` model require?** Mixed-precision Adaptive Moment Estimation (Adam) stores 2 bytes (BF16 weights) + 2 bytes (gradients) + 12 bytes (FP32 master weights + momentum + variance) = `{python} NapkinMath.bytes_per_param_str` bytes per parameter. For `{python} NapkinMath.model_b_str` parameters: `{python} NapkinMath.napkin_model_b_digit_str` $\times 10^9 \times$ `{python} NapkinMath.bytes_per_param_str` bytes = `{python} NapkinMath.train_mem_gb_str` GB. An A100 or H100 has `{python} NapkinMath.accel_mem_str` GB of HBM, so the model state alone exceeds a single accelerator—before accounting for activations.
+**How much memory does training a `{python} NapkinMath.model_b_str` model require?** Mixed-precision Adaptive Moment Estimation (Adam) stores 2 bytes (BF16 weights) + 2 bytes (gradients) + 12 bytes (FP32 master weights + momentum + variance) = `{python} NapkinMath.bytes_per_param_str` bytes per parameter. For `{python} NapkinMath.model_b_str` parameters: `{python} NapkinMath.napkin_model_b_digit_str` $\times 10^9 \times$ `{python} NapkinMath.bytes_per_param_str` bytes = `{python} NapkinMath.train_mem_gb_str` GB. An H100 has `{python} NapkinMath.accel_mem_str` GB of HBM, so the model state alone exceeds a single accelerator—before accounting for activations.
 
-**How much energy does one GPT-3 training run cost?** An A100 draws `{python} NapkinMath.a100_tdp_str` W at TDP. GPT-3 training used roughly `{python} NapkinMath.gpt3_ops_str` FLOPS across `{python} NapkinMath.gpt3_days_str` accelerator-days. At \$`{python} NapkinMath.elec_rate_str`/kWh: `{python} NapkinMath.gpt3_days_str` accelerator-days $\times$ 24 h/day $\times$ `{python} NapkinMath.a100_kw_str` kW $\times$ \$`{python} NapkinMath.elec_rate_str`/kWh $\approx$ `{python} NapkinMath.elec_cost_str` in electricity alone—a small fraction of the total cost, which is dominated by accelerator amortization.
+**How much energy does one GPT-3 training run cost?** An A100 draws `{python} NapkinMath.a100_tdp_str` W at TDP. GPT-3 training used roughly `{python} NapkinMath.gpt3_ops_str` FLOPs across `{python} NapkinMath.gpt3_days_str` wall-clock days on `{python} NapkinMath.gpt3_accelerators_str` A100s. At \$`{python} NapkinMath.elec_rate_str`/kWh: `{python} NapkinMath.gpt3_days_str` wall-clock days $\times$ `{python} NapkinMath.gpt3_accelerators_str` A100s $\times$ 24 h/day $\times$ `{python} NapkinMath.a100_kw_str` kW $\times$ \$`{python} NapkinMath.elec_rate_str`/kWh $\approx$ `{python} NapkinMath.elec_cost_str` in electricity alone—a small fraction of the total cost, which is dominated by accelerator amortization.
 
 :::
 
@@ -534,7 +536,7 @@ These constants define the parameter counts, per-inference FLOP budgets, and (wh
 | **GPT3_PARAMS**                    |            `{python} Constants.GPT3_PARAMS_val` | `{python} Constants.GPT3_PARAMS_unit`            |
 | **GPT3_TRAINING_DAYS_REF**         | `{python} Constants.GPT3_TRAINING_DAYS_REF_val` | `{python} Constants.GPT3_TRAINING_DAYS_REF_unit` |
 | **GPT3_TRAINING_OPS**              |      `{python} Constants.GPT3_TRAINING_OPS_val` | `{python} Constants.GPT3_TRAINING_OPS_unit`      |
-| **GPT4_TRAINING_ACCELERATOR_DAYS** | `{python} Constants.GPT4_TRAINING_GPU_DAYS_val` | `{python} Constants.GPT4_TRAINING_GPU_DAYS_unit` |
+| **GPT4_TRAINING_GPU_DAYS**         | `{python} Constants.GPT4_TRAINING_GPU_DAYS_val` | `{python} Constants.GPT4_TRAINING_GPU_DAYS_unit` |
 | **RESNET50_FLOPs**                 |         `{python} Constants.RESNET50_FLOPs_val` | `{python} Constants.RESNET50_FLOPs_unit`         |
 | **RESNET50_PARAMS**                |        `{python} Constants.RESNET50_PARAMS_val` | `{python} Constants.RESNET50_PARAMS_unit`        |
 | **MOBILENETV2_FLOPs**              |      `{python} Constants.MOBILENETV2_FLOPs_val` | `{python} Constants.MOBILENETV2_FLOPs_unit`      |
@@ -661,7 +663,7 @@ With all constants, units, and scale references in place, it is worth pausing to
 
 **Fallacy:** *Peak FLOPS predict real-world training throughput.*
 
-Datasheet FLOPS are measured under idealized conditions—perfectly aligned matrix dimensions, 100 percent occupancy, zero memory stalls. Real training workloads typically achieve 30–50 percent of peak (measured as Model FLOPS Utilization, or MFU). Using peak FLOPS to estimate training time without an MFU discount produces estimates that are 2--3$\times$ too optimistic, leading to missed deadlines and budget overruns.
+Datasheet FLOPS are measured under idealized conditions—perfectly aligned matrix dimensions, 100 percent occupancy, zero memory stalls. Real training workloads typically achieve 30–50 percent of peak (measured as Model FLOPS Utilization, or MFU). Using peak FLOPS to estimate training time without an MFU discount produces estimates that are 2$\times$--3$\times$ too optimistic, leading to missed deadlines and budget overruns.
 
 **Pitfall:** *Using FP32 FLOPS when the workload runs in BF16 or FP8.*
 
