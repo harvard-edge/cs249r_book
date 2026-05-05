@@ -130,7 +130,87 @@ env:
   CONTEXT_PATH: .
 
 jobs:
+  preflight:
+    name: 🌐 Preflight external URLs
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'harvard-edge'
+    timeout-minutes: 5
+    steps:
+      - name: 🔎 Probe required URLs and TL mirror pool
+        env:
+          QUARTO_VERSION: '1.9.27'
+        run: |
+          set -uo pipefail
+
+          # Required URLs — every one must return 200. These are the choke points
+          # the container build hits before TeX Live; a dead one wastes 30+ min
+          # on a runner before failing inside docker build.
+          required=(
+            "https://ppa.launchpadcontent.net/inkscape.dev/stable/ubuntu/dists/jammy/Release"
+            "https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc"
+            "https://cloud.r-project.org/bin/linux/ubuntu/jammy-cran40/InRelease"
+            "https://github.com/quarto-dev/quarto-cli/releases/download/v${QUARTO_VERSION}/quarto-${QUARTO_VERSION}-linux-amd64.deb"
+            "https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final/tlpkg/texlive.tlpdb"
+          )
+
+          # TeX Live install-tl mirror pool — install-texlive-base.sh tries each
+          # in order and falls through on failure, so this is resilience not a
+          # hard gate. Require ≥3 of 5 alive.
+          mirrors=(
+            "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz"
+            "https://mirrors.mit.edu/CTAN/systems/texlive/tlnet/install-tl-unx.tar.gz"
+            "https://ctan.math.washington.edu/tex-archive/systems/texlive/tlnet/install-tl-unx.tar.gz"
+            "https://mirrors.rit.edu/CTAN/systems/texlive/tlnet/install-tl-unx.tar.gz"
+            "https://mirror.las.iastate.edu/tex-archive/systems/texlive/tlnet/install-tl-unx.tar.gz"
+          )
+
+          probe() {
+            url="$1"
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -m 15 -L --retry 1 "$url" 2>/dev/null || echo "ERR")
+            printf '%s\t%s\n' "$code" "$url"
+          }
+          export -f probe
+
+          echo "=== Required URLs (all must return 200) ==="
+          fail=0
+          tmp=$(mktemp)
+          printf '%s\n' "${required[@]}" | xargs -P 8 -I{} bash -c 'probe "$@"' _ {} > "$tmp"
+          while IFS=$'\t' read -r code url; do
+            if [ "$code" = "200" ]; then
+              echo "  ✓ $code  $url"
+            else
+              echo "  ✗ $code  $url"
+              fail=$((fail+1))
+            fi
+          done < "$tmp"
+
+          echo
+          echo "=== TL install-tl mirror pool (need ≥3 of ${#mirrors[@]} alive) ==="
+          alive=0
+          tmp2=$(mktemp)
+          printf '%s\n' "${mirrors[@]}" | xargs -P 8 -I{} bash -c 'probe "$@"' _ {} > "$tmp2"
+          while IFS=$'\t' read -r code url; do
+            if [ "$code" = "200" ]; then
+              echo "  ✓ $code  $url"
+              alive=$((alive+1))
+            else
+              echo "  ⚠ $code  $url"
+            fi
+          done < "$tmp2"
+
+          echo
+          if [ "$fail" -gt 0 ]; then
+            echo "❌ $fail required URL(s) failed — aborting before container build"
+            exit 1
+          fi
+          if [ "$alive" -lt 3 ]; then
+            echo "❌ Only $alive of ${#mirrors[@]} TL mirrors alive (need ≥3) — aborting"
+            exit 1
+          fi
+          echo "✅ Preflight passed: required URLs all up, $alive/${#mirrors[@]} TL mirrors alive"
+
   build:
+    needs: preflight
     runs-on: ubuntu-latest
     if: github.repository_owner == 'harvard-edge'
     timeout-minutes: 90  # 1.5 hour timeout for Linux builds
