@@ -1081,11 +1081,11 @@ Performance at Different Batch Sizes
 |:-----------|--------------:|------------:|-----------------------:|:--------------|:--------------|
 | **1**      |          50.5 |        19.8 | 505 percent (unstable) | $\infty$      | $\infty$      |
 | **4**      |          52.0 |        76.9 | 130 percent (unstable) | $\infty$      | $\infty$      |
-| **8**      |          54.0 |       148.1 |           67.5 percent | 42.3          | 123.2         |
-| **16**     |          58.0 |       275.9 |           36.2 percent | 16.4          | 92.4          |
-| **32**     |          66.0 |       484.8 |           20.6 percent | 8.9           | 91.5          |
+| **8**      |          54.0 |       148.1 |           67.5 percent | 42.3          | 96.3          |
+| **16**     |          58.0 |       275.9 |           36.2 percent | 16.4          | 74.4          |
+| **32**     |          66.0 |       484.8 |           20.6 percent | 8.9           | 74.9          |
 
-: **Batch Size Impact on GPT-3 Serving Performance**. Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100 percent). The optimal operating point balances throughput against latency, with B=32 achieving lowest total latency despite higher service time. {#tbl-batch-size-comparison}
+: **Batch Size Impact on GPT-3 Serving Performance**. Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100 percent). The latency minimum occurs near B=16, while B=32 leaves more headroom because it runs at lower utilization despite having a slightly higher total latency. {#tbl-batch-size-comparison}
 
 ```{python}
 #| label: littles-law-verify
@@ -1102,6 +1102,7 @@ Performance at Different Batch Sizes
 # │
 # │ Imports: mlsysim.book (check)
 # │ Exports: GPT3ServingResults.b8_util_pct, GPT3ServingResults.b8_wait_ms,
+# │          GPT3ServingResults.b16_service_ms, GPT3ServingResults.b16_wait_ms,
 # │          GPT3ServingResults.b32_service_ms, GPT3ServingResults.b32_wait_ms,
 # │          GPT3ServingResults.b8_service_ms, LittlesLawVerify.expected_total_str,
 # │          LittlesLawVerify.l_str, LittlesLawVerify.in_service_str,
@@ -1114,25 +1115,32 @@ class GPT3ServingResults:
     b8_service_ms = 54.0
     b8_util_pct = 67.5
     b8_wait_ms = 42.3
+    b8_total_ms = 96.3
+
+    # Batch 16 results
+    b16_service_ms = 58.0
+    b16_util_pct = 36.2
+    b16_wait_ms = 16.4
+    b16_total_ms = 74.4
 
     # Batch 32 results
     b32_service_ms = 66.0
     b32_util_pct = 20.6
     b32_wait_ms = 8.9
-    b32_total_ms = 91.5
+    b32_total_ms = 74.9
 
 class LittlesLawVerify:
     # ┌── 1. LOAD ──────────────────────────────────────────
     arrival_rate = 100
-    batch_size = 32
-    expected_total_ms = GPT3ServingResults.b32_total_ms
-    utilization = GPT3ServingResults.b32_util_pct / 100
+    batch_size = 16
+    expected_total_ms = GPT3ServingResults.b16_total_ms
+    utilization = GPT3ServingResults.b16_util_pct / 100
     # ┌── 2. EXECUTE ───────────────────────────────────────
     L = arrival_rate * (expected_total_ms / 1000)
     in_service = batch_size * utilization
     in_queue = L - in_service
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(8 < L < 12, f"L should be ~9, got {L:.2f}")
+    check(7 < L < 8, f"L should be ~7.4, got {L:.2f}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     expected_total_str = f"{expected_total_ms}"
     l_str = f"{L:.2f}"
@@ -1150,7 +1158,7 @@ Analysis
 ![](images/svg/queuing-hockey-stick.svg)
 :::
 
-3. **Batch size 32 minimizes total latency**\index{Batch Size!32 minimizes total latency}: Despite longer service time (`{python} GPT3ServingResults.b32_service_ms` ms vs. `{python} GPT3ServingResults.b8_service_ms` ms), the dramatic reduction in queue wait time (`{python} GPT3ServingResults.b32_wait_ms` ms vs. `{python} GPT3ServingResults.b8_wait_ms` ms) yields lower total latency.
+3. **Batch size 16 minimizes total latency**\index{Batch Size!16 minimizes total latency}: Despite longer service time (`{python} GPT3ServingResults.b16_service_ms` ms vs. `{python} GPT3ServingResults.b8_service_ms` ms), the reduction in queue wait time (`{python} GPT3ServingResults.b16_wait_ms` ms vs. `{python} GPT3ServingResults.b8_wait_ms` ms) yields the lowest total latency, while B=32 leaves more utilization headroom.
 
 4. **Diminishing returns beyond B=32**\index{Diminishing Returns Beyond B=32}: Further batch size increases would reduce utilization but memory constraints prevent exploration.
 
@@ -1160,16 +1168,16 @@ We can confirm these results by *applying Little's Law to verify* internal consi
 
 **Verification using Little's Law**\index{Little's Law!verification using}: $N_{\text{req}} = \lambda \cdot T_{\text{lat}}$
 
-At B=32 with $\lambda = 100$ req/s and $E[T] =$ `{python} LittlesLawVerify.expected_total_str` ms:
+At B=16 with $\lambda = 100$ req/s and $E[T] =$ `{python} LittlesLawVerify.expected_total_str` ms:
 
 $L = 100 \times$ `{python} LittlesLawVerify.expected_total_ms/1000` $=$ `{python} LittlesLawVerify.l_str` requests in system
 
-With batch size `{python} LittlesLawVerify.batch_size` and utilization `{python} GPT3ServingResults.b32_util_pct` percent:
+With batch size `{python} LittlesLawVerify.batch_size` and utilization `{python} GPT3ServingResults.b16_util_pct` percent:
 
 - Expected requests in service: `{python} LittlesLawVerify.batch_size` $\times$ `{python} LittlesLawVerify.utilization` = `{python} LittlesLawVerify.in_service_str`
 - Expected requests in queue: `{python} LittlesLawVerify.l_str` - `{python} LittlesLawVerify.in_service_str` = `{python} LittlesLawVerify.in_queue_str`
 
-This matches our queue wait calculation: approximately 2-3 requests waiting on average.
+This matches our queue wait calculation: approximately 1-2 requests waiting on average.
 
 :::
 
