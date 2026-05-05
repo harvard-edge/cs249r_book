@@ -11,7 +11,8 @@ title: INT8 Dataflow Specification for Hailo-8
 scenario: You are tasked with deploying an FP32 object detection model to a dataflow edge accelerator for real-time video analytics. The accelerator provides strictly INT8 compute and features no local DRAM, streaming data directly from host memory.
 question: What precision-reduction and deployment pipeline efficiently runs the FP32 detector on this architecture without host-memory streaming bottlenecks?
 details:
-  realistic_solution: Mandate a rigorous Quantization-Aware Training (QAT) methodology that forces 100% of the model graph into INT8 precision. To compensate for activation degradation, implement Top-K sparsification or expand channel widths prior to compilation. The dataflow architecture requires the model to entirely reside on-chip; falling back to mixed-precision destroys the pipeline throughput by flooding the host PCIe bus.
+  realistic_solution: |
+    Use an all-INT8 deployment path: calibrate with PTQ if accuracy is acceptable, otherwise run QAT, then compile the entire detector graph for the dataflow accelerator with supported INT8 operators only. Verify that weights and scheduled activations fit the on-chip dataflow plan, and reject any mixed-precision partition, host fallback, or unsupported layer that would stream intermediate activations through host memory.
   common_mistake: |
     **The Pitfall:** Executing standard mixed-precision deployment (retaining FP16 for sensitive layers).
     **The Rationale:** Candidates copy cloud inference heuristics without accounting for the architectural hostility of DRAM-less dataflow accelerators toward graph partitions.
@@ -23,12 +24,12 @@ details:
     - Accelerator capability: 4 GOPS in < 0.2 ms natively
 
     **Calculations:**
-    - FP16 Activation Size = 256 * 128 * 128 * 2 bytes = 8.38 MB
-    - Round-trip PCIe penalty = (8.38 MB * 2) / 3900 MB/s = 4.3 ms
-    - Theoretical max FPS with graph break = 1000 ms / 4.3 ms = 232 FPS
+    - FP16 activation size = 256 * 128 * 128 * 2 bytes = 8,388,608 bytes = 8.0 MiB (~8.39 MB)
+    - Round-trip host transfer = 2 * 8.39 MB = 16.78 MB
+    - PCIe round-trip time = 16.78 MB / 3,900 MB/s = 0.00430 s = 4.3 ms
 
     **Conclusion & Interpretation:**
-    - **Result: 4.3 ms penalty (I/O-Bound)**. A single precision fallback inflates latency by 20x compared to pure on-chip execution.
+    - **Result: 4.3 ms per graph break (I/O-Bound)**. A single mixed-precision or host-fallback partition can dominate sub-millisecond on-chip execution, so the deployable graph must remain fully INT8 and accelerator-resident.
 status: published
 provenance: imported
 requires_explanation: true

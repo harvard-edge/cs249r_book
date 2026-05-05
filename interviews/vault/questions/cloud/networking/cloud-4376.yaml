@@ -8,30 +8,28 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: MI300X AllReduce Performance in 8-GPU Data Parallel Training vs H100
-scenario: An 8-GPU MI300X server uses Infinity Fabric (128 GB/s per GPU pair in full-mesh). An 8-GPU H100
-  SXM5 server uses NVLink 4.0 (900 GB/s bidirectional per GPU). Data parallel training of a 7B model transfers
-  28GB of FP32 gradients per backward pass.
-question: For a 28GB gradient AllReduce on 8 GPUs, what ring-AllReduce time do MI300X xGMI and H100 NVLink
-  achieve?
+scenario: An 8-GPU MI300X server has an effective 128 GB/s unidirectional xGMI ring link. An 8-GPU H100 SXM5 server has an effective 450 GB/s unidirectional NVLink ring path. Data parallel training of a 7B model transfers 28GB of FP32 gradients per backward pass.
+question: For a 28GB gradient AllReduce on 8 GPUs, what ring-AllReduce time do MI300X xGMI and H100 NVLink achieve?
 details:
-  realistic_solution: Ring AllReduce relies on individual link bandwidth. H100 achieves 109ms communication
-    time while MI300X achieves 383ms. The MI300X needs gradient compression or a dedicated high-bandwidth
-    GPU-to-GPU fabric to be competitive with H100 NVLink for data-parallel training.
-  common_mistake: '**The Pitfall:** Using total aggregate fabric bandwidth instead of per-GPU link bandwidth
-    for ring AllReduce calculations.
+  realistic_solution: Ring AllReduce time is set by the per-GPU send/receive volume over the ring path, not by summing all fabric links. For N=8 and a 28GB gradient, each GPU sends and receives 2 * (N-1) / N * 28GB = 49GB over the operation. Using the stated effective unidirectional ring bandwidths, H100 takes 49GB / 450GB/s = 109ms, while MI300X takes 49GB / 128GB/s = 383ms. H100 is therefore about 3.5x faster for this ring AllReduce under the stated bandwidth assumptions.
+  common_mistake: |
+    **The Pitfall:** Using total aggregate fabric bandwidth instead of per-GPU link bandwidth for ring AllReduce calculations.
+    **The Rationale:** Candidates forget that in a ring topology, each GPU only uses one send and one receive link to its immediate neighbors.
+    **The Consequence:** Vastly underestimating communication overhead and misjudging the necessity of gradient compression.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 28GB gradient tensor, 8 GPUs.
+    - Ring AllReduce per-GPU transfer volume is 2 * (N-1) / N of the tensor.
+    - Effective unidirectional ring bandwidth: H100 450 GB/s, MI300X 128 GB/s.
 
-    **The Rationale:** Candidates forget that in a ring topology, each GPU only uses one send and one
-    receive link to its immediate neighbors.
+    **Calculations:**
+    - Per-GPU transfer volume: 2 * (8-1) / 8 * 28 GB = 49 GB.
+    - H100 time: 49 GB / 450 GB/s = 0.109s = 109ms.
+    - MI300X time: 49 GB / 128 GB/s = 0.383s = 383ms.
+    - Relative time: 383 / 109 = 3.5x slower on MI300X under these assumptions.
 
-    **The Consequence:** Vastly underestimating communication overhead and misjudging the necessity of
-    gradient compression.
-
-    '
-  napkin_math: "1. **Assumptions & Constraints:**\n   - 28GB gradient, 8 GPUs.\n   - H100 send BW: 450\
-    \ GB/s. MI300X send BW: 128 GB/s.\n2. **Calculations:**\n   - Transfer volume: 2 × (7/8) × 28 GB =\
-    \ 49 GB.\n   - H100 time: 49 GB / 450 GB/s = 109 ms.\n   - MI300X time: 49 GB / 128 GB/s = 383 ms.\n\
-    3. **Conclusion & Interpretation:**\n   **Result: Network Bound. H100 is 1.4x faster for data parallel\
-    \ training due to the massive xGMI communication bottleneck.**\n"
+    **Conclusion & Interpretation:**
+    - **Result: Network-bound.** H100 NVLink is about 3.5x faster than the stated MI300X xGMI ring path for this 28GB AllReduce.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: both
 title: GradScaler Synchronization as a Hidden Overlap Barrier
 scenario: Your DDP training with mixed-precision (FP16) and GradScaler runs 20% slower than expected despite good overlap. Profiling shows a synchronization point between the backward pass and optimizer step where all GPUs wait. This sync does not appear in FP32 training.
-question: "What causes it?"
+question: What causes it?
 details:
-  realistic_solution: 'GradScaler workflow: (1) After backward: unscale_() divides all gradients by the loss scale. (2) Check for inf/nan in any gradient on any GPU — this requires an AllReduce of a single float (found_inf). (3) If any GPU has inf/nan, skip the optimizer step and reduce the scale. (4) This AllReduce is BLOCKING because the optimizer step cannot proceed until all GPUs agree on whether to skip. Fix: (a) Use BF16 instead of FP16 to eliminate GradScaler entirely (BF16 has FP32''s range, no overflow). (b) If FP16 is required, batch the inf check with the gradient norm AllReduce — one AllReduce instead of two. (c) Use NVIDIA Transformer Engine''s FP8 which has built-in scale management without per-step AllReduce.'
+  realistic_solution: 'GradScaler workflow: (1) After backward, unscale_() divides gradients by the current loss scale. (2) The scaler checks whether any local gradient contains inf/nan and DDP must make a consistent per-step decision about applying or skipping the optimizer step. (3) That overflow decision introduces a synchronization point after backward, even if the payload is tiny, because optimizer progress cannot safely continue until ranks agree. Fix: (a) Use BF16 instead of FP16 when supported to avoid dynamic loss scaling. (b) If FP16 is required, profile the scaler path and avoid redundant collectives by combining compatible checks such as overflow and norm reductions where the framework permits. (c) Reduce stragglers before the scaler boundary by fixing input imbalance or late gradient buckets.'
   common_mistake: |
     **The Pitfall:** Not realizing that `GradScaler.step()` enforces an all-GPU synchronization barrier.
     **The Rationale:** Developers treat FP16 mixed precision as a "free" speedup, ignoring the hidden collective communications required to safely manage scale factors.
@@ -22,12 +22,13 @@ details:
     - This AllReduce acts as a blocking synchronization barrier.
 
     **Calculations:**
-    - The AllReduce itself takes ~0.05ms.
-    - A straggler effect delays the barrier for faster GPUs.
-    - A 5ms straggler delay on a 25ms compute step adds pure idle time.
+    - Expected step without the scaler boundary = 25ms.
+    - The overflow-check payload may take only ~0.05ms, but the synchronization exposes the slowest rank.
+    - If the slowest rank arrives 5ms later than the fastest ranks, the effective step becomes 25ms + 5ms = 30ms.
+    - Slowdown = (30ms - 25ms) / 25ms = 20%.
 
     **Conclusion & Interpretation:**
-    - **Result: Synchronization-Bound**. The blocking barrier prevents optimizer progress, turning minor straggler variations into a massive 20% latency overhead.
+    - **Result: Synchronization-Bound**. The issue is not the flag payload size; it is the per-step overflow decision exposing rank skew before the optimizer step.
 status: published
 provenance: imported
 requires_explanation: false

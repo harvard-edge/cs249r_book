@@ -8,24 +8,29 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Spot Instance Strategy for Training Resilience
-scenario: 'You are training a 13B model on 32 spot instances at a 70% discount. Spot interruptions occur on average every 2 hours with a 2-minute warning.'
-question: 'What checkpointing strategy maximizes cost savings while minimizing wasted compute for a 13B model on 32 spot instances?'
+scenario: You are training a 13B model on 32 spot instances at a 70% discount. Spot interruptions occur on average every 2 hours with a 2-minute warning.
+question: What checkpointing strategy maximizes cost savings while minimizing wasted compute for a 13B model on 32 spot instances?
 details:
-  realistic_solution: 'Optimal checkpoint interval (Young''s approximation): interval = sqrt(2 × mean_time_between_failures × checkpoint_cost). Checkpoint cost for 13B model: 13B × 2B (BF16) = 26 GB to write. At NVMe write speed of 3 GB/s: ~9 seconds. Plus optimizer states: 13B × 12B = 156 GB across 32 GPUs (ZeRO-sharded), so each GPU writes ~4.9 GB → 1.6 s. Total checkpoint time ≈ 10 seconds. MTBF = 2 hours = 7200 s. Optimal interval = sqrt(2 × 7200 × 10) = sqrt(144000) ≈ 380 seconds ≈ 6.3 minutes. Strategy: checkpoint every 6 minutes to local NVMe, async upload to S3 every 30 minutes. On 2-minute interruption warning: immediately checkpoint (10 s) and gracefully shut down. Expected wasted compute per interruption: 6/2 = 3 minutes average (half the checkpoint interval). At 3 interruptions/day: 9 GPU-minutes wasted. Cost savings: 32 GPUs × $3/hr × 0.7 discount × 24h = $1,612/day saved. Wasted compute cost: negligible.'
+  realistic_solution: 'Use two-tier checkpointing. Write fast local sharded checkpoints about every 9-10 minutes, and copy durable checkpoints to object storage every 30 minutes. On the 2-minute spot warning, immediately take a final local checkpoint, start the upload if bandwidth allows, and terminate cleanly before eviction. Checkpoint size for the full job is roughly 26 GB of BF16 weights plus about 156 GB of ZeRO-sharded optimizer state, or 182 GB total across 32 GPUs. With sharded writes to local NVMe, a conservative end-to-end checkpoint cost of about 20 seconds gives Young''s interval sqrt(2 × 7200 s × 20 s) ≈ 537 seconds, about 9 minutes. The warning means most planned interruptions should lose near-zero training progress; the periodic interval mainly caps loss for sudden failures or missed notices. Cost savings: on-demand cost is 32 × $3/hr × 24 = $2,304/day; a 70% spot discount saves about $1,613/day before modest checkpoint overhead.'
   common_mistake: |
     **The Pitfall:** Checkpointing too frequently (e.g., every 5 minutes) or too infrequently (e.g., every 2 hours).
     **The Rationale:** Candidates either focus solely on minimizing wasted compute without considering checkpoint overhead, or they ignore the high frequency of spot interruptions.
     **The Consequence:** Either excessive time and bandwidth are spent on checkpointing, or nearly all progress is lost upon interruption.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model: 13B parameters.
-       - NVMe write speed: 3 GB/s. MTBF: 2 hours (7200 s).
-    2. **Calculations:**
-       - Checkpoint payload = 13B * 2B (weights) + 13B * 12B (ZeRO-sharded optim states) / 32 GPUs = ~4.9 GB per GPU.
-       - Total checkpoint time = ~9s (weights) + ~1.6s (states) = ~10 seconds.
-       - Optimal interval (Young's) = sqrt(2 * 7200s * 10s) = sqrt(144,000) = ~380 seconds = 6.3 minutes.
-       - Waste per interruption = 3 min average (half interval).
-    3. **Conclusion & Interpretation:** **Result: Reliability-Bound**. Spot saves ~$1,612/day vs ~$4.50/day in wasted compute overhead with a ~6-minute checkpoint interval.
+    **Assumptions & Constraints:**
+    - Model: 13B parameters in BF16.
+    - ZeRO-sharded optimizer state: about 12 bytes per parameter across the job.
+    - MTBF: 2 hours (7200 s); interruption warning: 2 minutes.
+
+    **Calculations:**
+    - Full-job checkpoint payload = 13B * 2 bytes + 13B * 12 bytes = 182 GB total.
+    - Sharded payload per GPU = 182 GB / 32 = about 5.7 GB before metadata.
+    - Conservative local checkpoint cost = about 20 seconds end to end.
+    - Young's interval = sqrt(2 * 7200s * 20s) = sqrt(288,000) = about 537 seconds, or 9 minutes.
+    - On-demand daily cost = 32 * $3/hr * 24 = $2,304; 70% spot discount saves about $1,613/day.
+
+    **Conclusion & Interpretation:**
+    - **Result: checkpoint locally about every 9-10 minutes and always checkpoint on the 2-minute warning**. Periodic checkpoints cap sudden-failure loss, while the warning path should preserve nearly all progress for normal spot interruptions.
 status: published
 provenance: imported
 requires_explanation: false

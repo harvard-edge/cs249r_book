@@ -7,27 +7,27 @@ topic: rdma-transport
 competency_area: networking
 bloom_level: create
 phase: both
-title: 'InfiniBand Adaptive Routing for Hotspot Avoidance in H100 Fat-Tree'
-scenario: 'A 512-H100 fat-tree InfiniBand cluster uses static routing. During AllReduce, 30% of links are at >90% utilization while 40% are idle, causing gradient sync to take 3× longer than ideal.'
-question: 'How would you use adaptive routing to eliminate AllReduce hotspots in the 512-H100 fat-tree InfiniBand cluster?'
+title: InfiniBand Adaptive Routing for Hotspot Avoidance in H100 Fat-Tree
+scenario: A 512-H100 fat-tree InfiniBand cluster uses static routing. During AllReduce, 30% of links are at >90% utilization while 40% are idle, causing gradient sync to take 3× longer than ideal.
+question: How would you use adaptive routing to eliminate AllReduce hotspots in the 512-H100 fat-tree InfiniBand cluster?
 details:
-  realistic_solution: 'AllReduce traffic pattern: ring topology creates sequential send-receive pairs — highly structured, not random. Static routing concentrates ring traffic on a subset of paths. Solutions: (1) RDMA Adaptive Routing (AR): InfiniBand subnet manager enables per-packet routing based on congestion signals. Mellanox/NVIDIA UFM provides AR for fat-tree. (2) Traffic-aware ring placement: assign ring ranks to GPUs that maximize path diversity. (3) Multipath ring AllReduce: split gradient tensor into chunks, route chunks over different paths. With AR enabled on HDR IB: hotspot traffic redistributes within 1-2RTT (<5μs). Expected improvement: 3× degradation → 1.2× (90% theoretical bandwidth). Key: enable RDMA congestion control (CC) with RTT-based marking.'
+  realistic_solution: 'AllReduce produces large structured flows, so static fat-tree routes can concentrate many ring edges on the same uplinks. Enable fabric-supported adaptive routing in the subnet manager or UFM for the relevant service levels and ensure there are multiple equal-cost paths through the spine. Pair that with traffic-aware rank placement so neighboring AllReduce ranks do not repeatedly cross the same leaf-spine links, and split large gradient buckets so independent flows can use different paths. Verify the fix with port counters: hot uplinks should drop from >90% while idle parallel paths rise, packet discards and congestion counters should fall, and nccl-tests should approach the expected bandwidth. Adaptive routing should be described as path selection or flowlet-level balancing supported by the fabric, not as guaranteed per-packet rerouting within a few microseconds.'
   common_mistake: |
     **The Pitfall:** Proposing Equal-Cost Multi-Path (ECMP) routing without flow distinction.
     **The Rationale:** Candidates assume ECMP perfectly load-balances, forgetting that ECMP flow hashing creates elephant flow collisions—large gradient flows hash to the same path.
     **The Consequence:** Congestion remains despite multiple paths, degrading AllReduce performance.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Ideal AllReduce: 2 * (511/512) * 40 GB / 25 GB/s (per-node IB) = 3.1 s.
+    - Ideal AllReduce: 2 * (511/512) * 40 GB / 25 GB/s (per-node IB) = 3.19 s.
     - Current Bottleneck: 30% of links run hot, causing 3x degradation.
 
     **Calculations:**
-    - Actual = 3.1 s * 3 = 9.3 s.
-    - Adaptive Routing: Redistributes to 70% average link utilization.
-    - Actual after AR ~ 3.1 / 0.7 = 4.4 s.
+    - Current time = 3.19 s * 3 = 9.57 s.
+    - If adaptive routing plus rank placement restores 85% useful fabric efficiency, expected time = 3.19 s / 0.85 = 3.75 s.
+    - Improvement = 9.57 s / 3.75 s = 2.55x.
 
     **Conclusion & Interpretation:**
-    - **Result: 4.4s vs 9.3s (Network-Bound)**. Adaptive routing yields a 2.1x improvement by bypassing static hotspot congestion.
+    - **Result: 3.75s vs 9.57s (Network-Bound).** Adaptive routing is useful when it is configured with real path diversity and verified with fabric counters; the math uses one consistent efficiency assumption after hotspot relief.
 status: published
 provenance: imported
 requires_explanation: true

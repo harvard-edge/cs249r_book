@@ -11,11 +11,11 @@ title: Diagnosing Input Stationary Bottlenecks in MLP Workloads
 scenario: You are porting a DLRM model with $4096 \times 4096$ MLP layers to a legacy accelerator with a 64x64 MAC array and 2MB SRAM using a strict Input Stationary (IS) dataflow. At batch size 256, DRAM bandwidth (800 GB/s) is saturated but MAC utilization is 4%.
 question: Why does the Input Stationary dataflow bottleneck MLP layers, and how do you quantify the architectural mismatch?
 details:
-  realistic_solution: The Input Stationary architecture pins input activations in the MACs and streams weights. Since the 64x64 array only holds a tile of 64 inputs at once, a batch of 256 requires 4 passes. This means the massive 32MB weight matrix is redundantly loaded from DRAM 4 times per layer, thrashing bandwidth. The fix is to transpose the matrix formulation in software (switching inputs and weights) to trick the compiler into treating the massive weights as the 'stationary inputs'.
+  realistic_solution: The Input Stationary architecture pins input activations in the MACs and streams weights. Since the 64x64 array only holds a tile of 64 batch items or input features at once, the compiler may force multiple passes that reload the same 33.55MB weight matrix from DRAM, wasting bandwidth while the MAC array waits. A software transpose does not change a strict IS dataflow into weight-stationary hardware. The real remedy is dataflow-aware tiling/layout so reuse appears on the dimension the hardware can keep stationary, or moving this MLP layer to a weight-stationary/output-stationary accelerator when the legacy IS mapping cannot expose enough reuse.
   common_mistake: |
     **The Pitfall:** Assuming the problem is simply a 'memory-bound' matrix-vector multiplication.
     **The Rationale:** Failing to realize that at Batch=256, the layer should be compute-bound, but the hardware dataflow is forcing redundant memory reads.
-    **The Consequence:** Attempting to prune or quantize the model when a simple software transpose (treating weights as inputs) would fix the dataflow mismatch.
+    **The Consequence:** Attempting to prune or quantize the model, or relying on a simple software transpose, instead of fixing the dataflow-aware tiling or moving the layer to hardware that can exploit weight reuse.
   napkin_math: |
     **Assumptions & Constraints:**
     - Weights: $4096 \times 4096$ FP16 = 33.55 MB.
@@ -28,8 +28,12 @@ details:
     - Arithmetic Intensity: 8.59 GFLOPs / 134.2 MB = 64 FLOPs/Byte.
     - Max throughput: 800 GB/s * 64 = 51.2 TFLOPs/s.
 
+    - If the 64x64 MAC array performs one FMA per MAC per cycle at 1 GHz, peak compute is about 64 × 64 × 2 × 1GHz = 8.2 TFLOPs/s.
+    - The bandwidth roof from this mapping is 800 GB/s × 64 FLOPs/Byte = 51.2 TFLOPs/s, above that illustrative compute peak.
+    - Observed 4% MAC utilization therefore indicates a dataflow/tiling utilization problem, not a pure bandwidth-roof limit from these idealized bytes alone.
+
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bandwidth Bound (Dataflow Mismatch).** The Input Stationary architecture forces redundant memory reads, tanking arithmetic intensity and MAC utilization.
+    - **Result: Dataflow-Mismatch Bound.** Redundant weight streaming and poor SRAM/MAC reuse under strict Input Stationary mapping explain the low utilization; fixing it requires dataflow-aware compilation or different hardware/dataflow, not a simple matrix transpose.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,22 +11,24 @@ title: NPU Memory Bandwidth Contention
 scenario: A vision model converted to TFLite is deployed on the Samsung Exynos 2400 NPU. During field testing, engineers observe that while median inference latency is excellent, 99th percentile latency spikes by 5x specifically when the camera ISP is simultaneously processing high-resolution video frames.
 question: Why does Exynos 2400 NPU P99 latency spike 5x when the ISP processes high-resolution video?
 details:
-  realistic_solution: The root cause is memory bandwidth contention. Because the 12 GB LPDDR5X memory is shared, the ISP consuming massive bandwidth for high-resolution video starves the NPU of data. To resolve this, the deployment engineer must optimize the model's memory footprint (e.g., ensuring fully quantized INT8 operators to minimize weight fetching) or implement a scheduler that throttles NPU inferences during peak ISP buffer flushes.
+  realistic_solution: The root cause is shared-memory bandwidth contention. The ISP and NPU both use the LPDDR5X memory subsystem, so high-resolution video bursts can delay NPU weight and activation reads even when NPU compute capacity is available. The direct mitigations are camera/NPU scheduling, QoS or bandwidth isolation where the platform exposes it, bounded inference queues, batching around ISP bursts, or reducing concurrent camera memory pressure. Quantization can help reduce traffic, but it is not the primary fix for external ISP contention.
   common_mistake: |
     **The Pitfall:** Misdiagnosing the latency spikes as NPU thermal throttling or missing operator coverage forcing CPU fallbacks.
     **The Rationale:** Candidates fail to identify the architectural bottleneck of shared unified memory subsystems in mobile SoCs.
     **The Consequence:** Time is wasted on model-level optimizations (like removing specific layers) when the root cause is external resource contention.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Shared Memory: LPDDR5X (~68 GB/s peak bandwidth).
-       - High-Res Video (ISP): Uses ~40 GB/s.
-       - OS/CPU Overhead: Uses ~15 GB/s.
-    2. **Calculations:**
-       - Remaining Bandwidth: 68 - 40 - 15 = 13 GB/s.
-       - Model Bandwidth Requirement: 300 MB traffic * 30 FPS = 9 GB/s.
-       - Collision Buffer: During ISP burst flushes, available drops below 9 GB/s.
-    3. **Conclusion & Interpretation:**
-       - **Result: Bandwidth Contention. The 34.7 TOPS NPU starves for memory bandwidth during shared LPDDR5X bus saturation, causing a 5x latency tail.**
+    **Assumptions & Constraints:**
+    - The NPU, ISP, CPU, and GPU share the LPDDR5X memory subsystem.
+    - High-resolution video processing creates bursty ISP reads/writes.
+    - Median latency is good, so the model is not generally compute-bound.
+
+    **Calculations:**
+    - During quiet periods, the NPU receives enough memory service and hits its normal median latency.
+    - During ISP bursts, the effective NPU memory service rate drops because camera buffers and image processing traffic take bus priority or queue ahead of NPU reads.
+    - A memory-bound inference can show a large P99 spike when stalled memory reads serialize behind ISP traffic, even if average NPU utilization remains healthy.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bandwidth Contention.** The 5x P99 tail is best explained by shared-memory contention with the ISP; scheduling and QoS are the release mitigations.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,16 +7,16 @@ topic: collective-communication
 competency_area: cross-cutting
 bloom_level: evaluate
 phase: both
-title: Orin Ring AllReduce
+title: Asymmetric Cross-Rack AllReduce on Orin Nodes
+scenario: Four edge compute nodes aggregate gradients for a 100 MB model via a tree switch. Same-rack pairs see ~125 MB/s bandwidth, while cross-rack pairs see only ~62 MB/s due to a contended uplink.
+question: Evaluate the realistic Ring AllReduce time given the asymmetric tree topology, and identify whether a 2-D hierarchical AllReduce would beat a flat 4-node ring across the contended cross-rack link?
 visual:
   kind: svg
   path: edge-2342.svg
   alt: Four Jetson Orin nodes arranged in a logical ring topology.
   caption: Ring AllReduce logical topology across four Orin nodes.
-scenario: Four edge compute nodes aggregate gradients for a 100 MB model via a tree switch. Same-rack pairs see ~125 MB/s bandwidth, while cross-rack pairs see only ~62 MB/s due to a contended uplink.
-question: Evaluate the realistic Ring AllReduce time given the asymmetric tree topology, and identify whether a 2-D hierarchical AllReduce would beat a flat 4-node ring across the contended cross-rack link.
 details:
-  realistic_solution: 'The flat ring completely dominates the hierarchical approach, clocking at 2.42s versus 3.63s. Hierarchical AllReduce on asymmetric uplinks inherently forces massive gradient payloads to squeeze through the heavily bottlenecked cross-rack link twice (up and down). Optimizing demands a flat ring combined with aggressive offline gradient sparsification/compression to minimize payload traversal across the 62 MB/s chokepoint.'
+  realistic_solution: A flat 4-node ring is bottlenecked by the 62 MB/s cross-rack hop, giving roughly 1.5 * 100 MB / 62 MB/s = 2.42s for one AllReduce. A simple two-level scheme does an intra-rack reduce to a rack representative, an inter-rack two-node AllReduce, then an intra-rack broadcast. That costs about 100/125 + 100/62 + 100/125 = 3.21s, so the flat ring is faster for the stated topology. Compression can still help because every viable design is constrained by the 62 MB/s cross-rack link.
   common_mistake: |
     **The Pitfall:** Applying standard ring-allreduce formulas using the fastest link bandwidth.
     **The Rationale:** Candidates fail to realize that an asymmetric topology pins the ring's performance to the single slowest hop.
@@ -28,30 +28,34 @@ details:
     - Payload: 100 MB model.
 
     **Calculations:**
-    - Flat ring bottleneck: 62 MB/s. Time = (1.5 * 100) / 62 = 2.42s.
-    - Hierarchical Time = 0.4s (intra) + (200 / 62) (inter) = 3.63s.
+    - Flat 4-node ring factor: 2 * (4 - 1) / 4 = 1.5 payloads per bottleneck link.
+    - Flat ring time: 1.5 * 100 MB / 62 MB/s = 2.42s.
+    - Hierarchical local reduce within each 2-node rack: 100 MB / 125 MB/s = 0.80s.
+    - Hierarchical inter-rack 2-node AllReduce: 100 MB / 62 MB/s = 1.61s.
+    - Hierarchical local broadcast within each rack: 100 MB / 125 MB/s = 0.80s.
+    - Hierarchical total: 0.80s + 1.61s + 0.80s = 3.21s.
     - Gradient Compression (4x, 25MB) with Flat Ring = (1.5 * 25) / 62 = 0.6s.
 
     **Conclusion & Interpretation:**
-    - **Result: Flat Ring is faster (2.42s vs 3.63s) (Network-Bound)**. Hierarchical serialization severely penalizes asymmetric networks.
+    - **Result: Flat Ring is faster (2.42s vs 3.21s) (Network-Bound)**. Under this explicit timing model, the hierarchical scheme loses because it serializes local reduce, cross-rack exchange, and local broadcast around the same slow uplink.
 status: published
 provenance: llm-draft
-expected_time_minutes: 8
 requires_explanation: true
+expected_time_minutes: 8
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-  - 'gemini-generated'
-  - 'target-fluency-L5'
+  - gemini-generated
+  - target-fluency-L5
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

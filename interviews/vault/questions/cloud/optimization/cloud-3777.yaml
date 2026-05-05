@@ -8,52 +8,26 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: Ring Attention for Million-Token Contexts
-scenario: You need to process a 1M token context on 8 MI300X GPUs (192 GB HBM3 each). Even with FlashAttention,
-  the KV cache for 1M tokens at 128 head_dim × 96 heads × 80 layers × 2 (K+V) × 2 bytes = ~3.9 TB, far
-  exceeding any single GPU.
-question: How does Ring Attention distribute 1M-token attention across 8 MI300X GPUs, and what communication
-  pattern does it use?
+scenario: You need to process a 1M token context on 8 MI300X GPUs (192 GB HBM3 each). The model has 80 attention layers, 96 KV heads per layer, head_dim=128, and BF16 K/V tensors. The total KV cache across all layers is about 3.9 TB.
+question: Is Ring Attention feasible for this 1M-token KV cache on 8 MI300X GPUs, and what pattern does it use?
 details:
-  realistic_solution: Ring Attention partitions the sequence into chunks. Each GPU holds Q for its chunk
-    and computes attention against K,V blocks rotating through the ring. However, for a 1M token sequence
-    with 128 head_dim, 96 heads, and 80 layers, the total KV cache is ~3.9 TB. Ring Attention requires
-    each GPU to store its own 1/8th chunk of Q, plus at least two chunks of KV (current and receiving)
-    at any time. A single 1/8th chunk of the KV cache is ~490 GB. Since an MI300X only has 192 GB of HBM3,
-    even a single chunk exceeds the GPU's memory capacity. Therefore, distributing this 1M-token context
-    across only 8 MI300X GPUs is physically impossible without additional techniques like KV cache quantization,
-    offloading, or using more GPUs.
-  common_mistake: '**The Pitfall:** Thinking Ring Attention simply shards the KV cache and does a standard
-    AllReduce.
-
-    **The Rationale:** Candidates miss the ring topology mechanism where each GPU holds a sequence chunk
-    and rotates KV blocks, overlapping communication with computation to fit within memory.
-
-    **The Consequence:** Proposing impossible KV cache allocations or suffering massive communication
-    bottlenecks.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: Ring Attention partitions the sequence into chunks. Each GPU holds Q for its chunk and computes attention against K,V blocks that rotate around a ring, typically using send/receive communication overlapped with attention compute. For the stated model, the total KV cache across all 80 attention layers is about 1,000,000 × 128 × 96 × 80 × 2 × 2 bytes = 3.93 TB. Sharding that evenly over 8 GPUs leaves about 491 GB of KV cache per GPU before accounting for Q, O, temporary buffers, or double-buffered communication. Since an MI300X has 192 GB of HBM3, this deployment is not feasible as specified. Ring Attention describes the communication/computation pattern, but it does not by itself make this KV cache fit; the system would need more GPUs, fewer KV heads/layers, KV quantization, offload, or a different attention/cache strategy.
+  common_mistake: |
+    **The Pitfall:** Thinking Ring Attention simply shards the KV cache and does a standard AllReduce.
+    **The Rationale:** Candidates miss the ring topology mechanism where each GPU holds a sequence chunk and rotates KV blocks, overlapping communication with computation to fit within memory.
+    **The Consequence:** Proposing impossible KV cache allocations or suffering massive communication bottlenecks.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 1M token context on 8 MI300X GPUs (192 GB HBM3 each).
-
-    - Total KV cache for 1M tokens is ~3.9 TB.
-
-    - Ring Attention stores at least 2 KV chunks per GPU at a time.
-
+    - Model: 80 attention layers, 96 KV heads per layer, head_dim=128.
+    - BF16 KV cache: 2 tensors (K and V) * 2 bytes/value.
+    - Ring Attention shards sequence blocks across 8 GPUs and rotates KV blocks around the ring.
     **Calculations:**
-
-    - Per GPU chunk size = 3.9 TB / 8 = 487.5 GB.
-
-    - Minimum memory required for 2 KV chunks = 2 * 487.5 GB = 975 GB.
-
-    - 975 GB > 192 GB available HBM3.
-
+    - Total KV bytes = 1,000,000 * 128 * 96 * 80 * 2 * 2 = 3,932,160,000,000 bytes = 3.93 TB.
+    - Ideal per-GPU shard = 3.93 TB / 8 = 491.5 GB.
+    - 491.5 GB > 192 GB before temporary buffers or double-buffering.
     **Conclusion & Interpretation:**
-
-    - **Result: OOM (Memory-Capacity-Bound)**. The total KV cache is too large to be partitioned across
-    only 8 GPUs, making the scenario physically impossible as specified.
-
-    '
+    - **Result: OOM (Memory-Capacity-Bound)**. Ring Attention would use a ring rotation of KV blocks, but this specific 80-layer KV cache cannot fit on only 8 MI300X GPUs.
 status: published
 provenance: imported
 requires_explanation: true

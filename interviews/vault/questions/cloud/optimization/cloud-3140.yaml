@@ -8,29 +8,31 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: Evaluating Ring Attention vs FlashAttention for 128K Context
-scenario: 'Your team is deploying a 70B model with 128K context on 8x H100s. Option A is FlashAttention-2 on each GPU with sequence parallelism (Ulysses). Option B is Ring Attention across 8 GPUs.'
+scenario: Your team is deploying a 70B model with 128K context on 8x H100s. Option A is FlashAttention-2 on each GPU with sequence parallelism (Ulysses). Option B is Ring Attention across 8 GPUs.
 question: For 128K context on 8 H100s, how do FlashAttention-2 with Ulysses and Ring Attention compare in communication, memory, and latency?
 details:
   realistic_solution: |
-    KV cache for 128K context per head: 128K x 128 x 2B = 32MB. With 64 KV heads, full KV = 2 x 32MB x 64 = 4GB per layer. Ring Attention: each GPU holds 128K/8 = 16K tokens. In each ring step, a GPU sends its K,V block to the neighbor: 4GB/8 = 512MB per step x 7 steps = 3.5GB per layer communicated. With NVLink at 900 GB/s, ring step transfer: 512MB / 900 = 0.57ms. Compute per step (FlashAttention on 16K x 16K): ~0.8ms. Communication is overlapped with compute. Ulysses (all-to-all): same 3.5GB volume but requires all-to-all, harder to overlap. Ring Attention wins for long context due to natural overlap.
+    For one layer, one K or V tensor for one head over 128K tokens is 128K x 128 x 2B = 32 MiB. K+V for 64 heads is therefore 2 x 32 MiB x 64 = 4 GiB per layer. Ring Attention shards the sequence, so each of 8 GPUs owns 16K tokens and a 4 GiB / 8 = 512 MiB K+V block per layer. Each rank sends that block around the ring for 7 neighbor steps, for about 7 x 512 MiB = 3.5 GiB communicated per rank per layer. A 512 MiB transfer at 900 GB/s is about 0.57 ms per step; if the local attention compute per step is about 0.8 ms, much of the transfer can be hidden, but the communication is still real. Ulysses uses all-to-all style sequence/head exchanges rather than neighbor ring sends; it can have comparable byte volume but different synchronization, memory layout, and overlap behavior. Ring Attention is attractive for very long context because its communication pattern pipelines naturally with blockwise attention compute.
   common_mistake: |
     **The Pitfall:** Thinking Ring Attention fundamentally eliminates communication volume.
     **The Rationale:** Candidates misunderstand that Ring Attention merely shifts communication to perfectly overlap with compute.
     **The Consequence:** Failing to accurately model the required NVLink bandwidth, leading to unexpected communication stalls.
   napkin_math: |
     **Assumptions & Constraints:**
-    - KV cache for 128K context (per head): 128K * 128 * 2 Bytes = 32MB.
+    - One K or V tensor for 128K context per head: 128K * 128 * 2 bytes = 32 MiB.
     - 64 heads, 8 GPUs.
     - NVLink transfer: 900 GB/s.
 
     **Calculations:**
-    - Full KV per layer (64 heads): 2 * 32MB * 64 = 4GB.
-    - Ring Attention (8 GPUs): each sends 4GB/8 = 512MB per step.
-    - NVLink transfer: 512MB / 900 GB/s = 0.57ms.
+    - Full K+V per layer across 64 heads: 2 * 32 MiB * 64 = 4 GiB.
+    - Ring shard per rank: 4 GiB / 8 = 512 MiB.
+    - Ring per-rank communication over 7 peer steps: 512 MiB * 7 = 3.5 GiB per layer.
+    - Per-step NVLink transfer: 512 MiB / 900 GB/s = about 0.57 ms.
     - Compute per step (FlashAttention 16K x 16K): ~0.8ms.
+    - Ulysses uses collective all-to-all exchanges, so latency depends more on collective scheduling and synchronization than the ring's nearest-neighbor pipeline.
 
     **Conclusion & Interpretation:**
-    - **Result: 0ms Overhead (Compute-Bound)**. Because compute (0.8ms) hides communication (0.57ms), Ring Attention adds ~0ms effective latency overhead.
+    - **Result: Communication-Overlap Tradeoff.** Ring Attention still communicates about 3.5 GiB per rank per layer, but its 0.57 ms transfer steps can be mostly hidden under ~0.8 ms compute steps; Ulysses has different all-to-all latency and overlap behavior.
 status: published
 provenance: imported
 requires_explanation: false

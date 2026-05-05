@@ -11,7 +11,7 @@ title: 'Capacity Factor Tuning: Quality vs Throughput'
 scenario: Your MoE model with 8 experts uses capacity factor C=1.5 during training. Each expert can process C × (tokens × top_k / num_experts) tokens. With a batch of 512 tokens and top-2 routing, each expert's capacity is 1.5 × 128 = 192 tokens. Your training is slow because experts average only 90 tokens (47% capacity utilization).
 question: Should you reduce the MoE capacity factor from 1.5 to 1.0, and what are the utilization-versus-token-drop tradeoffs?
 details:
-  realistic_solution: 'At C=1.5: each expert has capacity 192. Average load 90 (47% of capacity). Wasted compute: the expert''s compute kernel runs on 192-slot buffers regardless of actual fill — zero-padded slots still incur matrix multiply overhead (unless using variable-length batching). Memory: 8 experts × 192 × hidden_dim × 2B = significant padding. At C=1.0: capacity = 128. Average load 90, but max load (with natural variance) might reach 150-160 tokens. Tokens exceeding 128 are dropped: ~10-15% token drop rate. This hurts training quality — those tokens only get contribution from their second expert (or none if both overflow). Optimal: C=1.1-1.2 balances waste vs drops. Better approach: use auxiliary load-balancing loss to enforce near-uniform routing, then you can safely reduce C. Switch-Transformer recommends C=1.25 with load balancing. GShard uses C=2.0 for training stability. The newer approach (Megablocks): variable-length expert computation with no padding, eliminating the capacity factor entirely.'
+  realistic_solution: 'At C=1.5, each expert has capacity 192 and an average load of 90 tokens, so padded-buffer utilization is only 47%. Reducing to C=1.0 lowers capacity to 128 and raises average padded-buffer utilization to 70%, but it is only advisable if router imbalance is controlled: any expert receiving more than 128 routed tokens overflows and drops assignments. With the stated example max load of 150-160 tokens, C=1.0 would drop 22-32 assignments on that hot expert, so it is risky for training quality. A better recommendation is to reduce gradually to about C=1.1-1.25 while strengthening auxiliary load-balancing loss and monitoring per-expert overflow, or use variable-length expert kernels such as MegaBlocks to avoid paying for padding.'
   common_mistake: |
     **The Pitfall:** Setting capacity factor to exactly 1.0 and assuming no tokens are dropped.
     **The Rationale:** Candidates fail to account for natural variance in token distributions across experts.
@@ -21,12 +21,13 @@ details:
     - Average load: 90 tokens.
 
     **Calculations:**
-    - C=1.5: Capacity 192, Avg fill 90 = 47% utilization, 0% drops.
-    - C=1.0: Capacity 128, Avg fill 90 = 100% ideal, but ~12% drops due to variance.
-    - C=1.2: Capacity 154 = 58% utilization, <2% drops.
+    - C=1.5: capacity 192, average fill 90/192 = 47% utilization.
+    - C=1.0: capacity 128, average fill 90/128 = 70% utilization.
+    - If a hot expert receives 150-160 tokens, C=1.0 overflows by 22-32 routed assignments on that expert.
+    - C=1.2: capacity 1.2 × 128 ≈ 154, average fill 90/154 = 58% utilization; it tolerates a 150-token hot expert but not a 160-token one.
 
     **Conclusion & Interpretation:**
-    - **Result: 58% Utilization (Capacity-Variance-Bound)**. Balancing compute waste versus token drops is critical unless using variable-length computation architectures.
+    - **Result: Capacity-variance tradeoff.** C=1.0 improves average utilization but is risky under the stated variance; C≈1.2 is a safer reduction unless variable-length expert computation removes padding.
 status: published
 provenance: imported
 requires_explanation: false

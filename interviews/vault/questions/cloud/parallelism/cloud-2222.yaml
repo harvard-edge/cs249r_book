@@ -9,25 +9,27 @@ bloom_level: create
 phase: inference
 title: The Multi-Tenant Starvation Cascade
 scenario: You are the Staff engineer responsible for the GPU scheduling platform serving 20 ML teams. Current state uses fair-share with strict quotas. Three problems exist. (1) Team A uses 120% of quota by borrowing idle capacity and refuses to return it. (2) Team B's 256-GPU training job is queued for 3 days because their fair share is 50 GPUs and no preemption exists. (3) Team C needs advance burst capacity for Black Friday but the cluster is 98% allocated.
-question: "What scheduling policy resolves Team A's borrowed GPUs, Team B's queued 256-GPU job, and Team C's Black Friday burst without new hardware?"
+question: What scheduling policy resolves Team A's borrowed GPUs, Team B's queued 256-GPU job, and Team C's Black Friday burst without new hardware?
 details:
-  realistic_solution: 'Implement a three-tier scheduling architecture: **Tier 1 — Guaranteed quota with lending**: Each team gets a hard minimum (guaranteed capacity they can always reclaim). Team A: 100 GPUs guaranteed. Team B: 50 GPUs guaranteed. Team C: 80 GPUs guaranteed. Total guaranteed < total cluster (e.g., 800 of 1000) — the gap is the lending pool. **Tier 2 — Opportunistic borrowing with preemption contracts**: Teams can borrow from other teams'' idle quota and from the lending pool. Borrowed capacity is preemptible with a 30-minute warning. Team A''s 20 extra GPUs above quota are preemptible — Team B''s 256-GPU job can trigger preemption to reclaim GPUs. **Tier 3 — Burst reservations with advance scheduling**: Team C can reserve burst capacity up to 2 weeks in advance for known events (Black Friday). Reserved capacity trumps opportunistic borrowing. Implementation: use a token-based system. Guaranteed tokens are permanent. Opportunistic tokens expire when the lending team wants them back. Burst tokens are time-boxed reservations. The scheduler evaluates in order: burst reservations > guaranteed quota > opportunistic. This resolves all three: A keeps borrowed GPUs until B or C needs them. B''s 256-GPU job preempts A''s borrowed capacity (A retains their 100 guaranteed). C''s Black Friday burst is reserved in advance.'
+  realistic_solution: 'Implement hierarchical quotas with reclaimable borrowing and calendar reservations. Each team has a guaranteed quota that can always be reclaimed. Idle guaranteed quota enters a borrowable pool, but borrowed GPUs carry an explicit preemption contract and must be returned when the owner, a higher-priority reservation, or a starvation-bounded gang job needs them. Team A may run at 120% only while the extra 20% is borrowed; those borrowed GPUs are preempted first when capacity is reclaimed. Team B''s 256-GPU job needs gang scheduling plus starvation protection: once it ages past the policy threshold, the scheduler accumulates capacity by reclaiming borrowed GPUs and then starts the full gang atomically. Team C receives a time-bound Black Friday reservation made in advance; during that window, reservation capacity outranks opportunistic borrowing but not unrelated teams'' guaranteed minima unless policy explicitly allows paid priority. The scheduler order is: active reservations,
+    guaranteed quota, aged/starvation-protected gang jobs, then opportunistic borrowed work.'
   common_mistake: |
     **The Pitfall:** Proposing simple FIFO priority queues or strictly enforced hard quotas.
     **The Rationale:** Engineers default to rigid operating system scheduling concepts that fail to account for the massive scale and economic value of GPU time.
     **The Consequence:** Hard quotas waste millions of dollars in idle resources, while simple priorities just shift the starvation from one team to another.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Total Cluster: 1,000 GPUs.
-    - Guaranteed quotas: Team A=100, Team B=50, Team C=80.
+    - Team A is using 120% of quota, so 20% of its usage is borrowed capacity.
+    - Team B has a 256-GPU gang job and only 50 GPUs of fair share.
+    - Team C needs known future burst capacity for Black Friday.
 
     **Calculations:**
-    - Lending Pool = 1,000 - Total Guaranteed.
-    - Resolution for B: Preempt Team A's 20 borrowed GPUs. B gets 50 guaranteed + 206 from lending pool = 256 GPUs instantly.
-    - Resolution for C: Reserve 200 GPUs for 48 hours in advance.
+    - Team A reclaim rule: guaranteed usage is protected; borrowed usage above quota is preemptible.
+    - Team B gap: 256 GPUs required - 50 fair-share GPUs = 206 GPUs that must come from reclaimed borrowed capacity or idle lending capacity before the job can start atomically.
+    - Team C rule: reserve a time-boxed burst window in advance; the scheduler drains or blocks opportunistic borrowed jobs before that window starts.
 
     **Conclusion & Interpretation:**
-    - **Result: Allocation-Bound**. A multi-tier token system resolves resource starvation without requiring any additional hardware purchases.
+    - **Result: Policy-Bound.** The complete policy is guaranteed quotas plus preemptible borrowing, starvation-bounded gang scheduling, and advance time-bound reservations; unsupported fixed cluster-size arithmetic is not needed.
 status: published
 provenance: imported
 requires_explanation: true

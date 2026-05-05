@@ -17,15 +17,20 @@ details:
     **The Rationale:** Performance engineers see a collective bottleneck and immediately try to tune the network layer or environment variables.
     **The Consequence:** Ignoring the fundamental architectural flaw of the sharding strategy, which mathematically forces an O(N²) communication scaling bottleneck.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 64 GPUs, batch=2048, 100 tables, dim=64 (FP32).
-       - Compute step time: 2ms.
-       - Cross-node InfiniBand: 200 Gbps (25 GB/s).
-    2. **Calculations:**
-       - Volume per batch sent to each GPU: (2048 / 64) × 100 × 64 × 4 bytes = 819.2 KB.
-       - Total sent per GPU: 819.2 KB × 63 = 51.6 MB per step.
-       - Bandwidth needed for 2ms overlap: 51.6 MB / 2ms = 25.8 GB/s.
-    3. **Conclusion & Interpretation:** **Result: Network-Bound.** The required 25.8 GB/s exceeds the 25 GB/s InfiniBand limit, causing the all-to-all to completely dominate the 1ms compute step. Replicating hot tables is required.
+    **Assumptions & Constraints:**
+    - 64 GPUs, global batch=2048, local batch=2048/64=32.
+    - 100 tables, dim=64, FP32, so each embedding vector is 64 * 4 = 256 bytes.
+    - Compute step time is 2 ms.
+    - Cross-node InfiniBand is 200 Gbps, about 25 GB/s peak before collective overheads.
+
+    **Calculations:**
+    - Local embedding output per GPU before exchange: 32 * 100 * 64 * 4 bytes = 819,200 bytes ~= 0.82 MB.
+    - In an even row-sharded layout, each GPU keeps about 1/64 locally and sends about 63/64 remotely, so per-GPU payload is about 0.82 MB * 63/64 = 0.81 MB per step, not 0.82 MB to each destination.
+    - Payload bandwidth needed per GPU to hide this in 2 ms is about 0.81 MB / 2 ms = 0.4 GB/s, below the raw 25 GB/s link bandwidth.
+    - The profiler's 85% all-to-all time therefore points to collective latency, many small exchanges, poor table placement, and synchronization overhead, not only raw byte bandwidth.
+
+    **Conclusion & Interpretation:**
+    - **Result: communication-pattern bound.** Replicating small hot tables, co-locating tables accessed together, and using hybrid row/table sharding can reduce all-to-all fanout and message count; replication is a strong option for hot small tables but not the only possible architectural change.
 status: published
 provenance: imported
 requires_explanation: false

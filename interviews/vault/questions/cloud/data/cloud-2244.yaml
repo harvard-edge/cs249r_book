@@ -8,7 +8,7 @@ competency_area: data
 bloom_level: apply
 phase: training
 title: The Missing Combiner in Distributed Aggregation
-scenario: 'You are computing per-domain token counts across a 20 TB web corpus distributed over 500 nodes. Each node holds a 40 GB shard. The naive MapReduce approach emits (domain, 1) for every token and shuffles all pairs to reducers. The shuffle phase transfers 18 TB across the network and takes 3 hours. Your colleague points out that the final output is only 2 GB.'
+scenario: You are computing per-domain token counts across a 20 TB web corpus distributed over 500 nodes. Each node holds a 40 GB shard. The naive MapReduce approach emits (domain, 1) for every token and shuffles all pairs to reducers. The shuffle phase transfers 18 TB across the network and takes 3 hours. Your colleague points out that the final output is only 2 GB.
 question: Why is 18 TB moving across the network to produce a 2 GB result, and how do you fix it?
 details:
   realistic_solution: |
@@ -21,11 +21,15 @@ details:
     **Assumptions & Constraints:**
     - 20 TB corpus, 500 nodes, 25 Gbps (3.125 GB/s) per node.
     - 10M domains, 20 bytes/record.
+    - Assume each node emits local counts for about 10M domains before the final reducer merge.
 
     **Calculations:**
-    - Without combiner: 20 TB corpus * ~0.9 overhead = 18 TB shuffle. At 25 Gbps: 18 TB / (500 * 3.125 GB/s) = ~12 seconds (ideal) -> 3 hours real-world.
+    - Without combiner: 20 TB corpus * ~0.9 overhead = 18 TB shuffle.
+    - Ideal lower bound at full aggregate bandwidth: 18,000 GB / (500 * 3.125 GB/s) = 11.5 seconds.
+    - The observed 3 hours implies the job is dominated by serialization, spill, reducer skew, framework overhead, and non-ideal network utilization, not raw link bandwidth.
     - With combiner: 500 nodes * 10M domains * 20 bytes/record = 100 GB shuffle.
-    - Same bandwidth: 100 GB / (500 * 3.125 GB/s) = 0.064 seconds.
+    - Same ideal bandwidth lower bound: 100 GB / 1,562.5 GB/s = 0.064 seconds; real runtime will be much higher but still far below the 18 TB raw shuffle.
+    - Final reducer output can still be 2 GB after merging duplicate domain records and writing compact counts.
 
     **Conclusion & Interpretation:**
     - **Result: 18 TB to 100 GB (Network-Bound)**. Adding a local combiner reduces the network shuffle volume from 18 TB to 100 GB, a 180x reduction.

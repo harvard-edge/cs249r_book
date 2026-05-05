@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: both
 title: Real-time Data Drift Detection for Transformer Models on NVIDIA A100 Architectures
 scenario: 'You are tasked with deploying a critical, high-throughput transformer-based machine translation model in a cloud environment. You are evaluating two deployment architectures for serving: Architecture Alpha utilizes 4 GPUs in a data-parallel fashion, while Architecture Beta employs 2 GPUs with model parallelism. Both architectures must maintain an average inference latency of under 50ms and process 10,000 requests per second. Recently, upstream data sources have shown signs of potential data drift.'
-question: 'How would you implement real-time PSI or KL drift detection for both serving architectures, and what are the trade-offs?'
+question: How would you implement real-time PSI or KL drift detection for both serving architectures, and what are the trade-offs?
 details:
-  realistic_solution: 'For both architectures, implement an asynchronous, sampling-based drift detection pipeline. On Architecture Alpha (data parallel), each GPU could periodically sample its ingress data, compute PSI/KL divergence against a dynamic baseline, and report metrics to a central monitoring system. For Architecture Beta (model parallel), a dedicated sampling component resides alongside the ingress layer, processing a subset of features before inference utilizing custom CUDA kernels. Automated alerts trigger model retraining, with thresholds tuned based on business impact.'
+  realistic_solution: For both architectures, implement an asynchronous, sampling-based drift detection pipeline. On Architecture Alpha (data parallel), each GPU could periodically sample its ingress data, compute PSI/KL divergence against a dynamic baseline, and report metrics to a central monitoring system. For Architecture Beta (model parallel), a dedicated sampling component resides alongside the ingress layer, processing a subset of features before inference utilizing custom CUDA kernels. Automated alerts trigger model retraining, with thresholds tuned based on business impact.
   common_mistake: |
     **The Pitfall:** Running overly complex statistical checks synchronously on every inference request.
     **The Rationale:** Candidates aim for perfect detection accuracy but fail to decouple the drift detection compute path from the critical serving path.
@@ -20,14 +20,18 @@ details:
     **Assumptions & Constraints:**
     - 10,000 req/s * 2KB/req = 20 MB/s total throughput.
     - 5% sampling rate.
+    - Each sampled request contributes 50 scalar features.
+    - PSI/KL histograms use 10 bins per feature and update asynchronously once per second.
 
     **Calculations:**
-    - Sampled throughput = 1 MB/s.
-    - For 4 GPUs, each processes 250 KB/s of sample data.
-    - Computing PSI on 50 features over 15 MB/min requires < 1 GFLOP and < 50 MB/s bandwidth.
+    - Sampled request rate = 10,000 req/s * 5% = 500 req/s.
+    - Sampled throughput = 20 MB/s * 5% = 1 MB/s.
+    - Feature-bin updates = 500 req/s * 50 features = 25,000 bin updates/s.
+    - Even at 20 simple operations per update, compute is about 500,000 ops/s, far below 1 GFLOP/s on a sidecar CPU or GPU stream.
+    - A once-per-second PSI pass over 50 features * 10 bins = 500 bins is negligible compared with the 50 ms serving path when run asynchronously.
 
     **Conclusion & Interpretation:**
-    - **Result: Asynchronous detection overhead is mathematically negligible (<0.001%) and will not impact the 50ms latency. (Compute-Bound Asynchronous Offload)**. Avoiding synchronous checks preserves SLAs.
+    - **Result: Asynchronous sampling is overhead-light.** The trade-off is detection delay and sample fidelity, while synchronous per-request drift checks would directly consume the serving latency budget.
 status: published
 provenance: imported
 requires_explanation: false

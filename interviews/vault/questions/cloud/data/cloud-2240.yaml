@@ -12,23 +12,23 @@ scenario: You are running a distributed Spark job to join a 10 TB user-activity 
 question: How much data moves across the network during the shuffle phase, and what determines whether this is a broadcast join or a shuffle join?
 details:
   realistic_solution: |
-    If both tables are already partitioned by user_id with the same partition function and same number of partitions, zero shuffle is needed — this is a co-partitioned join. If partitioned differently, the optimizer must choose: (1) Shuffle both sides: ~10.5 TB network I/O, or (2) Broadcast the 500 GB table to all 200 nodes: 500 GB × 200 = 100 TB total network I/O — worse. (3) Re-partition only the 500 GB table to match the 10 TB table's partitioning: 500 GB network I/O. Option 3 is optimal. The rule: shuffle the smaller table to match the larger table's existing partitioning.
+    Given the scenario, the shuffle phase should move approximately 0 bytes: both tables are already partitioned by user_id across the same 200-node layout, so a co-partitioned join can be executed locally within matching partitions. Broadcast versus shuffle is a separate optimizer choice. Spark broadcasts only when one side is small enough to fit safely in executor memory and below the broadcast threshold. When the inputs are not compatibly partitioned and neither side is broadcastable, Spark uses a shuffle join that repartitions the required side or both sides by the join key.
   common_mistake: |
     **The Pitfall:** Assuming both tables must be shuffled, moving 10.5 TB across the network.
     **The Rationale:** Candidates ignore the broadcast join optimization for cases where one table is small enough to fit in memory.
     **The Consequence:** Severe network congestion and slow job execution times due to unnecessary large shuffles.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 10 TB and 500 GB tables.
-    - 200 nodes, 625 GB/s cluster bandwidth.
+    - 10 TB activity table and 500 GB profile table.
+    - Both are already partitioned by user_id across the same 200-node partitioning scheme.
 
     **Calculations:**
-    - Shuffle Join: 10 TB + 0.5 TB = 10.5 TB. Takes ~17s.
-    - Broadcast Join: 500 GB sent to 200 nodes = 100 TB. Takes ~160s.
-    - Re-partition small table: 500 GB shuffle. Takes ~0.8s.
+    - Co-partitioned join shuffle: 0 TB, because matching user_id partitions are already co-located.
+    - If not co-partitioned, shuffling both sides would move roughly 10 TB + 0.5 TB = 10.5 TB.
+    - Broadcasting the 500 GB side to 200 nodes would move 500 GB * 200 = 100 TB aggregate traffic and is usually too large for executor memory.
 
     **Conclusion & Interpretation:**
-    - **Result: Network-Bound**. Re-partitioning the small table avoids massive data movement and is 21x faster.
+    - **Result: Partitioning-Bound**. The correct answer for this setup is ~0 shuffle bytes; broadcast is chosen only for genuinely small inputs, while shuffle joins are used when compatible partitioning is absent and both sides must be keyed by user_id.
 status: published
 provenance: imported
 requires_explanation: false

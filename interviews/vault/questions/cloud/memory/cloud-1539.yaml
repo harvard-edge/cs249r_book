@@ -7,11 +7,11 @@ topic: memory-hierarchy-design
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: 'Diagnosing Sequence Length OOM'
-scenario: 'You are debugging an Out of Memory (OOM) error while fine-tuning a 13B parameter LLM on a single 8x A100 (80GB HBM) node. You are using ZeRO-1 to partition optimizer states. At a sequence length of 2048 (batch size 2), training is stable. However, when increasing the sequence length to 8192 (batch size 1), the job crashes with a CUDA OOM error during the forward pass. Profiling shows parameter memory is stable, but activation memory spikes exponentially.'
-question: 'Why does increasing sequence length to 8192 cause forward-pass OOM under ZeRO-1, and what attention implementation fixes it?'
+title: Diagnosing Sequence Length OOM
+scenario: You are debugging an Out of Memory (OOM) error while fine-tuning a 13B parameter LLM on a single 8x A100 (80GB HBM) node. You are using ZeRO-1 to partition optimizer states. At a sequence length of 2048 (batch size 2), training is stable. However, when increasing the sequence length to 8192 (batch size 1), the job crashes with a CUDA OOM error during the forward pass. Profiling shows parameter memory is stable, but attention activation memory spikes quadratically.
+question: Why does increasing sequence length to 8192 cause forward-pass OOM under ZeRO-1, and what attention implementation fixes it?
 details:
-  realistic_solution: 'Diagnose that the OOM is caused by materializing the O(S^2) attention matrix in HBM. Implement FlashAttention to keep intermediate attention logits in the GPU''s SRAM (e.g., 192KB shared memory per SM) by computing block-by-block temporally, only writing the final O(S) output to HBM.'
+  realistic_solution: Diagnose that the OOM is caused by standard attention materializing O(S^2) score or probability tensors in HBM while ZeRO-1 only shards optimizer state. Implement FlashAttention or another memory-efficient tiled attention kernel that computes attention in SRAM/register tiles and avoids writing the full attention matrix to HBM.
   common_mistake: |
     **The Pitfall:** Assuming the OOM is due to model parameters and unnecessarily applying ZeRO-3.
     **The Rationale:** Misunderstanding the quadratic memory scaling of standard self-attention activations.
@@ -22,14 +22,16 @@ details:
     - Optimizer states (FP32 master + momentum + variance) = 156GB.
     - ZeRO-1 shards states across 8 GPUs: 19.5GB per GPU.
     - S=8192, 40 heads, 40 layers.
+    - Standard attention may save attention probabilities or related S x S tensors for backward; exact memory depends on kernel, checkpointing, and framework.
 
     **Calculations:**
     - Total static per GPU = 26 + 26 + 19.5 = 71.5GB. Remaining HBM ≈ 8.5GB.
-    - 1 layer's attention matrix (S=8192): 8192 * 8192 * 40 * 2 bytes ≈ 5.36 GB.
-    - Across 40 layers, intermediate attention tensors = ~214 GB.
+    - One layer of attention probabilities at S=8192: 8192 * 8192 * 40 heads * 2 bytes ≈ 5.36GB.
+    - This is 16x larger than the same tensor at S=2048 because attention memory scales with S^2.
+    - A few saved activation tensors, workspace buffers, or non-checkpointed layers can exceed the remaining 8.5GB even though parameter memory is unchanged.
 
     **Conclusion & Interpretation:**
-    - **Result: 214 GB (Memory-Bound)**. The O(S²) intermediate attention tensors instantly cause OOM; FlashAttention fixes this by allocating intermediate results to SRAM.
+    - **Result: Quadratic attention activation growth (Memory-Bound)**. The O(S^2) attention tensors, not optimizer state, explain the forward OOM; FlashAttention reduces HBM traffic and storage by using tiled SRAM/register computation.
 status: published
 provenance: imported
 requires_explanation: false

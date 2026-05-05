@@ -8,25 +8,28 @@ competency_area: power
 bloom_level: analyze
 phase: both
 title: Power Anomaly Detection for H100 Training Clusters
-scenario: 'The ops team gets a page: GPU node h100-rack07-node04 is drawing 820W per GPU sustained—17% above the 700W TDP. No thermal throttling flags are set, training loss is progressing normally, and SMI shows no errors.'
-question: 'Why might h100-rack07-node04 sustain 820W per GPU without errors, is it a fault, and what power thresholds should trigger escalation?'
+scenario: 'The ops team gets a page: the rack PDU attributes 820W per GPU to h100-rack07-node04, while the H100 TDP is 700W. No thermal throttling flags are set, training loss is progressing normally, and SMI shows no errors.'
+question: Why might h100-rack07-node04 sustain 820W per GPU without errors, is it a fault, and what power thresholds should trigger escalation?
 details:
-  realistic_solution: 'Root cause candidates: (1) Power limit not explicitly set—H100 defaults to 700W limit via nvidia-smi -pl, but if unset or overridden, can boost to ~900W during Tensor Core-heavy phases. (2) Measurement artifact: PDU meter reading includes VRM and PCIe auxiliary power not in the GPU TDP spec. (3) Workload has exceptionally high arithmetic intensity (INT8 tensor operations) driving max boost. Check: nvidia-smi -q -d POWER to see current enforced limit. If limit = 700W but draw = 820W, likely PDU measurement includes other components. If limit = 900W (unconstrained), set -pl 700 immediately. Alert thresholds: >750W for >60s = investigate; >900W = page on-call immediately.'
+  realistic_solution: First separate GPU device power from PDU-allocated rack power. TDP and nvidia-smi power limits apply to GPU board/device power; a PDU allocation can include the node share of CPUs, DIMMs, NICs, fans, PSU losses, and measurement apportionment. Check nvidia-smi -q -d POWER for the enforced limit and current device power. If the device limit is 700W and SMI device power is near 700W, an 820W PDU allocation is not necessarily a GPU fault; it is rack accounting plus overhead. If SMI reports sustained device power above the enforced 700W limit, escalate as a telemetry, firmware, or power-limit enforcement issue. If the limit was intentionally raised, restore the approved cap. Use thresholds such as PDU allocation >800W per GPU for investigation, SMI device power >700W for >60s under a 700W cap for escalation, and any device power above the configured hard limit for immediate on-call review.
   common_mistake: |
-    **The Pitfall:** Treating TDP as an absolute maximum power ceiling.
-    **The Rationale:** Candidates forget that H100 SXM5 can sustain up to ~900W in short bursts (boost clocks) if the power limit is not explicitly clamped.
-    **The Consequence:** Unnecessary hardware replacements or panicking over expected boost behavior.
+    **The Pitfall:** Comparing a rack PDU allocation directly to the GPU TDP.
+    **The Rationale:** Candidates mix device power with node-level overhead and assume every watt reported by the PDU is GPU board power.
+    **The Consequence:** They either replace healthy GPUs or miss the real issue: an unset power cap, bad telemetry, or excess non-GPU node power.
   napkin_math: |
     **Assumptions & Constraints:**
-    - H100 SXM5 Spec: TDP = 700W. Unrestricted boost ≈ 900W.
-    - Host VRM Overhead (PDU reading): Adds 30-50W.
+    - H100 device TDP or configured cap: 700W.
+    - PDU allocation includes non-GPU node overhead and PSU losses.
+    - Observed PDU allocation: 820W per GPU equivalent.
 
     **Calculations:**
-    - GPU Components: Compute die ≈ 550W, HBM3 ≈ 100W, VRM ≈ 50W, PCIe/NVLink ≈ 50W. Total ≈ 750W.
-    - Observed Draw: 770W (GPU) + 50W (Host) = 820W.
+    - PDU overhead above TDP-equivalent = 820W - 700W = 120W per GPU equivalent.
+    - Overhead fraction = 120W / 700W = 17%.
+    - For an 8-GPU node, equivalent overhead = 8 * 120W = 960W for CPUs, memory, NICs, fans, PSU losses, and allocation error.
+    - If SMI device power is <= 700W, the GPU cap is being respected; if SMI device power is > 700W under a 700W cap, escalate.
 
     **Conclusion & Interpretation:**
-    - **Result: 820W draw expected (Power-Bound)**. 820W is expected if the limit is uncapped; capping at 700W reduces PDU readings to ~730W.
+    - **Result: Measurement-Bound Diagnosis**. 820W at the PDU is not automatically a GPU fault; escalation depends on the SMI device-power reading relative to the configured limit.
 status: published
 provenance: imported
 requires_explanation: false
@@ -40,7 +43,7 @@ math_status: WARN
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- Text is truncated at the end
+  - Text is truncated at the end
 human_reviewed:
   status: not-reviewed
   by: null

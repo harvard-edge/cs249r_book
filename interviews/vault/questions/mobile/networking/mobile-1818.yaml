@@ -8,59 +8,29 @@ competency_area: networking
 bloom_level: apply
 phase: inference
 title: SoC Die-to-Die Interconnect for Heterogeneous Inference
-scenario: The Snapdragon 8 Gen 3 splits a 7B model across its Hexagon NPU, Adreno GPU, and Cortex-X4 CPU
-  for heterogeneous inference. The NoC provides 60 GB/s NPU-to-memory, 40 GB/s GPU-to-memory, and 30 GB/s
-  between NPU and GPU directly.
-question: How would you design the layer-to-accelerator mapping that minimizes cross-accelerator data
-  transfer?
+scenario: The Snapdragon 8 Gen 3 splits a 7B model across its Hexagon NPU, Adreno GPU, and Cortex-X4 CPU for heterogeneous inference. The NoC provides 60 GB/s NPU-to-memory, 40 GB/s GPU-to-memory, and 30 GB/s between NPU and GPU directly.
+question: How would you design the layer-to-accelerator mapping that minimizes cross-accelerator data transfer?
 details:
-  realistic_solution: '7B model prefill (512 tokens): embedding (50M params) → 32 transformer blocks →
-    LM head. Each block: attention (QKV projection + output, FP16-heavy) + FFN (INT8-quantizable). Mapping:
-    (1) Embedding + LM head → CPU. Small matmuls — CPU handles in 1-2ms. Data: 512 × 4096 × 2 = 4.1 MB
-    output, sent to NPU at 30 GB/s = 0.1ms. (2) FFN layers (all 32) → NPU at INT8. FFN parameters = 2
-    × 4096 × 11008 × 32 = 2.88B. Compute for 512 tokens = 512 × 2 × 2.88B = ~2.9T INT8 ops. NPU at 45
-    TOPS: 2.9T / 45T = 64ms. (3) Attention layers → GPU at FP16. Attention parameters = 4 × 4096² × 32
-    = 2.1B. Compute for 512 tokens = 512 × 2 × 2.1B = ~2.1T FP16 ops. GPU at 4.6 TFLOPS: 2.1T / 4.6T =
-    460ms... too slow. Better: attention also on NPU with FP16 fallback. Cross-accelerator transfer is
-    minimal.'
-  common_mistake: '**The Pitfall:** Splitting the model sequentially by layer count (e.g., first 16 layers
-    on NPU, next 16 on GPU).
-
-    **The Rationale:** Candidates assume load balancing means equal layer distribution, failing to recognize
-    that different layers have vastly different compute and numerical precision profiles.
-
-    **The Consequence:** The system runs inefficiently because hardware accelerators are forced to compute
-    operations they are bad at (e.g., executing FP16 attention on the INT8-optimized NPU).
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - CPU Mapping: Embedding (cache-friendly).
-
-    - NPU Mapping: FFN layers (INT8-efficient).
-
-    - GPU Mapping: Attention layers (FP16 parallelizable).
-
-    - Re-Mapping Attention: Move Attention to NPU using its FP16 fallback mode (22.5 TFLOPS).
-
+  realistic_solution: 'To minimize cross-accelerator transfer, avoid splitting every transformer block between NPU and GPU unless the compute win is large enough to pay for two boundary transfers per block. A practical mapping is: keep embeddings, all transformer blocks, KV-cache updates, and LM head on one primary accelerator when they fit, preferably the NPU for an INT8/mobile-optimized 7B path. Use the CPU only for tokenization, sampling, and small control work. If an attention kernel is truly unsupported on the NPU, group several adjacent blocks on the GPU rather than alternating attention on GPU and FFN on NPU inside every block; this reduces boundary crossings from dozens per token/prefill to one or two large segment transfers. The design rule is to partition by contiguous layer ranges and supported kernels, not by op type inside each block.'
+  common_mistake: |
+    **The Pitfall:** Splitting the model sequentially by layer count (e.g., first 16 layers on NPU, next 16 on GPU).
+    **The Rationale:** Candidates assume load balancing means equal layer distribution, failing to recognize that different layers have vastly different compute and numerical precision profiles.
+    **The Consequence:** The system runs inefficiently because hardware accelerators are forced to compute operations they are bad at (e.g., executing FP16 attention on the INT8-optimized NPU).
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hidden state per 512-token prefill: 512 * 4096 * 2 bytes = 4.0 MB.
+    - Direct NPU-GPU bandwidth: 30 GB/s.
+    - A block-internal split moves activations NPU->GPU and GPU->NPU once per transformer block.
+    - A contiguous two-segment split crosses accelerators only at the segment boundary.
 
     **Calculations:**
-
-    - CPU: 1ms compute + 4.1MB/30GB/s (0.1ms) transfer = 1.1ms.
-
-    - NPU FFN: 2.88B params × 512 tokens × 2 = ~2.9T INT8 ops. At 45 TOPS = 64ms.
-
-    - GPU Attention: 2.1B params × 512 tokens × 2 = ~2.1T FP16 ops. GPU at 4.6 TFLOPS = 460ms (Too slow).
-
-    - NPU Attention: 2.1T / 22.5 TFLOPS = 93ms.
-
+    - Transfer per boundary: 4.0 MB / 30 GB/s = about 0.13 ms before synchronization overhead.
+    - Alternating attention/FFN across 32 blocks: 64 boundaries * 0.13 ms = about 8.3 ms minimum transfer time, plus 64 synchronization points.
+    - One contiguous split between NPU and GPU segments: 1 boundary * 0.13 ms, plus one synchronization point.
+    - Single-accelerator placement for all supported blocks: 0 NPU-GPU activation transfers.
 
     **Conclusion & Interpretation:**
-
-    - **Result: ~158ms (Compute-Bound)**. By mapping purely by compute affinity, cross-unit transfer overhead
-    is negligible (0.3ms) and total prefill latency drops to ~158ms entirely on the NPU/CPU.
-
-    '
+    - **Result: transfer-minimizing placement favors one primary accelerator or a small number of contiguous layer segments.** Only split attention and FFN across accelerators if profiling shows the compute savings exceed repeated activation-transfer and synchronization costs.
 status: published
 provenance: imported
 requires_explanation: true

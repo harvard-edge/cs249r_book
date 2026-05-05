@@ -7,11 +7,12 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: evaluate
 phase: training
-title: 'The MLIR Retargetability Boundary'
-scenario: 'Your company trained a 70B transformer on NVIDIA GPUs using PyTorch. A cloud cost analysis shows that AMD MI300X GPUs offer 30% lower $/TFLOP. The plan is to retarget the compiled model using MLIR''s multi-target lowering — keep the high-level dialects identical and swap only the final backend from NVVM to AMDGPU. After migration, actual training throughput is only 60% of the NVIDIA baseline, despite comparable peak TFLOPS.'
-question: 'Where does MLIR retargetability break when moving to MI300X, and what extra optimization work is required?'
+title: The MLIR Retargetability Boundary
+scenario: Your company trained a 70B transformer on NVIDIA GPUs using PyTorch. A cloud cost analysis shows that AMD MI300X GPUs offer 30% lower $/TFLOP. The plan is to retarget the compiled model using MLIR's multi-target lowering — keep the high-level dialects identical and swap only the final backend from NVVM to AMDGPU. After migration, actual training throughput is only 60% of the NVIDIA baseline, despite comparable peak TFLOPS.
+question: Where does MLIR retargetability break when moving to MI300X, and what extra optimization work is required?
 details:
-  realistic_solution: 'The retargetability promise breaks down at three levels: (1) **Tiling and memory hierarchy mismatch**: Tile sizes auto-tuned for H100 (80GB HBM3 at 3.35 TB/s, 50MB L2, 228KB shared memory per SM) are suboptimal for MI300X (192GB HBM3 at 5.3 TB/s, 256MB Infinity Cache, 64KB LDS per CU). MI300X''s much larger cache favors different working-set sizes. The tiling passes in the mid-level dialects must be re-tuned. (2) **Missing hardware primitives**: NVIDIA''s TMA (Tensor Memory Accelerator) for async tile loads has no direct MI300X equivalent — the compiler must generate explicit DMA commands, requiring different shared memory orchestration at the GPU dialect level. (3) **Library fallback gap**: cuBLAS/cuDNN provide hand-tuned kernels for common shapes on NVIDIA. rocBLAS/MIOpen on AMD have less coverage for exotic shapes (grouped GEMM for MoE, variable-length attention). The compiler must generate these kernels from scratch rather than dispatching to libraries. The fix requires: re-running auto-tuning on MI300X (~30 min), adding MI300X-specific tiling heuristics to the affine dialect passes, and writing custom Triton kernels for the 5-10 operator shapes where rocBLAS falls short. After this work, expect 85-90% of equivalent H100 throughput, making the 30% cost savings real.'
+  realistic_solution: 'The retargetability promise breaks down at three levels: (1) **Tiling and memory hierarchy mismatch**: Tile sizes auto-tuned for H100 (80GB HBM3 at 3.35 TB/s, 50MB L2, 228KB shared memory per SM) are suboptimal for MI300X (192GB HBM3 at 5.3 TB/s, 256MB Infinity Cache, 64KB LDS per CU). MI300X''s much larger cache favors different working-set sizes. The tiling passes in the mid-level dialects must be re-tuned. (2) **Missing hardware primitives**: NVIDIA''s TMA (Tensor Memory Accelerator) for async tile loads has no direct MI300X equivalent — the compiler must generate explicit DMA commands, requiring different shared memory orchestration at the GPU dialect level. (3) **Library fallback gap**: cuBLAS/cuDNN provide hand-tuned kernels for common shapes on NVIDIA. rocBLAS/MIOpen on AMD have less coverage for exotic shapes (grouped GEMM for MoE, variable-length attention). The compiler must generate these kernels from scratch rather than dispatching to libraries. The fix
+    requires: re-running auto-tuning on MI300X (~30 min), adding MI300X-specific tiling heuristics to the affine dialect passes, and writing custom Triton kernels for the 5-10 operator shapes where rocBLAS falls short. After this work, expect 85-90% of equivalent H100 throughput, turning the advertised 30% hardware discount into roughly 20% lower cost per unit of training throughput.'
   common_mistake: |
     **The Pitfall:** Believing MLIR's retargetability promise equates to seamless performance portability.
     **The Rationale:** MLIR is marketed as a multi-target compiler, leading engineers to think simply swapping the backend dialect will magically map to entirely different hardware architectures efficiently.
@@ -20,14 +21,16 @@ details:
     **Assumptions & Constraints:**
     - Baseline NVIDIA throughput: 100%.
     - Hardware cost savings on MI300X: 30%.
-    
+
     **Calculations:**
     - Naive MLIR Retarget: 60% throughput.
     - Post-Optimization Throughput: ~88% of baseline (after tiling/kernel fixes).
-    - True Cost Savings: At 88% speed and 70% cost = 0.70 / 0.88 = 80% relative cost.
-    
+    - Post-optimization throughput: assume an observed 88% of the NVIDIA baseline after retuning and custom kernels.
+    - Normalized cost per unit throughput: 0.70 cost / 0.88 throughput = 0.795 of baseline.
+    - Effective savings versus baseline: 1 - 0.795 = 0.205, or about 20.5%.
+
     **Conclusion & Interpretation:**
-    - **Result: ~20% true cost savings (Compute-Bound)**. Architectural differences in memory hierarchy demand extensive tuning to recover compiler retargeting performance.
+    - **Result: ~20% cost-per-throughput savings (Compute-Bound)**. The 30% hardware discount is only realized as about 20% effective savings after accounting for the remaining throughput gap.
 status: published
 provenance: imported
 requires_explanation: false

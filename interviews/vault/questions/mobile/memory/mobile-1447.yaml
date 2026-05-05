@@ -11,7 +11,8 @@ title: mmap-Driven LLM Streaming on A17 Pro Neural Engine
 scenario: You are deploying a 4-bit quantized 8B parameter LLM onto an iPhone 15 Pro. The iOS jetsam strictly limits your app's peak RSS to 4 GB, and the product requires a time-to-first-token (TTFT) cold start of under 500ms.
 question: How would you evaluate using memory-mapped files (mmap) to execute this model without being terminated by the OS?
 details:
-  realistic_solution: Use mmap combined with strict POSIX madvise calls (MADV_WILLNEED and MADV_DONTNEED) to create a sliding window of resident memory. To hit the 500ms cold start, start ANE execution immediately on the first layers while a background thread asynchronously page-faults the upcoming layers into memory.
+  realistic_solution: |
+    mmap should be evaluated as a residency-management tool, not as a way to make a 4 GB model fit instantly. It can cap peak RSS by mapping sharded weights, prefetching the next shard, and dropping old pages after each layer, but the pages still must be read from storage and staged through the CPU/runtime. Because the 4-bit weights alone equal the 4 GB RSS limit before KV cache, activations, and framework overhead, a reliable iOS deployment needs true layer streaming with a small resident window, a shorter context, a smaller model, or a warm-start/preloaded state. A strict sub-500 ms cold TTFT is unlikely for the full 4 GB model from storage.
   common_mistake: |
     **The Pitfall:** Assuming memory-mapped files instantly skip I/O stalls.
     **The Rationale:** Candidates often assume mmap magically makes weights instantly available without realizing the ensuing page faults severely stall the NPU.
@@ -27,9 +28,12 @@ details:
     **Calculations:**
     - Total sequential load time: 4.0 GB / 2 GB/s = 2.0s (violates TTFT).
     - Load time per layer: 125 MB / 2 GB/s = 62.5ms.
+    - Minimum I/O to process all 32 layers for the first token still sums to 32 * 62.5ms = 2.0s if weights are cold.
+    - RSS with the whole model resident = 4.0 GB weights + KV cache + activations + runtime overhead, which exceeds the 4.0 GB limit.
+    - A two-layer streaming window uses about 250 MB of weight RSS, but it trades memory capacity for repeated I/O and cannot remove the cold-read latency.
 
     **Conclusion & Interpretation:**
-    - **Result: 62.5ms/layer (I/O-Bound)**. By memory-mapping and forcing asynchronous page faults ahead of the ANE execution, the pipeline hides the 2.0s total load time, achieving TTFT in ~62.5ms per layer.
+    - **Result: mmap helps RSS, not cold-start physics**. Streaming can avoid jetsam by keeping only a small layer window resident, but a cold 4 GB weight read has a ~2.0s lower bound at 2 GB/s. Meeting 500ms requires a smaller model, prewarming, cached residency, or changing the product target.
 status: published
 provenance: imported
 requires_explanation: false

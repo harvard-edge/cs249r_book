@@ -11,7 +11,7 @@ title: Edge Data Efficiency for Real-time Object Detection on Hailo-8
 scenario: Your team is deploying a real-time object detection model on an autonomous drone platform equipped with a Hailo-8 AI processor. The drone captures 1080p RGB video at 30 FPS. Continuously feeding raw, voluminous sensor data to the model on the edge device consumes excessive power and memory bandwidth, severely impacting battery life.
 question: How would you use data selection to reduce 1080p 30 FPS drone input while preserving on-device adaptation capabilities?
 details:
-  realistic_solution: Implement a cascaded, uncertainty-aware active learning pipeline. First, run a lightweight, INT8-quantized heuristic gate or temporal motion tracker on the host CPU to decimate redundant frames. For the remaining frames passed to the Hailo-8, compute an epistemic uncertainty proxy (e.g., bounding box variance from a lightweight ensemble or confidence entropy). Only frames exhibiting high uncertainty or significant distribution shift are retained in a local coreset buffer for periodic on-device fine-tuning, dramatically reducing the Information-Compute Ratio (ICR) and mitigating catastrophic forgetting.
+  realistic_solution: Use data selection as an adaptation-preserving filter, not just frame dropping. Deduplicate adjacent frames with a lightweight motion or embedding gate, then retain frames with high uncertainty, novel scene embeddings, rare object classes, and environmental diversity. Store retained examples in a bounded coreset buffer with quotas for recent shifts and long-tail cases, plus a small replay set of known-good examples. Periodically offload the coreset or update metadata for retraining/fine-tuning while measuring whether adaptation improves without forgetting earlier drone conditions.
   common_mistake: |
     **The Pitfall:** Applying generic, static data pruning (e.g., random sampling or threshold-based filtering).
     **The Rationale:** Candidates often do not consider the dynamic distribution shifts at the edge or the model's uncertainty, assuming random sampling is sufficient to reduce volume.
@@ -19,15 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Drone camera: 1080p RGB (1920 x 1080 x 3 bytes) at 30 FPS.
-    - Effective memory bandwidth for sustained inference data transfer: Assumed bottlenecked at 50 MB/s.
+    - Effective sustained processing budget for frames selected for full inference/adaptation: 50 MB/s.
+    - Adaptation buffer target: keep at least 10% of frames by uncertainty/diversity, not purely random frames.
 
     **Calculations:**
     - Raw frame size = 1920 * 1080 * 3 = 6,220,800 bytes (~6.22 MB).
     - Raw data rate = 6.22 MB/frame * 30 FPS = 186.6 MB/s.
     - Required reduction factor = (186.6 - 50) / 186.6 = 73.2%.
+    - Maximum selected rate at 50 MB/s = 50 / 6.22 ≈ 8 FPS, which leaves room to keep a diverse 3 FPS adaptation subset plus additional uncertain frames for immediate processing.
 
     **Conclusion & Interpretation:**
-    - **Result: 73.2% Reduction (Memory-Bandwidth-Bound)**. A minimum of 73.2% of raw frames must be dropped or bypassed to operate within memory bandwidth constraints.
+    - **Result: Select Up To About 8 FPS**. The selection policy must bypass roughly 73% of raw frames for the heavy path while ensuring the retained buffer is uncertainty- and diversity-weighted so adaptation data is not lost.
 status: published
 provenance: imported
 requires_explanation: true
@@ -37,7 +39,7 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The Napkin Math ends with an open question about the impact of reduction on quality.
+  - The Napkin Math ends with an open question about the impact of reduction on quality.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

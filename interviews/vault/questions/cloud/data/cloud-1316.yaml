@@ -11,22 +11,24 @@ title: Mitigating Gradient Inversion in Medical Federated Learning
 scenario: In a federated learning setup for a medical imaging model (ResNet-50, 25M parameters), clients (hospitals) train locally on 8x NVIDIA A100 nodes and send FP32 gradient updates to the central cloud aggregator. A security audit reveals that a malicious aggregator can perfectly reconstruct the raw 256x256 patient X-ray images from these updates when the local batch size is set to 1.
 question: Why do batch-size-1 federated gradients allow exact X-ray reconstruction, and what mitigation prevents it with under 1% accuracy loss?
 details:
-  realistic_solution: Increase the minimum local batch size to at least 16 to average gradients across multiple images (breaking the 1:1 mapping), and implement DP-SGD by clipping gradients to a maximum L2 norm (e.g., C=1.0) and adding Gaussian noise (e.g., σ=0.01) before transmission.
+  realistic_solution: Do not rely on batch size alone as a privacy guarantee. Require larger local batches to reduce the one-sample gradient mapping, and add a real privacy control such as secure aggregation so the server never sees individual-client gradients, or DP-SGD with clipping and noise calibrated to a stated epsilon/delta budget after measuring accuracy impact.
   common_mistake: |
     **The Pitfall:** Assuming TLS/encryption in transit solves the privacy problem.
     **The Rationale:** Engineers treat the aggregator as inherently trusted because it sits inside the company's cloud VPC.
-    **The Consequence:** The aggregator decrypts the packets to do the math, and the mathematical mapping from gradients to input data remains perfectly intact, allowing a compromised aggregator to reconstruct raw PHI data.
+    **The Consequence:** The aggregator decrypts the packets to do the math, so a compromised or malicious aggregator can still attack the gradients. Batch size, architecture, and defenses affect recoverability, but encryption in transit does not protect gradients after receipt.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Image size: 256x256 (65,536 pixels).
-    - B=1 allows analytic recovery.
+    - Image size: 256x256 = 65,536 pixels.
+    - With batch size 1, an observed gradient can expose a direct relationship to one image.
+    - With batch size B, the observed gradient is an aggregate over B images.
 
     **Calculations:**
-    - If B=16, the gradient is ∑(x_i * δ_i^T).
-    - Number of unknowns: 16 * 256 * 256 = 1,048,576 pixels.
+    - For B=1, the attacker tries to fit one image to one gradient update.
+    - For B=16, the same update is a sum/average over 16 images, so the image unknowns rise to 16 * 65,536 = 1,048,576 pixel values before considering labels and model states.
+    - This makes inversion less identifiable, but it is not a proof of privacy; DP noise must be calibrated to a target epsilon/delta, or secure aggregation must hide individual updates.
 
     **Conclusion & Interpretation:**
-    - **Result: Optimization Search Space Bound**. Batch size > 1 exponentially increases the search space (over 1M unknowns), thwarting reconstruction attacks.
+    - **Result: Identifiability Reduced, Not Eliminated.** Larger batches weaken exact reconstruction from individual gradients, while calibrated DP-SGD or secure aggregation provides the privacy mechanism.
 status: published
 provenance: imported
 requires_explanation: false

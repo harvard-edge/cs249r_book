@@ -11,7 +11,8 @@ title: Infinity Fabric vs NVLink for Scale-Up Topology
 scenario: You are choosing between an 8x GPU NVLink node and an 8x GPU Infinity Fabric node for a 70B parameter LLM training job with TP=8.
 question: For 70B LLM training with TP=8, how do 8x NVLink and 8x Infinity Fabric nodes compare on all-reduce and memory capacity?
 details:
-  realistic_solution: 'For 70B LLM in BF16: model weights = 140GB. 8-GPU node: 640GB total, 140GB fits with headroom for activations and optimizer states in mixed precision. High memory capacity 8-GPU nodes can hold full optimizer states in BF16 without offloading. All-reduce: both nodes have ~900 GB/s bandwidth. NVLink topology: fully connected NVSwitch, bisection bandwidth = 900 GB/s. Infinity Fabric peer-to-peer bandwidth depends on system topology (PCIe vs dedicated fabric on OAM modules). Infinity Fabric OAM: 7-link fabric = 896 GB/s aggregate. Performance near-equivalent for all-reduce; higher memory capacities win on avoiding gradient checkpointing.'
+  realistic_solution: |
+    A 70B BF16 model has 140GB of weights total, or 17.5GB per rank with TP=8. That fits on both an 8-GPU NVLink node and a high-capacity 8-GPU Infinity Fabric node, but full training memory is much larger once gradients, optimizer states, activations, and workspace are included. An 8x80GB NVLink node has 640GB total, while 8x192GB high-capacity GPUs provide about 1.5TB, so capacity can decide whether optimizer state or activations must be sharded, checkpointed, or offloaded. For all-reduce, NVSwitch-style NVLink usually provides more uniform high-bisection intra-node bandwidth and lower topology sensitivity. Infinity Fabric performance depends on the exact OAM/baseboard topology and routing; use measured collective bandwidth, not a single peak link number. The decision is therefore: NVLink is usually safer for latency-sensitive TP collectives, while the higher-memory node can win if avoiding memory-saving techniques saves more time than any collective penalty.
   common_mistake: |
     **The Pitfall:** Comparing peak interconnect bandwidth directly and concluding the nodes are identical.
     **The Rationale:** Candidates look at NVLink (900 GB/s) and Infinity Fabric (896 GB/s) and assume training performance will match.
@@ -19,16 +20,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 70B model, TP=8, BF16 (2 bytes/param).
-    - Link bandwidth: ~900 GB/s. Compute: ~989 TFLOPS. Batch=512.
+    - NVLink/NVSwitch effective all-reduce bandwidth: assume 900 GB/s for a large intra-node payload.
+    - Infinity Fabric effective all-reduce bandwidth: assume 700-900 GB/s depending on topology and routing.
 
     **Calculations:**
+    - Total BF16 weights = 70B * 2 bytes = 140GB.
     - Weights per rank: 70B / 8 = 8.75B params = 17.5 GB.
-    - All-Reduce payload per step: 2 × (7/8) × 17.5 GB = 30.6 GB.
-    - All-Reduce Time (at 900 GB/s): 30.6 GB / 900 GB/s ≈ 34 ms.
-    - Compute Time: ~6 × 70B FLOPs × 512 / 989 TFLOPS ≈ 217 ms.
+    - 8x80GB node capacity = 640GB; 8x192GB node capacity = 1,536GB.
+    - Representative 17.5GB TP all-reduce payload: ring traffic per rank = 2 * (7/8) * 17.5GB = 30.6GB.
+    - NVLink time at 900GB/s = 30.6GB / 900GB/s = 34ms.
+    - Infinity Fabric time at 700-900GB/s = 34-44ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Communication is ~15.6% overhead (34ms / 217ms), scaling efficiently on both (Compute-Bound)**.
+    - **Result: Capacity-vs-Topology Tradeoff.** The model weights fit either way, but training-state capacity and measured intra-node collective bandwidth determine whether the larger-memory Infinity Fabric node or the more uniform NVLink node is faster.
 status: published
 provenance: imported
 requires_explanation: false

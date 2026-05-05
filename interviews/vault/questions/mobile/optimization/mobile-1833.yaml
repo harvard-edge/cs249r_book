@@ -8,44 +8,27 @@ competency_area: optimization
 bloom_level: understand
 phase: training
 title: Understanding why autograd is disabled on Core ML and how to replicate gradient-based effects
-scenario: A developer exports a PyTorch model to Core ML for deployment. They want to implement a feature
-  where the model can perform a few-shot adaptation step on-device using gradient descent. Core ML does
-  not support backward passes. The team considers re-implementing autograd from scratch.
-question: How can a mobile app support few-shot adaptation when inference frameworks do not provide backward
-  passes?
+scenario: A developer exports a PyTorch model to Core ML for deployment. They want to implement a feature where the model can perform a few-shot adaptation step on-device using gradient descent. Core ML does not support backward passes. The team considers re-implementing autograd from scratch.
+question: How can a mobile app support few-shot adaptation when inference frameworks do not provide backward passes?
 details:
-  realistic_solution: Use gradient-free adaptation methods such as Prompt engineering or Test-time normalization
-    adaptation. For true gradient-based adaptation, deploy a tiny PyTorch Mobile model subset (e.g., classification
-    head only) with autograd enabled, while the backbone runs efficiently on Core ML.
-  common_mistake: '**The Pitfall:** Assuming mobile inference runtimes support backpropagation.
-
-    **The Rationale:** Candidates falsely equate training frameworks with highly optimized, inference-only
-    compiled computational graphs.
-
-    **The Consequence:** The team wastes months trying to reverse-engineer autograd into an engine that
-    literally strips all gradient metadata.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Core ML Backbone Inference: ~15ms.
-
-    - PyTorch Mobile Head (1000 params): ~2ms.
-
+  realistic_solution: 'Use an adaptation method that matches the deployed runtime. Keep the Core ML backbone inference-only and adapt only a small on-device component: a linear/prototype head trained with a mobile training runtime that supports gradients, a nearest-centroid cache updated from embeddings, test-time normalization statistics, or prompt/context parameters when the model type supports them. Do not rebuild autograd inside Core ML; export embeddings from the backbone, detach them, and run the few-shot update in a tiny trainable head or use a gradient-free method.'
+  common_mistake: |
+    **The Pitfall:** Assuming mobile inference runtimes support backpropagation.
+    **The Rationale:** Candidates falsely equate training frameworks with highly optimized, inference-only compiled computational graphs.
+    **The Consequence:** The team wastes months trying to reverse-engineer autograd into an engine that literally strips all gradient metadata.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Core ML backbone is inference-only and does not retain backward graph metadata.
+    - Few-shot adaptation should update only a small head or external state.
+    - Backbone embeddings can be treated as fixed features during adaptation.
 
     **Calculations:**
-
-    - 5-Shot Adaptation (5 steps * 2ms): 10ms.
-
-    - Total Adaptation Time: 15ms + 10ms = 25ms.
-
+    - Rebuilding autograd for the full exported backbone would require storing activations and gradients for layers that Core ML intentionally compiled away.
+    - Training only a small head limits gradient storage to the head parameters and the few cached embeddings.
+    - Gradient-free alternatives such as prototype updates require no backward pass and only store class statistics or prompts.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 25ms (Compute-Bound)**. Total adaptation time is ~25ms, completely negating the need to
-    rebuild autograd from scratch.
-
-    '
+    - **Result: adapt outside the inference graph.** Keep Core ML for the fixed backbone and place the trainable or gradient-free adaptation state in a small supported runtime component.
 status: published
 provenance: imported
 requires_explanation: false

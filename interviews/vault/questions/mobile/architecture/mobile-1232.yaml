@@ -8,52 +8,28 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: Architecting Real-Time Translation on Tensor G3
-scenario: Design an offline, real-time speech translation system for a device powered by the Google Tensor
-  G3. The hardware features an on-device TPU with 7.5 TOPS optimized for on-device LLMs (Gemini Nano)
-  and shares 12 GB of LPDDR5X RAM with the OS. You must evaluate the architectural tradeoffs between deploying
-  a monolithic encoder-decoder model versus a decoupled pipeline (an encoder-only acoustic model feeding
-  a decoder-only LLM) and justify your choice based on these hardware constraints.
-question: How would you design an offline, real-time speech translation system for a device powered by
-  the Google Tensor G3?
+scenario: Design an offline, real-time speech translation system for a device powered by the Google Tensor G3. The hardware features an on-device TPU with 7.5 TOPS optimized for on-device LLMs (Gemini Nano) and shares 12 GB of LPDDR5X RAM with the OS. You must evaluate the architectural tradeoffs between deploying a monolithic encoder-decoder model versus a decoupled pipeline (an encoder-only acoustic model feeding a decoder-only LLM) and justify your choice based on these hardware constraints.
+question: How would you design an offline, real-time speech translation system for a device powered by the Google Tensor G3?
 details:
-  realistic_solution: 'The optimal design leverages a decoupled architecture: a lightweight encoder-only
-    model for ASR and a 4-bit quantized decoder-only LLM for translation. This aligns perfectly with the
-    Tensor G3''s hardware optimizations. The encoder processes audio streams efficiently in chunks, while
-    the decoder-only LLM maximizes the TPU''s 7.5 TOPS and stays within a strict memory budget, avoiding
-    the memory bandwidth bottlenecks typically associated with large cross-attention layers in traditional
-    encoder-decoder setups.'
-  common_mistake: '**The Pitfall:** Proposing a large monolithic encoder-decoder model and ignoring memory
-    constraints.
-
-    **The Rationale:** Candidates fail to recognize that the Tensor G3''s TPU is explicitly optimized
-    for decoder-only LLMs like Gemini Nano.
-
-    **The Consequence:** They assume the full 12 GB LPDDR5X is available, rather than allocating a safe
-    1.5-2 GB budget for background ML tasks, leading to out-of-memory errors.'
-  napkin_math: '**Assumptions & Constraints:**
-
-    - 1.8B parameter decoder-only LLM at 4-bit quantization.
-
-    - 12 GB LPDDR5X RAM with memory bandwidth of ~50 GB/s.
-
-    - Target: 20 tokens/sec.
-
+  realistic_solution: A strong design evaluates both paths rather than assuming one is universally optimal. A compact end-to-end speech translation encoder-decoder can preserve prosody and translation context, but it is harder to fit and tune under mobile memory and latency limits. A decoupled pipeline with streaming ASR followed by a small quantized translation model is often easier to deploy, cache, test, and update, but it introduces ASR error propagation and may need text normalization or confidence-aware retries. Choose the pipeline only if its measured latency, memory, and quality meet the offline target; otherwise use a purpose-built compact sequence-to-sequence model.
+  common_mistake: |
+    **The Pitfall:** Proposing a large monolithic encoder-decoder model and ignoring memory constraints.
+    **The Rationale:** Candidates fail to recognize that the Tensor G3's TPU is explicitly optimized for decoder-only LLMs like Gemini Nano.
+    **The Consequence:** They assume the full 12 GB LPDDR5X is available, rather than allocating a safe 1.5-2 GB budget for background ML tasks, leading to out-of-memory errors.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - ASR encoder: 50-150 MB quantized weights plus streaming activations.
+    - Translation model: 1.8B parameters at 4-bit needs about 0.9 GB for packed weights.
+    - Runtime overhead includes KV cache, activations, tokenizer buffers, audio features, and delegate workspaces.
+    - Target: real-time speech, so each 1 second audio chunk must finish in under about 1 second end-to-end.
 
     **Calculations:**
-
-    - Weights require ~0.9 GB.
-
-    - Reading model for one token: 0.9 GB / 50 GB/s = 18 ms.
-
-    - 20 tokens/sec = 50 ms/token.
-
-    - Remaining time: 50 ms - 18 ms = 32 ms.
-
+    - Translation weights: 1.8B * 0.5 bytes = 0.9 GB before metadata and packing overhead.
+    - Add ASR weights, KV cache, activations, and runtime buffers: roughly 1.2-1.6 GB total working set for the decoupled path.
+    - Latency budget must include ASR feature extraction/encoding, text handoff, autoregressive decoding, and post-processing; no single weight-size division proves viability.
 
     **Conclusion & Interpretation:**
-
-    - This comfortably leaves 32 ms for TPU compute (utilizing the 7.5 TOPS) and KV cache updates, proving
-    the decoder-only approach is highly viable.'
+    - The decoupled design is attractive because it keeps components small and independently measurable, but it is viable only after profiling the full pipeline. The monolithic encoder-decoder remains a valid choice if it gives better translation quality within the same memory and chunk-latency envelope.
 status: published
 provenance: imported
 requires_explanation: true

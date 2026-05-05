@@ -8,43 +8,31 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: Calculating PagedAttention Memory Savings
-scenario: You are optimizing an inference server running a 70B parameter LLM on an 8x A100 (80GB) node.
-  The KV cache consumes exactly 512 KB per token. The server handles a batch of 64 requests, with a maximum
-  supported sequence length of 4096 tokens per request. However, the actual average sequence length at
-  runtime is only 1024 tokens.
-question: How much GPU memory is wasted by contiguous KV allocation, and how much is consumed with 16-token
-  PagedAttention blocks?
+scenario: You are optimizing an inference server running a 70B parameter LLM on an 8x A100 (80GB) node. The KV cache consumes exactly 512 KB per token. The server handles a batch of 64 requests, with a maximum supported sequence length of 4096 tokens per request. However, the actual average sequence length at runtime is only 1024 tokens.
+question: How much GPU memory is wasted by contiguous KV allocation, and how much is consumed with 16-token PagedAttention blocks?
 details:
-  realistic_solution: Identify that contiguous allocation pre-reserves memory for the maximum possible
-    sequence length (4096 tokens) for every request. Calculate the max allocation, then calculate the
-    actual usage based on the average length (1024 tokens) which PagedAttention dynamically allocates.
-    The difference is the waste eliminated.
-  common_mistake: '**The Pitfall:** Failing to account for pre-allocation in contiguous KV caches.
-
+  realistic_solution: Contiguous allocation pre-reserves 4096 tokens for every request, so 64 requests reserve 128GB. The batch actually needs 1024 tokens/request, or 32GB. With 16-token PagedAttention blocks, 1024 tokens is exactly 64 blocks per request, so there is no tail-block waste for the average case and the consumed KV memory is 32GB. The contiguous scheme wastes 96GB.
+  common_mistake: |
+    **The Pitfall:** Failing to account for pre-allocation in contiguous KV caches.
     **The Rationale:** Candidates assume memory is only allocated for the tokens actively being generated.
-
-    **The Consequence:** They vastly underestimate the baseline memory consumption and fail to recognize
-    the massive savings introduced by PagedAttention.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    Extracted from text
+    **The Consequence:** They vastly underestimate the baseline memory consumption and fail to recognize the massive savings introduced by PagedAttention.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch size: 64 requests.
+    - Max sequence length: 4096 tokens/request.
+    - Average actual length: 1024 tokens/request.
+    - KV cache footprint: 512 KB/token = 0.5 MB/token.
+    - PagedAttention block size: 16 tokens.
 
     **Calculations:**
-
-    - Max Allocation = 64 requests * 4096 tokens * 0.5 MB/token = 128 GB.
-
-    - Actual Usage (PagedAttention) = 64 requests * 1024 tokens * 0.5 MB/token = 32 GB.
-
-    - Waste Eliminated = 128 GB - 32 GB = 96 GB.
-
-    - **Conclusion:** **PagedAttention allocates 16-token pages (8 MB each) on demand, eliminating 75%
-    of the memory footprint.**
+    - Contiguous allocation = 64 requests * 4096 tokens * 0.5 MB/token = 131,072 MB = 128 GB.
+    - Actual token memory needed = 64 requests * 1024 tokens * 0.5 MB/token = 32,768 MB = 32 GB.
+    - 16-token pages per request = ceil(1024 / 16) = 64 pages.
+    - PagedAttention consumed memory = 64 requests * 64 pages * 16 tokens/page * 0.5 MB/token = 32 GB.
+    - Contiguous waste = 128 GB - 32 GB = 96 GB.
 
     **Conclusion & Interpretation:**
-
-    See calculations'
+    - **Result: 96 GB wasted by contiguous allocation; 32 GB consumed with 16-token PagedAttention blocks.** The 16-token block size adds no average-case tail waste here because 1024 is divisible by 16.
 status: published
 provenance: imported
 requires_explanation: false

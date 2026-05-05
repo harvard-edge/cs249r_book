@@ -9,30 +9,29 @@ bloom_level: apply
 phase: inference
 title: Embedding Table Sharding Strategy for 10TB Feature Space
 scenario: A production recommendation system has 50 embedding tables totaling 10TB. The largest table has 2B rows x 64-dim float32 (512GB). You have 128 GPUs each with 80GB HBM.
-question: "How would you shard 50 embedding tables totaling 10TB across 128 GPUs, including the 512GB largest table?"
+question: How would you shard 50 embedding tables totaling 10TB across 128 GPUs, including the 512GB largest table?
 details:
-  realistic_solution: 'Hybrid sharding strategy: (1) Table-wise sharding: each table assigned to a GPU group. Large table (512GB) assigned to 8 GPUs (10% overhead). Row-wise shard: split 2B rows into 8 shards of 250M rows each. (2) Column-wise sharding: for tables that are tall but narrow. (3) Hot row replication: identify top-1K hot rows via access logs and replicate. (4) Column-parallel for dense tables.'
+  realistic_solution: |
+    Use a hybrid placement plan driven first by capacity and then by access skew. The 128 GPUs provide 10.24TB raw HBM, so a 10TB embedding set leaves only about 240GB for metadata, optimizer-free serving state, and imbalance; target roughly 78GB/GPU and avoid full replication. Put the 512GB largest table on 8 GPUs with row-wise sharding: 2B rows / 8 = 250M rows per GPU, or 64GB per GPU. Place other very large tables in row-wise GPU groups sized so each shard stays below about 75GB. Pack small and medium tables table-wise onto the remaining capacity using bin packing by table size and lookup rate, reserving headroom for hot-row caches. Replicate only tiny hot tables or top hot rows where the extra memory is bounded and removes all-to-all traffic. Column-wise sharding is a fallback for very wide tables, not the default for the full 10TB plan.
   common_mistake: |
     **The Pitfall:** Sharding all tables uniformly across all GPUs.
     **The Rationale:** Candidates treat embedding tables as uniform memory blocks, ignoring power-law access distributions where the top 0.1% of rows receive 10% of lookups.
     **The Consequence:** Creating immense all-to-all network traffic and massive compute load imbalances because hot rows are arbitrarily scattered across the cluster.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 512GB table across 8 GPUs.
-    - DLRM lookup batch of 4K samples, avg 100 lookups per sample.
-    - InfiniBand = 400 Gbps (50 GB/s).
+    - Total tables: 10TB across 128 GPUs with 80GB HBM each.
+    - Largest table: 512GB with 2B rows and 64 float32 dimensions.
+    - Keep several GB per GPU for runtime headroom, so target less than 80GB of embeddings per GPU.
 
     **Calculations:**
-    - 512GB table / 8 GPUs = 64GB per GPU.
-    - All-to-all traffic per batch = 4K * 100 = 400K lookups.
-    - Per shard = 400K / 8 = 50K lookups.
-    - Lookup size = 64 * 4B = 256 bytes.
-    - Total embedding output = 400K * 256B = 100MB per batch.
-    - All-to-all reduce = 100MB * (8-1)/8 = 87.5MB per batch.
-    - Network time = 87.5MB / 50GB/s = 1.75 ms.
+    - Raw capacity: 128 * 80GB = 10.24TB.
+    - Average placement required: 10TB / 128 = 78.125GB/GPU, leaving about 1.875GB/GPU on average.
+    - Largest table on 8 GPUs: 512GB / 8 = 64GB/GPU.
+    - Largest-table row split: 2B rows / 8 = 250M rows/GPU.
+    - Remaining tables: 10TB - 512GB ~= 9.49TB across 120 GPUs = about 79GB/GPU if the largest table group is isolated, so some smaller tables must be packed into the 16GB/GPU spare on the largest-table group or table groups must be resized to keep headroom.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.75 ms (Compute-Bound)**. Network time (1.75 ms) is well within a typical 10ms batch step budget.
+    - **Result: the 10TB corpus barely fits in 10.24TB raw HBM, so placement must be capacity-balanced.** Row-wise shard the largest and other large tables, bin-pack small tables into remaining HBM, and reserve replication only for bounded hot rows or tiny tables.
 status: published
 provenance: imported
 requires_explanation: true

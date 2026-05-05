@@ -11,7 +11,7 @@ title: Edge AI Model Serving on Hailo-8 with Dynamic Workloads
 scenario: You are designing model serving infrastructure for an industrial inspection system equipped with a Hailo-8 AI processor. The system must simultaneously run multiple AI models and handle variable inference loads throughout the day.
 question: How would you design a Hailo-8 model serving strategy for multiple variable-load inspection models with sub-50ms critical latency and low cold starts?
 details:
-  realistic_solution: Implement an embedded inference server utilizing Hailo-8's Dataflow Compiler. Keep critical base models loaded in memory while proactively lazy-loading infrequent models. Dynamically map model dataflows to Hailo-8's architecture for concurrent execution.
+  realistic_solution: Implement a lightweight embedded inference server around precompiled Hailo-8 dataflow artifacts. Keep hot and safety-critical inspection models resident, manage the rest with a fixed-size model cache and LRU or priority eviction, and prewarm predictable shift-change or product-line models before traffic arrives. Use a deadline-aware scheduler with admission control, strict per-model queues, and no batching on sub-50ms critical paths. Avoid heavyweight container isolation in the request path; use telemetry to shed low-priority inspections before cache misses or queueing delay break the latency SLA.
   common_mistake: |
     **The Pitfall:** Treating the edge device's model serving like a cloud environment (e.g., heavyweight containers, infinite RAM assumptions).
     **The Rationale:** Engineers default to familiar cloud-native tools without realizing they introduce massive latency penalties and memory overhead on embedded hardware.
@@ -21,14 +21,16 @@ details:
     - Hailo-8 = 26 TOPS INT8.
     - Sub-50ms target latency.
     - Battery = 37 Wh at 2.5W typical draw.
-    - Context switch = 100ms+ penalty.
+    - Measured critical model runtime when resident: 20ms.
+    - Cold model load or graph swap penalty: 100ms+.
 
     **Calculations:**
-    - 50 GOPS model = 26,000 / 50 = 520 inferences/second theoretical.
+    - Critical path budget after resident inference = 50ms - 20ms = 30ms for queueing and dispatch.
+    - A 100ms cold load exceeds the entire 50ms SLA before inference begins.
     - 37 Wh / 2.5W = 14.8 hours uptime.
 
     **Conclusion & Interpretation:**
-    - **Result: Sub-50ms budget is blown by a single 100ms context switch (Context-Switch-Bound)**. Careful time-slicing and persistent memory allocation are mandatory.
+    - **Result: Critical Models Must Stay Resident (Cold-Load-Bound)**. The serving strategy should spend memory on hot models and use admission control for cold paths rather than relying on peak TOPS arithmetic.
 status: published
 provenance: imported
 requires_explanation: true

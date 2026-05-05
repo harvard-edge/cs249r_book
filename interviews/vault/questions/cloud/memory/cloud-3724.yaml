@@ -11,7 +11,7 @@ title: Memory Bandwidth Bottleneck Diagnosis for LLM Decode on MI300X
 scenario: An MI300X (192GB HBM3, 5.3 TB/s) serving Llama-3-70B at batch_size=4 shows 95 tok/s throughput but profiling shows only 63% HBM bandwidth utilization.
 question: Why is the MI300X deployment reaching only 63% HBM bandwidth at batch_size=4, and how would you investigate the gap?
 details:
-  realistic_solution: 'Expected throughput: 140GB / 5.3TB/s = 26.4ms per batch step; 4 tokens / 26.4ms = 151.5 tok/s theoretical at 100% HBM utilization. Achieved 95 tok/s = 62.5% efficiency, matching 63% HBM utilization. Causes: (1) Kernel launch overhead between layers — 80 layers × 2 kernel launches = 160 launches, each ~10-50µs → 1.6-8ms per 80-layer forward = significant for 3.5ms ideal forward. (2) CPU-GPU synchronization for dynamic shapes (variable seq lengths in continuous batching). (3) Attention computation at batch=4, seq=growing: attention not purely memory-bound at this batch size. (4) HBM bank conflicts or non-coalesced accesses in custom kernels. Investigation: ROCm rocprof, measure per-kernel bandwidth.'
+  realistic_solution: 'Expected throughput: 140GB / 5.3TB/s = 26.4ms per decode batch step if every step streams the full weights at peak bandwidth. At batch_size=4, that is 4 generated tokens / 26.4ms = 151.5 aggregate tok/s. Achieved 95 tok/s means the system is getting about 62.7% of ideal bandwidth, consistent with the 63% HBM utilization profile. This is a bandwidth-underutilization gap, not proof that the workload is compute-bound. Likely causes include kernel launch overhead between many layer kernels, CPU-GPU synchronization from continuous batching and dynamic shapes, attention/metadata overhead at small batch, and non-coalesced or bank-conflicted memory access. Investigate with rocprof by measuring per-kernel bandwidth, launch gaps, occupancy, and synchronization stalls.'
   common_mistake: |
     **The Pitfall:** Assuming low bandwidth utilization means the workload is compute-bound.
     **The Rationale:** Engineers see 63% BW utilization and assume they hit a compute ceiling, ignoring launch overheads and inefficiencies.
@@ -20,17 +20,18 @@ details:
     **Assumptions & Constraints:**
     - Model: Llama-3-70B (140 GB weights).
     - Hardware: MI300X (5.3 TB/s bandwidth).
-    - Batch Size: 4.
+    - Batch size: 4 active sequences, one generated token per sequence per decode step.
 
     **Calculations:**
-    - Ideal Read Time: 140 GB weights / 5.3 TB/s = 26.4 ms to read all weights for one decode step.
-    - Ideal Throughput: 4 tokens (batch size) / 26.4 ms = 151.5 tok/s at 100% utilization.
+    - Ideal read time: 140 GB weights / 5.3 TB/s = 26.4 ms for one batched decode step.
+    - Ideal aggregate throughput: 4 generated tokens / 26.4 ms = 151.5 tok/s at 100% bandwidth utilization.
     - Achieved Efficiency: 95 tok/s actual / 151.5 tok/s ideal = 62.7%.
     - Lost Throughput: 151.5 - 95.0 = 56.5 tok/s lost to overhead.
-    - Kernel Launch Overhead: 80 layers * 50µs = 4.0 ms per step.
+    - Kernel launch overhead example: 80 layers * 50µs = 4.0 ms per step.
+    - If added to the ideal 26.4ms step, launch overhead alone gives 4 tokens / 30.4ms = 131.6 tok/s, so the remaining gap to 95 tok/s must come from sync, attention overhead, or inefficient memory access.
 
     **Conclusion & Interpretation:**
-    - **Result: 62.7% Efficiency (Compute-Bound)**. The 4.0ms launch overhead is significant compared to the 26.4ms ideal compute time, explaining the utilization gap.
+    - **Result: 62.7% Bandwidth Efficiency.** The deployment is underutilizing HBM bandwidth; launch overhead explains part of the gap, and profiling should look for synchronization and memory-access inefficiencies rather than assuming a tensor-core compute bottleneck.
 status: published
 provenance: imported
 requires_explanation: false

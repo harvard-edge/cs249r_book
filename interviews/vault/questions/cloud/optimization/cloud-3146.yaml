@@ -8,10 +8,10 @@ competency_area: optimization
 bloom_level: create
 phase: inference
 title: KV Cache Quantization with PagedAttention
-scenario: You serve a 70B model on 4x GPUs with PagedAttention. Current setup uses FP16 KV cache, supporting 200 concurrent requests at avg 4096 tokens. Product wants 500 concurrent requests.
+scenario: You serve a 70B model on 4x GPUs with PagedAttention and TP=4, so every request has KV pages on every GPU. FP16 KV cache supports 200 concurrent requests at avg 4096 tokens, but product wants 500.
 question: What KV-cache quantization strategy would let the 4-GPU 70B service reach 500 concurrent requests, and what quality tradeoff does it make?
 details:
-  realistic_solution: 'With Tensor Parallelism, each GPU stores 1/4 of the model weights and 1/4 of the KV heads, but processes ALL requests. Therefore, a 500 concurrent request target means 500 requests per GPU. An 80GB GPU has ~45GB available after storing weights. FP16 KV cache per GPU per request is ~335MB, so FP16 fits ~134 requests. FP8 halves this to 167MB, fitting ~269 requests (failing the target). Only INT4 group quantization (group=128) reduces it to 83.5MB, fitting 538 requests. Quality impact: INT4 shows 1-2% degradation on long-context tasks due to accumulated quantization error in deep layers, and requires per-channel/group scaling to preserve attention score distributions.'
+  realistic_solution: 'With Tensor Parallelism, each GPU stores 1/4 of the model weights and 1/4 of the KV heads, but processes all requests. Therefore, a 500 concurrent request target means 500 requests with KV pages resident on each GPU. An 80GB GPU has ~45GB available after storing weights. FP16 KV cache per GPU per request is ~335MB, so FP16 fits ~134 requests. FP8 halves this to 167MB, fitting ~269 requests and missing the target. INT4 group quantization (for example group=128 with per-group scales) reduces it to 83.5MB, fitting ~538 requests. Quality impact: INT4 can hurt long-context quality because quantization error accumulates in KV vectors, so it needs calibration and per-channel or per-group scaling rather than a fixed guaranteed degradation percentage.'
   common_mistake: |
     **The Pitfall:** Dividing the concurrent request target by the number of GPUs when using Tensor Parallelism.
     **The Rationale:** Candidates intuitively think that 4 GPUs means each handles 1/4 of the user requests (like in Data Parallelism).

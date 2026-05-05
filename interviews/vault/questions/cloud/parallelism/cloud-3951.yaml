@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: both
 title: Sequence Parallelism AllGather Overlap in Megatron-LM
 scenario: Megatron-LM's sequence parallelism partitions the sequence dimension across tensor-parallel GPUs for LayerNorm and Dropout (which are not parallelizable by standard tensor parallelism). Before each attention/MLP block, an AllGather reconstructs the full sequence.
-question: "How does Megatron-LM overlap the sequence-parallel AllGather before attention/MLP blocks with computation?"
+question: How does Megatron-LM overlap the sequence-parallel AllGather before attention/MLP blocks with computation?
 details:
-  realistic_solution: 'Megatron''s approach: decompose AllGather into chunks along the sequence dimension. As each chunk arrives, start processing it: (1) AllGather chunk 0. (2) While AllGathering chunk 1, start computing attention on chunk 0. (3) For cross-chunk attention, earlier chunks are already available. (4) This works perfectly for causal models but NOT for bidirectional models where every token attends to every other.'
+  realistic_solution: 'The AllGather before an attention or MLP block has a real data dependency: the block generally needs the gathered activation tensor before its main computation can start. Megatron-style overlap is therefore limited rather than a perfect chunk-by-chunk attention pipeline. The practical strategy is to schedule collectives asynchronously around layer boundaries, use separate communication streams, and overlap the sequence-parallel collectives with independent work such as adjacent LayerNorm/Dropout or other tensor-parallel communication where dependencies allow. If the next compute kernel consumes the full gathered tensor immediately, the remaining AllGather latency stays on the critical path.'
   common_mistake: |
     **The Pitfall:** Thinking AllGather and attention computation are completely independent.
     **The Rationale:** Candidates assume network transfers can always be fully hidden, forgetting that the attention block intrinsically requires the full sequence tensor to begin.

@@ -7,26 +7,27 @@ topic: software-portability
 competency_area: cross-cutting
 bloom_level: analyze
 phase: both
-title: 'TPU v5e SPMD Programming Model vs CUDA''s SIMT'
-scenario: 'A team accustomed to CUDA''s SIMT (Single Instruction Multiple Threads) model is porting a custom sparse attention kernel to TPU v5e. They struggle because TPUs use SPMD (Single Program Multiple Data) with systolic arrays.'
-question: 'What are the key conceptual shifts when porting a CUDA SIMT sparse attention kernel to a TPU v5e SPMD model?'
+title: TPU v5e SPMD Programming Model vs CUDA's SIMT
+scenario: A team accustomed to CUDA's SIMT (Single Instruction Multiple Threads) model is porting a custom sparse attention kernel to TPU v5e. They struggle because TPUs use SPMD (Single Program Multiple Data) with systolic arrays.
+question: What are the key conceptual shifts when porting a CUDA SIMT sparse attention kernel to a TPU v5e SPMD model?
 details:
   realistic_solution: 'Three key shifts: (1) From thread-level to tile-level: instead of each thread computing one output element, each MXU operation processes a 128x128 tile. Express computation as matrix multiplications, not per-element ops. (2) From shared memory to VMEM: TPU''s vector memory (VMEM, 16MB per core on v5e) replaces CUDA''s shared memory, but it is managed by the compiler, not the programmer. (3) From warp divergence to masking: sparse attention on TPU requires padding sparse patterns to dense tiles and using mask matrices, not conditional execution. Performance depends on sparsity pattern regularity.'
   common_mistake: |
-    **The Pitfall:** Trying to express thread-level parallelism on a TPU.
-    **The Rationale:** Thinking in terms of thread blocks and warps, failing to adapt to the systolic array architecture.
-    **The Consequence:** Designing fundamentally wrong kernels, as TPUs process computation at the 128x128 matrix tile level, not per-element operations via threads.
+    **The Pitfall:** Expecting per-thread conditional sparsity to map directly onto TPU tiles.
+    **The Rationale:** CUDA habits encourage thinking in terms of thread blocks, warps, and branches, while TPU performance comes from regular dense systolic-array tiles with predictable data movement.
+    **The Consequence:** Sparse attention is implemented as irregular masks and padding that waste MXU work instead of being reformulated into block-structured or compiler-friendly tiled operations.
   napkin_math: |
     **Assumptions & Constraints:**
     - TPU v5e MXU uses a 128x128 systolic array at ~197 TFLOPS BF16.
     - Sparse attention has 50% unstructured sparsity.
 
     **Calculations:**
-    - Processing full 128x128 tiles with 50% masking yields an effective throughput of ~98.5 TFLOPS.
-    - CUDA skips sparse blocks entirely via thread-level divergence.
+    - Dense tile work remains 128 x 128 operations even when an unstructured mask zeros half the logical entries.
+    - A 50% unstructured mask does not automatically halve runtime or double throughput; speedup requires block structure, lower memory traffic, and compiler/hardware support.
+    - CUDA also needs sparse structure to skip useful work efficiently; thread-level divergence alone is not a throughput model.
 
     **Conclusion & Interpretation:**
-    - **Result: 98.5 TFLOPS (Compute-Bound)**. CUDA can be potentially 2x more efficient for unstructured sparsity compared to the TPU's dense-tile masking approach.
+    - **Result: Structure-Bound Sparse Performance**. The portability issue is that TPU code should expose regular dense or block-sparse tiles; unstructured per-element sparsity often becomes masked dense work rather than a clean 2x compute reduction.
 status: published
 provenance: imported
 requires_explanation: false

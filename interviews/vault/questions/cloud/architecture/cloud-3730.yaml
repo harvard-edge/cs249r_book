@@ -8,30 +8,33 @@ competency_area: architecture
 bloom_level: create
 phase: inference
 title: Prefill-Decode Disaggregation Architecture Specification for H100 Fleet
-scenario: Design a prefill-decode disaggregation system for serving a 70B model at 1000 req/s with P50 TTFT < 200ms and P50 TPOT < 50ms/token.
+scenario: Design a prefill-decode disaggregation system for serving a 70B model at 1000 req/s with average 512-token prompts and 256-token outputs. A prefill GPU completes one prompt in 50ms, and a decode GPU sustains batch=16 at 30 tok/s per sequence. Target P50 TTFT is < 200ms and P50 TPOT is < 50ms/token.
 question: How many prefill vs decode GPUs would you use, how would you transfer KV cache, and how would you load-balance 1000 req/s?
 details:
-  realistic_solution: "Prefill GPU requirement: avg prompt 512 tokens, 70B model, 50ms prefill per request at 1 GPU. Need 1000 req/s \times 0.05s = 50 concurrent prefills \rightarrow 50 H100s for prefill. Decode GPU requirement: avg 256 output tokens per response, 30 tok/s per sequence at batch=16. Throughput: 16 \times 30 = 480 tok/s per GPU. Need 1000 \times 256 / 480 = 534 decode GPUs. Ratio: 50 prefill : 534 decode = 1:10.7. KV transfer: after prefill, transfer KV cache (2\times80\times8\times128\times512\times2B = 168MB) from prefill GPU to decode GPU via RDMA over InfiniBand at 100 GB/s: 1.68ms. Load balancer: route new requests to least-loaded prefill GPU; after prefill, schedule decode on GPU with most spare capacity."
+  realistic_solution: 'Prefill sizing: with 1000 req/s and 50ms service time, Little''s Law gives 50 concurrent prefills, so use about 50 prefill H100s before headroom. This keeps service time plus small queueing and KV transfer below the 200ms P50 TTFT target. Decode sizing: 1000 req/s × 256 output tokens = 256K decode tokens/s. At batch=16, a decode GPU provides 16 × 30 = 480 aggregate tok/s, or 33ms/token per sequence, which satisfies TPOT < 50ms/token if queues stay short. Need ceil(256000/480) = 534 decode H100s, plus production headroom. KV transfer after prefill: 2 tensors (K,V) × 80 layers × 8 KV heads × 128 dim × 512 tokens × 2 bytes = about 168MB, transferred by RDMA over 100 GB/s InfiniBand in about 1.68ms. Load-balance new requests to least-loaded prefill workers, then place decode sessions on GPUs with spare batch slots and low per-token queue delay.'
   common_mistake: |
     **The Pitfall:** Using the same GPU ratio as the compute ratio without accounting for the different memory bandwidth requirements.
     **The Rationale:** Failing to isolate the compute-heavy prefill phase from the memory-bound decode phase.
     **The Consequence:** Grossly undersizing the decode fleet, leading to severe queuing and SLA violations.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Prefill: 1000 req/s, 50ms latency (512 tokens).
-    - Decode: 1000 req/s, 256 tokens average length. Throughput: 480 tok/s per GPU.
-    - KV Transfer Network: 100 GB/s InfiniBand. Model: 80 layers, 8 KV heads, 128 dim, 2 Bytes.
+    - Prefill: 1000 req/s, 50ms service time for a 512-token prompt.
+    - Decode: 1000 req/s, 256 output tokens average.
+    - Decode GPU throughput assumption: batch=16, 30 tok/s per active sequence, so 480 aggregate tok/s per GPU.
+    - KV transfer network: 100 GB/s InfiniBand. Model KV shape: 80 layers, 8 KV heads, head_dim=128, BF16 K and V.
 
     **Calculations:**
-    - Prefill GPUs: 1000 req/s \times 50ms = 50 concurrent prefills = 50 GPUs.
+    - Prefill concurrency by Little's Law: 1000 req/s * 0.050s = 50 concurrent prefills, so 50 prefill GPUs at this service time.
+    - TTFT budget check: 50ms prefill + 1.68ms KV transfer + scheduling/queueing headroom remains below 200ms P50 if utilization is kept below saturation.
     - Decode Tokens/s: 1000 req/s \times 256 tokens = 256K tokens/s.
-    - Decode GPUs: 256K / 480 = 534 GPUs.
+    - Decode GPUs: 256K / 480 = 533.3, round up to 534 GPUs.
+    - TPOT budget check: 30 tok/s per sequence = 33.3ms/token, under the 50ms/token P50 target before queueing.
     - Total Fleet: 50 prefill + 534 decode = 584 GPUs (Ratio 1:10.7).
-    - KV Transfer Size: 2 \times 80 layers \times 8 KV heads \times 128 dim \times 512 tokens \times 2 Bytes = 168 MB.
+    - KV transfer size: 2 * 80 layers * 8 KV heads * 128 dim * 512 tokens * 2 bytes = 167,772,160 bytes = 168 MB.
     - Transfer Time: 168 MB / 100 GB/s = 1.68ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 50 Prefill and 534 Decode GPUs (Memory-Bandwidth-Bound)**. Network transfer (1.68ms) is negligible, allowing strict separation into 50 Prefill and 534 Decode GPUs.
+    - **Result: 50 Prefill and 534 Decode GPUs Before Headroom.** The sizing follows the TTFT and TPOT service-time assumptions directly. KV transfer is small versus the 200ms TTFT budget, but queueing headroom and decode-slot-aware scheduling are still required in production.
 status: published
 provenance: imported
 requires_explanation: true

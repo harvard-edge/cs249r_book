@@ -7,11 +7,12 @@ topic: quantization-fundamentals
 competency_area: optimization
 bloom_level: evaluate
 phase: both
-title: TPU v5e vs H100 for Fine-Tuning LoRA at Scale
+title: TPU v5e vs H100 for a 7B LoRA Fine-Tune
 scenario: A team runs LoRA fine-tuning (rank=16) on a 7B base model using 1M samples, batch size 64, for 3 epochs. The LoRA adapter has 40M trainable parameters. TPU v5e (16 chips) achieves 197 TFLOPS BF16 per chip at MFU 55%; standard GPUs (8 GPUs) achieve 989 TFLOPS FP16 per GPU at MFU 50%.
-question: Which configuration finishes faster, and what is the per-dollar cost comparison assuming $1.2/chip-hr for TPU v5e and $3.5/GPU-hr for H100?
+question: Which configuration finishes faster, and what is the per-dollar cost comparison assuming 1.2/chip-hr for TPU v5e and 3.5/GPU-hr for H100?
 details:
-  realistic_solution: 'Calculate effective FLOPs. LoRA computation is uniquely lightweight: the frozen backbone runs purely in inference mode, meaning backprop only computes gradients for the tiny 40M adapter matrices. The total required FLOPs are vastly lower than full fine-tuning. H100 achieves the workload faster and cheaper due to raw performance dominance at this specific, smaller hardware scale.'
+  realistic_solution: |
+    Use a LoRA training cost model that still includes the frozen 7B backbone forward and backward-through-activations. LoRA avoids full weight-gradient and optimizer-state work for the 7B parameters, but it does not make training cost proportional only to the 40M adapter parameters. With 46,875 steps, batch size 64, and 512 tokens/sample, a reasonable estimate is about 4 * 7B * 64 * 512 = 9.17e14 FLOPs/step, or 4.30e19 FLOPs total. The 16-chip TPU v5e slice delivers 16 * 197 * 0.55 = 1.73 PFLOP/s effective, finishing in about 6.9 hours for about $132. The 8xH100 configuration delivers 8 * 989 * 0.50 = 3.96 PFLOP/s effective, finishing in about 3.0 hours for about $84. H100 is faster and cheaper for the stated prices and MFU assumptions.
   common_mistake: |
     **The Pitfall:** Using theoretical TFLOPS multipliers without adjusting for LoRA's unique computation profile.
     **The Rationale:** Engineers default to the standard formula for full fine-tuning (forward + full backward), overestimating total FLOPs.
@@ -24,13 +25,14 @@ details:
     - GPUs (8 GPUs): 989 TFLOPS/GPU at 50% MFU, $3.5/GPU-hr.
 
     **Calculations:**
-    - Total step FLOPs = Forward (7B) + backward (7B + 40M) = 4 * 7B * 64 * 512 = 9.17e14.
+    - LoRA step FLOPs estimate: forward plus backward-through-activations for the frozen backbone, roughly 4 * params * batch * tokens.
+    - Total step FLOPs = 4 * 7B * 64 * 512 = 9.17e14. Adapter-gradient work for 40M parameters is small relative to the backbone pass.
     - Total Training FLOPs = 46,875 * 9.17e14 = 4.3e19.
     - TPU v5e speed = 16 * 197e12 * 0.55 = 1.73e15 FLOPS/sec. Time = 6.9 hours. Cost = 6.9 * 16 * $1.20 = $132.
-    - GPU speed = 8 * 989e12 * 0.50 = 3.95e15 FLOPS/sec. Time = 3.0 hours. Cost = 3.0 * 8 * $3.50 = $84.
+    - H100 speed = 8 * 989e12 * 0.50 = 3.96e15 FLOPS/sec. Time = 3.0 hours. Cost = 3.0 * 8 * $3.50 = $84.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.0 hours (Compute-Bound)**. The GPU cluster wins on both time (2.3x faster) and cost (36% cheaper) for this specific small-scale workload.
+    - **Result: H100 finishes in about 3.0 hours versus 6.9 hours for TPU v5e.** At the stated prices, H100 costs about $84/job versus $132/job for TPU v5e, so it wins on both time and per-job cost.
 status: published
 provenance: imported
 requires_explanation: false

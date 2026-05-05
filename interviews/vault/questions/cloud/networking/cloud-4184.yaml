@@ -11,7 +11,7 @@ title: NVLink Domain Size and Scaling Limits
 scenario: NVIDIA's DGX B200 connects 8 GPUs via NVSwitch with 1.8 TB/s per GPU. The GB200 NVL72 extends this to 72 GPUs via NVSwitch fabric at 900 GB/s per GPU.
 question: What AllReduce speedup comes from scaling the NVLink domain from 8 to 72 GPUs for a 405B model, and why do returns diminish beyond 72?
 details:
-  realistic_solution: '405B model in FP16 = 810 GB. DGX B200 (8 GPUs): 810 / 8 = 101.25 GB per GPU. Tensor parallel AllReduce per layer: activation shard = ~200 MB / 8 = 25 MB. AllReduce time: 2 × 25 MB × 7/8 / 1800 GB/s = 0.024ms. GB200 NVL72 (72 GPUs): 810 / 72 = 11.25 GB per GPU — fits in each GPU''s HBM with room for KV cache. AllReduce: 200 MB / 72 = 2.78 MB per shard. Time: 2 × 2.78 × 71/72 / 900 GB/s = 0.006ms. Speedup: 4× faster AllReduce + each GPU loads 9× fewer weights per step. Beyond 72: must cross to InfiniBand (50 GB/s). AllReduce for 128 GPUs: NVLink for intra-72 + IB for 2 domains. IB step: 2 × (200/72) MB × 1 / 50 = 0.11ms. IB adds 18× the latency of NVLink. Diminishing returns: going from 72→128 adds only 72/128 = 56% more GPUs but the IB boundary adds significant overhead per step.'
+  realistic_solution: For the communication part, hold the per-layer tensor being reduced fixed at 200 MB and use the ring AllReduce model 2 * (N - 1) / N * tensor_size / bandwidth. On 8 B200 GPUs, time is 2 * 7/8 * 200 MB / 1,800 GB/s = 0.194 ms. On a 72-GPU NVL72 domain, time is 2 * 71/72 * 200 MB / 900 GB/s = 0.438 ms. The larger domain does not make this fixed-size AllReduce faster; the per-GPU bandwidth is half as large and the ring factor is only slightly larger, so this collective is about 2.25x slower. The 72-GPU domain still helps a 405B model by reducing weight state per GPU from about 101 GB to 11.25 GB, which can make the model placement feasible and reduce per-GPU memory pressure. Returns diminish beyond 72 because traffic that leaves the NVSwitch domain must traverse a slower network such as InfiniBand, so added GPUs can reduce memory or compute per GPU while adding cross-domain communication overhead.
   common_mistake: |
     **The Pitfall:** Assuming NVLink domains can scale indefinitely without performance penalties.
     **The Rationale:** Candidates fail to realize that NVSwitch uses electrical signaling limited to short distances; scaling beyond 72 GPUs requires crossing to InfiniBand, which is drastically slower.
@@ -19,17 +19,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 405B model in FP16 = 810 GB.
-    - DGX B200 (8 GPUs, 1800 GB/s): TP AllReduce activation shard = ~25 MB.
-    - GB200 NVL72 (72 GPUs, 900 GB/s): AllReduce shard = 2.78 MB.
-    - InfiniBand: 50 GB/s.
+    - Per-layer AllReduce tensor held fixed for comparison: 200 MB.
+    - DGX B200: 8 GPUs, 1,800 GB/s per GPU.
+    - GB200 NVL72: 72 GPUs, 900 GB/s per GPU.
+    - Ring AllReduce time model: 2 * (N - 1) / N * tensor_size / bandwidth.
 
     **Calculations:**
-    - B200 Time: 2 * 25 MB * (7/8) / 1800 GB/s = 0.024 ms.
-    - NVL72 Time: 2 * 2.78 MB * (71/72) / 900 GB/s = 0.006 ms.
-    - 128 GPUs (72 + 56 via IB): IB Step Time = 2 * (200/72) MB * 1 / 50 GB/s = 0.11 ms.
+    - 8-GPU Time: 2 * 7/8 * 200 MB / 1,800 GB/s = 0.194 ms.
+    - 72-GPU Time: 2 * 71/72 * 200 MB / 900 GB/s = 0.438 ms.
+    - Communication ratio: 0.438 / 0.194 = 2.25x slower for this fixed-size AllReduce.
+    - Model state per GPU: 810 GB / 8 = 101.25 GB; 810 GB / 72 = 11.25 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: Interconnect-Bound.** Scaling beyond 72 GPUs hits the InfiniBand boundary, which is 18x slower than NVLink.
+    - **Result: Memory-Capacity Benefit, Not AllReduce Speedup.** The 72-GPU domain greatly reduces model state per GPU, but this fixed-size AllReduce is slower because per-GPU NVLink bandwidth is lower. Beyond 72 GPUs, cross-domain network hops further reduce scaling efficiency.
 status: published
 provenance: imported
 requires_explanation: false

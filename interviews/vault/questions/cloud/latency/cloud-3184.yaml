@@ -8,45 +8,29 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: Staged Speculation for Ultra-Long Generation
-scenario: 'You are generating a 10K-token response (long-form report) from a 405B model on 8x H100. At
-  80ms/token autoregressive, this takes 800 seconds. With K=5 speculation (alpha=0.78), it takes ~270
-  seconds. Design a staged speculation system that adapts strategy as the generation progresses through
-  three phases: (1) low-entropy opening, (2) high-entropy body, (3) formulaic conclusion.'
-question: How should speculation be staged across a 10K-token 405B generation, and why does tree speculation
-  help most in the body?
+scenario: 'You are generating a 10K-token response (long-form report) from a 405B model on 8x H100. At 80ms/token autoregressive, this takes 800 seconds. With K=5 speculation (alpha=0.78), it takes ~270 seconds. Design a staged speculation system that adapts strategy as the generation progresses through three phases: (1) low-entropy opening, (2) high-entropy body, (3) formulaic conclusion.'
+question: How should speculation be staged across a 10K-token 405B generation, and why does tree speculation help most in the body?
 details:
-  realistic_solution: 'Phase analysis: (1) Opening (tokens 1-500): template language, high predictability.
-    Alpha=0.90, optimal K=12. (2) Body (500-8500): novel content, lower predictability. Alpha=0.72, optimal
-    K=6. (3) Conclusion (8500-10000): formulaic summary, refs back to body. Alpha=0.85, optimal K=10.
-    Per-phase optimization: Opening: K=12. E[tok]=(1-0.90^13)/0.10=7.46. Round=12x3+80=116ms. Rate=7.46/116=64.3
-    tok/s. Time for 500 tokens: 7.8s. Body: K=6. E[tok]=(1-0.72^7)/0.28=3.21. Round=6x3+80=98ms. Rate=32.8
-    tok/s. 8000 tokens: 243.9s. Conclusion: K=10. E[tok]=(1-0.85^11)/0.15=5.55. Round=10x3+80=110ms. Rate=50.5
-    tok/s. 1500 tokens: 29.7s. Total staged: 7.8+243.9+29.7 = 281.4s. Uniform K=5 takes ~270s, so simple
-    staging is actually slightly slower! The key insight: most time is spent in the body phase where alpha
-    is lowest. Real optimization: for body phase, use tree speculation (branching factor 3, depth 4) to
-    explore multiple continuations. Tree with alpha=0.72: E=4.5 tokens at 12-token tree cost. Rate=4.5/(12x3+80)=38.8
-    tok/s. Body: 8000/38.8=206.2s. Total: 7.8+206.2+29.7=243.7s. 10% improvement over uniform.'
-  common_mistake: '**The Pitfall:** Using a single speculation strategy for the entire 10K generation.
-
+  realistic_solution: 'Use a staged policy, but do not use the same linear K everywhere. Opening tokens 1-500 are predictable, so use linear speculation with K=12 and alpha≈0.90: E=(1-0.90^13)/0.10=7.46 tokens, round time=12x3+80=116ms, rate=64.3 tok/s, time=7.8s. Body tokens 500-8500 dominate the run and have lower alpha≈0.72, so switch to tree speculation rather than just increasing K. A 12-draft-token tree that returns about 4.5 accepted tokens costs 12x3+80=116ms, rate=38.8 tok/s, time=206.2s. Conclusion tokens 8500-10000 are formulaic, so use linear speculation with K=10 and alpha≈0.85: E=(1-0.85^11)/0.15=5.55, round time=110ms, rate=50.5 tok/s, time=29.7s. Total staged time is about 243.7s. Tree speculation helps most in the body because low-entropy openings and conclusions already accept long linear runs, while the body has more branching uncertainty; exploring several likely continuations raises useful accepted work per verification round.'
+  common_mistake: |
+    **The Pitfall:** Using a single speculation strategy for the entire 10K generation.
     **The Rationale:** The acceptance rate and optimal K vary dramatically across the generation.
-
-    **The Consequence:** Suboptimal performance because openings are predictable, body paragraphs are
-    creative, and conclusions follow templates.'
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Uniform K=5 (alpha=0.78).
+    **The Consequence:** Suboptimal performance because openings are predictable, body paragraphs are creative, and conclusions follow templates.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Draft cost = 3ms/token. Verification cost = 80ms/round.
+    - Opening: 500 tokens, alpha=0.90, K=12.
+    - Body: 8000 tokens, alpha=0.72, tree uses 12 draft tokens/round and returns about 4.5 useful tokens.
+    - Conclusion: 1500 tokens, alpha=0.85, K=10.
 
     **Calculations:**
-
-    - E=(1-0.78^6)/0.22=3.52 tokens/step. Round=95ms. Rate=37 tok/s. 10K tokens = 270s.
-
-    - Staged linear: 281s (slightly worse due to high K penalty in body).
-
-    - Staged with tree for body: 244s (10% improvement).
+    - Opening: E=(1-0.90^13)/0.10=7.46. Round=116ms. Rate=64.3 tok/s. Time=500/64.3=7.8s.
+    - Body tree: E≈4.5. Round=(12*3)+80=116ms. Rate=38.8 tok/s. Time=8000/38.8=206.2s.
+    - Conclusion: E=(1-0.85^11)/0.15=5.55. Round=110ms. Rate=50.5 tok/s. Time=1500/50.5=29.7s.
+    - Total staged time = 7.8 + 206.2 + 29.7 = 243.7s.
 
     **Conclusion & Interpretation:**
-
-    - The body phase dominates at 87% of generation time. Optimizing the body''s alpha matters most.'
+    - **Result: staged linear opening/conclusion plus body tree speculation ≈244s (Latency-Bound)**. The body dominates total time, so tree speculation helps most there.
 status: published
 provenance: imported
 requires_explanation: true

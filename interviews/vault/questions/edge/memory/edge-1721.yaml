@@ -7,11 +7,11 @@ topic: memory-hierarchy-design
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: 'Optimizing ViT Activation Memory Bandwidth on Jetson Orin'
-scenario: 'You are deploying a 4-camera surround-view Vision Transformer (ViT) on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, Ampere GPU + DLA). Despite profiling showing we are far below the 275 TOPS compute limit, the pipeline is stalling at 15 FPS instead of the target 30 FPS. Profiling reveals that reading and writing large intermediate feature maps to the 32 GB LPDDR5 is creating a severe bottleneck.'
-question: 'How do you diagnose the exact memory hierarchy constraint and quantify the impact of operator fusion to hit the framerate target within the 60W TDP?'
+title: Optimizing ViT Activation Memory Bandwidth on Jetson Orin
+scenario: You are deploying a 4-camera surround-view Vision Transformer (ViT) on an NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, Ampere GPU + DLA). Despite profiling showing we are far below the 275 TOPS compute limit, the pipeline is stalling at 15 FPS instead of the target 30 FPS. Profiling reveals that reading and writing large intermediate feature maps to the 32 GB LPDDR5 is creating a severe bottleneck.
+question: How do you diagnose the exact memory hierarchy constraint and quantify the impact of operator fusion to hit the framerate target within the 60W TDP?
 details:
-  realistic_solution: 'The correct approach is to analyze the memory traffic of memory-bound operations like LayerNorm and Softmax. By implementing operator fusion (e.g., FlashAttention or fusing LayerNorm with the preceding linear layer), intermediate activations are retained in the Ampere GPU''s SRAM instead of taking a round-trip to the LPDDR5. This directly reduces memory bandwidth utilization, alleviating the stall.'
+  realistic_solution: The exact constraint is LPDDR5 bandwidth from repeatedly spilling large ViT intermediates, not TOPS. Diagnose it with Nsight Systems/Compute by checking low SM utilization alongside high DRAM throughput, cache miss traffic, and read/write bytes for LayerNorm, Softmax, attention, and projection kernels. Operator fusion, such as fused attention or LayerNorm fusion, keeps tiles in registers/shared memory and cuts LPDDR5 reads and writes; the impact is quantified by comparing unfused versus fused bytes per block at the target FPS.
   common_mistake: |
     **The Pitfall:** Suggesting lowering precision to INT4 or offloading to the DLA, missing the memory bandwidth bottleneck entirely.
     **The Rationale:** Candidates see a low framerate and immediately reach for compute optimizations, failing to calculate the massive LPDDR5 bandwidth consumed by unfused memory-bound operators like LayerNorm and Softmax.
@@ -23,13 +23,14 @@ details:
     - Architecture: Jetson Orin 32GB LPDDR5.
 
     **Calculations:**
-    - Unfused traffic (QKV, Softmax, Out, Proj): 8MB * 4 writes + 8MB * 4 reads = 64MB per block.
-    - For 12 blocks at 30 FPS: 64MB * 12 * 30 = 23,040 MB/s (~23 GB/s).
-    - Fused attention traffic: Keeps 8MB working set in SRAM. Only 1 read and 1 write (16MB) to LPDDR5 per block.
-    - Bandwidth saved: 64MB - 16MB = 48MB per block.
+    - Assume the unfused attention/LN/projection sequence spills the 8MB working set four times and reloads it four times: 8MB * (4 writes + 4 reads) = 64MB per block.
+    - At 12 blocks and 30 FPS, unfused traffic = 64MB * 12 * 30 = 23,040 MB/s, about 23.0 GB/s.
+    - A fused kernel still reads the input working set and writes the output once: 8MB * 2 = 16MB per block.
+    - Fused traffic at 30 FPS = 16MB * 12 * 30 = 5,760 MB/s, about 5.8 GB/s.
+    - Bandwidth saved = 23.0 GB/s - 5.8 GB/s = 17.2 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: ~17.2 GB/s Saved (Memory Bandwidth-Bound)**. Fusing saves 48MB * 12 * 30 = ~17.2 GB/s of LPDDR5 bandwidth, removing the bottleneck and allowing 30 FPS.
+    - **Result: ~17.2 GB/s saved (LPDDR5 Bandwidth-Bound)**. The optimization is justified if profiling shows these kernels are driving LPDDR5 traffic; fusion reduces traffic from ~23.0 GB/s to ~5.8 GB/s for the stated working set.
 status: published
 provenance: imported
 requires_explanation: false

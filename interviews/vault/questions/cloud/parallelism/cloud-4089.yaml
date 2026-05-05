@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: training
 title: TP Degree Selection for Inference
 scenario: You are deploying a 70B parameter model (BF16) for inference. The model weights alone are 140 GB. You must choose between running on a single 192GB GPU or distributed across two identical GPUs.
-question: "Should you use TP=1 with a single GPU or TP=2 across two GPUs?"
+question: Should you use TP=1 with a single GPU or TP=2 across two GPUs?
 details:
-  realistic_solution: 'Single GPU (TP=1): 140 GB weights leave 52 GB for KV cache and activations. With long context (32K tokens, 80 layers, 64 KV heads, head_dim=128), KV cache = 2 × 32768 × 80 × 64 × 128 × 2B = 84 GB — exceeds remaining memory. So TP=1 fails for long context. TP=2: 384 GB total, 140 GB weights split = 70 GB per GPU, leaving 122 GB per GPU for KV cache. KV cache is also split across TP ranks, so each GPU holds 42 GB. Memory bandwidth doubles from 5.3 to 10.6 TB/s, nearly doubling decode throughput since decode is memory-bandwidth bound. The cost: each transformer block now needs 2 AllReduces over the inter-GPU link. This adds ~0.1 ms per block × 80 blocks = 8 ms — modest vs the ~25 ms decode latency at TP=1.'
+  realistic_solution: 'Use TP=2 for the stated long-context deployment. TP=1 fits the 140 GB weights on a 192 GB GPU but leaves only 52 GB for KV cache, runtime activations, allocator reserve, and serving overhead. With 32K tokens, 80 layers, 64 KV heads, head_dim=128, and BF16, an MHA-style KV cache is 2 × 32768 × 80 × 64 × 128 × 2B = about 85.9 GB total, so TP=1 does not fit. With TP=2, weights shard to 70 GB per GPU. If KV heads are sharded consistently with tensor parallelism, each GPU holds about 42.9 GB of KV cache, for roughly 112.9 GB per GPU before smaller runtime overheads, which fits in 192 GB. TP=2 can improve decode throughput by using two GPUs worth of memory bandwidth, but the gain is not a guaranteed 2× because tensor-parallel AllReduce/AllGather traffic, kernel efficiency, batching, and interconnect bandwidth matter. The safe conclusion is memory-driven: TP=2 is required for this long context and may improve throughput if communication overhead is controlled.'
   common_mistake: |
     **The Pitfall:** Selecting Tensor Parallelism degree based strictly on whether weights fit on a single GPU.
     **The Rationale:** Ignoring the massive dynamic memory footprint of the KV cache and the performance benefits of doubling aggregate memory bandwidth.
@@ -21,15 +21,16 @@ details:
        - Model: 70B parameters, BF16 (140 GB weights).
        - Memory: 192 GB total per GPU.
        - Context: 32K tokens, 80 layers, 64 KV heads, head_dim 128.
-       - Memory Bandwidth: 5.3 TB/s per GPU.
+       - Assume KV heads are sharded across TP ranks; if replicated, TP=2 would need more memory.
     2. **Calculations:**
-       - KV Cache Size = 2 * 32768 * 80 * 64 * 128 * 2 bytes = ~85 GB.
-       - TP=1 Memory Req = 140 GB + 85 GB = 225 GB (Exceeds 192 GB: OOM).
-       - TP=2 Memory Req per GPU = 70 GB + 42.5 GB = 112.5 GB (Fits 192 GB).
-       - TP=1 Throughput = 140 GB / 5.3 TB/s = ~26 ms/token.
-       - TP=2 Throughput = 70 GB / 5.3 TB/s = ~13 ms/token + ~8 ms comms = ~21 ms/token.
+       - KV Cache Size = 2 * 32768 * 80 * 64 * 128 * 2 bytes = 85,899,345,920 bytes ≈ 85.9 GB.
+       - TP=1 Memory Req = 140 GB + 85.9 GB = 225.9 GB, before activations and allocator reserve, so it exceeds 192 GB.
+       - TP=2 Weights per GPU = 140 GB / 2 = 70 GB.
+       - TP=2 KV per GPU if sharded = 85.9 GB / 2 = 42.95 GB.
+       - TP=2 Memory Req per GPU = 70 GB + 42.95 GB = 112.95 GB, before smaller runtime overheads, so it fits 192 GB.
+       - Throughput cannot be derived just by dividing weight bytes by bandwidth; TP=2 adds communication and kernel-efficiency costs.
     3. **Conclusion & Interpretation:**
-       - **Result: TP=2 Required (Memory-Capacity-Bound).** TP=2 avoids OOM on long contexts and speeds up decoding by ~20% by doubling aggregate bandwidth.
+       - **Result: TP=2 Required (Memory-Capacity-Bound).** TP=2 avoids OOM for the long-context KV cache and may improve decode throughput, but the speedup must be measured with communication overhead included.
 status: published
 provenance: imported
 requires_explanation: false

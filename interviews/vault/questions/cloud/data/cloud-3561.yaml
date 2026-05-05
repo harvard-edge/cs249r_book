@@ -11,22 +11,27 @@ title: Optimizing Large-Scale Foundation Model Training with Data Efficiency on 
 scenario: You are leading the ML engineering effort for a new large-scale foundation model (e.g., a vision transformer). The training dataset spans petabytes of raw, heterogeneous data. You've identified a 'data wall' where adding more data no longer yields proportional performance gains, and data loading is a bottleneck. Your compute resources are a cluster of TPU accelerators.
 question: What data selection strategy would train the petabyte-scale model on the accelerators within 100 TPU-days while maximizing Information-Compute Ratio (ICR) and avoiding collapse?
 details:
-  realistic_solution: The solution involves a multi-pronged approach integrating coreset selection, strategic synthetic data generation, and continuous monitoring of the Information-Compute Ratio (ICR). Firstly, implement an iterative coreset selection process (e.g., via embedding similarity or gradient-based importance sampling on a smaller proxy model) to intelligently prune the petabyte-scale dataset, prioritizing high-value, diverse samples. Secondly, identify data scarcity regions and strategically generate high-fidelity synthetic data, ensuring careful validation against real data distributions to prevent model collapse and introducing diversity to improve generalization. This process would be guided by the ICR, which quantifies the information gain per unit of compute, allowing dynamic adjustment of data selection and curriculum learning strategies. The data pipeline must be highly optimized for the TPU HBM bandwidth, leveraging asynchronous prefetching, efficient data serialization, and potentially offloading heavy augmentation to dedicated CPUs to keep the compute units saturated. Implement robust data versioning and lineage tracking.
+  realistic_solution: |
+    Use an explicit data-efficiency gate before full training. Embed or score the corpus with a smaller proxy model, deduplicate near-neighbor samples, reject low-quality or redundant data, and keep a diverse coreset stratified by domain, rarity, and difficulty. Add synthetic data only for measured coverage gaps, cap its fraction per domain, and require validation against held-out real distributions plus collapse monitors such as diversity metrics, memorization checks, and downstream eval regressions. The 100 TPU-day budget should drive a token/sample schedule: spend early compute on broad coverage, then raise the sampling probability of examples with high loss, high gradient novelty, or rare-domain value. The input pipeline should use pre-sharded records, host prefetch, and accelerator-side overlap so data loading no longer determines the effective ICR.
   common_mistake: |
     **The Pitfall:** Focusing exclusively on architectural improvements or compute scaling without addressing data quality.
     **The Rationale:** Engineers often treat data as a static blob and try to optimize the model architecture or distributed training setup instead.
     **The Consequence:** The TPU spends significant time processing redundant/noisy samples, and high memory bandwidth is severely underutilized.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - HBM Bandwidth = 1.6 TB/s.
-       - Compute = 197 TFLOPS BF16.
-       - Sample size = 300 KB.
-       - Budget = 100 TPU-days.
-    2. **Calculations:**
-       - Data Throughput Limit: 1.6 TB/s / 300 KB ≈ 5.3 million images/sec.
-       - Compute Budget: 100 days * 24h * 3600s * 197 TFLOPS ≈ 1.7 * 10^21 FLOPs.
-    3. **Conclusion & Interpretation:**
-       - **Result: System is FLOP-bound.** Data selection must aggressively filter the petabyte dataset to fit within the 1.7E21 FLOPs envelope.
+    **Assumptions & Constraints:**
+    - Budget is 100 TPU-days.
+    - A TPU accelerator provides about 197 TFLOP/s BF16 peak for this estimate.
+    - Effective training throughput after utilization losses is 50% of peak.
+    - Average training sample is 300KB, but ICR depends on useful information per FLOP, not raw HBM bandwidth.
+
+    **Calculations:**
+    - Compute budget = 100 * 24 * 3600 * 197e12 = about 1.70e21 peak FLOPs.
+    - At 50% utilization, usable compute is about 8.5e20 FLOPs.
+    - If a candidate sample costs 2e9 FLOPs end-to-end, the budget covers about 4.25e11 sample presentations.
+    - Raw HBM bandwidth alone would allow millions of 300KB samples per second, so it does not prove the job is FLOP-bound or data-bound.
+
+    **Conclusion & Interpretation:**
+    - **Result: The constraint is useful examples per compute budget.** Select and schedule data by measured information gain, and use synthetic data only where it fills validated coverage gaps without reducing diversity.
 status: published
 provenance: imported
 requires_explanation: true

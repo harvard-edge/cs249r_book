@@ -11,39 +11,24 @@ title: PCIe DMA Engine Overlap for Host-Device Data Movement
 scenario: An H100 GPU has a DMA copy engine separate from its compute SMs.
 question: How does H100's separate DMA copy engine let PCIe transfers overlap with kernel execution?
 details:
-  realistic_solution: Utilize asynchronous CUDA streams to overlap H2D (Host-to-Device), Compute, and
-    D2H (Device-to-Host) operations. The H100's dual DMA engines operate independently from the 132 SMs,
-    sharing only the massive HBM bandwidth.
-  common_mistake: '**The Pitfall:** Thinking the GPU must pause computation to handle PCIe data transfers.
-
-    **The Rationale:** Candidates conflate the GPU''s main compute units (SMs) with its memory controllers
-    and I/O engines.
-
+  realistic_solution: Utilize asynchronous CUDA streams with pinned host memory so H2D or D2H PCIe copies are issued through copy engines while kernels run on the SMs. Overlap is possible when the transfer is asynchronous, the kernel does not immediately consume or overwrite the same buffer, and dependencies are expressed with CUDA events rather than device-wide synchronization.
+  common_mistake: |
+    **The Pitfall:** Thinking the GPU must pause computation to handle PCIe data transfers.
+    **The Rationale:** Candidates conflate the GPU's main compute units (SMs) with its memory controllers and I/O engines.
     **The Consequence:** They fail to architect pipelines that hide I/O latency behind compute.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - H100 HBM3 bandwidth is 3.35 TB/s.
-
-    - PCIe Gen5 x16 bandwidth is 64 GB/s.
-
-    - Compute kernel BW is ~2.5 TB/s typically.
-
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - PCIe Gen5 x16 effective peak is about 64 GB/s per direction.
+    - A batch transfer is 1 GB.
+    - The compute kernel on the previous batch runs for 25 ms and does not depend on the incoming buffer.
 
     **Calculations:**
-
-    - PCIe uses 64 GB/s out of 3350 GB/s HBM bandwidth.
-
-    - Bandwidth fraction: 64 / 3350 = 1.9%.
-
+    - PCIe transfer time: 1 GB / 64 GB/s = 0.0156 s = 15.6 ms.
+    - Hidden transfer time during compute: min(15.6 ms, 25 ms) = 15.6 ms.
+    - Exposed transfer time: max(0, 15.6 ms - 25 ms) = 0 ms.
 
     **Conclusion & Interpretation:**
-
-    - **Result: PCIe DMA consumes <2% of HBM bandwidth (I/O-Unconstrained)**. The system allows concurrent
-    H2D, D2H, and Compute.
-
-    '
+    - **Result: Transfer Hidden by Compute**. Separate copy engines enable overlap because the copy duration fits inside the independent kernel's compute window.
 status: published
 provenance: imported
 requires_explanation: false

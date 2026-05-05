@@ -11,7 +11,7 @@ title: Tail Latency from Thermal Throttling on Jetson Orin
 scenario: A computer vision pipeline on Jetson AGX Orin processes 30 FPS camera feeds. In a 25°C lab, P99 frame latency is 28ms. In a 40°C deployment environment, P99 spikes to 95ms intermittently. The pipeline includes YOLOv8n inference at INT8.
 question: What is causing the Jetson Orin P99 latency to jump from 28ms to 95ms at 40°C, and how would you mitigate it?
 details:
-  realistic_solution: Monitor tegrastats to correlate throttle events with latency spikes. At 40°C ambient, the 60W power draw pushes the junction temperature to its ~95°C limit, triggering thermal throttling. While compute (TOPS) is throttled, the true cause of the latency spike is memory bandwidth throttling (EMC frequency drop), which starves the pipeline. Mitigate by reducing the sustained power budget from 60W to 30W (e.g., switching from MAXN to 30W mode) to stay below thermal limits at 40°C ambient, ensuring consistent latency. Alternatively, implement active cooling or frame-dropping.
+  realistic_solution: Monitor tegrastats to correlate throttle events with latency spikes. At 40°C ambient, a 60W sustained load can push junction temperature near the throttling threshold. Thermal throttling can reduce both compute clocks and EMC memory frequency; for a lightweight detector, the EMC drop often drives the tail-latency spike by starving preprocessing and tensor movement. Mitigate by reducing sustained power from 60W to 30W, improving active cooling, or shedding frames to stay below the thermal limit.
   common_mistake: |
     **The Pitfall:** Assuming the latency spike is a software bug and spending time profiling CUDA kernels, or assuming the compute (TOPS) throttling is the bottleneck.
     **The Rationale:** Developers often focus purely on compute limitations rather than memory bandwidth, especially when dealing with lightweight models like YOLOv8n.
@@ -24,11 +24,12 @@ details:
     - YOLOv8n INT8 needs ~8.7 GOPS.
 
     **Calculations:**
-    - Junction Temp = 40°C + (60W * 0.9°C/W) = 94°C (triggering threshold).
-    - 137 TOPS > 8.7 GOPS (Compute is not the bottleneck).
+    - Estimated junction temp = 40°C + (60W * 0.9°C/W) = 40°C + 54°C = 94°C, which is near the ~95°C throttle threshold.
+    - Even after a 50% compute-clock reduction, 137 TOPS is far above an 8.7 GOPS lightweight detector estimate.
+    - If EMC memory bandwidth is also reduced, preprocessing, image copies, and tensor movement can dominate the P99 path.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory bandwidth throttling stretches P99 latency to 95ms (Memory-Bound).** Reducing sustained power budget to 30W prevents thermal throttling.
+    - **Result: thermal throttling with likely EMC impact (Thermal/Memory-Bound).** The simplified thermal model puts 60W at 40°C near the throttle point; reducing sustained power or improving cooling prevents the compute and memory clock drops that inflate P99 latency.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: inference
 title: Designing a High-Throughput Inference Load Balancer for NVIDIA A100 Clusters
 scenario: You are designing the load balancing system for a multi-datacenter ML inference service running on clusters. Inference requests vary significantly in complexity, leading to fluctuating processing times per model. The system must efficiently distribute traffic, minimize latency, and maximize GPU utilization.
-question: "How would you design request routing for this service considering consistent hashing, weighted round-robin, and dynamic traffic management to meet a strict P99 latency target?"
+question: How would you design request routing for this service considering consistent hashing, weighted round-robin, and dynamic traffic management to meet a strict P99 latency target?
 details:
   realistic_solution: Employ a smart routing layer that uses Least Outstanding Requests (LOR) combined with real-time continuous batching metrics. The load balancer must dynamically weight nodes such that requests are routed away from GPUs nearing their SLA queue depth limit.
   common_mistake: |
@@ -17,16 +17,19 @@ details:
     **The Rationale:** These are standard L4/L7 load balancing strategies that candidates default to without considering ML workload heterogeneity.
     **The Consequence:** This leads to hot-spotting, imbalanced GPU utilization, and increased tail latencies, as a slow-processing request blocks subsequent requests on the same GPU.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Target SLA: P99 latency of L ms.
-       - Average processing time: T ms.
-       - A100 HBM2e bandwidth: 2000 GB/s.
-       - Model memory per inference: B GB.
-    2. **Calculations:**
-       - Memory Bottleneck Throughput: 2000 GB/s / B inferences/second.
-       - Queue Latency Constraint: Queue depth D must satisfy D * T << L.
-    3. **Conclusion & Interpretation:**
-       - **Result: Latency-Bound Queuing.** The load balancer must dynamically weight nodes using Least Outstanding Requests (LOR) such that no GPU receives traffic if its estimated D * T approaches the SLA limit L.
+    **Assumptions & Constraints:**
+    - Target P99 latency is L ms.
+    - Estimated P99 service time for a request class is S99 ms.
+    - A GPU has q outstanding requests for the same class.
+    - Arrival rate and service-time variance are monitored continuously.
+
+    **Calculations:**
+    - Rough upper-bound waiting time for a new request is q * S99 when service is serialized for that class.
+    - Route to a GPU only when q * S99 + S99 leaves headroom under L.
+    - If observed arrival rate pushes a shard near saturation, lower its routing weight before average utilization reaches 100%, because P99 queueing grows nonlinearly with utilization.
+
+    **Conclusion & Interpretation:**
+    - **Result: Latency-Bound Queuing.** Use least-outstanding-requests with per-class service-time percentiles and live queue-depth signals; do not route from GPU memory bandwidth alone.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,55 +8,31 @@ competency_area: data
 bloom_level: create
 phase: training
 title: On-Device LLM Active Learning Curation on Tensor G3
-scenario: To continuously improve the on-device Gemini Nano model without sending raw user data to the
-  cloud, you must synthesize an architecture that selects and pseudo-labels difficult examples entirely
-  on-device using a temporarily loaded secondary teacher model.
+scenario: To continuously improve the on-device Gemini Nano model without sending raw user data to the cloud, you must synthesize an architecture that selects and pseudo-labels difficult examples entirely on-device using a temporarily loaded secondary teacher model.
 question: How should an on-device active learning system curate LLM personalization data on Tensor G3?
 details:
-  realistic_solution: The optimal architecture uses an asynchronous, on-device teacher-student setup triggered
-    only when the device is idle and charging. A lightweight heuristic filters high-entropy user interactions
-    during the day. At night, the OS unloads the standard Nano student model, loads a highly quantized
-    3B parameter teacher model into the 12 GB LPDDR5X RAM, and generates high-quality pseudo-labels for
-    the day's hard examples. These curated pairs are then used to compute gradients for federated learning.
-  common_mistake: '**The Pitfall:** Proposing cloud-based human labeling or unoptimized active learning
-    strategies like Monte Carlo Dropout.
-
-    **The Rationale:** Candidates often propose sending raw user text to the cloud, violating strict privacy
-    constraints, or they ignore the memory and thermal bottlenecks of running inference on multiple LLMs
-    simultaneously on a mobile device.
-
-    **The Consequence:** This leads to severe privacy violations, memory exhaustion, and battery drain
-    from too many expensive forward passes.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Tensor G3: 12 GB LPDDR5X RAM, 7.5 TOPS TPU.
-
-    - Teacher model: 3B parameters, INT4 quantized.
-
-    - Pseudo-label length: 50 tokens.
-
-    - Utilization: 20% effective TPU utilization (1.5 TOPS).
-
+  realistic_solution: The architecture should be an asynchronous on-device pseudo-labeling pipeline. During the day, a small student model and cheap uncertainty filters keep only high-entropy or disagreement examples in an encrypted ring buffer. When the phone is idle, charging, and cool, the runtime unloads the foreground student, maps a highly quantized 3B teacher with explicit memory headroom, and generates pseudo-labels for the retained examples at a throttled token rate. The curated pairs are then used for a later local LoRA/personalization step or summarized into privacy-preserving adapter updates, not raw user-text gradients.
+  common_mistake: |
+    **The Pitfall:** Proposing cloud-based human labeling or unoptimized active learning strategies like Monte Carlo Dropout.
+    **The Rationale:** Candidates often propose sending raw user text to the cloud, violating strict privacy constraints, or they ignore the memory and thermal bottlenecks of running inference on multiple LLMs simultaneously on a mobile device.
+    **The Consequence:** This leads to severe privacy violations, memory exhaustion, and battery drain from too many expensive forward passes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Tensor G3 class phone: 12 GB unified memory, with several GB reserved for OS and foreground services.
+    - Teacher model: 3B parameters, INT4 weights plus scales and runtime overhead.
+    - Pseudo-label batch: 1000 hard examples, 50 generated tokens each.
+    - Conservative teacher throughput when thermally throttled: 4 tokens/s.
 
     **Calculations:**
-
-    - Memory footprint: 3B * 0.5 bytes = 1.5 GB.
-
-    - Compute per example: 3B * 2 * 50 = 300 GFLOPs.
-
-    - Time per example: 300 GFLOPs / 1.5 TOPS = 0.2 seconds.
-
-    - Time for 1000 examples: 1000 * 0.2 s = 200 seconds.
-
+    - Raw INT4 weights = 3B params * 0.5 bytes = 1.5 GB.
+    - Add about 20% for group scales, alignment, tokenizer/runtime buffers, and graph metadata: 1.5 GB * 1.2 = 1.8 GB.
+    - Reserve KV cache and activations for the active decode batch: about 0.5 GB.
+    - Practical teacher footprint = 1.8 GB + 0.5 GB = 2.3 GB, which is plausible only when foreground LLM state is unloaded.
+    - Generated tokens = 1000 examples * 50 tokens = 50,000 tokens.
+    - Nightly labeling time = 50,000 tokens / 4 tokens/s = 12,500 s = 3.47 hours.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 200 seconds (Compute-Bound).** Curating 1000 hard examples takes under 4 minutes, making
-    it highly feasible for a nightly background task.
-
-    '
+    - **Result: about 2.3 GB resident memory and 3.5 hours of throttled background generation.** The teacher-student design is feasible as an overnight idle task, not as a short foreground compute burst.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,21 +11,24 @@ title: KV-Cache Recomputation vs Storage Tradeoff
 scenario: 'A user sends a 4096-token prompt and then asks 5 follow-up questions (each 100 tokens) spaced over 30 seconds. Option A: store the KV-cache for the 4096-token prefix between follow-ups. Option B: recompute the prefix KV-cache for each follow-up.'
 question: 'For Llama 3 70B on 2×H100, which is more economical: storing the KV-cache or recomputing it?'
 details:
-  realistic_solution: 'Option A (store): KV-cache for 4096 tokens = 1.31 GB. Held in GPU memory for the duration of the conversation (~5 follow-ups over ~30 seconds). Memory cost: 1.31 GB × 30s = 39.3 GB-seconds. On H100 at $2/GPU-hr: 39.3 GB-seconds × ($2/3600s) / 80 GB = $0.00027. Option B (recompute): Prefill 4096 tokens on 70B model: ~200ms on 2×H100 at ~989 TFLOPS utilized. FLOPs: 2 × 70B × 4096 = 574 TFLOPs per prefill. GPU cost per prefill: 200ms × $2/3600s × 2 GPUs = $0.00022. For 5 follow-ups: 5 × $0.00022 = $0.0011 + 5 × 200ms = 1 second of latency. Option A costs $0.00027 + 0ms latency. Option B costs $0.0011 + 1000ms latency. Storing is 4× cheaper and eliminates 1 second of user-facing latency. The breakeven: if memory is so scarce that storing 1.31 GB prevents serving 2+ additional requests, recomputation may win. Rule of thumb: cache the prefix if follow-ups > 2.'
+  realistic_solution: Option A (store) keeps about 1.31 GB of KV-cache for the 4096-token prefix resident for roughly 30 seconds. If the 2×H100 deployment is already reserved, that does not create a direct per-GB rental charge; the real cost is opportunity cost if the retained KV blocks reduce admission capacity for other requests. Option B (recompute) repeats the 4096-token prefill for each of 5 follow-ups. With the stated 200 ms estimate on 2×H100, recomputation consumes 5 × 200 ms = 1.0 second of extra two-GPU time and adds about 1 second of user-visible latency. At $2/GPU-hour, that extra compute time is 1.0 s × 2 GPUs × $2/3600 ≈ $0.0011. Therefore storing is usually more economical when the KV pool has enough headroom, because it avoids repeated prefill compute and latency. Recompute can be more economical only when the 1.31 GB retained KV-cache has a higher opportunity cost than the extra prefill time, which requires a separate capacity/revenue assumption.
   common_mistake: |
     **The Pitfall:** Always choosing to recompute because 'memory is expensive'.
     **The Rationale:** For long prefixes with many follow-ups, the cumulative recomputation cost far exceeds the one-time memory cost of caching, not to mention the impact on user latency.
     **The Consequence:** Massively inflated compute costs and high user-facing latency for multi-turn conversations.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Prefix: 4096 tokens. KV-cache size: 1.31 GB.
-       - Duration: 30s. GPU cost: $2/hr per H100.
-       - Recompute latency: ~200ms for 4096 tokens on 2x H100.
-    2. **Calculations:**
-       - Option A (Store) Cost: 1.31 GB held for 30s. VRAM proportionate cost ≈ $0.0003.
-       - Option B (Recompute) Cost: 5 follow-ups × 200ms × 2 GPUs × ($2/3600s) = $0.0011.
-       - Option B Latency penalty: 5 × 200ms = 1000ms (1s).
-    3. **Conclusion & Interpretation:** **Store is ~3.7× cheaper ($0.0003 vs $0.0011) and saves 1s latency. Memory-Capacity vs Compute-Cost Tradeoff.**
+    **Assumptions & Constraints:**
+    - Prefix: 4096 tokens. KV-cache size: about 1.31 GB.
+    - Follow-ups: 5. Recompute latency: ~200 ms per 4096-token prefill on 2x H100.
+    - GPU rental: $2/hr per H100, charged for reserved GPU time rather than per GB of VRAM.
+
+    **Calculations:**
+    - Store: direct incremental rental cost is $0 if the GPUs are already reserved; opportunity cost depends on whether 1.31 GB blocks other work.
+    - Recompute: 5 * 200 ms = 1.0 s of extra two-GPU time.
+    - Recompute GPU-time cost: 1.0 s * 2 GPUs * ($2 / 3600 s) ≈ $0.0011, plus about 1.0 s added latency.
+
+    **Conclusion & Interpretation:**
+    - **Result: Store unless KV memory is the binding capacity constraint.** The prompt supports a qualitative opportunity-cost tradeoff, not a per-GB-seconds storage bill.
 status: published
 provenance: imported
 requires_explanation: false

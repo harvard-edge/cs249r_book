@@ -8,56 +8,31 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Optimizing Large Generative AI Model Deployment on Samsung Exynos 2400 NPU under Memory Constraints
-scenario: You are deploying a generative AI model on the Samsung Exynos 2400 NPU. Even quantized, the
-  model requires 15 GB of peak memory during full-batch inference. You must choose between (A) Aggressive
-  Model Partitioning with Host Offloading, or (B) Micro-Batching with Activation Recomputation.
-question: How would you evaluate host offloading versus activation recomputation to fit a 15GB peak memory
-  LLM into the Exynos 2400's 12GB RAM?
+scenario: You are deploying a generative AI model on the Samsung Exynos 2400 NPU. Even quantized, the model requires 15 GB of peak memory during full-batch inference. You must choose between (A) Aggressive Model Partitioning with Host Offloading, or (B) Micro-Batching with Activation Recomputation.
+question: How would you evaluate host offloading versus activation recomputation to fit a 15GB peak memory LLM into the Exynos 2400's 12GB RAM?
 details:
-  realistic_solution: 'A realistic solution would involve a careful hybrid approach. Start by profiling
-    the model''s memory footprint to identify exact peak usage points. For Approach B, optimize micro-batching
-    size to balance recomputation overhead with memory savings, potentially using a ''striping'' or ''pipelining''
-    technique to hide recomputation latency. For Approach A, optimize data transfer mechanisms (e.g.,
-    using zero-copy buffers where possible, asynchronous transfers).
-
-    '
-  common_mistake: '**The Pitfall:** Neglecting the dynamic memory requirements of activations and underestimating
-    NPU-host data transfer penalties.
-
-    **The Rationale:** Engineers look at static model weight sizes and assume they fit, ignoring the massive
-    activation tensors generated during inference and the crippling latency of moving them across the
-    PCIe bus.
-
-    **The Consequence:** The model either crashes with an OOM error or runs so slowly due to host offloading
-    that it is completely unusable.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    Compare the approaches against the same 12 GB peak-memory target. Since the model peaks at 15 GB, at least 3 GB must be removed from the live working set. Host offloading can make the model fit, but it adds transfer latency every time the offloaded tensors are needed and is only attractive if those tensors are cold or transfers can be overlapped. Activation recomputation or micro-batching is usually preferable when it reduces the live activation peak below 12 GB with a smaller latency penalty. The recommended choice is recomputation first, with selective host offload only for rarely used state or as part of a hybrid plan.
+  common_mistake: |
+    **The Pitfall:** Neglecting the dynamic memory requirements of activations and underestimating NPU-host data transfer penalties.
+    **The Rationale:** Engineers look at static model weight sizes and assume they fit, ignoring the massive activation tensors generated during inference and the crippling latency of moving them across the PCIe bus.
+    **The Consequence:** The model either crashes with an OOM error or runs so slowly due to host offloading that it is completely unusable.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Total RAM: 12 GB.
-
-    - Base Memory (Weights + minimal activations): 8 GB.
-
-    - Peak Memory: 15 GB.
-
-    - Interconnect: 10 GB/s.
-
+    - Available RAM for the model: 12 GB.
+    - Current full-batch peak memory: 15 GB.
+    - Required live-memory reduction: at least 3 GB.
+    - Effective host-transfer bandwidth: 10 GB/s.
 
     **Calculations:**
-
-    - Excess Activations: 15 GB - 8 GB = 7 GB.
-
-    - Approach A (Offloading 3 GB): 3 GB / 10 GB/s = 300 ms per cycle.
-
-    - Approach B (Recomputation): Reduces 7 GB to 3 GB (peak 11 GB). Recomputing 4 GB takes ~50 ms.
-
+    - Approach A, host offload: offload 3 GB to reduce peak from 15 GB to 12 GB.
+    - Offload transfer cost if tensors are read back once: 3 GB / 10 GB/s = 0.3 s, or 300 ms, before synchronization overhead.
+    - Approach B, recomputation: reduce live activations by 4 GB, lowering peak from 15 GB to 11 GB.
+    - If recomputing those activations costs about 50 ms, it fits the memory target with much lower latency than a 300 ms transfer cycle.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 50 ms compute vs 300 ms transfer (Compute-Bound)**. Spending 50 ms on compute is vastly
-    superior to spending 300 ms on data transfer.
-
-    '
+    - **Result: prefer activation recomputation or micro-batching, with selective offload only for cold tensors.** The consistent budget shows recomputation reaches an 11 GB peak with a smaller assumed latency penalty than offloading the minimum 3 GB.
 status: published
 provenance: imported
 validated: true

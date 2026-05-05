@@ -8,25 +8,28 @@ competency_area: optimization
 bloom_level: apply
 phase: inference
 title: 'FlashAttention Tiling: Why SRAM Size Determines Tile Shape'
-scenario: 'An H100 GPU has 256 KB of shared memory (SRAM) per SM. Standard attention for a 70B model with hidden_dim=8192, num_heads=64 (head_dim=128) computes Q×K^T which produces an N×N attention matrix per head. FlashAttention tiles this computation.'
-question: 'Which FlashAttention tile sizes fit in 256 KB SRAM for N=4096, d=128, and why does tiling reduce HBM traffic from O(N²) to O(N)?'
+scenario: An H100 GPU has 256 KB of shared memory (SRAM) per SM. Standard attention for a 70B model with hidden_dim=8192, num_heads=64 (head_dim=128) computes Q×K^T which produces an N×N attention matrix per head. FlashAttention tiles this computation.
+question: Which FlashAttention tile sizes fit in 256 KB SRAM for N=4096, d=128, and why does tiling reduce HBM traffic from O(N²) to O(N)?
 details:
-  realistic_solution: 'Each tile must hold: Q_tile (B_r × d), K_tile (B_c × d), S_tile (B_r × B_c), and V_tile (B_c × d), plus output O_tile (B_r × d) and running statistics (row max, row sum). With d=128 and BF16 (2 bytes): Q_tile = B_r × 128 × 2 = 256×B_r bytes. K_tile = B_c × 128 × 2 = 256×B_c bytes. S_tile = B_r × B_c × 2 bytes. Total SRAM ≤ 256 KB = 262,144 bytes. With B_r = B_c = 128: Q=32KB, K=32KB, S=32KB, V=32KB, O=32KB = 160KB. Fits with margin. Standard attention reads Q,K,V from HBM, writes N²-sized attention matrix to HBM, reads it back for V multiplication — total HBM traffic O(N²). FlashAttention: reads Q,K,V from HBM once, computes S tiles in SRAM (never written to HBM), accumulates output in SRAM. HBM traffic drops from O(N²) to O(N×d). For N=4096, d=128: ratio ≈ N/2d = 16× fewer HBM accesses.'
+  realistic_solution: 'Each tile must hold: Q_tile (B_r × d), K_tile (B_c × d), S_tile (B_r × B_c), and V_tile (B_c × d), plus output O_tile (B_r × d) and running statistics (row max, row sum). With d=128 and BF16 (2 bytes): Q_tile = B_r × 128 × 2 = 256×B_r bytes. K_tile = B_c × 128 × 2 = 256×B_c bytes. S_tile = B_r × B_c × 2 bytes. Total SRAM ≤ 256 KB = 262,144 bytes. With B_r = B_c = 128: Q=32KB, K=32KB, S=32KB, V=32KB, O=32KB = 160KB, so 128×128 is one valid tile shape that fits with margin, not a proof of the unique or maximum tile. Standard attention reads Q,K,V from HBM, writes N²-sized attention matrix to HBM, reads it back for V multiplication — total HBM traffic O(N²). FlashAttention reads Q,K,V from HBM, computes S tiles in SRAM without materializing S in HBM, and writes O. Using the same BF16 byte model, HBM traffic drops from roughly 2N² + 4Nd elements to about 4Nd elements, or about 16× fewer bytes for N=4096, d=128.'
   common_mistake: |
     **The Pitfall:** Thinking FlashAttention changes the mathematical computation.
     **The Rationale:** Candidates assume algorithmic complexity reduction rather than memory access optimization is responsible for the speedup.
     **The Consequence:** Fails to understand that it computes the exact same attention—it just changes the memory access pattern by tiling the computation to fit in fast SRAM instead of materializing the full N×N matrix in slow HBM.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Standard HBM traffic: Q,K,V reads (3*N*d) + S write (N^2) + S read (N^2) + O write (N*d) = ~2N^2 + 4Nd.
-    - FlashAttention: Q,K,V reads (3Nd) + O write (Nd) = 4Nd.
+    - Count BF16 elements first, then multiply both numerator and denominator by 2 bytes/element.
+    - Standard HBM traffic: Q,K,V reads (3Nd) + S write (N^2) + S read (N^2) + O write (Nd) = 2N^2 + 4Nd elements.
+    - FlashAttention traffic model: Q,K,V reads plus O write = 4Nd elements, ignoring smaller metadata and re-reads from finite tiling.
 
     **Calculations:**
-    - Ratio: (2N^2 + 4Nd) / 4Nd = ~N/2d for large N.
-    - For N=4096, d=128: Ratio = 4096 / (2 * 128) = 16.
+    - Standard bytes = (2N^2 + 4Nd) * 2.
+    - FlashAttention bytes = 4Nd * 2.
+    - Ratio = (2N^2 + 4Nd) / 4Nd = N/(2d) + 1.
+    - For N=4096, d=128: Ratio = 4096 / (2 * 128) + 1 = 17x under this simplified model; the leading O(N^2) term alone contributes 16x.
 
     **Conclusion & Interpretation:**
-    - **Result: 16x fewer HBM accesses (Memory-Bandwidth-Bound)**. Tiling eliminates the $O(N^2)$ reads/writes to slow HBM.
+    - **Result: about 16-17x fewer HBM bytes (Memory-Bandwidth-Bound)**. Tiling eliminates materialized O(N^2) HBM traffic; 128x128 is a feasible SRAM tile example.
 status: published
 provenance: imported
 requires_explanation: false

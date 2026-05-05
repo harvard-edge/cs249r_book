@@ -8,48 +8,27 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: SSM vs Transformer Hardware Tradeoff
-scenario: State-space models (SSMs) like Mamba replace attention with a recurrent scan operation. From
-  a systems perspective, compare the training and inference hardware profiles of SSMs vs Transformers.
+scenario: State-space models (SSMs) like Mamba replace attention with a recurrent scan operation. From a systems perspective, compare the training and inference hardware profiles of SSMs vs Transformers.
 question: When does each architecture have a systems advantage?
 details:
-  realistic_solution: During training, Transformers leverage large dense GEMMs that perfectly saturate
-    Tensor Cores, yielding high Model FLOPs Utilization (MFU). SSMs rely on parallel associative scans
-    which are less hardware-friendly, resulting in lower MFU. During inference, Transformers suffer from
-    an $O(S)$ scaling KV cache that destroys memory bandwidth and limits batch size. SSMs maintain a constant
-    $O(d)$ hidden state footprint, entirely bypassing the KV cache memory wall for infinite context generation.
-  common_mistake: '**The Pitfall:** Assuming SSMs are universally faster across both training and inference.
-
-    **The Rationale:** SSMs avoid the notorious $O(N^2)$ compute bottleneck of self-attention, suggesting
-    dominance everywhere.
-
-    **The Consequence:** Overlooking the reality that modern GPUs are purpose-built for dense matrix multiplications;
-    SSM parallel scans lack this mechanical sympathy, training slower per FLOP.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Target Context: 32K tokens.
-
-    - Transformer state: $O(S)$ KV cache footprint.
-
-    - SSM state: $O(d)$ fixed footprint.
-
+  realistic_solution: During training, Transformers leverage large dense GEMMs that map well to Tensor Cores and often reach higher Model FLOPs Utilization (MFU) than scan-heavy SSM kernels. SSMs rely on recurrent or parallel scan operations that can be less hardware-friendly. During inference, Transformers carry an $O(S)$ KV cache whose memory footprint grows with context length and can limit batch size. SSMs maintain a fixed-size state per sequence, avoiding KV-cache growth over context length, but this does not guarantee unlimited context quality or capacity.
+  common_mistake: |
+    **The Pitfall:** Assuming SSMs are universally faster across both training and inference.
+    **The Rationale:** SSMs avoid the notorious $O(N^2)$ compute bottleneck of self-attention, suggesting dominance everywhere.
+    **The Consequence:** Overlooking the reality that modern GPUs are purpose-built for dense matrix multiplications; SSM parallel scans lack this mechanical sympathy, training slower per FLOP.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target context: 32K tokens.
+    - Transformer state: KV cache grows linearly with context length, layers, heads, head dimension, and bytes per element.
+    - SSM state: hidden state is fixed per sequence for a given model and dtype, but its exact size depends on architecture.
 
     **Calculations:**
-
-    - 70B Transformer at 32K context: KV cache ≈ 10+ GB per request (restricts batch size).
-
-    - 70B SSM at 32K context: Fixed hidden state ≈ 10 MB per request (1000x smaller).
-
-    - Training Efficiency (MFU): Transformers (GEMM) = 40-50%, SSMs (Scan) = 25-35%.
-
+    - Example transformer KV cache: layers * tokens * KV heads * head_dim * 2 tensors * bytes. For large 70B-class models at 32K context, this can be many GB per request under common BF16/FP16 layouts.
+    - Example SSM inference state: layers * state channels * bytes. It does not multiply by context length, so the footprint is typically much smaller for long generation.
+    - Training efficiency comparison should be treated qualitatively: dense Transformer GEMMs usually map better to GPU tensor cores than scan-heavy SSM kernels, but exact MFU depends on model, kernels, sequence length, and hardware.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Memory vs Compute trade-off (Memory-Capacity Bound)**. Transformers win on training throughput
-    (Compute-Bound), but SSMs hold a massive inference advantage for long sequences.
-
-    '
+    - **Result: Memory vs Compute trade-off (Memory-Capacity Bound)**. Transformers often win on training throughput, while SSMs can have an inference advantage for long sequences because state does not grow with context length.
 status: published
 provenance: imported
 requires_explanation: false

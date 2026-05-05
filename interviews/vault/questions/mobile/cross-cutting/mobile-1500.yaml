@@ -8,51 +8,29 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: inference
 title: On-Device DP-SGD Specification for A17 Pro Text Prediction
-scenario: You are designing an on-device personalization system for a next-word prediction model running
-  on the Apple A17 Pro Neural Engine. The system must use DP-SGD to ensure user privacy with a strict
-  epsilon budget of 2.0 per week. You need to specify the batching, noise generation, and clipping strategy,
-  ensuring the training process does not exceed the thermal envelope (~5W) or unified memory constraints
-  (8 GB shared with CPU/GPU) while maximizing utility.
-question: How would you specify on-device DP-SGD text prediction on A17 Pro with private clipping and
-  noise?
+scenario: You are designing an on-device personalization system for a next-word prediction model running on the Apple A17 Pro Neural Engine. The system must use DP-SGD to ensure user privacy with a strict epsilon budget of 2.0 per week. You need to specify the batching, noise generation, and clipping strategy, ensuring the training process does not exceed the thermal envelope (~5W) or unified memory constraints (8 GB shared with CPU/GPU) while maximizing utility.
+question: How would you specify on-device DP-SGD text prediction on A17 Pro with private clipping and noise?
 details:
-  realistic_solution: The optimal design leverages the unified 8 GB memory architecture by generating
-    noise directly on the A17 Pro's Neural Engine or GPU (if compute-bound on ANE) using a vectorized
-    PRNG. Gradient clipping is implemented via a custom compute shader or fused kernel to avoid moving
-    unclipped gradients across the memory bus. The batch size is tuned to saturate the 16-core ANE (35
-    TOPS) without causing memory pressure that would trigger unified memory swapping.
-  common_mistake: '**The Pitfall:** Proposing to generate cryptographically secure pseudo-random noise
-    on the CPU and transferring it to the Neural Engine.
-
-    **The Rationale:** Candidates rely on standard CPU libraries for RNG and ignore the high cost of memory
-    transfers.
-
-    **The Consequence:** Massive synchronization overhead across the memory bus, destroying performance
-    and exceeding the 5W thermal budget.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: Specify DP-SGD as a small on-device fine-tuning loop with per-example clipping, secure seeded noise generation, and fused reduction/add-noise kernels placed on the mobile runtime path that actually supports them, typically CPU plus GPU/Metal rather than assuming arbitrary PRNG execution on the Neural Engine. Keep per-example gradient buffers short-lived, accumulate clipped gradients into one model-sized buffer, and tune micro-batch size by measured memory pressure and thermal behavior. The privacy accountant enforces epsilon 2.0 per week and blocks further personalization when the budget is exhausted.
+  common_mistake: |
+    **The Pitfall:** Treating DP-SGD as ordinary fine-tuning with a noise call bolted on after the fact.
+    **The Rationale:** Candidates ignore per-example clipping, privacy accounting, and the cost of materializing every unclipped gradient in unified memory.
+    **The Consequence:** The system either violates the epsilon budget or creates avoidable memory traffic and thermal spikes during personalization.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Model Details: 10M params, FP16 gradients (20 MB per vector).
-
-    - Micro-batch Memory: Batch size 32 requires 32 * 20 MB = 640 MB (Safely within 8GB limit).
-
-    - Noise Demand: 10M samples per step at 10 steps/sec.
-
+    - Micro-batch size: 32 examples.
+    - Naive per-example gradient storage would keep one 20 MB vector per example.
+    - Fused clipping accumulates into one clipped-gradient buffer plus one noise buffer.
 
     **Calculations:**
-
-    - CPU Generation Bandwidth Cost: 20 MB/step * 10 steps/sec = 200 MB/s.
-
-    - ANE Generation Cost: Generating noise locally on Neural Engine requires 0 MB/s external bandwidth.
-
+    - Naive per-example gradient memory = 32 * 20 MB = 640 MB before activations and optimizer state.
+    - Fused approach resident gradient memory ≈ 20 MB clipped accumulator + 20 MB noise/output buffer = 40 MB, plus temporary per-layer workspace.
+    - Memory saved before activations ≈ 640 MB - 40 MB = 600 MB.
+    - At 10 steps/sec, writing one model-sized noise/update buffer is 20 MB * 10 = 200 MB/s; this is manageable, but duplicating full per-example gradients would multiply traffic and heat.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 0 MB/s external bandwidth (Memory-Bandwidth Bound)**. Fusing ANE clipping and noise addition
-    prevents a 200 MB/s memory bottleneck and keeps the system within the 5W envelope.
-
-    '
+    - **Result: Memory-aware DP-SGD**. Fused clipping and noise addition are needed to avoid hundreds of MB of extra resident gradients while preserving the weekly epsilon budget and thermal headroom.
 status: published
 provenance: imported
 requires_explanation: true

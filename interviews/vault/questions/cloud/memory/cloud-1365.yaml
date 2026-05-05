@@ -7,12 +7,12 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: 'Diagnosing Low SM Utilization in LLM Inference'
-scenario: 'You are profiling an autoregressive LLM inference service running on a single GPU (40GB memory, 2.0 TB/s peak bandwidth). The model has 15 billion parameters loaded in FP16. When serving a single user request (batch size = 1), the service generates 25 tokens per second, but the profiler shows that the GPU''s compute units (SMs) are at less than 5% utilization. An engineer suggests upgrading to the latest cuBLAS library to optimize matrix multiplication kernels.'
-question: 'Why is the GPU at <5% SM utilization for batch-1 decoding, and why won''t a cuBLAS upgrade materially improve tokens/sec?'
+title: Diagnosing Low SM Utilization in LLM Inference
+scenario: You are profiling an autoregressive LLM inference service running on a single GPU (40GB memory, 2.0 TB/s peak bandwidth). The model has 15 billion parameters loaded in FP16. When serving a single user request (batch size = 1), the service generates 25 tokens per second, but the profiler shows that the GPU's compute units (SMs) are at less than 5% utilization. An engineer suggests upgrading to the latest cuBLAS library to optimize matrix multiplication kernels.
+question: Why is the GPU at <5% SM utilization for batch-1 decoding, and why won't a cuBLAS upgrade materially improve tokens/sec?
 details:
   realistic_solution: |
-    The compute units are starved for data due to the memory wall. In autoregressive generation at batch=1, each token requires streaming the entire 30GB of model weights from HBM to SRAM. The observed 25 tokens/s represents ~37.5% effective bandwidth utilization, confirming the system is strictly HBM-bound. Increasing batch size is the primary lever to amortize weight loads.
+    The compute units are starved for data due to the memory wall. In autoregressive generation at batch=1, each token has very low arithmetic intensity and must repeatedly read the model weights from HBM with limited reuse. A 30GB FP16 model on a 2.0 TB/s GPU gives a rough upper bound of about 66 tokens/s before accounting for cache behavior, kernel overhead, and bandwidth efficiency, so the observed 25 tokens/s is consistent with a memory-dominated workload. Increasing batch size is the primary lever to amortize weight loads.
   common_mistake: |
     **The Pitfall:** Assuming low SM utilization indicates inefficient compute kernels or CPU bottleneck.
     **The Rationale:** Standard profiling wisdom dictates that low compute utilization means the compute logic itself needs optimization.
@@ -22,14 +22,15 @@ details:
     - 15B parameter model in FP16 = 30 GB weights.
     - GPU memory 40GB, 2.0 TB/s peak bandwidth.
     - Batch size 1, 25 tokens/s generated.
+    - Treat one full weight read per token as a lower-bound bandwidth model.
 
     **Calculations:**
-    - Memory wall: Autoregressive generation requires streaming the entire 30 GB weights per token.
-    - Theoretical max throughput: 2,000 GB/s / 30 GB/token = 66.6 tokens/second.
-    - Current performance: 25 tokens/s represents 25 / 66.6 = 37.5% effective bandwidth utilization.
+    - Lower-bound traffic: 30 GB/token * 25 tokens/s = 750 GB/s of weight traffic.
+    - Peak bandwidth comparison: 750 GB/s / 2,000 GB/s = 37.5% of peak before overheads.
+    - Real kernels have imperfect locality, launch overhead, KV-cache traffic, and bandwidth-efficiency losses, so this is a rough dominance check rather than an exact utilization measurement.
 
     **Conclusion & Interpretation:**
-    - **Result: 37.5% bandwidth utilization (Memory-Bound)**. The system is strictly memory-bandwidth bound, meaning compute optimizations (like cuBLAS) yield zero improvement.
+    - **Result: Memory-Dominated Decoding.** The back-of-the-envelope traffic is large enough to explain low SM utilization; a cuBLAS upgrade may help small kernels at the margin but is unlikely to materially improve tokens/sec without batching or reducing memory traffic.
 status: published
 provenance: imported
 requires_explanation: false

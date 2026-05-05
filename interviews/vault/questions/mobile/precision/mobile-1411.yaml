@@ -11,7 +11,7 @@ title: Optimizing Sub-4-bit LLM Deployment on Google Tensor G3
 scenario: Your team is deploying a 2B parameter LLM on the Google Tensor G3. Initial deployment using standard 8-bit weight quantization is functional, but token generation rates are slow.
 question: How would you optimize a sub-4-bit LLM deployment on Tensor G3 for memory-bandwidth-bound decoding?
 details:
-  realistic_solution: 'Implement a 4-bit group-wise quantization scheme (like AWQ) to compress the weights in the 12 GB LPDDR5X memory. Since LLM auto-regressive decoding is heavily memory bandwidth bound, reducing the weight size directly reduces memory fetch time. A fused custom kernel on the TPU should load the 4-bit weights and dequantize them to INT8 or FP16 in SRAM just-in-time for the matrix multiplication, hiding the unpacking latency behind the memory transfer.'
+  realistic_solution: Implement a 4-bit group-wise quantization scheme (like AWQ) to compress the weights in the 12 GB LPDDR5X memory. Since LLM auto-regressive decoding is heavily memory bandwidth bound, reducing the weight size directly reduces memory fetch time. A fused custom kernel on the TPU should load the 4-bit weights and dequantize them to INT8 or FP16 in SRAM just-in-time for the matrix multiplication, hiding the unpacking latency behind the memory transfer.
   common_mistake: |
     **The Pitfall:** Assuming reducing bit-width linearly improves speed without accounting for dequantization overhead.
     **The Rationale:** Engineers focus solely on the reduced memory payload, forgetting that sub-byte formats like INT4 often require unpacking to INT8/FP16 in SRAM before matrix multiplication.
@@ -20,16 +20,18 @@ details:
     **Assumptions & Constraints:**
     - Model: 2B params. INT8 footprint: 2 GB.
     - LPDDR5X Bandwidth: ~60 GB/s. TPU Compute: 7.5 TOPS.
-    - Compute per token: 4 GOPS.
+    - Approximate decode compute per token: 2B MACs = about 4 GOPS.
+    - Assume weight traffic is streamed once per decode token; activations and KV-cache add overhead.
 
     **Calculations:**
-    - INT8 Memory-Bound Limit: 60 GB/s / 2 GB = 30 tokens/sec.
-    - Compute-Bound Limit: 7.5 TOPS / 4 GOPS = ~1875 tokens/sec. (Severely Memory-Bound).
+    - INT8 Weight-Read Lower Bound: 2 GB / 60 GB/s = 33ms per token before KV-cache and kernel overhead.
+    - Compute Lower Bound: 4 GOPS / 7,500 GOPS/sec = 0.53ms per token, so weight traffic dominates this estimate.
     - 4-bit Footprint: 2B * 0.5 bytes = 1 GB.
-    - 4-bit Memory-Bound Limit: 60 GB/s / 1 GB = 60 tokens/sec.
+    - 4-bit Weight-Read Lower Bound: 1 GB / 60 GB/s = 16.7ms per token before dequantization, KV-cache, and scheduler overhead.
+    - Practical Gain: speedup is bounded by the fraction of decode time spent reading weights and by fused dequantization efficiency.
 
     **Conclusion & Interpretation:**
-    - **Result: 60 tokens/sec (Memory-Bandwidth Bound)**. The new speed doubles throughput by alleviating the memory-bandwidth bound constraint.
+    - **Result: up to 2x lower weight-read time (Memory-Bandwidth Bound)**. INT4 can reduce the dominant weight traffic from 33ms to 16.7ms per token, but end-to-end throughput only approaches that gain if fused dequantization and KV-cache traffic do not dominate.
 status: published
 provenance: imported
 requires_explanation: false

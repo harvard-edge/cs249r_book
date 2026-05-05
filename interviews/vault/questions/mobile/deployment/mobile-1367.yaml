@@ -8,51 +8,31 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: On-Device Shadow Rollout for A17 Pro Video Segmentation
-scenario: You are rolling out a video background segmentation model to iOS users on the Apple A17 Pro
-  Neural Engine. You must design an on-device shadow deployment architecture that compares live and shadow
-  model outputs without causing camera frame drops.
-question: How would you design an A17 Pro shadow rollout for video segmentation without frame drops or
-  thermal throttling?
+scenario: You are rolling out a video background segmentation model to iOS users on the Apple A17 Pro Neural Engine. You must design an on-device shadow deployment architecture that compares live and shadow model outputs without causing camera frame drops.
+question: How would you design an A17 Pro shadow rollout for video segmentation without frame drops or thermal throttling?
 details:
-  realistic_solution: The optimal architecture strictly decouples the shadow model into an asynchronous,
-    low-priority NSOperationQueue. The legacy model remains in the synchronous critical path to guarantee
-    the 33.3ms frame budget. The shadow model processes heavily downsampled frames asynchronously only
-    when thermal states (`NSProcessInfoThermalState`) are nominal.
-  common_mistake: '**The Pitfall:** Executing the shadow model synchronously alongside the live model
-    within the critical camera pipeline.
-
-    **The Rationale:** Treating mobile real-time inference like a scalable cloud microservice without
-    respecting hard physical frame deadlines.
-
-    **The Consequence:** Immediate frame drops, severe thermal throttling, and OS intervention shutting
-    down the camera pipeline.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - A17 Pro ANE peak: 35 TOPS @ ~5W (~7 TOPS/W).
-
-    - Live model: 0.8 TOPS. Shadow model: 1.2 TOPS.
-
+  realistic_solution: |
+    Keep the current live segmentation model on the synchronous camera path and move only the candidate shadow model to a separate low-priority asynchronous pipeline. Feed the shadow path sampled frames from a bounded queue, drop shadow work under backpressure, compare live and shadow masks through telemetry, and gate execution on thermal and battery state. The shadow path can process reduced-resolution or less frequent frames, but the key architecture is that shadow inference never blocks camera capture, live segmentation, preview rendering, or frame delivery.
+  common_mistake: |
+    **The Pitfall:** Executing the shadow model synchronously alongside the live model within the critical camera pipeline.
+    **The Rationale:** Treating mobile real-time inference like a scalable cloud microservice without respecting hard physical frame deadlines.
+    **The Consequence:** Immediate frame drops, severe thermal throttling, and OS intervention shutting down the camera pipeline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - A17 Pro ANE peak: 35 TOPS; assume 25% sustained utilization for camera workloads = 8.75 TOPS effective.
+    - Live model sustained load at 30 FPS: 0.8 TOPS = 26.7 GOP/frame.
+    - Shadow model sustained load at 30 FPS: 1.2 TOPS = 40.0 GOP/frame.
     - Real-time frame budget (30 FPS): 33.3 ms.
 
-
     **Calculations:**
-
-    - Compute capacity per 33.3ms frame: 35 TOPS * 0.0333s = 1.16 Tera-Ops.
-
-    - Combined load per frame: 2.0 TOPS * 0.0333s = 0.066 Tera-Ops.
-
-    - Power draw increase: 2.0 TOPS / 7 TOPS/W = ~0.286W.
-
+    - Effective compute capacity per frame: 8.75 TOPS * 0.0333s = 291.4 GOP/frame.
+    - Live model compute time: 26.7 GOP / 8,750 GOP/s = 3.05 ms.
+    - Shadow model compute time if run every frame: 40.0 GOP / 8,750 GOP/s = 4.57 ms.
+    - Synchronous combined inference time: 3.05 ms + 4.57 ms = 7.62 ms before ISP, camera, render, memory contention, and scheduling overhead.
+    - Asynchronous 1-in-3 shadow sampling average load: 40.0 GOP / 3 = 13.3 GOP/frame equivalent, or 1.52 ms/frame average at 8.75 TOPS.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 0.066 Tera-Ops (Scheduling-Bound)**. While the hardware has immense compute margin (0.066
-    < 1.16 Tera-Ops), running the shadow model synchronously artificially blocks the 33.3ms deadline;
-    asynchronous offloading is structurally mandatory.
-
-    '
+    - **Result: Asynchronous shadow pipeline with sampling and backpressure.** Even though raw compute can fit on average, synchronous shadow inference adds 4.57 ms to the camera critical path before other real-time work. Decoupling and sampling make shadow comparison safe without frame drops.
 status: published
 provenance: imported
 requires_explanation: true

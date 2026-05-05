@@ -8,63 +8,47 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: 5G Remote KV Prefetching
-scenario: A transformer's KV cache is split between local LPDDR5 and an edge server's NVMe SSD over a
-  5G mmWave connection (1 Gbps, 15ms ping).
-question: What speculative prefetching mechanism for the remote KV blocks can hide the 15ms 5G synchronization
-  latency?
+scenario: A transformer's KV cache is split between local LPDDR5 and an edge server's NVMe SSD over a 5G mmWave connection (1 Gbps, 15ms ping).
+question: What speculative prefetching mechanism can hide remote KV block fetch latency over 5G?
 details:
-  realistic_solution: The 15ms ping represents a hard stall if fetched reactively. At an assumed 50ms/token
-    generation speed, the local NPU must predict and issue the 5G fetch request at least 1 token in advance.
-    Fetching a 1MB chunk takes 8ms plus the 15ms sync, totally 23ms, safely hiding behind the 50ms compute.
-  common_mistake: '**The Pitfall:** Using a purely reactive paging strategy.
-
-    **The Rationale:** Candidates often design systems that wait for a cache miss before requesting the
-    remote block, ignoring network latency.
-
-    **The Consequence:** A reactive fetch blocks the local NPU generation loop for at least 15ms on every
-    remote cache miss, destroying token generation throughput.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Network Ping Sync = 15ms.
-
+  realistic_solution: The 15ms ping becomes a hard stall if remote KV blocks are fetched reactively. Define each remote block as a 1MB group of compressed KV pages for a known span of layers and recent tokens. At 1 Gbps, transfer is about 8ms, and a realistic request budget is roughly 25-30ms after protocol overhead. With a 50ms/token decoder, the scheduler should predict the next needed block and prefetch it at least one decoding step ahead, keeping a small lookahead window so remote blocks arrive before attention reads them.
+  common_mistake: |
+    **The Pitfall:** Using a purely reactive paging strategy.
+    **The Rationale:** Candidates often design systems that wait for a cache miss before requesting the remote block, ignoring network latency.
+    **The Consequence:** A reactive fetch blocks the local NPU generation loop for at least 15ms on every remote cache miss, destroying token generation throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 5G round-trip latency budget: about 15ms.
     - Bandwidth: 1 Gbps = 125 MB/s.
-
+    - Remote KV block: 1MB compressed KV page group, not one token.
     - Target generation speed: 50ms/token.
-
+    - Protocol, scheduling, and SSD read overhead: about 5ms beyond ping and transfer.
 
     **Calculations:**
-
-    - Fetch time for a 1MB chunk = 1MB / 125MB/s = 8ms.
-
-    - Total fetch time = 15ms (ping) + 8ms (transfer) = 23ms.
-
+    - Transfer time for one 1MB KV block = 1MB / 125MB/s = 8ms.
+    - Approximate remote fetch budget = 15ms RTT + 8ms transfer + 5ms overhead = 28ms.
+    - One decoding step provides about 50ms of compute time, so prefetching the next required KV block at least one step ahead leaves about 22ms of slack.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 23ms fetch time (Network-Latency Bound)**. Fetching 1 token in advance safely hides the
-    network latency behind the 50ms compute.
-
-    '
+    - **Result: about 28ms per 1MB remote KV block fetch**. A speculative scheduler should prefetch block IDs for the likely next attention reads at least one decoding step ahead; the block size is a KV layout choice, not a one-token unit.
 status: published
 provenance: llm-draft
-expected_time_minutes: 14
 requires_explanation: true
+expected_time_minutes: 14
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-specification-L6+
+  - gemini-generated
+  - target-specification-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

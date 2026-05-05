@@ -11,7 +11,7 @@ title: Jetson Orin Thermal Throttling and Inference Latency Tail
 scenario: A passively cooled Jetson Orin NX (15W mode) shows 28ms latency at 22°C ambient, degrading to 95ms at 38°C.
 question: What causes the afternoon p99 latency spike, how does thermal throttling explain it, and how would you harden the deployment?
 details:
-  realistic_solution: 'Passive cooling is insufficient at 38°C ambient + solar heating. Throttling reduces CPU/GPU clocks by 25%. Combined with queueing effects at throttled throughput, p99 inflates 3-4x. Fix: add active cooling (5-10W fan) or reduce TDP to 10W mode.'
+  realistic_solution: 'The afternoon spike is caused by thermal headroom collapse: 38°C ambient plus solar load pushes the passively cooled module near its throttle point, so GPU clocks drop and service time rises. A modest 25% clock reduction changes 28ms service time to about 37ms; if requests arrive roughly every 40ms, utilization jumps from 0.70 to 0.93 and tail latency can grow by several times, matching the observed 95ms p99. Harden the deployment with active cooling or shading, lower-TDP/workload shaping during hot periods, and thermal headroom alerts that shed load before throttling.'
   common_mistake: |
     **The Pitfall:** Blaming software or model issues rather than thermal queueing effects.
     **The Rationale:** Cloud engineers are unaccustomed to systems without active cooling exhibiting strong temperature-dependent performance drops.
@@ -23,13 +23,14 @@ details:
     - Passive θja = 1.8°C/W.
 
     **Calculations:**
-    - Afternoon Junction = 50°C + (15W * 1.8°C/W) = 77°C (near throttle).
-    - Solar peak pushes to 82°C.
-    - Throttled clocks by 25% means Latency = 28ms / 0.75 = 37.3ms.
-    - Arrival = 25ms (40 FPS). ρ = 37.3 / 25 = 1.49.
+    - Effective afternoon ambient: 38°C + 12°C solar = 50°C.
+    - Afternoon junction: 50°C + (15W * 1.8°C/W) = 77°C, near the throttle threshold.
+    - Throttled clocks by 25% means service time = 28ms / 0.75 = 37.3ms.
+    - If arrival interval is 40ms, morning ρ = 28/40 = 0.70 and throttled ρ = 37.3/40 = 0.93.
+    - Queueing amplification proxy: (1 - 0.70) / (1 - 0.93) = 4.3x.
 
     **Conclusion & Interpretation:**
-    - **Result: ρ = 1.49 (Unstable Queue) (Thermally-Bound)**. The system enters thermal throttling, which explodes the queue length and p99 latency.
+    - **Result: ρ rises from 0.70 to 0.93 (Thermally-Bound).** Thermal throttling leaves too little service headroom, so small service-time increases produce a large p99 latency spike.
 status: published
 provenance: imported
 requires_explanation: false

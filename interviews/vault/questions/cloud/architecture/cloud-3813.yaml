@@ -11,7 +11,7 @@ title: 'Expert Offloading: CPU-GPU Expert Swapping for Inference'
 scenario: You want to serve Mixtral 8x7B (93.4 GB FP16) on a single 80 GB GPU (2 TB/s). The model doesn't fit in GPU memory. A colleague proposes keeping shared layers on GPU and swapping experts from CPU RAM over PCIe 4.0 (32 GB/s).
 question: Is CPU expert swapping over PCIe 4.0 viable for serving Mixtral 8x7B under a 50 ms/token interactive latency target?
 details:
-  realistic_solution: 'Shared attention layers: ~7B params = 14 GB FP16, stays on GPU. Each expert MLP: ~5.3B params = 10.6 GB FP16. At batch size 1, top-2: need to load 2 experts from CPU. Transfer time per expert: 10.6 GB / 32 GB/s = 331ms. Two experts: 662ms. This far exceeds the 50ms/token target — not viable for interactive serving with FP16. With INT4 quantization: each expert = 2.65 GB. Transfer: 2.65 / 32 = 83ms per expert. Two experts: 166ms. Still too slow. Viable approach: INT4 quantization (total = 23.4 GB) fits entirely on an 80 GB GPU. No swapping needed. Alternatively, use 2 GPUs with tensor parallelism. Expert offloading is only viable for throughput-oriented batch inference.'
+  realistic_solution: 'No: CPU expert swapping over PCIe 4.0 is not viable for a 50 ms/token interactive target. Shared attention layers can stay resident on GPU, but each FP16 expert MLP is about 10.6 GB. With top-2 routing at batch size 1, loading two missing experts costs about 662 ms of PCIe transfer before compute, far above the SLA. Even INT4 expert transfers are about 166 ms for two experts, still too slow if swapping is on the critical path. Practical alternatives are to fit the quantized model fully in GPU memory, shard the model across multiple GPUs, or use offloading only for throughput-oriented batch serving where prefetch and overlap can hide misses.'
   common_mistake: |
     **The Pitfall:** Assuming you can swap experts continuously in parallel with computation without stalling.
     **The Rationale:** Engineers rely on theoretical pre-fetching, ignoring that routing is data-dependent and unpredictable token-to-token.
@@ -29,7 +29,7 @@ details:
     - INT4 transfer: 2.65 GB / 32 GB/s = 83 ms * 2 = 166 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: PCIe Bottleneck (IO-Bound)**. Full INT4 model (23.4 GB) fits directly on an 80 GB GPU, eliminating the need to swap.
+    - **Result: PCIe Bottleneck (IO-Bound).** Swapping experts over PCIe is not viable for 50 ms/token; quantization or multi-GPU placement avoids putting expert transfers on the critical path.
 status: published
 provenance: imported
 requires_explanation: false

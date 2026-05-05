@@ -11,7 +11,7 @@ title: Extreme Quantization Deployment on Qualcomm Cloud AI 100
 scenario: You are tasked with deploying an LLM aggressively quantized to 2-bit (AWQ) onto a Qualcomm Cloud AI 100 accelerator. While the platform boasts 400 TOPS INT8, direct sub-4-bit support is limited.
 question: How would you prepare, deploy, and validate the 2-bit AWQ LLM on the Cloud AI 100 given limited native sub-4-bit support?
 details:
-  realistic_solution: Because the hardware lacks native 2-bit matrix multiply accelerators, you must leverage the Qualcomm AI Engine Direct SDK to write custom kernel implementations. The 2-bit weights must be densely packed into INT8 containers in DRAM. At runtime, the kernel reads the INT8 block, unpacks/dequantizes it to INT8 or FP16 inside the fast on-chip SRAM, and executes the dense MAC operations. While the extra unpacking instructions consume compute cycles, the massive 400 TOPS capacity easily absorbs this. The true bottleneck remains memory bandwidth; effectively shrinking the weight footprint by 4x (INT8 to 2-bit) fundamentally alleviates the memory wall during auto-regressive generation.
+  realistic_solution: Because Cloud AI 100 is optimized for supported INT8-style execution rather than arbitrary native 2-bit matrix multiply, treat the AWQ checkpoint as a compression candidate, not an automatic deployment format. First prove an INT8 or supported mixed-precision baseline through the Qualcomm deployment stack. If 2-bit storage is required, keep weights densely packed in memory but use custom preprocessing or kernels that unpack/dequantize into a supported compute format at tile or layer granularity, then measure whether the bandwidth savings exceed the unpack and dequantization cost. If operator coverage or utilization is poor, fall back to INT4/INT8, groupwise INT8, or selective 2-bit only for layers where accuracy and throughput survive profiling. The deployment is viable only if end-to-end token latency, memory bandwidth, and supported operator placement are validated on hardware.
   common_mistake: |
     **The Pitfall:** Assuming sub-4-bit quantization naturally accelerates compute without considering the hardware's instruction set architecture.
     **The Rationale:** Candidates overlook the severe cycle overhead required to unpack non-native bit-widths from memory registers prior to multiplication.
@@ -21,15 +21,17 @@ details:
     - Model: 10B parameters, quantized to 2-bit AWQ.
     - Memory capacity: 32 GB LPDDR4x (approx 100 GB/s bandwidth).
     - Compute capacity: 400 TOPS INT8.
+    - 2-bit weights are stored compressed but compute executes after unpack/dequantization into a supported format.
 
     **Calculations:**
     - Memory footprint = 10 * 10^9 * 2 bits / 8 bits/byte = 2.5 GB.
-    - Time to read weights (per token) = 2.5 GB / 100 GB/s = 0.025 seconds (25ms).
-    - Required operations (decode) = ~20 GigaOps per token.
-    - Compute time available = 25ms. Threshold = 20 GOPS / 400 TOPS = 0.05ms (vast compute headroom for unpacking).
+    - INT8 footprint for the same weights = 10 GB, so ideal storage traffic is 4x lower for weights.
+    - If a decode step streams a layer tile with 250 MB of 2-bit weights, the raw transfer lower bound is 250 MB / 100 GB/s = 2.5 ms for that tile stream.
+    - If unpacking expands those weights to INT8 before compute, internal traffic can approach the 1 GB INT8 equivalent plus unpack work, so the 4x DRAM saving is not the end-to-end speedup.
+    - A 20 GOP/token compute estimate on 400 TOPS has an ideal lower bound of 20e9 / 400e12 = 0.00005 s = 0.05 ms, but real latency is dominated by achieved utilization, data movement, and custom-kernel overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 25ms Read Time (Memory-Bandwidth-Bound)**. The massive INT8 compute capacity makes on-the-fly 2-bit unpacking highly viable.
+    - **Result: 2.5 GB Stored Model With Qualified Bandwidth Savings**. 2-bit compression can reduce DRAM traffic, but Cloud AI 100 deployment is practical only if the supported execution path or custom kernels preserve enough throughput after unpacking and dequantization.
 status: published
 provenance: imported
 requires_explanation: false

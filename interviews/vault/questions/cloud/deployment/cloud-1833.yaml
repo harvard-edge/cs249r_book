@@ -13,19 +13,23 @@ question: What is causing the TTFT regression with Confidential Computing enable
 details:
   realistic_solution: The bottleneck is the PCIe bounce buffer mechanism used in Confidential Computing. Encrypted data must be transferred from host memory to the GPU's secure memory region via limited-size bounce buffers, causing PCIe synchronization stalls that severely restrict the effective host-to-device transfer rate during model loading and initial prompt processing.
   common_mistake: |
-    **The Pitfall:** Assuming the H100's hardware encryption engines slow down matrix multiplications during decoding.
-    **The Rationale:** Candidates misunderstand where the encryption overhead applies, thinking AES-GCM natively limits internal HBM3 bandwidth.
-    **The Consequence:** Investigating complex CUDA kernel optimizations instead of focusing on the host-to-device PCIe transfer bottlenecks.
+    **The Pitfall:** Treating the TTFT spike as a decode-time compute or HBM bandwidth problem.
+    **The Rationale:** Candidates see Confidential Computing and assume every matrix multiplication is slowed by encryption, even though steady-state decoding throughput is unchanged.
+    **The Consequence:** They tune CUDA kernels or quantization while missing the host-to-device transfer stalls and bounce-buffer behavior that affect loading and prompt setup.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Llama-3 70B (140GB), CC limits PCIe transfer to ~15 GB/s.
+    - Llama-3 70B weights are roughly 140GB total.
+    - On 8 GPUs, a simple tensor-parallel shard is about 17.5GB/GPU.
+    - Observed CC host-to-device bandwidth is about 15GB/s/GPU during affected transfers.
+    - Decode throughput remains 15 tokens/s, so the hot decode loop is not the bottleneck.
 
     **Calculations:**
-    - Transfer payload per GPU: 140GB / 8 GPUs = 17.5 GB.
-    - PCIe transfer time: 17.5 GB / 15 GB/s = ~1.16s.
+    - Lower-bound time to move one 17.5GB shard at 15GB/s is 17.5 / 15 = 1.17s.
+    - The observed TTFT increase is over 2.5s, so a single clean shard transfer does not fully explain it.
+    - Repeated secure copies, bounce-buffer synchronization, page setup, and prompt/KV initialization can add stalls before the first token while leaving later decode throughput normal.
 
     **Conclusion & Interpretation:**
-    - **Result: The 1.16s PCIe transfer plus secure enclave initialization perfectly accounts for the multi-second TTFT spike**. HBM3 is unaffected.
+    - **Result: TTFT is dominated by CC host-to-device transfer stalls, not decode compute**. The transfer math gives a plausible lower bound, but the multi-second regression requires CC setup and bounce-buffer overhead beyond a single ideal transfer.
 status: published
 provenance: imported
 requires_explanation: false

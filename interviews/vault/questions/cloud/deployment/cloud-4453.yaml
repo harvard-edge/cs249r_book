@@ -11,7 +11,7 @@ title: KV Cache Eviction Policy for Decode Pool Memory Management
 scenario: A decode pool running vLLM shows increasing preemptions when long-context requests arrive (>4K tokens). KV cache utilization is at 95% when preemptions begin.
 question: Why do >4K-token arrivals trigger vLLM preemption cascades at 95% KV utilization, and how would you fix it?
 details:
-  realistic_solution: 'vLLM KV cache is paged (PagedAttention). At 95% utilization with 4K token requests arriving, the new request needs 256 pages for prefill. Existing requests are also generating tokens and consuming more pages. The preemption cascade: new long request pre-allocates pages -> existing decode requests overflow -> vLLM preempts lowest-priority decode request. Fix: Implement admission control (reject new requests above 85% memory) and reserve 10% of KV pages for existing request growth.'
+  realistic_solution: vLLM KV cache is paged (PagedAttention), and prefill plus ongoing decode growth consume the same KV block budget. At 95% KV utilization, a >4K-token arrival needs hundreds of new blocks during prefill while existing decode requests still need one more token of KV each step. That exhausts headroom and forces vLLM to preempt lower-priority work, often causing recomputation rather than a simple PCIe swap. Fix it by reserving KV headroom for decode growth, lowering the maximum KV utilization target, limiting long-context concurrency, and using admission control or routing for long-prefill requests.
   common_mistake: |
     **The Pitfall:** Reducing the maximum context length to avoid preemptions.
     **The Rationale:** Engineers view hard limits as the easiest way to prevent memory exhaustion.
@@ -24,13 +24,14 @@ details:
     - Paged KV block size: 16 tokens.
 
     **Calculations:**
-    - KV memory per token: 2 (K+V) * 32 layers * 32 heads * 128 dim * 2 bytes = 524 KB.
-    - Total token capacity: 60 GB / 524 KB = ~114,500 tokens.
-    - Preemption swap cost (for 2K token request): 2048 tokens * 524 KB = 1.07 GB.
-    - PCIe Gen4 swap time: 1.07 GB / 32 GB/s = 33 ms disruption per preemption.
+    - KV memory per token: 2 (K+V) * 32 layers * 32 heads * 128 dim * 2 bytes = 524,288 bytes = 512 KiB.
+    - Total token capacity: 60 GiB / 512 KiB = 122,880 tokens.
+    - At 95% utilization, free capacity is only 5% * 122,880 ≈ 6,144 tokens.
+    - One 4K-token prefill consumes 4,096 tokens of KV, leaving about 2,048 tokens for all active decode growth and allocator fragmentation.
+    - If 256 active sequences each need 8 more decode tokens before completion, that is another 2,048 tokens, exhausting the remaining headroom.
 
     **Conclusion & Interpretation:**
-    - **Result: 33 ms disruption (Memory-Bound Preemption Cascades)**. High KV utilization paired with long-context bursts causes catastrophic preemptions.
+    - **Result: KV headroom exhaustion (Memory-Bound Preemption Cascades).** Long-prefill arrivals at 95% KV utilization can consume the slack needed by ongoing decodes, so reserve headroom or limit admission before the allocator reaches this state.
 status: published
 provenance: imported
 requires_explanation: false

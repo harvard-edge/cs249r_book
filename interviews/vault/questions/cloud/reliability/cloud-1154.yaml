@@ -7,11 +7,11 @@ topic: fault-tolerance-checkpointing
 competency_area: reliability
 bloom_level: evaluate
 phase: training
-title: Scaling Checkpoints for ZeRO-3
+title: Distributed ZeRO-3 Checkpointing Across Object-Storage Prefixes
 scenario: You are training a 175B parameter LLM using ZeRO-3 on 128 compute nodes, each with 8x A100 80GB GPUs. The full model state requires 2.1 TB of storage. Your cloud provider limits single-node network egress to 400 Gbps, and shared object storage limits throughput to 100 Gbps per prefix.
 question: How should you checkpoint the 2.1TB ZeRO-3 state to minimize pause time and avoid object-storage prefix throttling?
 details:
-  realistic_solution: Implement distributed checkpointing where each of the 128 nodes writes its local partitions in parallel. To bypass the 100 Gbps per-prefix object storage bottleneck, prepend a hash of the node ID to the storage path, distributing the 2.1 TB write across 128 distinct prefixes for massive aggregate throughput.
+  realistic_solution: Implement distributed checkpointing where each of the 128 nodes writes its local partitions in parallel. To bypass the 100 Gbps per-prefix object storage bottleneck, prepend a hash of the node ID to the storage path, distributing the 2.1 TB write across 128 distinct prefixes. Treat the aggregate throughput gain as something to benchmark because object storage may not scale perfectly linearly across hot prefixes.
   common_mistake: |
     **The Pitfall:** Relying on Rank 0 to gather and write the entire checkpoint.
     **The Rationale:** Candidates default to standard PyTorch checkpointing paradigms, ignoring the single-node egress limit and storage API prefix bottlenecks at scale.
@@ -19,14 +19,15 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - 2.1 TB ZeRO-3 state. Object storage limits throughput to 100 Gbps (12.5 GB/s) per prefix.
-       - 128 compute nodes available.
+       - 128 compute nodes available. Each node has a 400 Gbps (50 GB/s) egress limit.
     2. **Calculations:**
        - Centralized checkpointing: 2,100 GB written to one prefix at 12.5 GB/s = 168 seconds.
-       - Distributed checkpointing with hashed prefixes: 128 nodes use 128 unique prefixes.
-       - Aggregate throughput limit: 128 × 12.5 GB/s = 1,600 GB/s.
-       - New checkpoint time: 2,100 GB / 1,600 GB/s = 1.31 seconds.
+       - Distributed checkpointing with hashed prefixes avoids forcing all writes through one prefix.
+       - If the object store actually scales linearly across 128 hot prefixes and the writers can fill them, the prefix-side upper bound is 128 × 12.5 GB/s = 1,600 GB/s.
+       - Per-node egress is not the bottleneck in that optimistic case because each node writes roughly 2,100 GB / 128 = 16.4 GB, below its 50 GB/s egress ceiling for a 1-second-class transfer.
+       - Optimistic lower-bound time: 2,100 GB / 1,600 GB/s = 1.31 seconds. Without verified multi-prefix scaling, the only safe bound is the single-prefix 168 seconds.
     3. **Conclusion & Interpretation:**
-       - **Distributed hashed prefixes reduce checkpoint pause time from 168s to 1.3s, saving nearly 3 minutes of idle compute across 1,024 GPUs.**
+       - **Distributed hashed prefixes remove the guaranteed 168s single-prefix bottleneck; the 1.3s estimate is an optimistic lower bound that requires measured linear scaling across prefixes.**
        - **Result: IO-Bound**
 status: published
 provenance: imported

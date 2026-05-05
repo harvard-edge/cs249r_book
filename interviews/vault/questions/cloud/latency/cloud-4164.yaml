@@ -8,36 +8,18 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: Cross-Region Tail Latency in Geo-Distributed Serving
-scenario: You serve a 70B model from 3 regions (US-East, EU-West, Asia-Pacific) with MI300X clusters.
-  Local P99 is 80ms, but 15% of requests require cross-region model sharding (the full model doesn't fit
-  in smaller regional clusters). Cross-region P99 is 350ms due to 60-120ms network RTT. Design a system
-  that meets a global P99 SLA of 150ms.
+scenario: You serve a 70B model from 3 regions (US-East, EU-West, Asia-Pacific) with MI300X clusters. Local P99 is 80ms, but 15% of requests require cross-region model sharding (the full model doesn't fit in smaller regional clusters). Cross-region P99 is 350ms due to 60-120ms network RTT. Design a system that meets a global P99 SLA of 150ms.
 question: How would you design the 3-region MI300X serving system to meet a global P99 SLA of 150 ms?
 details:
-  realistic_solution: 'Three-tier strategy: (1) Capacity planning — ensure each region has enough MI300X
-    capacity to serve 100% of regional traffic with the full model. Use 8-way tensor parallelism within
-    each region. Cost: 3× more GPUs but eliminates cross-region inference. (2) For overflow: use a smaller
-    distilled model (13B) that fits on a single MI300X per region as a fallback. Quality drops 5% but
-    latency stays at 40ms. (3) Smart routing — classify requests by latency sensitivity. Chat/interactive
-    → always local (full model or fallback). Batch/async → route to cheapest region, no SLA. (4) Prefetch
-    popular prompts'' KV caches across regions via Infinity Fabric within each cluster. Result: 0% cross-region
-    for interactive, P99 = 85ms global. The massive SLA violation cost of $54,000/hr far outweighs the
-    extra hardware cost.'
-  common_mistake: '**The Pitfall:** Trying to make cross-region inference fast.
-
+  realistic_solution: 'As stated, the 150ms global P99 SLA cannot be met while 15% of interactive requests require cross-region model sharding with 350ms cross-region P99. Since 15% of requests are slower than 150ms, the global P99 necessarily falls inside that cross-region tail. The design must remove cross-region inference from the SLA path: place enough MI300X capacity in each region to run the full 70B model locally, route latency-sensitive traffic only to a local full-model replica, and reserve cross-region sharding for batch or async traffic outside the 150ms SLA. If smaller regions cannot host the full model, the concrete fixes are capacity expansion, model repartitioning/quantization so a full replica fits locally, or changing the SLA/product tier for those requests. A distilled fallback can be an optional product tradeoff, but it is not the answer for the full-model SLA.'
+  common_mistake: |
+    **The Pitfall:** Trying to make cross-region inference fast.
     **The Rationale:** The physics of light in fiber imposes a floor of 60ms RTT US-to-EU.
-
-    **The Consequence:** You fail to meet the SLA; instead, design the system to avoid cross-region inference
-    entirely for latency-sensitive requests.'
-  napkin_math: '**Assumptions & Constraints:** Cross-region RTT: US-EU = 80ms, US-Asia = 120ms. 3 regions
-    * 8 MI300X = 24 GPUs. GPU Cost = $3.50/hr. SLA violation cost = $0.01/violation. Traffic = 15% of
-    10K req/s cross-region.
-
-    **Calculations:** Min cross-region inference: 80ms + 80ms local = 160ms > 150ms SLA (impossible for
-    EU). Full regional deployment: 24 GPUs * $3.50/hr = $84/hr. Cross-region: 16 GPUs * $3.50/hr = $56/hr.
-    SLA violations = 1500 req/s * 3600 = 5,400,000 req/hr. Violation cost = 5,400,000 * $0.01 = $54,000/hr.
-
-    **Conclusion & Interpretation:** Full regional saves $53,972/hr net.'
+    **The Consequence:** You fail to meet the SLA; instead, design the system to avoid cross-region inference entirely for latency-sensitive requests.
+  napkin_math: |
+    **Assumptions & Constraints:** Local P99 is 80ms. Cross-region sharded P99 is 350ms. 15% of requests currently require cross-region sharding. Global P99 SLA is 150ms.
+    **Calculations:** With 15% cross-region traffic, at least the slowest 15% of requests are governed by the 350ms cross-region path. The 99th percentile is within that slow cross-region subset, so global P99 is approximately 350ms, not 150ms. To make global P99 <= 150ms, the fraction of SLA-bound requests using the cross-region path must be less than 1%, and in practice should be 0% for margin. Local full-model serving gives P99 around 80ms plus routing overhead, which fits the SLA.
+    **Conclusion & Interpretation:** The constrained system is physically/capacity infeasible as written. The release-quality design is to eliminate cross-region full-model inference for latency-sensitive requests by colocating full replicas or changing the model partitioning/capacity plan; cross-region sharding is only acceptable for non-SLA traffic.
 status: published
 provenance: imported
 requires_explanation: true

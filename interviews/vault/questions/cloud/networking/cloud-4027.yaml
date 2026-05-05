@@ -11,7 +11,7 @@ title: Micro-Burst Detection for ML Traffic
 scenario: Your monitoring system samples switch counters every 5 seconds, showing 5% average link utilization on your cluster's spine switches. But training jobs report intermittent 10ms stalls. You suspect micro-bursts are saturating links at sub-second timescales.
 question: What 400Gbps micro-burst can hide inside 5-second switch-counter samples, and how would you detect it?
 details:
-  realistic_solution: 'At 400Gbps, in a 5-second window: maximum data transfer = 400 Gbps × 5s = 250 GB. With 5% average utilization = 12.5 GB transferred. This 12.5 GB could arrive as a uniform 5% load OR as a 250ms burst at line rate followed by 4.75s of silence — both show 5% average. Even a 250ms burst generates 12.5 GB of instantaneous queuing pressure. Detection methods: (1) Enable per-port histogram counters (available on modern switches) that record buffer occupancy distribution at µs granularity. (2) Use INT (In-band Network Telemetry). (3) Deploy ECN counters.'
+  realistic_solution: At 400Gbps, a 5-second window can carry 250 GB at line rate. A 5% average sample means 12.5 GB was transferred; that could be steady 20Gbps traffic or a 250ms burst at 400Gbps followed by 4.75s of silence. The burst is dangerous only to the extent that it exceeds the downstream drain rate. For example, if the congested egress can drain 300Gbps, the queue grows at 100Gbps for 250ms, or 3.125 GB, far beyond a 64 MB buffer. Detect it with per-port buffer-occupancy histograms at microsecond granularity, INT queue-depth samples, ECN mark counters, and high-frequency packet/byte counters rather than 5-second averages.
   common_mistake: |
     **The Pitfall:** Trusting 5-second averaged counters to represent instantaneous load.
     **The Rationale:** Engineers often assume that average utilization metrics reflect the maximum pressure on the network, forgetting that network traffic is bursty.
@@ -21,14 +21,17 @@ details:
        - Network link = 400 Gbps.
        - Polling window = 5 seconds.
        - Micro-burst duration = 250ms (0.25s) at line rate.
+       - Congested egress drain rate = 300 Gbps.
        - Switch buffer = 64 MB.
     2. **Calculations:**
        - Burst size: 400 Gbps * 0.25s = 100 Gigabits.
        - Convert to Bytes: 100 Gigabits / 8 = 12.5 GB.
        - Average utilization over 5s: 100 Gigabits / 5s = 20 Gbps (5% of 400 Gbps).
-       - Buffer oversubscription: 12.5 GB (12,500 MB) / 64 MB ≈ 195x oversubscription.
+       - Excess rate into the queue: 400 Gbps - 300 Gbps = 100 Gbps.
+       - Queue growth during the burst: 100 Gbps * 0.25s / 8 = 3.125 GB.
+       - Buffer pressure versus 64 MB: 3,125 MB / 64 MB ≈ 49x, if the burst targets that egress.
     3. **Conclusion & Interpretation:**
-       - **Result: Severe micro-bursting causing 195x buffer oversubscription.** A 5% average load can easily hide catastrophic instantaneous congestion.
+       - **Result: A 5% average sample can hide a line-rate burst, but queue occupancy depends on excess rate over the egress drain rate.** Detect the burst with queue-depth or ECN telemetry, not by dividing total burst payload by buffer size.
 status: published
 provenance: imported
 requires_explanation: false

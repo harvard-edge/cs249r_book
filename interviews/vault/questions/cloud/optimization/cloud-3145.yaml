@@ -8,46 +8,28 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: FlashAttention-2 vs FlashAttention-1 Parallelism
-scenario: 'FlashAttention-1 parallelizes over batch and heads. FlashAttention-2 reverses this: outer loop
-  over Q tiles, inner loop over K/V tiles.'
-question: Why does FlashAttention-2 achieve higher occupancy than FlashAttention-1 for an H100 workload
-  (batch=1, 32 heads, seq_len=16384, head_dim=128)?
+scenario: 'FlashAttention-1 parallelizes over batch and heads. FlashAttention-2 reverses this: outer loop over Q tiles, inner loop over K/V tiles.'
+question: Why does FlashAttention-2 achieve higher occupancy than FlashAttention-1 for an H100 workload (batch=1, 32 heads, seq_len=16384, head_dim=128)?
 details:
-  realistic_solution: FA-1 parallelism is batch x heads = 32 thread blocks. H100 has 132 SMs, so 100 SMs
-    idle. FA-2 parallelism includes Q tiles = batch x heads x ceil(N/B_r) = 4,096 blocks, achieving 100%
-    occupancy. FA-2 also reduces non-matmul FLOPs.
-  common_mistake: '**The Pitfall:** Thinking the loop reordering is a minor algorithmic tweak.
-
-    **The Rationale:** Candidates fail to realize that FA-1 with batch=1 drastically under-utilizes the
-    SMs.
-
-    **The Consequence:** Misjudging the hardware impact, leaving 100 SMs idle and missing the concurrency
-    benefits of FA-2.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    FA-1 exposes parallel work mainly over batch x heads, so this workload has only 32 coarse units of work and cannot keep 132 H100 SMs busy. FA-2 adds parallelism over Q tiles: batch x heads x ceil(N/B_r) = 1 x 32 x 128 = 4,096 blocks. That is about 31 blocks of work per SM over the launch, giving the scheduler enough concurrency to keep SMs much better utilized. This is launch parallelism and SM utilization, not a literal occupancy percentage; true occupancy still depends on registers, shared memory, and warps per block. FA-2 also reduces non-matmul FLOPs.
+  common_mistake: |
+    **The Pitfall:** Thinking the loop reordering is a minor algorithmic tweak.
+    **The Rationale:** Candidates fail to realize that FA-1 with batch=1 drastically under-utilizes the SMs.
+    **The Consequence:** Misjudging the hardware impact, leaving 100 SMs idle and missing the concurrency benefits of FA-2.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - H100 GPU: 132 SMs.
-
     - Config: batch=1, 32 heads, seq=16384, block_size=128.
 
-
     **Calculations:**
-
-    - FA-1 Blocks: 1 * 32 = 32 blocks.
-
-    - FA-1 Occupancy: 32 / 132 = 24.2%.
-
+    - FA-1 coarse work units: approximately 1 * 32 = 32 blocks, depending on exact kernel tiling.
+    - Available FA-1 work: 32 / 132 = 0.24 blocks per SM, so many SMs are idle for batch=1.
     - FA-2 Blocks: 1 * 32 * ceil(16384 / 128) = 4,096 blocks.
-
-    - FA-2 Occupancy: 4,096 / 132 = 31 blocks per SM = 100%.
-
+    - Available FA-2 work: 4,096 / 132 ≈ 31 blocks per SM over the launch.
+    - True occupancy requires kernel resource usage; block count only shows that FA-2 has enough work to fill the machine.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Occupancy rises from 24% to 100% (Compute-Bound)**. FA-2 fixes severe SM starvation at
-    batch=1.
-
-    '
+    - **Result: Higher SM Utilization**. FA-2 fixes severe launch under-parallelism at batch=1 by exposing thousands of Q-tile blocks, but the block count should not be reported as a literal occupancy percentage.
 status: published
 provenance: imported

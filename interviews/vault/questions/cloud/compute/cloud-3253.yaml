@@ -8,67 +8,34 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Optimizing Large Language Model Inference on Google TPU v5e with Systolic Arrays
-scenario: Your team is tasked with deploying a large Transformer-based language model (e.g., 20 billion
-  parameters, BF16 precision for weights and activations) for real-time inference on a Google TPU v5e.
-  The model's primary bottleneck is the matrix multiplication operations in the self-attention and feed-forward
-  layers. Given the TPU v5e's specifications (16 GB HBM, 197 TFLOPS BF16 peak compute, 1.6 TB/s HBM bandwidth),
-  you must evaluate how you would design the dataflow and tiling strategy for the dominant matrix multiplication
-  operations to maximize throughput while minimizing HBM access.
-question: How would you tile the 20B BF16 transformer's GEMMs on TPU v5e, and when would you choose weight-stationary
-  versus output-stationary dataflow?
+scenario: Your team is tasked with deploying a large Transformer-based language model (e.g., 20 billion parameters, BF16 precision for weights and activations) for real-time inference on a Google TPU v5e. The model's primary bottleneck is the matrix multiplication operations in the self-attention and feed-forward layers. Given the TPU v5e's specifications (16 GB HBM, 197 TFLOPS BF16 peak compute, 1.6 TB/s HBM bandwidth), you must evaluate how you would design the dataflow and tiling strategy for the dominant matrix multiplication operations to maximize throughput while minimizing HBM access.
+question: How would you tile the 20B BF16 transformer's GEMMs on TPU v5e, and when would you choose weight-stationary versus output-stationary dataflow?
 details:
-  realistic_solution: 'A realistic solution would involve analyzing the dimensions of the matrix multiplications,
-    the model''s memory footprint, and the TPU''s HBM capacity. For a large language model, weight-stationary
-    dataflow is often preferred due to the reusability of weights across multiple activations, especially
-    for batch inference or sequence processing where the same weights are applied to different input elements.
-    The solution should detail a tiling strategy:
-
-    1.  **Spatial Tiling:** Partitioning the large matrices into smaller blocks that fit within the systolic
-    array''s dimensions and on-chip memory.
-
-    2.  **Temporal Tiling:** Iteratively processing these blocks, ensuring data (activations, partial
-    sums) are reused in on-chip buffers as much as possible before going back to HBM.
-
-    3.  **Data Placement:** Strategically placing weights and activations in HBM and on-chip caches to
-    minimize external memory transfers, utilizing the 1.6 TB/s bandwidth efficiently but not exhaustively.
-
-    The solution should articulate how these choices lead to high utilization of the 197 TFLOPS BF16 compute
-    and minimize stalls due to HBM bandwidth limitations.'
-  common_mistake: '**The Pitfall:** Suggesting a simple partitioning strategy without considering actual
-    data reuse patterns or quantifying data movement.
-
-    **The Rationale:** Candidates often have a superficial understanding of TPU memory hierarchy, assuming
-    one dataflow is universally superior.
-
-    **The Consequence:** The design leads to suboptimal HBM access and fails to align the dataflow with
-    the model''s characteristics, degrading inference throughput.'
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    A realistic solution would involve analyzing the dimensions of the matrix multiplications, the model's memory footprint, and the TPU's HBM capacity. For a large language model, weight-stationary dataflow is often preferred due to the reusability of weights across multiple activations, especially for batch inference or sequence processing where the same weights are applied to different input elements. The solution should detail a tiling strategy:
+    1.  **Spatial Tiling:** Partitioning the large matrices into smaller blocks that fit within the systolic array's dimensions and on-chip memory.
+    2.  **Temporal Tiling:** Iteratively processing these blocks, ensuring data (activations, partial sums) are reused in on-chip buffers as much as possible before going back to HBM.
+    3.  **Data Placement:** Strategically placing weights and activations in HBM and on-chip caches to minimize external memory transfers, utilizing the 1.6 TB/s bandwidth efficiently but not exhaustively.
+    The solution should articulate how these choices lead to high utilization of the 197 TFLOPS BF16 compute and minimize stalls due to HBM bandwidth limitations.
+  common_mistake: |
+    **The Pitfall:** Suggesting a simple partitioning strategy without considering actual data reuse patterns or quantifying data movement.
+    **The Rationale:** Candidates often have a superficial understanding of TPU memory hierarchy, assuming one dataflow is universally superior.
+    **The Consequence:** The design leads to suboptimal HBM access and fails to align the dataflow with the model's characteristics, degrading inference throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Model: 20B parameters (BF16 = 40 GB footprint).
-
     - TPU v5e HBM: 16 GB.
-
     - Peak Compute: 197 TFLOPS (~98.5 T MACs/s).
-
     - HBM Bandwidth: 1.6 TB/s.
 
-
     **Calculations:**
-
-    - Bandwidth required if 0 reuse: 98.5T MACs/s * 2 ops * 2 bytes = 394 TB/s.
-
-    - Available bandwidth: 1.6 TB/s.
-
-    - Minimum data reuse factor required: 394 TB/s / 1.6 TB/s ≈ 246.
-
+    - Model footprint: 20B * 2 bytes = 40 GB, so all weights cannot reside in one 16 GB HBM device at once.
+    - To sustain peak compute, required operational intensity is 197 TFLOPs/s / 1.6 TB/s = ~123 FLOPs/byte from HBM.
+    - A single BF16 GEMM tile with MxK times KxN performs 2*M*N*K FLOPs and moves at least 2*(M*K + K*N + M*N) bytes if each operand tile is loaded once and C is written once.
+    - Example 128x1024 by 1024x128 tile: FLOPs = 33.6M; bytes = 2*(131k + 131k + 16k) = ~557 KB; intensity is ~60 FLOPs/byte, below the peak-compute roofline unless weights, activations, or partial sums are reused across additional tokens/batches.
 
     **Conclusion & Interpretation:**
-
-    - **Result: ~246x Reuse Required (Memory-Bandwidth Bound)**. The 40 GB model won''t fit entirely in
-    16 GB HBM, and strict weight-stationary tiling is required to reuse elements at least 246 times to
-    prevent memory bandwidth starvation.
-
-    '
+    - **Result: Dataflow choice is a roofline tradeoff, not a hard full-model residency requirement.** Weight-stationary tiling is attractive when weights are reused across tokens or batches; output-stationary tiling is better when partial-sum traffic dominates. The design should stream model shards through HBM while maximizing on-chip reuse.
 status: published
 provenance: imported
 requires_explanation: true

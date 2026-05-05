@@ -18,18 +18,19 @@ details:
     **The Consequence:** The system will immediately OOM on the first 128K-token request due to the massive KV cache and attention matrix footprints.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 40 layers, d_model=4096, 128K tokens.
-    - GQA KV Cache: 8 KV heads, d_head=128.
-    - Sliding Window Attention: window_size=4096.
+    - Inference context: L=128,000 tokens, 40 layers, FP16 KV cache.
+    - MHA: 32 KV heads, d_head=128, so d_model=4096.
+    - GQA: 8 KV heads, d_head=128.
+    - Sliding-window attention uses W=4096 visible tokens per query head.
 
     **Calculations:**
-    - MHA KV Cache: 2 * 128,000 * 4096 * 2 bytes * 40 layers ≈ 84 GB (Exceeds GPU memory).
-    - GQA KV Cache: 2 * 128,000 * 128 * 8 * 2 bytes * 40 layers ≈ 21 GB (Fits comfortably).
-    - MHA Attention Matrix: 32 heads * 128,000 * 128,000 * 2 bytes ≈ 1.05 TB (Infeasible).
-    - Sliding Window Attention: 32 * 128,000 * 4096 * 2 bytes ≈ 33.5 GB.
+    - MHA KV cache = 2 (K,V) * 128,000 * 32 * 128 * 2 bytes * 40 ≈ 83.9 GB.
+    - GQA KV cache = 2 * 128,000 * 8 * 128 * 2 bytes * 40 ≈ 21.0 GB.
+    - Full attention score work scales as O(L^2) per query head: 128,000^2 positions/head before optimized kernels stream or tile the scores.
+    - Sliding-window score work scales as O(L * W): 128,000 * 4096 = 524M positions/head, about 31x fewer positions than full attention.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Capacity Bound.** GQA solves the KV cache memory bottleneck, and Sliding Window bounds the attention computation.
+    - **Result: KV-cache and attention-work reduction.** GQA reduces resident KV memory by 4x for the stated head counts, while sliding-window attention bounds per-token attention work and temporary score traffic during inference.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: Your team has a well-trained dense 7B model. Rather than training an M
 question: What are the systems costs and expected quality tradeoffs of sparse upcycling a dense 7B model into an 8-expert MoE versus training from scratch?
 details:
   realistic_solution: |
-    Sparse upcycling (Komatsuzaki et al. 2023): Take a dense 7B model, duplicate each FFN into 8 copies (creating 8x7B = ~47B MoE), initialize a random router, and continue training. Systems costs: (1) Memory jumps from 14 GB to 94 GB weights (6.7x increase) — immediately requires multi-GPU serving. (2) Training: need expert parallelism setup (8 GPUs minimum vs 1 GPU for dense). (3) Continued training needed: typically 10-20% of original training tokens for experts to differentiate. At 2T original tokens: 200-400B additional tokens. (4) Training cost: 400B tokens x 6 x 13B active FLOPs = 3.12 x 10^22 FLOPs, vs from-scratch MoE at 2T tokens x 6 x 13B = 1.56 x 10^23 FLOPs. Upcycling cost is ~20% of from-scratch. Quality: upcycling reaches ~95% of from-scratch MoE quality. The 5% gap comes from experts starting identical — some redundancy persists. For many applications, this tradeoff (80% cost savings for 5% quality gap) is compelling.
+    Sparse upcycling duplicates the FFN layers into 8 expert copies while keeping the non-FFN layers shared, so a 7B dense model becomes roughly a 47B total-parameter MoE with about 13B active parameters per token. Systems costs: (1) FP16 weight memory rises from about 14 GB to about 94 GB, a 6.7x increase, so serving usually needs sharding or offload. (2) Training and serving need an MoE-capable layout with expert placement and all-to-all; the GPU count is configuration-dependent rather than a fixed 8-GPU minimum. (3) Continued training is still required so the router and duplicated experts specialize, often on the order of 10-20% of the original token budget. At 2T original tokens, that is 200-400B additional tokens. Using the 6 x active-params training rule, 400B tokens x 6 x 13B active params = 3.12 x 10^22 FLOPs, versus 2T tokens x 6 x 13B = 1.56 x 10^23 FLOPs for training the MoE from scratch under the same active-FLOP model. Upcycling can save substantial compute, but quality may lag a from-scratch MoE because experts start identical and must differentiate during fine-tuning.
   common_mistake: |
     **The Pitfall:** Assuming upcycling gives you "free" MoE quality instantly.
     **The Rationale:** Engineers overlook that duplicated experts start identically and require hundreds of billions of tokens to differentiate via routing.
@@ -20,16 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Dense 7B weights = 14 GB.
-    - Upcycled 8x7B weights = ~94 GB.
-    - Training tokens needed: ~400B (20% of original).
+    - Upcycled MoE total weights = ~47B params = ~94 GB FP16.
+    - Active params per token = ~13B.
+    - Continued training tokens needed: ~200-400B (10-20% of a 2T-token original run).
 
     **Calculations:**
+    - Memory ratio: 94 GB / 14 GB = 6.7x.
     - Upcycling compute: 400B tokens * 78 GFLOPs = 3.12e22 FLOPs.
     - From-scratch compute: 2T tokens * 78 GFLOPs = 1.56e23 FLOPs.
     - Cost ratio: 3.12e22 / 1.56e23 = 20%.
 
     **Conclusion & Interpretation:**
-    - **Result: 80% compute saved, 6.7x VRAM increase (Memory-Bound)**. Upcycling saves immense compute while hitting ~95% quality, but instantly requires multi-GPU serving due to the huge footprint.
+    - **Result: compute-memory tradeoff.** At the high end of the continued-training estimate, upcycling uses about 20% of from-scratch MoE training FLOPs but increases FP16 weight memory by 6.7x; quality depends on how well the duplicated experts specialize.
 status: published
 provenance: imported
 requires_explanation: false

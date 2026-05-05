@@ -7,27 +7,30 @@ topic: speculative-decoding
 competency_area: latency
 bloom_level: analyze
 phase: inference
-title: 'Speculative Decoding Throughput Degradation Under Load'
-scenario: 'Your 70B model serves 200 concurrent requests. Without speculation, decode is memory-bound at 100 tok/s per request. With K=5 speculation using a 7B draft model on the same GPUs, single-request latency improves 2.5x but total throughput drops 15%.'
-question: 'Why can K=5 speculative decoding with a 7B draft reduce throughput by 15% for 200 concurrent requests?'
+title: Speculative Decoding Throughput Degradation Under Load
+scenario: Your 70B model serves 200 concurrent requests. Without speculation, decode is memory-bound at 100 tok/s per request. With K=5 speculation using a 7B draft model on the same GPUs, single-request latency improves 2.5x but total throughput drops 15%.
+question: Why can K=5 speculative decoding with a 7B draft reduce throughput by 15% for 200 concurrent requests?
 details:
-  realistic_solution: 'Without speculation, batch=200 decode: KV read per step = 200 x 640MB = 128GB at 4x3.35=13.4 TB/s = 9.6ms. Compute: 200 x 140 GFLOP = 28 TFLOP at 4x989=3.96 PFLOPS = 7.1ms. Compute/IO ratio: 0.74 — approaching compute-bound. With speculation: each request generates K=5 draft tokens, then verifies K+1=6 tokens in one pass. Verification batch: 200 x 6 = 1,200 effective tokens. Compute: 1,200 x 140G = 168 TFLOP at 3.96 PFLOPS = 42.4ms. Plus draft cost: 200 x 5 x 14 GFLOP = 14 TFLOP = 3.5ms. Total: 45.9ms for ~740 tokens (200 x 3.7 avg). Without speculation: 9.6ms for 200 tokens. Throughput: speculation = 740/45.9 = 16.1K tok/s, no-spec = 200/9.6 = 20.8K tok/s. Speculation is 22% worse on throughput.'
+  realistic_solution: Use served tokens as the throughput unit. Without speculation, the scenario states 100 tok/s per request at 200 concurrent requests, so aggregate throughput is 200 x 100 = 20,000 served tok/s. With K=5 speculation, single-request latency improves because each round serves about 3.7 tokens, but the same GPUs must also run draft generation and a wider target verification pass. The observed throughput drop is 15%, so aggregate throughput is 20,000 x 0.85 = 17,000 served tok/s, or about 85 tok/s per request. A consistent way to explain this is that the high-concurrency baseline is already near the compute/memory balance point; verifying K+1 positions and running the 7B draft adds enough FLOPs that the system becomes compute-bound. Speculation helps single-stream latency but reduces total served-token throughput under this load.
   common_mistake: |
     **The Pitfall:** Believing speculative decoding is universally beneficial for all batch sizes.
     **The Rationale:** Because speculative decoding dramatically improves single-stream latency, engineers assume it will also improve (or at least not harm) overall system throughput.
     **The Consequence:** Deploying speculation at high batch sizes pushes the system into a compute-bound regime, where the extra FLOPs of verifying draft tokens actively degrade total throughput.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 200 concurrent requests (batch size).
-    - Speculation uses K=5 generating 6 tokens per pass.
-    
+    - 200 concurrent requests.
+    - Throughput is measured in served target-distribution tokens.
+    - No-speculation baseline is given by the scenario: 100 tok/s per request.
+    - With speculation, the scenario states total served-token throughput drops by 15%.
+
     **Calculations:**
-    - No-Speculation Throughput: 200 reqs * 1 token / 9.6ms = 20.8K tok/s.
-    - Speculation Timing: Verification 42.4ms + Draft 3.5ms = 45.9ms.
-    - Speculation Throughput: 740 accepted tokens / 45.9ms = 16.1K tok/s.
-    
+    - No-speculation aggregate throughput = 200 requests * 100 tok/s = 20,000 tok/s.
+    - Speculative aggregate throughput = 20,000 tok/s * (1 - 0.15) = 17,000 tok/s.
+    - Per-request speculative throughput = 17,000 / 200 = 85 tok/s.
+    - The 15% loss comes from extra draft FLOPs plus target verification over K+1 positions, not from fewer served tokens.
+
     **Conclusion & Interpretation:**
-    - **Result: 22% throughput loss (Compute-Bound)**. Speculative decoding excels at single-stream latency but collapses batch throughput by adding massive verification compute overhead.
+    - **Result: 15% throughput loss (Compute-Bound)**. Speculative decoding improves single-request latency, but at 200 concurrent requests the added verification and draft compute lowers total served-token throughput.
 status: published
 provenance: imported
 requires_explanation: false

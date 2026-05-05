@@ -8,14 +8,14 @@ competency_area: parallelism
 bloom_level: analyze
 phase: both
 title: 'Diagnosing Failed Overlap: NCCL Blocking on Compute Stream'
-scenario: 'You set up DDP with gradient bucketing and NCCL on a separate CUDA stream. Nsight Systems profiling shows that the AllReduce kernels run sequentially with backward computation. Both the compute and NCCL kernels appear on the same stream in the timeline.'
+scenario: You set up DDP with gradient bucketing and NCCL on a separate CUDA stream. Nsight Systems profiling shows that the AllReduce kernels run sequentially with backward computation. Both the compute and NCCL kernels appear on the same stream in the timeline.
 question: Why are the NCCL AllReduce kernels failing to overlap with the backward computation, running sequentially instead?
 details:
-  realistic_solution: 'Check NCCL_LAUNCH_MODE environment variable. Before NCCL 2.19: default is PARALLEL, which uses separate streams. In some configurations, it can be GROUP, which serializes NCCL calls. Set NCCL_LAUNCH_MODE=PARALLEL explicitly. Also verify backward hooks and whether an implicit cudaStreamSynchronize() exists.'
+  realistic_solution: The timeline shows both compute and NCCL kernels on the same stream, so DDP is not actually launching the reducer collectives on an independent communication stream or something is synchronizing the streams before overlap can occur. Inspect the DDP reducer path, custom communication hooks, autograd hooks, bucket readiness, CUDA stream guards, and any implicit synchronizations such as cudaStreamSynchronize(), cudaDeviceSynchronize(), blocking tensor copies, or stream-capture constraints. NCCL_LAUNCH_MODE can affect grouped launch behavior, but it is not the primary explanation for DDP overlap; the first fix is to restore correct reducer stream usage and remove synchronization that serializes backward with AllReduce.
   common_mistake: |
-    **The Pitfall:** Assuming PyTorch DDP always creates a separate NCCL stream by default.
-    **The Rationale:** Depending on the NCCL version and environment, `NCCL_LAUNCH_MODE` may serialize calls if not explicitly set to `PARALLEL`.
-    **The Consequence:** Missing communication-computation overlap, leading to a significant drop in training throughput.
+    **The Pitfall:** Looking only at NCCL environment variables instead of the CUDA stream timeline.
+    **The Rationale:** DDP overlap depends on reducer bucket readiness, communication stream usage, and avoiding synchronizing hooks or copies.
+    **The Consequence:** The real serialization point remains in the training code, so AllReduce keeps running after backward instead of alongside it.
   napkin_math: |
     **Assumptions & Constraints:**
     - 200ms backward compute.

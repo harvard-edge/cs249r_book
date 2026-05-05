@@ -9,23 +9,28 @@ bloom_level: apply
 phase: inference
 title: Flash Attention Numerical Stability with Long Sequences
 scenario: A model trained with standard attention is being converted to use FlashAttention-2 for inference on TPU v5e. At seq_len=32768, you observe NaN values in attention outputs that don't appear with standard attention. The model was trained in BF16.
-question: "How would you debug and fix NaNs from Flash Attention at seq_len=32768 on TPU v5e?"
+question: How would you debug and fix NaNs from Flash Attention at seq_len=32768 on TPU v5e?
 details:
-  realistic_solution: Enable Flash Attention's softmax scaling (divide QK by sqrt(d_head) before the attention kernel, which Flash Attention should handle internally). Check if the model uses ALiBi or RoPE positional encodings; very long sequences with ALiBi can produce large negative logits that cause exp(-large) = 0, leading to zero-division in softmax. Enforce FP32 accumulation in the attention kernel even with BF16 inputs.
+  realistic_solution: |
+    First isolate where the NaNs start: compare standard attention and Flash Attention on the same TPU v5e inputs, dump finite checks around Q/K/V, mask application, positional encoding, softmax output, and the following projection/RMSNorm. Verify the padding/causal mask convention, because an all-masked row or wrong mask polarity can produce NaNs even when the softmax kernel is numerically stable. Then check TPU/XLA-specific behavior: supported FlashAttention kernel path, BF16 casts, accumulation dtype, RoPE/ALiBi long-context scaling, and whether a fallback or unsupported shape is being used. If the failing kernel accumulates in BF16 or mishandles masks at 32768 tokens, switch to a supported FP32-accumulation or standard-attention path for that shape and file a kernel repro.
   common_mistake: |
-    **The Pitfall:** Assuming Flash Attention is perfectly mathematically equivalent to standard attention across all sequences and precisions.
-    **The Rationale:** Candidates trust the algorithm's memory benefits but forget that BF16's limited dynamic range causes overflow when combined with long sequences or ALiBi.
-    **The Consequence:** The model produces catastrophic NaN logits during long-context generation, silently crashing the inference service.
+    **The Pitfall:** Assuming the NaNs must be fixed by adding another softmax scale factor.
+    **The Rationale:** Flash Attention kernels already implement the standard scaling and online softmax stabilization; NaNs at long context are more often caused by mask bugs, dtype casts, positional-encoding range issues, or a TPU/XLA kernel path mismatch.
+    **The Consequence:** The real failing operation remains unidentified, so the service keeps producing NaNs or silently falls back to a slower attention implementation.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - BF16 format: 8-bit exponent, 7-bit mantissa, max representable value ~3.4e38.
-       - Sequence length: 32,768.
-    2. **Calculations:**
-       - Attention logits (after QK^T / sqrt(d)) can swing to ±100.
-       - Computing exp(100) inside softmax yields ~2.7e43.
-       - 2.7e43 > 3.4e38 (BF16 max).
-    3. **Conclusion & Interpretation:**
-       - **Result: Precision-Bound Overflow.** While FlashAttention's running max mitigates this, it strictly requires FP32 intermediate accumulation to prevent NaNs.
+    **Assumptions & Constraints:**
+    - BF16 inputs on TPU v5e.
+    - Flash Attention uses an online softmax with a running max, so raw exp(logit) overflow is not the expected failure mode.
+    - Sequence length is 32,768, which stresses mask shape, positional encoding range, and kernel support.
+
+    **Calculations:**
+    - Stable softmax computes exp(x_i - max(x)), so the largest exponent is exp(0) = 1 rather than exp(large_logit).
+    - A row with every position masked can produce max = -inf; subtracting or normalizing that row can yield NaNs if the kernel does not handle it.
+    - BF16 has limited mantissa precision, so reductions and running sums may differ from FP32; compare BF16 vs FP32 accumulation on the same captured Q/K/V/mask tensors.
+    - TPU/XLA debugging path: reproduce the failing shape, test standard attention, test Flash Attention with the same mask, then bisect dtype casts and positional-encoding scaling.
+
+    **Conclusion & Interpretation:**
+    - **Result: Debug the kernel path and masks, not a generic exp overflow.** FP32 accumulation may be the fix for a specific TPU kernel/configuration, but the defensible workflow is to localize the first NaN and verify mask, dtype, and long-context positional behavior.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,27 +9,31 @@ bloom_level: create
 phase: both
 title: Android OOM Gradient Resumption
 scenario: Implementing a federated learning client on Android that trains overnight but gets frequently killed by the Android Out-Of-Memory (OOM) killer.
-question: Design a fine-grained gradient checkpointing mechanism to the local flash storage that minimizes write amplification while allowing resume from the exact mini-batch.
+question: Design a mobile training checkpoint/resume strategy that survives Android OOM kills while resuming from the exact mini-batch?
 details:
-  realistic_solution: 'Avoid writing full model weights (100s of MBs) per batch to preserve UFS flash longevity. Instead, write a tiny JSON state file with the current epoch and batch index. Only write the accumulated 32-bit gradient diffs to a persistent memory-mapped file every 10 batches. If killed, the app loads the base weights and applies the saved gradient diffs.'
+  realistic_solution: Save an atomic checkpoint containing the current epoch, mini-batch index, RNG/data-loader state, model weights or weight delta, optimizer state such as momentum, and any accumulated gradients needed for the in-progress update. To reduce flash wear, write compact incremental deltas between full checkpoints and coalesce saves at a safe interval, but only advertise exact resume for batches whose complete training state has been fsynced. On restart, validate the checkpoint, restore tensors and counters, and continue from the saved mini-batch rather than replaying gradient diffs alone.
   common_mistake: |
     **The Pitfall:** Writing the entire 50MB model checkpoint to flash after every mini-batch.
     **The Rationale:** Candidates rely on standard server-side checkpointing patterns without accounting for limited mobile flash endurance.
     **The Consequence:** Quickly destroys the phone's storage hardware through extreme write amplification.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Diff Checkpoint Size: 10MB grads per save.
-    - Save Frequency: 10 writes during the target window.
+    - Full checkpoint size: 50MB.
+    - Incremental complete-state checkpoint size: 10MB.
+    - Save frequency during the target window: 10 checkpoints.
+    - Flash write amplification estimate: 2x.
 
     **Calculations:**
-    - Total Write Footprint: 10MB * 10 writes = 100MB flash usage.
+    - Full-checkpoint write volume = 50MB * 10 = 500MB logical writes.
+    - Incremental-state write volume = 10MB * 10 = 100MB logical writes.
+    - Estimated physical writes with 2x amplification = 100MB * 2 = 200MB.
 
     **Conclusion & Interpretation:**
-    - **Result: 100MB (I/O-Bound)**. 100MB write usage preserves UFS flash compared to gigabytes from full checkpoints.
+    - **Result: 100MB logical or about 200MB physical incremental writes (I/O-Bound).** This reduces flash pressure versus 500MB logical full checkpoints while still requiring complete model, optimizer, batch, RNG, and accumulated-gradient state for exact resume.
 status: published
 provenance: llm-draft
-expected_time_minutes: 14
 requires_explanation: true
+expected_time_minutes: 14
 validated: true
 math_verified: true
 human_reviewed:

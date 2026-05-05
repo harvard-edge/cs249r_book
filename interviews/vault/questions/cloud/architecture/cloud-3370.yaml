@@ -20,16 +20,17 @@ details:
     **Assumptions & Constraints:**
     - Hardware: H100 (80GB HBM3, 3.35 TB/s).
     - Decoder-only model: 70B parameters (140 GB FP16).
-    - Sequence: 4096 tokens.
+    - Sequence: 4096 tokens, batch=8.
+    - Example KV shape: 80 layers, 64 KV heads, d_head=128, FP16.
 
     **Calculations:**
-    - Weights: 140 GB requires minimum 2x H100s.
-    - Memory bandwidth generation limit: 3.35 TB/s / 140 GB = ~24 tokens/second/GPU (if perfectly memory-bound).
-    - Generation latency: 1000 ms / 24 = 41 ms/token (dangerously close to 50ms SLA).
-    - KV Cache (Batch=8): ~80 GB, requiring even more GPUs.
+    - Persistent weights: 140 GB requires at least 2 H100s with tensor parallelism, before KV cache and runtime overhead.
+    - Batch-1 decode lower-bound weight traffic per generated token is roughly one 70 GB shard read per GPU; 70 GB / 3350 GB/s ≈ 21 ms before compute, KV reads, collectives, and kernel overhead.
+    - KV cache per token = 2 (K,V) * 80 * 64 * 128 * 2 bytes ≈ 2.5 MB.
+    - KV cache for batch=8 at 4096 tokens ≈ 2.5 MB * 4096 * 8 ≈ 82 GB across the tensor-parallel group.
 
     **Conclusion & Interpretation:**
-    - **Result: 41 ms/token (Memory-Bandwidth-Bound)**. For large decoder-only models, HBM3 bandwidth strictly bottlenecks token generation, driving up the cost-per-token and forcing multi-GPU distribution just to meet latency SLAs.
+    - **Result: tight memory and latency budget.** The 50 ms target cannot be inferred from weight size alone, but a 70B decoder has a large per-token HBM floor plus KV-cache growth. The evaluation should benchmark batch size, tensor parallelism, KV layout, and encoder-vs-decoder workload fit instead of relying on a universal tokens/sec estimate.
 status: published
 provenance: imported
 requires_explanation: true

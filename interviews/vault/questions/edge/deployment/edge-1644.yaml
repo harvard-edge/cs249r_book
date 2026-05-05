@@ -7,11 +7,11 @@ topic: compound-ai-systems
 competency_area: deployment
 bloom_level: create
 phase: both
-title: On-Premise Agent Orchestration Pipeline
-scenario: 'You are architecting an on-premise factory automation agentic system deployed on a single Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). The compound pipeline involves a lightweight router model, a dense retriever, and an 8-billion parameter LLM orchestrator. Given a peak load of 20 requests per second where each request requires a 1000-token prompt processing and 50 tokens of generation.'
+title: Cloud AI 100 8B LLM Serving at 20 RPS Under 1 Second
+scenario: You are architecting an on-premise factory automation agentic system deployed on a single Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). The compound pipeline involves a lightweight router model, a dense retriever, and an 8-billion parameter LLM orchestrator. Given a peak load of 20 requests per second where each request requires a 1000-token prompt processing and 50 tokens of generation.
 question: How would you serve the router, retriever, and 8B LLM on one Cloud AI 100 to handle 20 RPS within 1 second, and what bottlenecks dominate?
 details:
-  realistic_solution: 'The optimal architecture involves statically co-locating the INT8 quantized 8B LLM, retriever, and router in the 32GB memory to eliminate swapping overhead. To handle the generative memory bandwidth bottleneck on LPDDR4x, the system must utilize continuous batching. Furthermore, chunked prefill must be implemented to prevent the heavy 1000-token compute phases from starving the latency-sensitive generation cycles.'
+  realistic_solution: Keep the router, retriever, and INT8 8B LLM resident in memory, but treat the single accelerator as compute-tight and bandwidth-sensitive rather than merely capacity-bound. The dominant bottlenecks are, in order, prefill compute for the 1000-token prompts, LPDDR4x bandwidth during autoregressive decode, and batching/queuing needed to keep 20 RPS under a 1-second SLA. Use continuous batching for decode, chunked prefill so long prompts do not starve decode steps, admission control, and prompt/retrieval caching where possible. The rough compute load is 336 TOPS, or 84% of the 400 TOPS peak, leaving limited margin for router/retriever overhead and scheduling inefficiency.
   common_mistake: |
     **The Pitfall:** Focusing solely on memory capacity while ignoring memory bandwidth and compute during prefill.
     **The Rationale:** Candidates see that the models easily fit into 32GB RAM and assume the problem is solved, overlooking the severe bandwidth bottleneck of autoregressive generation.
@@ -25,14 +25,16 @@ details:
     - Generation: 50 tokens per request.
 
     **Calculations:**
-    - Prefill Compute = 1000 tokens * 8B params * 2 OPs/param = 16 TOPS.
+    - Prefill Compute per request = 1000 tokens * 8B params * 2 ops/param = 16 TOP.
     - At 20 RPS, prefill demands 320 TOPS.
-    - Generation Compute = 50 tokens * 8B * 2 OPs/param = 0.8 TOPS per request, or 16 TOPS total.
+    - Generation Compute per request = 50 tokens * 8B params * 2 ops/param = 0.8 TOP.
     - Total compute = 336 TOPS (84% of the 400 TOPS capacity).
-    - Unbatched Generation Bandwidth = 1000 tokens/sec * 8 GB/token = 8000 GB/s.
+    - Generated-token rate = 20 RPS * 50 tokens = 1000 tokens/s.
+    - Unbatched decode weight traffic lower bound = 1000 decode passes/s * 8 GB/pass = 8000 GB/s.
+    - With continuous batching of about 20 active requests, decode needs about 50 batched decode passes/s, so weight traffic lower bound is 50 * 8 GB = 400 GB/s before KV-cache and activation traffic.
 
     **Conclusion & Interpretation:**
-    - **Result: 8000 GB/s (Memory Bandwidth Bound).** This massively exceeds LPDDR4x capabilities, proving continuous batching is mandatory.
+    - **Result: compute load is about 336 TOPS, and batched decode still implies roughly 400 GB/s of weight-read traffic before overhead.** The serving design is dominated by prefill compute, LPDDR4x decode bandwidth, and batching/queuing effects; continuous batching and chunked prefill are required to have a chance at the 1-second SLA.
 status: published
 provenance: imported
 requires_explanation: true

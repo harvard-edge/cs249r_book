@@ -7,12 +7,12 @@ topic: adversarial-robustness
 competency_area: reliability
 bloom_level: apply
 phase: inference
-title: 'Token-Level Safety Classifier Bottleneck'
-scenario: 'To defend against prompt injection and model extraction, we deploy a continuous safety classifier alongside an on-device LLM (Gemini Nano, 3.2B parameters, 4-bit) on the Google Tensor G3. The G3 features a TPU with 7.5 TOPS and 12 GB of LPDDR5X memory. The safety classifier (200M parameters, 8-bit) evaluates every single generated token. When activated, the generation speed drops drastically from 20 tokens/sec to 5 tokens/sec, despite the TPU compute utilization remaining under 15%.'
-question: 'Why does a 200M INT8 safety classifier cut Gemini Nano generation from 20 to 5 tokens/sec on Tensor G3?'
+title: Token-Level Safety Classifier Bottleneck
+scenario: To defend against prompt injection and model extraction, we deploy a continuous safety classifier alongside an on-device LLM (Gemini Nano, 3.2B parameters, 4-bit) on the Google Tensor G3. The G3 features a TPU with 7.5 TOPS and 12 GB of LPDDR5X memory. The safety classifier (200M parameters, 8-bit) evaluates every single generated token. When activated, the generation speed drops drastically from 20 tokens/sec to 5 tokens/sec, despite the TPU compute utilization remaining under 15%.
+question: Why does a 200M INT8 safety classifier cut Gemini Nano generation from 20 to 5 tokens/sec on Tensor G3?
 details:
   realistic_solution: |
-    The severe drop in throughput is caused by memory cache thrashing and bandwidth contention. Autoregressive generation requires streaming the entire model's weights from RAM for every token. By forcing the system to also load the safety classifier's weights for every token, the TPU constantly context-switches, destroying memory locality and drastically reducing the effective bandwidth of the LPDDR5X memory.
+    The severe drop in throughput is caused by memory-bandwidth and scheduling contention rather than peak TOPS. Batch-1 autoregressive generation is already sensitive to weight, KV-cache, and activation traffic. Evaluating a 200M-parameter classifier after every generated token adds another model invocation, extra tensor movement, and accelerator/host scheduling overhead in the critical path. Even if the classifier weights are not literally reloaded from DRAM in full for every token, the added memory traffic and poor overlap can reduce effective decode throughput from 20 tok/s to 5 tok/s.
   common_mistake: |
     **The Pitfall:** Blaming the TPU compute capacity (TOPS).
     **The Rationale:** Candidates assume that running two models simultaneously exhausts the 7.5 TOPS.
@@ -21,17 +21,19 @@ details:
     **Assumptions & Constraints:**
     - LLM size: 3.2B parameters, 4-bit quantization (0.5 bytes/param).
     - Classifier size: 200M parameters, 8-bit quantization (1 byte/param).
-    - Maximum theoretical LPDDR5X bandwidth: ~60 GB/s.
+    - Maximum theoretical LPDDR5X bandwidth: ~60 GB/s, with lower sustained bandwidth available to the inference path.
+    - Observed slowdown: 20 tok/s baseline to 5 tok/s with per-token safety classification.
 
     **Calculations:**
     - LLM footprint: 3.2B * 0.5 bytes = 1.6 GB.
     - Classifier footprint: 200M * 1 byte = 0.2 GB.
-    - Total weights loaded per token: 1.6 GB + 0.2 GB = 1.8 GB.
-    - Required bandwidth for 20 tokens/sec: 1.8 GB * 20 = 36 GB/s.
-    - Effective bandwidth at 5 tokens/sec: 1.8 GB * 5 = 9.0 GB/s.
+    - Added classifier footprint: 0.2 GB / 1.6 GB = 12.5% more model weights resident or touched by the token path.
+    - Baseline token time: 1 / 20 tok/s = 50 ms/token.
+    - Contended token time: 1 / 5 tok/s = 200 ms/token.
+    - Extra critical-path time: 200 ms - 50 ms = 150 ms/token from classifier execution, memory traffic, synchronization, and scheduling overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 9.0 GB/s Effective (Memory-Bound).** Loading two models concurrently causes massive cache thrashing, dropping effective memory bandwidth drastically and severely curtailing generation speed.
+    - **Result: 4x slower critical path (Memory-Bandwidth/Scheduling Bound).** The 200M classifier adds only 12.5% more weights than the LLM, so the 4x slowdown indicates poor overlap and shared-memory/accelerator contention, not a lack of raw TOPS.
 status: published
 provenance: imported
 requires_explanation: false

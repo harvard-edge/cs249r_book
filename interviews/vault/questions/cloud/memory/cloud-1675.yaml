@@ -11,7 +11,7 @@ title: Evaluating Block Sizes in Paged Memory Management
 scenario: You are optimizing an LLM serving cluster running a 70B parameter model on 4x A100 (80GB) GPUs. Your current serving engine pre-allocates contiguous KV cache memory for the maximum context window of 4,096 tokens per request. The KV cache consumes 320 KB per token. Given an average total sequence length of 512 tokens, your system is bottlenecked by severe memory fragmentation and a tiny maximum batch size. You are migrating to a paged memory management system (like vLLM) and must evaluate the optimal block size (tokens per page).
 question: Which PagedAttention block size (1, 16, or 256 tokens) would you choose, and why?
 details:
-  realistic_solution: Select a moderate block size (e.g., 16 tokens). This bounds internal fragmentation to a maximum of 15 tokens per sequence (less than 5 MB wasted), keeps the centralized page table compact, and allows the attention kernel to perform efficient, vectorized memory reads over contiguous blocks.
+  realistic_solution: Select a moderate block size, 16 tokens. A 1-token block minimizes fragmentation but creates excessive page-table entries and scattered memory reads. A 256-token block is efficient for metadata and vectorized reads but can waste up to 255 tokens per sequence, or about 79.7 MiB at 320 KB/token. A 16-token block bounds worst-case waste to 15 tokens, about 4.7 MiB per sequence, while keeping metadata and attention-kernel access patterns practical.
   common_mistake: |
     **The Pitfall:** Assuming that a block size of 1 is optimal.
     **The Rationale:** A block size of 1 perfectly eliminates 100% of internal memory fragmentation.
@@ -25,11 +25,12 @@ details:
     2. **Calculations:**
        - Max Context Memory: 4,096 * 320 KB = 1,280 MiB.
        - Pre-allocation Max Batch: 163,840 MiB / 1,280 MiB = 128 requests.
-       - Paged Memory (16-token blocks): 512 tokens / 16 = 32 pages.
-       - Paged Memory per Request: 512 * 320 KB = 160 MiB.
-       - Paged Max Batch: 163,840 MiB / 160 MiB = 1,024 requests.
+       - 1-token blocks: 512 pages/request, ~0 token internal fragmentation, highest page-table and lookup overhead.
+       - 16-token blocks: ceil(512 / 16) = 32 pages/request; worst-case waste = 15 * 320 KB = 4,800 KB (~4.7 MiB).
+       - 256-token blocks: ceil(512 / 256) = 2 pages/request; worst-case waste = 255 * 320 KB = 81,600 KB (~79.7 MiB).
+       - Block size changes fragmentation and metadata overhead, not the 320 KB/token KV footprint for tokens actually stored.
     3. **Conclusion & Interpretation:**
-       - **Result: 8x throughput increase (1,024 vs 128 batch size).** Paged memory significantly mitigates fragmentation while preserving kernel efficiency.
+       - **Result: choose 16-token blocks.** This is the best trade-off among 1, 16, and 256 because it keeps fragmentation below ~5 MiB/request without the metadata and memory-access costs of 1-token pages or the large tail waste of 256-token pages.
 status: published
 provenance: imported
 requires_explanation: true

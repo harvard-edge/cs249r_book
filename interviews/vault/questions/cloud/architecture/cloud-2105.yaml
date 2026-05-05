@@ -11,7 +11,8 @@ title: DLRM Training Pipeline End-to-End Design
 scenario: 'You must design the training infrastructure for a production DLRM at social scale: 12 embedding tables totaling 4 TB, and an MLP bottom/top network of 50M parameters, training on 10B examples/day. The system must support hourly model updates.'
 question: What are the three critical systems bottlenecks for social-scale DLRM training with hourly updates, and how should the architecture address them?
 details:
-  realistic_solution: 'Bottleneck 1 — Embedding table memory (4 TB): Cannot fit on any single node. Must use model-parallel embedding sharding across ~64+ GPUs (80 GB each). Table-wise sharding with row-wise sharding for oversized tables. AllToAll for cross-table feature interaction. Bottleneck 2 — Sparse gradient communication: Embedding gradients are extremely sparse (only rows accessed in the batch get gradients). Standard AllReduce is wasteful. Use sparse AllReduce or parameter-server-style gradient aggregation. At 10B examples/day with 50 lookups each: ~500B sparse updates/day. Bottleneck 3 — Data pipeline I/O: 10B examples × ~1 KB each = 10 TB/day = 115 MB/s sustained. Must pre-shuffle and pre-batch on distributed storage. Hourly refresh requires training pipeline to process ~420M examples/hour. Architecture: Model-parallel embeddings + data-parallel MLPs (ZeRO-1). Dedicated parameter server nodes for embedding update aggregation. RDMA-capable interconnect for AllToAll.'
+  realistic_solution: 'Bottleneck 1 — Embedding table memory (4 TB): Cannot fit on any single node. Raw capacity is 50 80GB GPUs, but runtime headroom, uneven table sizes, fragmentation, and communication buffers push the practical minimum to ~64+ GPUs before optimizer state. Table-wise sharding with row-wise sharding for oversized tables. AllToAll for cross-table feature interaction. Bottleneck 2 — Sparse gradient communication: Embedding gradients are extremely sparse (only rows accessed in the batch get gradients). Standard AllReduce is wasteful. Use sparse AllReduce or parameter-server-style gradient aggregation. At 10B examples/day with 50 lookups each: ~500B sparse updates/day. Bottleneck 3 — Data pipeline I/O: 10B examples × ~1 KB each = 10 TB/day = 115 MB/s sustained. Must pre-shuffle and pre-batch on distributed storage. Hourly refresh requires training pipeline to process ~420M examples/hour. Architecture: Model-parallel embeddings + data-parallel MLPs (ZeRO-1). Dedicated parameter
+    server or sharded optimizer nodes for embedding update aggregation and optimizer state. RDMA-capable interconnect for AllToAll.'
   common_mistake: |
     **The Pitfall:** Treating DLRM training like standard dense LLM training.
     **The Rationale:** Deep learning infrastructure is heavily biased toward dense transformers.
@@ -21,13 +22,15 @@ details:
        - Embeddings: 4 TB total size.
        - MLPs: 50M parameters.
        - Data volume: 10B examples/day, ~1 KB per example.
-       - GPU Memory: 80 GB per GPU.
+       - GPU Memory: 80 GB per GPU, with 20% reserved for fragmentation, buffers, activations, and runtime overhead.
+       - Optimizer state for embeddings is sharded/offloaded to parameter-server or optimizer nodes unless additional GPU memory is provisioned.
     2. **Calculations:**
-       - Memory minimum: 4 TB / 80 GB = 50 GPUs purely for embeddings.
+       - Raw embedding memory minimum: 4 TB / 80 GB = 50 GPUs if every byte were usable.
+       - Practical resident-embedding capacity with 20% headroom: 4 TB / (80 GB * 0.8) = 62.5, so plan for ~64 GPUs before optimizer state.
        - MLP memory: 50M * 16 bytes (BF16 + optimizer) = 800 MB.
-       - AllToAll communication at batch 64K: 64,000 * 12 tables * 128 dim * 2 bytes = ~196 MB per step.
+       - AllToAll activation payload at batch 64K, assuming one active lookup per table and 128 BF16 values per lookup: 64,000 * 12 tables * 128 dim * 2 bytes = ~196 MB for the forward exchange. Backward gradients and return traffic make the per-iteration network volume a multiple of this.
        - Data I/O: 10B * 1 KB = 10 TB/day = 115 MB/s sustained.
-    3. **Conclusion & Interpretation:** **115 MB/s ingestion & 50 GPUs min (Memory Capacity and I/O-Bound).**
+    3. **Conclusion & Interpretation:** **~64 GPUs for resident embeddings plus optimizer-state capacity, and 115 MB/s sustained ingestion (Memory Capacity and I/O-Bound).**
 status: published
 provenance: imported
 requires_explanation: true

@@ -9,24 +9,29 @@ bloom_level: evaluate
 phase: inference
 title: LLM Serving Autoscaling Under Burst
 scenario: You are serving a 13B parameter LLM for a real-time chat application. Base traffic utilizes 20 nodes. Your P99 latency SLA is 1.5 seconds. The cold start time for a new node is roughly 4 minutes. Your service experiences sudden viral spikes that can triple the traffic within 60 seconds. You must evaluate trade-offs between buffer strategies.
-question: "How would you handle 3x traffic spikes within 60s given 4-minute LLM cold starts without paying for a permanent 3x warm buffer?"
+question: How would you handle 3x traffic spikes within 60s given 4-minute LLM cold starts without paying for a permanent 3x warm buffer?
 details:
-  realistic_solution: Adopt a hybrid approach combining a warm over-provisioning buffer, predictive scaling for diurnal patterns, and dynamic batching to gracefully degrade throughput while the reactive cluster autoscaler provisions nodes.
+  realistic_solution: Use a hybrid warm-pool and pre-scaling policy instead of a permanent 3x fleet. Keep a modest warm buffer sized to absorb only the first minute of overload, trigger predictive pre-scaling from traffic velocity signals immediately, and use admission control plus latency-aware dynamic batching to hold P99 under 1.5s while cold nodes load. For example, keep 10 warm spare nodes over the 20-node base, pre-scale as soon as traffic growth predicts a 3x event, and shed or defer low-priority requests if the queue would exceed the 1.5s latency budget before the remaining cold nodes become ready.
   common_mistake: |
     **The Pitfall:** Relying entirely on reactive scaling triggers like CPU utilization.
     **The Rationale:** Ignoring the 4-minute cold start delay of loading massive model weights.
     **The Consequence:** Guaranteeing massive SLA violations during the deficit window before nodes spin up.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Cold start = 240s, Burst = 60s, Deficit window = 180s.
-    - Base load = 20 nodes (1000 req/s), Burst = 3000 req/s.
+    - Base load = 20 nodes serving 1,000 req/s, so one node serves about 50 req/s at the SLA.
+    - 3x burst demand = 3,000 req/s, requiring about 60 nodes at the same per-node rate.
+    - Cold start = 240s; spike reaches 3x within 60s.
+    - Queueing budget must stay below roughly 1.5s, so the backlog cannot grow without bound.
 
     **Calculations:**
-    - Deficit = 2000 req/s over 180s -> 360,000 requests queue up.
-    - Buffer of 10 nodes + doubling max batch size absorbs the 3000 req/s.
+    - Permanent 3x warm buffer would require 60 warm nodes total, or 40 idle extra nodes above the 20-node base.
+    - A 10-node warm pool gives 30 warm nodes total, or about 1,500 req/s immediate capacity.
+    - At the full 3,000 req/s burst, the remaining deficit is about 1,500 req/s until pre-scaled nodes are ready.
+    - If that deficit is simply queued for 180s, backlog would reach 270,000 requests, far above a 1.5s SLA; batching alone cannot make this safe.
+    - Therefore the trigger must start cold nodes before the fleet is saturated, and admission control must cap queue depth to about 1.5s * 1,500 req/s = 2,250 requests during the transition.
 
     **Conclusion & Interpretation:**
-    - **Result: 10 warm extra nodes and dynamic batching (Compute-Bound)**. Successfully absorb the spike while respecting the 1.5s SLA.
+    - **Result: Hybrid warm pool plus predictive pre-scaling (Cold-Start-Bound)**. Ten warm extra nodes reduce the immediate gap, but the SLA is met only if early scaling and queue/admission limits prevent the cold-start deficit from accumulating.
 status: published
 provenance: imported
 requires_explanation: true

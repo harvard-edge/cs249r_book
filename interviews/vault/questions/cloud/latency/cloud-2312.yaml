@@ -8,33 +8,28 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: Periodic Latency Spikes in Feature Store
-scenario: 'In our real-time fraud detection pipeline, features flow via Kafka -> Flink -> Redis. Base
-  ingestion latency is 15ms. However, exactly every 5 minutes, P99 latency spikes to 3000ms, causing fraud
-  prediction timeouts (SLA: 100ms) at our peak load of 100,000 events/sec.'
-question: What is causing the 5-minute 3000ms latency spikes in the Kafka-Flink-Redis pipeline, and how
-  would you eliminate them?
+scenario: 'In our real-time fraud detection pipeline, features flow via Kafka -> Flink -> Redis. Base ingestion latency is 15ms. However, exactly every 5 minutes, P99 latency spikes to 3000ms, causing fraud prediction timeouts (SLA: 100ms) at our peak load of 100,000 events/sec.'
+question: What is causing the 5-minute 3000ms latency spikes in the Kafka-Flink-Redis pipeline, and how would you eliminate them?
 details:
-  realistic_solution: 'The symptom of highly periodic, massive latency spikes in a streaming system almost
-    always points to background maintenance tasks blocking the main execution thread. The 5-minute interval
-    strongly correlates with Redis BGSAVE (RDB snapshotting). At 100,000 writes/sec, a Redis BGSAVE triggers
-    a fork. The heavy write volume causes massive copy-on-write page faults, saturating memory bandwidth
-    and blocking Redis''s single-threaded event loop. Fix: disable BGSAVE on the master, delegate to read-replica,
-    or shift to Append-Only File (AOF).'
-  common_mistake: '**The Pitfall:** Scaling out the Flink cluster by adding more TaskManagers.
+  realistic_solution: The symptom of highly periodic, massive latency spikes in a streaming system points to background maintenance interacting badly with the hot write path. The 5-minute interval strongly correlates with Redis BGSAVE (RDB snapshotting). BGSAVE forks Redis, and at 100,000 writes/sec the parent keeps mutating pages while the child snapshots the dataset, causing copy-on-write memory pressure, page faults, and occasional event-loop stalls. Fix by moving snapshots to a replica, disabling BGSAVE on the write master, or using AOF with an fsync policy chosen explicitly for the latency/durability tradeoff.
+  common_mistake: |
+    **The Pitfall:** Scaling out the Flink cluster by adding more TaskManagers.
+    **The Rationale:** Assuming the compute layer is falling behind the Kafka stream because latency is high.
+    **The Consequence:** Wasting money on Flink nodes while the true bottleneck (the single-threaded Redis instance blocking on background snapshotting) remains unfixed.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Ingestion: 100,000 events/sec * 1 KB/event.
+    - Write load: about 100 MB/sec.
+    - BGSAVE runs every 5 minutes and takes roughly 60 seconds.
+    - Redis dataset is already in memory; incoming writes determine how many pages are dirtied during the forked snapshot.
 
-    **The Rationale:** Assuming the compute layer is falling behind the Kafka stream because latency is
-    high.
+    **Calculations:**
+    - Bytes written during a 60-second snapshot window: 100 MB/sec * 60 sec = 6 GB of incoming updates.
+    - Copy-on-write impact is page-based: updates that touch distinct pages force the parent to retain old page copies for the child snapshot.
+    - The worst case is several GB of extra memory churn plus kernel page faults during the snapshot, not Redis garbage collection.
 
-    **The Consequence:** Wasting money on Flink nodes while the true bottleneck (the single-threaded Redis
-    instance blocking on background snapshotting) remains unfixed.
-
-    '
-  napkin_math: "1. **Assumptions & Constraints:**\n   - Ingestion: 100,000 events/sec * 1KB/event.\n \
-    \  - BGSAVE runs every 5 minutes.\n2. **Calculations:**\n   - Write Load: 100 MB/s.\n   - BGSAVE Memory\
-    \ Modified: Over a 60-second BGSAVE, 6GB of RAM is written.\n   - Copy-On-Write Overhead: The OS fork\
-    \ forces Redis to duplicate 6GB of RAM pages.\n3. **Conclusion & Interpretation:**\n   **Heavy memory\
-    \ allocation stalls the single-threaded Redis event loop. Result: Latency-Spike-Bound due to garbage\
-    \ collection / snapshotting.**\n"
+    **Conclusion & Interpretation:**
+    - **Result: Snapshot/COW-Latency-Bound.** The periodic 3000ms spikes are consistent with Redis forked snapshotting under heavy writes; move persistence off the hot master or choose an AOF policy with known fsync tradeoffs.
 status: published
 provenance: imported
 requires_explanation: false

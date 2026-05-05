@@ -8,20 +8,14 @@ competency_area: precision
 bloom_level: analyze
 phase: training
 title: Optimizing LLM Training Throughput and Memory with Mixed Precision on TPU v5e
-scenario: >-
-  You are tasked with training a large language model (LLM) efficiently on
-  a Google TPU v5e. The TPU v5e provides 16 GB of HBM, 197 TFLOPS BF16 peak performance,
-  and 1.6 TB/s HBM bandwidth. The model's full-precision (FP32) footprint (weights,
-  activations, and gradients) significantly exceeds the 16 GB HBM.
-question: >-
-  What mixed-precision training strategy would you use on TPU v5e to fit the
-  model in 16 GB HBM while preserving FP32-like accuracy?
+scenario: You are tasked with training a large language model (LLM) efficiently on a Google TPU v5e. The TPU v5e provides 16 GB of HBM, 197 TFLOPS BF16 peak performance, and 1.6 TB/s HBM bandwidth. The model's full-precision (FP32) footprint (weights, activations, and gradients) significantly exceeds the 16 GB HBM.
+question: What mixed-precision training strategy would you use on TPU v5e to fit the model in 16 GB HBM while preserving FP32-like accuracy?
 details:
-  realistic_solution: 'A realistic solution would involve a multi-faceted approach. Use BF16 for most model weights and activations to save memory and leverage the TPU''s native BF16 arithmetic performance. Keep optimizer states (e.g., Adam''s `m` and `v` buffers) in FP32 for numerical stability. Implement dynamic loss scaling, which automatically adjusts the loss scale factor to prevent gradient underflow when using lower precision formats. For extreme memory pressure, consider techniques like gradient checkpointing or offloading less frequently accessed parts of the model to host memory. For specific layers highly sensitive to precision, a targeted approach might involve keeping them in FP32 or using FP16. Evaluate the precision-accuracy tradeoff empirically, starting with BF16 and selectively experimenting with FP8 for specific components where accuracy degradation is minimal or acceptable.'
+  realistic_solution: Use BF16 as the native low-precision format for TPU v5e weights, activations, and gradients, while keeping optimizer states and sensitive reductions in FP32 for stability. However, BF16 alone cannot fit a 10B model in 16 GB HBM because BF16 weights alone require about 20 GB before gradients, optimizer states, and activations. The workable strategy is to combine BF16 with sharding/model parallelism across devices, activation checkpointing, gradient accumulation, and possibly host offload for optimizer state. BF16 usually does not require dynamic loss scaling because it has an FP32-like exponent range; instead, validate convergence with FP32 baselines, gradient clipping, and selective FP32 for numerically sensitive operations.
   common_mistake: |
-    **The Pitfall:** Blindly converting all operations to BF16 without dynamic loss scaling or selectively preserving FP32.
-    **The Rationale:** Candidates fail to realize that while BF16 saves memory, it can cause gradient underflow/overflow or degrade accuracy in precision-sensitive layers without proper scaling and mixed-precision tracking.
-    **The Consequence:** Training instability, exploding gradients, or degraded model accuracy.
+    **The Pitfall:** Assuming BF16 alone will make the model fit in 16 GB HBM.
+    **The Rationale:** Candidates count only dtype savings and ignore weights, gradients, optimizer states, activations, and the fact that BF16 weights for 10B parameters already exceed device memory.
+    **The Consequence:** The job still OOMs unless the design adds sharding, checkpointing, offload, or a smaller model.
   napkin_math: |
     **Assumptions & Constraints:**
     - 10B parameter LLM model.
@@ -29,11 +23,12 @@ details:
     - FP32 requires 4 bytes/param; BF16 requires 2 bytes/param.
 
     **Calculations:**
-    - FP32 footprint = 10B × 4 bytes = 40 GB (exceeds HBM).
-    - BF16 footprint = 10B × 2 bytes = 20 GB.
+    - FP32 weights alone = 10B × 4 bytes = 40 GB (exceeds HBM).
+    - BF16 weights alone = 10B × 2 bytes = 20 GB (still exceeds 16 GB HBM).
+    - BF16 weights + BF16 gradients + FP32 Adam states = 20 GB + 20 GB + 80 GB = 120 GB before activations.
 
     **Conclusion & Interpretation:**
-    - **Result: 20 GB (Memory-Bound)**. Even in BF16, the weights exceed 16 GB memory, necessitating further strategies like sharding or offloading alongside dynamic loss scaling.
+    - **Result: BF16 alone does not fit (Memory-Bound)**. A single TPU v5e cannot hold the full training state; BF16 must be paired with sharding/model parallelism, activation checkpointing, and/or offload, and BF16 normally does not need dynamic loss scaling.
 status: published
 provenance: imported
 requires_explanation: true

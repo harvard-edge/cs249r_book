@@ -11,7 +11,7 @@ title: Optimizing FlashAttention Tile Size for MI300X
 scenario: AMD MI300X has 192GB HBM3 at 5.3 TB/s but smaller SRAM per CU (64KB LDS) compared to H100's 256KB SMEM. You are porting FlashAttention-2 to ROCm for a 70B model with head_dim=128, FP16. You must analyze how the smaller SRAM changes optimal tile size and determine what throughput impact this has.
 question: How does MI300X's 64KB LDS change FlashAttention tile size for head_dim=128 FP16, and what throughput impact should you expect?
 details:
-  realistic_solution: 'With 64KB LDS, budget: Q tile + K tile + V tile + O tile + stats. Using B_r=B_c=64: Q = 64x128x2B = 16KB, K = 16KB, V = 16KB, O = 16KB = 64KB total — exactly at limit. Compared to H100''s B_r=B_c=128, this means 4x more tiles per attention computation. More tiles = more loop iterations = more overhead. However, MI300X has 5.3 TB/s bandwidth vs H100''s 3.35 TB/s (1.58x more). For memory-bound operations, MI300X can compensate. But for FlashAttention (compute-bound after tiling), smaller tiles mean lower matmul efficiency: 64x64x128 GEMMs achieve ~70% of peak vs 128x128x128 at ~85%. Net: MI300X FlashAttention throughput ~85% of H100 despite higher bandwidth.'
+  realistic_solution: 'With 64KB LDS, budget: Q tile + K tile + V tile + O tile + stats. Using B_r=B_c=64: Q = 64x128x2B = 16KB, K = 16KB, V = 16KB, O = 16KB, so the four tensors consume 64KB before softmax statistics and double buffering. Compared to H100''s B_r=B_c=128, this creates 4x more tiles per attention computation. More tiles increase loop overhead and smaller 64x64x128 GEMMs tend to run less efficiently than 128x128x128 GEMMs. MI300X has higher HBM bandwidth than H100, so the result is not a simple bandwidth loss; expect roughly competitive but somewhat lower FlashAttention throughput than H100 for this shape unless the ROCm kernel recovers the lost tile efficiency.'
   common_mistake: |
     **The Pitfall:** Assuming the exact same tile sizes that work on NVIDIA will work on AMD.
     **The Rationale:** Failing to account for architectural differences in SRAM per Compute Unit between accelerators.
@@ -23,14 +23,13 @@ details:
     - Head dimension: 128, FP16 (2 bytes).
 
     **Calculations:**
-    - MI300X Tile (64x64): Q+K+V+O = (64×128×2)×4 = 65.5 KB (fits LDS limit).
-    - H100 Tile (128x128): fits within 256 KB easily.
-    - GEMM Efficiency: 64x64x128 achieves ~70%. 128x128x128 achieves ~85%.
-    - MI300X Effective: 1307 × 0.70 = 915 TFLOPS.
-    - H100 Effective: 989 × 0.85 = 841 TFLOPS.
+    - MI300X Tile (64x64): Q+K+V+O = (64×128×2B)×4 = 65,536 bytes = 64 KiB.
+    - That leaves little LDS room for stats or buffering, so practical kernels may need staging/reuse tricks or smaller effective tiles.
+    - H100 can use larger 128x128 tiles within 256 KB SMEM, reducing tile count by about 4x.
+    - Smaller 64x64x128 GEMMs have lower arithmetic intensity and more loop/reduction overhead than 128x128x128 GEMMs.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound**. While MI300X requires 4x more tiles due to LDS limits, its higher raw compute compensates, yielding roughly competitive FlashAttention throughput (~915 vs 841 effective TFLOPS).
+    - **Result: Tile-Efficiency Limited**. MI300X's bandwidth helps, but the LDS limit pushes smaller tiles and more loop overhead, so expect roughly competitive but somewhat lower FlashAttention throughput than H100 rather than a precise peak-TFLOPS ratio.
 status: published
 provenance: imported
 requires_explanation: false

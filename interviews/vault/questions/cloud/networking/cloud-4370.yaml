@@ -7,30 +7,31 @@ topic: collective-communication
 competency_area: networking
 bloom_level: create
 phase: both
-title: TPU v5e Pod AllReduce Topology for 1T Model Training
+title: Mapping TP PP and EP onto a TPU v5e Torus
 scenario: Training a 1T MoE model requires 2,048 TPU v5e chips using 3D model parallelism (TP=8, PP=16, EP=16). Each dimension requires distinct collective communication patterns. The ICI topology is a 3D torus (16×16×8).
 question: How would you map TP=8, PP=16, and EP=16 for the 1T MoE model onto a 16×16×8 TPU torus, and how does it compare to H100?
 details:
-  realistic_solution: 'Torus mapping: TP=8 → 8-chip axis (lowest latency, highest bandwidth within node-equivalent group). PP=16 → one 16-chip axis (point-to-point pipeline sends, latency-tolerant). EP=16 → remaining 16-chip axis (all-to-all for expert routing). Communication per step: TP AllReduce: 2 × (8-1)/8 × (hidden=16384 × seq=2048 × 2 bytes) = 2 × 0.875 × 67MB = 117MB per layer × 128 layers = 15GB total. At ICI 1600 Gbps = 200 GB/s per chip: T_TP = 15GB/200 = 75ms (ring across 8 chips). PP bubble overhead: with PP=16, micro-batch pipeline has (PP-1)/PP = 93.75% efficiency with 1F1B. EP all-to-all: route to 16 experts, each forward/backward = 2 × MoE_input × top-k/16. H100 comparison: TP=8 via NVLink (900 GB/s per pair): T_TP = 15GB/450 = 33ms. PP and EP via 400Gbps InfiniBand: T_PP = point-to-point 100GB/50GB/s = 2s — catastrophically slow for pipeline. TPU v5e wins by using ICI (200 GB/s) for PP instead of InfiniBand (50 GB/s), making the H100 cluster ~4× slower for pipeline-parallel steps.'
+  realistic_solution: Map TP=8 to the 8-chip torus axis so the latency-sensitive tensor-parallel collectives stay on the shortest dimension. Map PP=16 to one 16-chip axis because pipeline sends are mostly nearest-neighbor point-to-point traffic. Map EP=16 to the remaining 16-chip axis so expert all-to-all traffic is contained within a single torus dimension instead of crossing all three dimensions. For a representative hidden=16384, sequence=2048 activation, the per-boundary payload is 2048 * 16384 * 2 bytes = 67.1 MB. A TP=8 ring AllReduce moves 2*(7/8)*67.1 = 117.4 MB per participating chip per layer, or about 15.0 GB if this occurs across 128 layers. At an assumed 200 GB/s TPU ICI link bandwidth, that aggregate TP communication is about 75 ms. H100 NVLink can make TP faster inside an 8-GPU node, but PP/EP traffic that crosses nodes falls to InfiniBand-class bandwidth and topology placement becomes critical. The defensible conclusion is not a blanket 4x H100 slowdown; TPU v5e is attractive
+    when all three parallel dimensions fit cleanly on ICI, while H100 is strong for intra-node TP and must minimize cross-node PP/EP traffic.
   common_mistake: |
     **The Pitfall:** Mapping tensor parallelism to a long, high-latency torus dimension.
     **The Rationale:** Engineers assume all dimensions are equal and arbitrarily assign parallelism strategies to torus axes.
     **The Consequence:** The most latency-sensitive operation (TP AllReduce) becomes a massive bottleneck, crippling step time.
   napkin_math: |
     **Assumptions & Constraints:**
-    - MoE 1T Params: 1T * 2 bytes = 2TB (1GB/chip avg).
-    - TPU v5e ICI bandwidth: 200 GB/s.
-    - H100 bandwidths: NVLink 450 GB/s, IB 50 GB/s.
+    - Activation payload example: sequence 2048, hidden 16384, BF16 = 2 bytes.
+    - TPU v5e ICI bandwidth assumption: 200 GB/s per active torus link direction.
+    - H100 comparison: NVLink is appropriate inside an 8-GPU node; cross-node PP/EP traffic uses lower-bandwidth InfiniBand-class links.
 
     **Calculations:**
-    - TP AllReduce (TPU v5e): 15GB payload / 200 GB/s = 75ms.
-    - TP AllReduce (H100): 15GB payload / 450 GB/s = 33ms.
-    - PP Point-to-Point (TPU v5e): 67MB payload / 200 GB/s = 0.34ms * 16 stages = 5.4ms.
-    - PP Point-to-Point (H100): 67MB payload / 50 GB/s = 1.34ms * 16 stages = 21.4ms.
-    - PP Overhead for 2048 micro-batches: TPU = 11s, H100 = 43s.
+    - One activation boundary: 2048 * 16384 * 2 = 67.1 MB.
+    - TP=8 ring AllReduce per layer: 2 * (8-1) / 8 * 67.1 MB = 117.4 MB per chip.
+    - Across 128 layers: 117.4 MB * 128 = 15.0 GB per chip. At 200 GB/s, time is about 75 ms.
+    - PP point-to-point per boundary: 67.1 MB / 200 GB/s = 0.34 ms on TPU ICI; over a 50 GB/s cross-node link, the same payload is 1.34 ms.
+    - EP all-to-all should be mapped to the other 16-chip axis; its volume depends on token routing and top-k load balance, so the prompt supports topology guidance rather than an exact step-time ratio.
 
     **Conclusion & Interpretation:**
-    - **Result: 4x faster PP (Network-Bound)**. TPU v5e wins because its 200 GB/s ICI accelerates pipeline parallelism 4x faster than H100's 50 GB/s InfiniBand.
+    - **Result: topology-sensitive communication.** TPU v5e fits TP, PP, and EP onto the 16x16x8 torus cleanly. H100 can be faster for intra-node TP, but cross-node PP/EP must be minimized; the data does not justify a blanket 4x H100 slowdown.
 status: published
 provenance: imported
 requires_explanation: true

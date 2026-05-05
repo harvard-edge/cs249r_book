@@ -7,28 +7,33 @@ topic: data-efficiency-selection
 competency_area: data
 bloom_level: evaluate
 phase: training
-title: 'On-Device LLM Coreset Sizing for Tensor G3'
-scenario: 'You are designing the on-device personalization pipeline for an LLM running on a mobile TPU. To improve prediction accuracy while preserving privacy, the model must fine-tune locally overnight.'
-question: 'How do you size this minimal dataset and select coreset strategies to ensure the fine-tuning process completes within a 1-hour overnight charging window while maximizing the Information-Compute Ratio?'
+title: On-Device LLM Coreset Sizing for Tensor G3
+scenario: You are designing the on-device personalization pipeline for an LLM running on a mobile TPU. To improve prediction accuracy while preserving privacy, the model must fine-tune locally overnight.
+question: How do you size this minimal dataset and select coreset strategies to ensure the fine-tuning process completes within a 1-hour overnight charging window while maximizing the Information-Compute Ratio?
 details:
-  realistic_solution: 'Implement Active Learning with uncertainty sampling or Top-K Sparsification to build a highly compressed coreset. Manage memory constraints by keeping activation checkpoints in LPDDR5X while streaming batches.'
+  realistic_solution: |
+    Size the coreset from measured on-device training throughput, then choose examples by information gain per training second. Start with a candidate pool of recent private interactions, score them with uncertainty, loss, and embedding diversity, and select a balanced coreset that avoids near-duplicates. Run a short pilot to measure seconds per 512-token LoRA sequence under charging and thermal limits, then cap the dataset so the planned epochs fit inside 60 minutes with a reserve. Stop adding examples when a held-out local validation slice gains less than a small threshold, such as 0.2 percentage points, per added batch.
   common_mistake: |
     **The Pitfall:** Training on all daily user interactions.
     **The Rationale:** Candidates propose naive bulk fine-tuning, overestimating what a mobile TPU can process without thermal throttling.
     **The Consequence:** The fine-tuning takes hours, overheating the device and violating the 1-hour overnight charging window.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hardware: 7.5 TOPS TPU. Target window: 1 hour (3600s).
-    - Model: 2B INT8 LoRA, 512 sequence length.
+    - Hardware: 7.5 TOPS TPU; sustained training utilization after thermal limits: 25% = 1.875 TOPS.
+    - Target window: 1 hour (3600s), reserve 20% for checkpointing, input pipeline stalls, and thermal variation.
+    - Model: 2B INT8 base with LoRA adapters; 512-token sequences.
+    - Training cost estimate: forward plus backward/update overhead ~= 6 ops per parameter-token.
+    - Candidate coreset plan: 200 sequences for 2 epochs.
 
     **Calculations:**
-    - Ops/Token: 6 * 2e9 = 12e9 ops.
-    - Ops/Sequence: 12e9 * 512 = 6.1e12 ops.
-    - Total Compute (400 seqs, 5 epochs): 400 * 5 * 6.1e12 = 1.22e16 ops.
-    - Compute Time: 1.22e16 / 7.5e12 = 1626 seconds (~27 mins).
+    - Ops/sequence/epoch = 6 * 2B * 512 = 6.14e12 ops.
+    - Total training ops = 200 sequences * 2 epochs * 6.14e12 = 2.46e15 ops.
+    - Compute time = 2.46e15 / 1.875e12 = 1312 seconds (~21.9 minutes).
+    - Add 80% overhead for IO, optimizer bookkeeping, and throttling: 21.9 * 1.8 = 39.4 minutes.
+    - Usable budget with reserve = 60 * 0.8 = 48 minutes.
 
     **Conclusion & Interpretation:**
-    - **Result: 27 mins (Compute-Bound)**. A coreset of 400 sequences takes 27 minutes, safely fitting the 60-minute window with thermal buffer room.
+    - **Result: 200 sequences for 2 epochs fits**. The planned coreset takes about 39 minutes against a 48-minute usable budget. Increase the coreset only while validation gain per added batch justifies the extra training time; otherwise stop and preserve the thermal reserve.
 status: published
 provenance: imported
 requires_explanation: false

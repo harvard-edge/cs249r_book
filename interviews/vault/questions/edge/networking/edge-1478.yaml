@@ -11,7 +11,8 @@ title: Multi-TPU Routing for High-Frequency Industrial Inspection
 scenario: You are designing the inference architecture for an industrial gateway receiving 8 concurrent 60 FPS video streams. The system is equipped with an array of 4 Google Coral Edge TPUs via a PCIe switch running an INT8-quantized defect detection model.
 question: How would you route 8 concurrent 60 FPS streams across four Coral Edge TPUs while minimizing latency and PCIe contention?
 details:
-  realistic_solution: 'Implement a device-aware, stateful routing strategy. Pin specific camera streams to specific TPUs to maintain cache locality and avoid context switching. Use a least-outstanding-requests queue per TPU rather than round-robin, ensuring the load balancer dispatches batches optimized for INT8 SRAM limits.'
+  realistic_solution: |
+    Implement a device-aware routing strategy with static affinity: assign two camera streams to each Edge TPU and keep a small per-device FIFO so models and tensor arenas stay resident. Use load-aware spillover only when a TPU queue crosses a latency threshold, because spillover adds host-device transfer contention. Since 8 streams at 60 FPS require 480 inferences per second and the four TPUs only provide about 400 FPS at 10 ms per inference, the scheduler must also enforce admission control, downsample to 50 FPS per stream, or add capacity.
   common_mistake: |
     **The Pitfall:** Using standard cloud load balancing techniques like simple round-robin.
     **The Rationale:** Candidates ignore the stateful nature of Edge TPUs and the severe penalty of PCIe host-to-device transfers.
@@ -28,7 +29,7 @@ details:
     - Deficit: 480 - 400 = 80 FPS.
 
     **Conclusion & Interpretation:**
-    - **Result: 80 FPS Deficit (Compute-Bound)**. The system will bottleneck. It requires either dynamically downsampling streams to 50 FPS or adding a 5th TPU.
+    - **Result: 80 FPS Deficit (Compute-Bound)**. A stable routing policy is two streams per TPU, but each TPU receives 120 FPS and can serve only 100 FPS. The minimum mitigation is reducing each stream to 50 FPS, cutting total demand to 400 FPS, or adding a fifth TPU to provide 500 FPS capacity.
 status: published
 provenance: imported
 requires_explanation: true

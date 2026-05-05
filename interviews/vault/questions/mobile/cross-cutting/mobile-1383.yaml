@@ -12,7 +12,7 @@ scenario: You are designing a cross-device federated learning system to personal
 question: How would you personalize an on-device LLM with federated LoRA under a 10 MB daily upload limit?
 details:
   realistic_solution: |
-    The optimal architecture uses LoRA with a 4-bit quantized frozen base model. Transmit only the quantized LoRA weights using FedProx to constrain local updates and prevent client drift.
+    Freeze the 4-bit base LLM and train only small LoRA adapters on device. Keep optimizer state local, use FedAvg or FedProx over adapter deltas only, and enforce the daily upload budget with one scheduled round or multiple smaller rounds whose compressed adapter payloads sum below 10 MB. For non-IID personalization, add a proximal term or server-side robust aggregation, but do not upload the base model, optimizer state, raw examples, or per-token traces.
   common_mistake: |
     **The Pitfall:** Proposing full model fine-tuning with standard FedAvg.
     **The Rationale:** Candidates default to full fine-tuning without considering that storing full optimizer states easily exceeds mobile memory limits and massively violates the 10MB communication budget.
@@ -24,10 +24,13 @@ details:
     - Payload limit: 10 MB.
 
     **Calculations:**
-    - Adapter Size (FP16): 1.8M * 2 bytes = 3.6 MB.
-    - Optimizer State (Adam): 3.6 MB * 2 = 7.2 MB.
+    - Adapter payload in FP16 = 1.8M * 2 bytes = 3.6 MB.
+    - Local Adam state = 2 moments * 3.6 MB = 7.2 MB, but it stays on device and is not uploaded.
+    - One daily round with headers, secure aggregation mask metadata, and version tags adds about 0.4 MB.
+    - Daily upload = 3.6 MB adapter delta + 0.4 MB overhead = 4.0 MB.
+    - If split into two rounds, each round must send at most 5 MB; a 3.6 MB full adapter would exceed that after overhead, so use one round or delta compression/sparsification.
 
     **Conclusion & Interpretation:**
-    - **Result: Bandwidth Limit Respected.** Only the 3.6 MB LoRA weights are transmitted, easily satisfying the 10MB upload limit while avoiding OOM from full fine-tuning.
+    - **Result: about 4.0 MB uploaded for one daily LoRA round.** The 10 MB limit is respected because only adapter deltas and small protocol metadata are transmitted; optimizer state is a local memory cost, not a communication cost.
 status: published
 provenance: imported

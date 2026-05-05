@@ -11,7 +11,7 @@ title: Differential Privacy Impact on On-Device Model Size
 scenario: You're training a private on-device recommendation model on an A17 Pro. The model has 5M parameters. DP-SGD with per-sample gradients requires storing individual gradients for each sample in the batch.
 question: With batch size 32, how much memory do per-sample gradients consume, and does this fit alongside the model and activations within the OS app limits?
 details:
-  realistic_solution: 'Memory breakdown: model weights (FP32): 5M * 4 = 20 MB. Per-sample gradients: 5M * 4 bytes * 32 samples = 640 MB. Optimizer state (Adam, FP32): 5M * 4 * 3 = 60 MB (weights, momentum, variance). Activations: ~100 MB. Total: 20 + 640 + 60 + 100 = 820 MB. iOS app memory limit: ~2-4 GB depending on device state. 820 MB is feasible but tight. Optimization: (1) Reduce batch size to 8: 5M * 4 * 8 = 160 MB. Total: 340 MB — comfortable. (2) Use gradient accumulation with virtual batching: compute per-sample gradient, clip, accumulate into a running sum, discard. Never store all 32 gradients simultaneously. Memory: 5M * 4 * 2 (current gradient + accumulator) = 40 MB. Total: 220 MB. This is the standard approach for DP-SGD on memory-constrained devices.'
+  realistic_solution: 'Direct answer: storing all per-sample gradients for batch size 32 costs 5M * 4 bytes * 32 = 640 MB. A consistent full-memory estimate is model weights: 20 MB, Adam optimizer state: 40 MB for momentum and variance, per-sample gradients: 640 MB, and activations/workspace: about 100 MB, for roughly 800 MB before framework overhead. That can fit under a 2-4 GB iOS app budget, but it is tight and fragile once the runtime, camera/UI memory, and temporary tensors are included. Practical workaround: compute each per-sample gradient, clip it, add it to an accumulated batch gradient, then discard it. That streaming DP-SGD path stores only a current gradient plus accumulator, about 40 MB for gradients, but it is an implementation strategy rather than the answer to the raw per-sample-gradient storage question.'
   common_mistake: |
     **The Pitfall:** Calculating the raw gradient size and assuming it easily fits within the physical RAM.
     **The Rationale:** Engineers forget to account for activations, optimizer states, and most importantly, the OS's strict per-app memory limits (typically 2-4 GB).
@@ -20,16 +20,19 @@ details:
     **Assumptions & Constraints:**
     - Model: 5M parameters (FP32, 4 bytes/param).
     - Batch Size: 32.
-    - App Memory Budget: ~2 GB.
+    - Adam optimizer state stores momentum and variance in addition to weights.
+    - App Memory Budget: roughly 2-4 GB depending on device state.
 
     **Calculations:**
-    - Naive Gradients: 5M * 4 bytes * 32 samples = 640 MB.
-    - Virtual Batching Gradients: 5M * 4 bytes * 2 (current + accumulator) = 40 MB.
-    - Overhead: Model (20 MB) + Optimizer (60 MB) + Activations (100 MB) = 180 MB.
-    - Total (Virtual): 180 MB + 40 MB = 220 MB.
+    - Per-Sample Gradients: 5M * 4 bytes * 32 samples = 640 MB.
+    - Model Weights: 5M * 4 bytes = 20 MB.
+    - Adam State: 5M * 4 bytes * 2 = 40 MB.
+    - Activations and Workspace: about 100 MB.
+    - Total if all per-sample gradients are stored: 640 MB + 20 MB + 40 MB + 100 MB = about 800 MB.
+    - Streaming alternative: current gradient + accumulated clipped gradient = 5M * 4 bytes * 2 = 40 MB for gradients.
 
     **Conclusion & Interpretation:**
-    - **Result: 220 MB Total Memory**. Virtual batching achieves **16x memory savings** on gradients, fitting safely within the OS app limit.
+    - **Result: 640 MB for the per-sample gradients and about 800 MB total before framework overhead.** It may fit, but streaming clipped gradients is the safer mobile DP-SGD implementation.
 status: published
 provenance: imported
 requires_explanation: false

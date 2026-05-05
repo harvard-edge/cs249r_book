@@ -9,9 +9,9 @@ bloom_level: create
 phase: both
 title: MoE Serving with Offloaded Experts
 scenario: You need to serve a 256-expert MoE model (each expert 2B params, 671B total) on a single node with 640 GB total HBM. The model does not fit entirely in GPU memory.
-question: "How can you offload experts for a 671B, 256-expert MoE on one 8x H100 node, and what latency does PCIe fetching add?"
+question: How can you offload experts for a 671B, 256-expert MoE on one 8x H100 node, and what latency does PCIe fetching add?
 details:
-  realistic_solution: Keep the shared attention layers + top-16 most frequently accessed experts in GPU HBM, offload the remaining 240 experts to CPU DRAM. Predict expert routing for the next batch and prefetch experts asynchronously. Quantize offloaded experts to INT4 to minimize PCIe fetch time.
+  realistic_solution: Keep the dense/shared layers and the current hot expert working set in HBM, and store cold experts in CPU DRAM. For each batch, use the router or a lookahead pass to prefetch the next needed experts asynchronously; if an expert is not resident when needed, fetch it over PCIe. Each expert is 2B parameters, so a BF16 expert is about 4 GB and costs 4 GB / 64 GB/s = 62.5ms to fetch over PCIe Gen5. INT4 offload reduces the transferred expert to about 1 GB, or 15.6ms per missed expert fetch. With top-2 routing, the worst synchronous miss for two cold experts is roughly 31ms at INT4, so this design only works when routing prediction, caching, and overlap hide most expert transfers.
   common_mistake: |
     **The Pitfall:** Assuming all experts must be GPU-resident.
     **The Rationale:** Candidates are used to dense models where the entire parameter set must be in HBM for every forward pass.
@@ -24,10 +24,10 @@ details:
        - PCIe Gen5 bandwidth: 64 GB/s per GPU.
     2. **Calculations:**
        - PCIe fetch time (BF16): 4 GB / 64 GB/s = 62.5 ms.
-       - PCIe fetch time (INT4): 1 GB / 64 GB/s = 15.6 ms.
-       - Amortized latency (with 90% cache hit rate): 0.1 * 15.6 ms = 1.56 ms.
+       - PCIe fetch time (INT4): 1 GB / 64 GB/s = 15.6 ms per missed expert.
+       - Top-2 worst synchronous INT4 miss: 2 * 15.6 ms = 31.2 ms if both selected experts must be fetched.
     3. **Conclusion & Interpretation:**
-       - **Result: Bandwidth-Bound Fetch.** Offloading works if idle experts reside in CPU DRAM and are fetched via PCIe. Quantizing offloaded experts to INT4 reduces fetch time to 15.6ms, yielding a viable 1.56ms amortized penalty per token.
+       - **Result: Bandwidth-Bound Fetch.** Offloading works only if caching and prefetch overlap avoid most synchronous PCIe misses; a cold INT4 expert miss adds about 15.6ms.
 status: published
 provenance: imported
 requires_explanation: false

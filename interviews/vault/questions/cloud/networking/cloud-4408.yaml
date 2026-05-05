@@ -11,20 +11,22 @@ title: RDMA Memory Registration Overhead in Dynamic Batch LLM Training
 scenario: Your training framework uses dynamic tensor allocation. After migrating to a 128-node InfiniBand RDMA cluster, each training step takes 850ms instead of 420ms. Profiling shows RDMA memory registration (ibv_reg_mr) consuming 310ms per step.
 question: Why does dynamic tensor allocation add 310ms of ibv_reg_mr overhead per training step, and how would you redesign RDMA memory management?
 details:
-  realistic_solution: 'RDMA memory registration cost: approximately 1-5 µs per page (4KB) for HCA MTT updates, plus TLB shootdown across CPUs for page pinning. For a 7B model gradient buffer: 7B params × 4 bytes (FP32) = 28GB. Registration: 28GB / 4KB × 2 µs = 7,000,000 × 2 µs = 14,000,000 µs = 14 seconds per registration—impossible. But if PyTorch uses per-tensor registration (not full gradient): a typical microbatch gradient chunk = 100MB. 100MB / 4KB × 2 µs = 51,200 µs = 51ms per tensor × 6 pipeline stages = 307ms. Close to observed 310ms. Fix: implement a RDMA buffer pool. Pre-register a fixed memory region at startup (all gradient memory in one ibv_reg_mr call), reuse across steps. Registration becomes a one-time cost at initialization.'
+  realistic_solution: |
+    Dynamic tensor allocation keeps producing new virtual address ranges, so the RDMA stack cannot reuse an existing memory registration. Each new gradient bucket that participates in RDMA must be pinned, mapped into the HCA memory translation table, and later deregistered. At roughly 2 us per 4KB page, four newly allocated 150 MiB communication buffers cost about 307 ms per step, matching the observed 310 ms. Redesign the framework around a fixed RDMA memory arena: reserve the communication buffers at startup, register that pool once, suballocate tensor buckets from it, and recycle the same addresses across steps. If tensors are not contiguous, use a small set of pre-registered slabs rather than trying to solve the problem with one universal ibv_reg_mr call.
   common_mistake: |
     **The Pitfall:** Assuming RDMA memory registration is functionally free or negligible.
     **The Rationale:** Engineers equate RDMA overhead with standard local memory allocations, ignoring the cost of page pinning.
     **The Consequence:** Dynamic allocation forces the OS to pin/unpin pages and the hardware to update MTT tables on every step, completely stalling the training loop.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 28GB gradient buffer (FP32). 4KB pages.
-    - ibv_reg_mr cost: ~2µs per page.
+    - Dynamic allocation creates 4 new RDMA communication buffers per step.
+    - Each buffer is 150 MiB. Page size = 4 KiB.
+    - ibv_reg_mr cost: ~2 us per page.
 
     **Calculations:**
-    - Gradient chunks (e.g. 128 chunks): 218MB per chunk = 55,808 pages.
-    - Registration per chunk: 55,808 × 2µs = 111.6ms.
-    - 2-3 chunks in flight = ~310ms overhead per step.
+    - Pages per buffer = 150 MiB / 4 KiB = 38,400 pages.
+    - Registration per buffer = 38,400 * 2 us = 76.8 ms.
+    - Four newly allocated buffers per step = 4 * 76.8 ms = 307.2 ms.
 
     **Conclusion & Interpretation:**
     - **Result: Memory-Registration-Bound.** Dynamic allocation forces the OS to pin/unpin pages on every step. Pre-registering a static RDMA buffer pool reduces the cost to a one-time startup initialization.

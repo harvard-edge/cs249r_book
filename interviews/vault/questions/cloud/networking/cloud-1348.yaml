@@ -11,7 +11,7 @@ title: Evaluating gRPC Migration for Inter-Service Tensor Transfer
 scenario: You are architecting an internal computer vision serving pipeline where microservices exchange 10MB dense float32 tensors. The current REST/JSON over HTTP/1.1 implementation exhibits a p99 latency of 180ms per hop, violating a strict 50ms SLA. Your team proposes rewriting the communication layer to use gRPC with standard Protobuf messages over your 10 Gbps datacenter network.
 question: Will standard gRPC achieve the SLA, and what architectural adjustments might be required for optimal tensor transfer?
 details:
-  realistic_solution: 'Accept the gRPC proposal but mandate that the 10MB tensor payload be encoded as a flat `bytes` field rather than a `repeated float` field. Standard Protobuf repeated fields suffer from varint encoding overhead and per-element processing. By casting the tensor to raw bytes and sending it in a Protobuf `bytes` field, serialization overhead is drastically reduced, bringing total hop latency remarkably close to the network transfer bound.'
+  realistic_solution: Accept the gRPC proposal only if tensor payloads are encoded as a flat `bytes` field or another tensor-native binary frame, not as per-element `repeated float` fields. Protobuf floats are fixed32 values, not varints, but repeated scalar encoding still adds per-element serialization work. A raw bytes payload keeps framing simple and reduces overhead, though it still has memory-copy and framing costs.
   common_mistake: |
     **The Pitfall:** Failing to separate network transfer time from serialization overhead.
     **The Rationale:** Engineers assume gRPC and Protobuf are universally fast enough for any payload without considering how repeated fields are encoded.
@@ -24,12 +24,12 @@ details:
 
     **Calculations:**
     - Network transfer time: 10 MB / 1.25 GB/s = 8 ms.
-    - JSON parsing overhead: ~150 ms (Total ~158 ms).
-    - Protobuf `repeated float` serialization: ~30 ms (Total ~38 ms, barely meets SLA).
-    - Protobuf `bytes` field serialization: ~0 ms (Total ~8 ms).
+    - JSON parsing overhead: ~150 ms, so total is ~158 ms and misses the SLA.
+    - Protobuf `repeated float` uses fixed32 encoding, but per-element serialization can still cost tens of ms; assume ~30 ms, so total is ~38 ms and has limited p99 headroom.
+    - Protobuf `bytes` still needs framing and at least one copy; assume ~2-5 ms, so total is ~10-13 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Serialization-Bound.** Using a raw `bytes` field drops serialization near 0 ms, yielding a total hop latency of ~8 ms and safely meeting the 50ms SLA.
+    - **Result: Serialization-Bound.** Standard gRPC can meet the 50ms SLA if tensors use a binary payload, but `bytes` reduces rather than eliminates serialization and copy cost.
 status: published
 provenance: imported
 requires_explanation: true

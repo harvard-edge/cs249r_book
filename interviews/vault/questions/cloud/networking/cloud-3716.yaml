@@ -8,49 +8,33 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: AllToAll Communication for Expert Parallelism in MoE on TPU v5e
-scenario: TPU v5e pods have 256 chips connected via ICI at ~4 TB/s aggregate. A Mixture-of-Experts model
-  routes tokens to 8 active experts out of 64 total across 64 TPU chips. Each token dispatch requires
-  an AllToAll collective.
-question: What AllToAll volume and latency does top-2 MoE token dispatch create for batch=512, seq_len=2048,
-  token_dim=1024 across 64 TPU chips?
+scenario: TPU v5e pods have 256 chips connected via ICI at ~4 TB/s aggregate. A Mixture-of-Experts model uses top-2 routing across 64 experts placed on 64 TPU chips. Each token dispatch requires an AllToAll collective.
+question: What AllToAll volume and latency does top-2 MoE token dispatch create for batch=512, seq_len=2048, token_dim=1024 across 64 TPU chips?
 details:
-  realistic_solution: 'Tokens per batch: 512 × 2048 = 1M tokens. Top-2 routing: each token goes to 2 experts.
-    Token size: 1024 dims × 2B = 2KB. AllToAll: each of 64 chips sends/receives 1M/64 = 15,625 tokens
-    per expert chip. But with top-2 routing: 2M token-dispatches total / 64 chips = 31,250 per chip. AllToAll
-    volume per chip: 31,250 × 2KB = 62.5MB sent + 62.5MB received = 125MB per chip. Total network: 64
-    × 62.5MB = 4GB. At 4 TB/s aggregate ICI: 4GB / 4TB/s = 1ms. Per-chip bandwidth: 4TB/s/64 = 62.5 GB/s
-    per chip. 62.5MB / 62.5 GB/s = 1ms — bandwidth bound.'
-  common_mistake: '**The Pitfall:** Calculating AllToAll as if all tokens go to all chips.
-
-    **The Rationale:** Candidates fail to adapt the AllToAll formula to the specifics of expert parallelism
-    sparsity.
-
-    **The Consequence:** They dramatically overestimate the network volume, because each chip only sends/receives
-    its precise portion of tokens to/from the specific chips hosting the routed experts.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - 512 batch, 2048 seq_len
+  realistic_solution: 'Tokens per batch: 512 × 2048 = 1,048,576 tokens. Top-2 routing creates 2,097,152 token dispatches. Token payload: 1024 dims × 2B = 2KB. Assuming uniform routing across 64 expert chips, each chip sends about 2,097,152/64 = 32,768 dispatches, or 32,768 × 2KB = 67.1MB one-way. It also receives roughly the same amount, so bidirectional per-chip traffic is about 134.2MB. Cluster-wide one-way traffic is 64 × 67.1MB ≈ 4.29GB, or 8.59GB if counting sent+received. At 4 TB/s aggregate ICI, the one-way bandwidth lower bound is about 1.07ms; equivalently, 67.1MB at 62.5 GB/s per chip is about 1.07ms.'
+  common_mistake: |
+    **The Pitfall:** Calculating AllToAll as if all tokens go to all chips.
+    **The Rationale:** Candidates fail to adapt the AllToAll formula to the specifics of expert parallelism sparsity.
+    **The Consequence:** They dramatically overestimate the network volume, because each chip only sends/receives its precise portion of tokens to/from the specific chips hosting the routed experts.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Batch = 512, seq_len = 2048.
+    - Top-2 routing across 64 expert chips.
+    - Token payload = 1024 BF16 values = 1024 × 2 bytes = 2048 bytes.
+    - Volume is reported as one-way sent bytes, with bidirectional sent+received noted separately.
 
     **Calculations:**
-
-    - Tokens: 512 × 2048 = 1M.
-
-    - Top-2 routing: 2M dispatches.
-
-    - Dispatches per chip: 2M / 64 = 31,250 tokens.
-
-    - Volume per chip: 31,250 tokens × 2KB = 62.5MB sent.
-
-    - ICI bandwidth per chip: 62.5 GB/s.
-
-    - **Latency: 62.5MB / 62.5 GB/s = 1ms AllToAll.**
-
+    - Tokens: 512 × 2048 = 1,048,576.
+    - Top-2 dispatches: 1,048,576 × 2 = 2,097,152.
+    - Dispatches sent per chip under uniform routing: 2,097,152 / 64 = 32,768.
+    - One-way volume per chip: 32,768 × 2048 bytes = 67,108,864 bytes = 67.1 MB.
+    - Bidirectional per-chip traffic: 67.1 MB sent + 67.1 MB received = 134.2 MB.
+    - Cluster one-way traffic: 64 × 67.1 MB = 4.29 GB; bidirectional accounting is 8.59 GB.
+    - Per-chip bandwidth: 4 TB/s / 64 = 62.5 GB/s.
+    - One-way latency lower bound: 67.1 MB / 62.5 GB/s = 1.07 ms.
 
     **Conclusion & Interpretation:**
-
-    Bandwidth bound.'
+    - **Result: ~67.1 MB one-way per chip, ~1.07 ms bandwidth lower bound (Communication-Bound)**. Counting send+receive doubles the volume to ~134.2 MB per chip but does not change the one-way bandwidth critical-path estimate.
 status: published
 provenance: imported
 requires_explanation: true

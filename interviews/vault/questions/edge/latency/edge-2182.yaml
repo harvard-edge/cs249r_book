@@ -11,25 +11,26 @@ title: Latency Jitter from DVFS on Edge Devices
 scenario: Your Jetson Orin NLP pipeline shows 3x latency jitter between consecutive identical inferences. Profiling reveals the GPU clock oscillates between 612 MHz and 1.3 GHz due to Dynamic Voltage and Frequency Scaling (DVFS).
 question: How do you stabilize latency without exceeding the 60W power budget?
 details:
-  realistic_solution: 'Lock GPU frequency to a sustainable mid-point using nvpmodel and jetson_clocks. Profile power at each frequency step: 612 MHz = 18W GPU, 900 MHz = 32W GPU, 1.3 GHz = 52W GPU. At 900 MHz, latency is 1.44x the minimum but perfectly stable, and leaves 28W for CPU + memory + DLA. Set: `sudo nvpmodel -m 2` (custom power mode), `sudo jetson_clocks --fan` (active cooling at fixed fan speed). Result: P50 and P99 converge to within 10% because DVFS is eliminated. Alternatively, use the MAXN mode with a 50W software power cap — the Orin will reduce clocks gracefully rather than oscillating.'
+  realistic_solution: Lock the GPU to a profiled sustainable frequency inside a validated nvpmodel power mode, then verify total module power with tegrastats or board telemetry. Example profiling shows GPU-only power of about 18W at 612 MHz, 32W at 900 MHz, and 52W at 1.3 GHz. If CPU, memory, and DLA need roughly 20W during the NLP pipeline, 1.3 GHz would put total power near 72W and trigger throttling, while 900 MHz leaves headroom under the 60W budget. Use the board-specific nvpmodel mode or custom mode that supports this cap, lock clocks/fan consistently, and validate that P50 and P99 converge to within 10%.
   common_mistake: |
     **The Pitfall:** Locking clocks to the maximum frequency.
     **The Rationale:** Candidates see frequency oscillation and immediately try to lock the GPU to 1.3 GHz for maximum performance.
-    **The Consequence:** Power draw quickly exceeds the 60W limit, triggering hard thermal throttling that causes worse, unpredictable latency spikes.
+    **The Consequence:** Total module power can exceed the 60W envelope once CPU, memory, and accelerators are included, triggering throttling that causes worse, unpredictable latency spikes.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Jetson Orin 60W limit.
+    - Jetson Orin 60W module power limit.
     - Oscillating DVFS frequencies: 612 MHz to 1.3 GHz.
+    - Example non-GPU pipeline power during inference: 20W for CPU, memory, and other accelerators.
 
     **Calculations:**
-    - At 1.3 GHz (Max): inference = 8ms, power = 52W GPU (exceeds 60W limit when combined with CPU/memory).
-    - At 612 MHz (Min): inference = 8ms x (1300/612) = 17ms, power = 18W GPU.
-    - At 900 MHz (Mid): inference = 8ms x (1300/900) = 11.5ms, power = 32W GPU.
+    - At 1.3 GHz: inference = 8ms, GPU-only power = 52W, total estimate = 52W + 20W = 72W, above the 60W module budget.
+    - At 612 MHz: inference = 8ms x (1300/612) = 17.0ms, GPU-only power = 18W, total estimate = 38W.
+    - At 900 MHz: inference = 8ms x (1300/900) = 11.6ms, GPU-only power = 32W, total estimate = 52W.
     - DVFS Oscillating Jitter: P50 = 10ms, P99 = 25ms (150% jitter).
-    - Locked 900 MHz Jitter: P50 = 11.5ms, P99 = 12.5ms.
+    - Locked 900 MHz Jitter: P50 = 11.6ms, P99 = 12.5ms, which is (12.5 - 11.6) / 11.6 = 7.8% jitter.
 
     **Conclusion & Interpretation:**
-    - **Result: Thermally-Stable Latency (Power-Bound).** Locking the GPU at 900 MHz eliminates DVFS oscillation, bringing jitter below 10% while safely staying under the 60W budget.
+    - **Result: thermally stable latency under the 60W module budget.** The 900 MHz lock is justified because the total estimated power is 52W, while max clock would exceed the budget once non-GPU power is included.
 status: published
 provenance: imported
 requires_explanation: false

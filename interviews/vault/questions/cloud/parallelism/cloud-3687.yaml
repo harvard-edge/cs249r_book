@@ -8,32 +8,28 @@ competency_area: parallelism
 bloom_level: understand
 phase: inference
 title: Gang Scheduling for Distributed Training Efficiency
-scenario: Your team is running 30 concurrent 8-GPU training jobs on a 200-GPU cluster. The Kubernetes
-  scheduler is launching jobs as GPUs become available, but jobs start with 4-6 GPUs and block waiting
-  for the remaining GPUs. GPU utilization sits at 32% even though 190 of 200 GPUs are allocated.
-question: Why is all-or-nothing gang scheduling necessary for the 30 concurrent 8-GPU jobs, and what scheduler
-  behavior would fix utilization?
+scenario: Your team is running 30 concurrent 8-GPU training jobs on a 200-GPU cluster. The Kubernetes scheduler is launching jobs as GPUs become available, but jobs start with 4-6 GPUs and block waiting for the remaining GPUs. GPU utilization sits at 32% even though 190 of 200 GPUs are allocated.
+question: Why is all-or-nothing gang scheduling necessary for the 30 concurrent 8-GPU jobs, and what scheduler behavior would fix utilization?
 details:
-  realistic_solution: 'Implement gang scheduling with all-or-nothing allocation: a job requesting 8 GPUs
-    either receives all 8 simultaneously or waits in a queue. Use a backfill scheduler that allows smaller
-    jobs to run during wait periods. Tools: Volcano scheduler for Kubernetes, Slurm with --ntasks-per-node
-    and --exclusive, or YARN capacity scheduler with GPU gang support.'
-  common_mistake: '**The Pitfall:** Using a default scheduler that treats GPUs as independent resources
-    and allocates them greedily.
+  realistic_solution: 'Implement gang scheduling with all-or-nothing allocation: a job requesting 8 GPUs either receives all 8 simultaneously or waits in a queue. Use a backfill scheduler that allows smaller jobs to run during wait periods. Tools: Volcano scheduler for Kubernetes, Slurm with --ntasks-per-node and --exclusive, or YARN capacity scheduler with GPU gang support.'
+  common_mistake: |
+    **The Pitfall:** Using a default scheduler that treats GPUs as independent resources and allocates them greedily.
+    **The Rationale:** Candidates incorrectly assume distributed jobs can start computing as soon as partial resources are granted.
+    **The Consequence:** Partial allocations starve jobs while holding resources, creating massive cluster-wide deadlocks and 0% true utilization on allocated nodes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 30 jobs × 8 GPUs/job = 240 requested GPUs.
+    - Cluster total = 200 GPUs.
+    - Reported allocation = 190 GPUs.
 
-    **The Rationale:** Candidates incorrectly assume distributed jobs can start computing as soon as partial
-    resources are granted.
+    **Calculations:**
+    - If 8 jobs receive full 8-GPU gangs, active compute = 8 × 8 = 64 GPUs.
+    - Effective compute utilization = 64 / 200 = 32%.
+    - Allocated-but-idle partial holds = 190 allocated - 64 active = 126 GPUs.
+    - The remaining 22 jobs hold 126 / 22 = 5.7 GPUs each on average but cannot compute because they lack full gangs.
 
-    **The Consequence:** Partial allocations starve jobs while holding resources, creating massive cluster-wide
-    deadlocks and 0% true utilization on allocated nodes.
-
-    '
-  napkin_math: "1. **Assumptions & Constraints:**\n   - 30 jobs × 8 GPUs/job = 240 requested GPUs.\n \
-    \  - Cluster total = 200 GPUs.\n2. **Calculations:**\n   - 8 jobs successfully gang-schedule = 64\
-    \ GPUs actively computing (64/200 = 32% utilization).\n   - Remaining 22 jobs are stuck waiting holding\
-    \ 126 partial GPUs (~5.7 GPUs each).\n   - Total allocated = 64 + 126 = 190 GPUs.\n3. **Conclusion\
-    \ & Interpretation:** **63% of the cluster is allocated but completely deadlocked. Gang scheduling\
-    \ enforces atomic allocation to prevent partial holds. Result: Scheduler-Deadlock-Bound.**\n"
+    **Conclusion & Interpretation:**
+    - **Result: Scheduler-Deadlock Bound.** 190 GPUs can be allocated while only 64 are actively computing; gang scheduling prevents partial GPU holds from masquerading as useful utilization.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,11 +11,12 @@ title: Tensor Arena Planning for Jetson Orin Multi-Model Serving
 scenario: 'Your Jetson Orin (32 GB LPDDR5, 60W) serves 5 TensorRT models concurrently for autonomous driving: perception (2.1 GB GPU memory), tracking (800 MB), prediction (1.2 GB), planning (600 MB), and control (200 MB). Total model memory is 4.9 GB. GPU memory is shared with the system (Linux + display = 4 GB), leaving 28 GB for models. However, memory fragmentation after 24 hours of operation causes allocation failures even though total free memory is sufficient.'
 question: How do you plan memory allocation to prevent fragmentation?
 details:
-  realistic_solution: 'Apply the tensor arena pattern from TinyML at edge scale: pre-allocate a contiguous memory pool at startup and sub-allocate within it. Strategy: (1) Allocate one contiguous GPU memory block of 6 GB at process start (leaves 22 GB for growth). (2) Use a custom allocator (arena/bump allocator) that sub-allocates to each model from this block. Models receive fixed offsets: perception at offset 0, tracking at 2.1 GB, prediction at 2.9 GB, planning at 4.1 GB, control at 4.7 GB. (3) No dynamic allocation after initialization — TensorRT''s IExecutionContext uses pre-allocated device memory for activations. (4) For variable-size inputs (different image resolutions), allocate for the maximum expected size at startup. Waste some memory but eliminate fragmentation. TensorRT supports this via createExecutionContextWithoutDeviceMemory() + manual memory binding.'
+  realistic_solution: 'Apply the tensor arena pattern at edge scale: reserve model memory at startup and keep the serving process from doing repeated cudaMalloc/cudaFree during steady-state inference. Strategy: (1) Allocate a planned GPU memory pool of about 6 GB at process start for the five models, leaving 22 GB of the 28 GB model-available memory outside that pool. (2) Use fixed sub-allocations or a cudaMemPool/custom allocator for engine weights, bindings, scratch buffers, and per-context activation memory sized from TensorRT engine inspection. (3) Create separate TensorRT execution contexts as needed and assign each context its required device memory using the TensorRT API for externally supplied context memory, while still accounting for workspace, optimization profiles, plugins, and variable input sizes. (4) Allocate for the maximum supported shape/profile during startup and fail fast if the pool cannot satisfy it. This reduces fragmentation and makes failures deterministic, but it
+    does not guarantee that unrelated driver, plugin, or system allocations can never fail.'
   common_mistake: |
     **The Pitfall:** Relying on dynamic memory allocation (`cudaMalloc`) during continuous operation.
     **The Rationale:** Candidates assume standard memory management is fine as long as total requested memory is less than total free memory.
-    **The Consequence:** Dynamic allocation creates memory holes over 24 hours, leading to intermittent Out-Of-Memory (OOM) failures and forcing system restarts in safety-critical autonomous driving.
+    **The Consequence:** Dynamic allocation creates memory holes over 24 hours, leading to intermittent Out-Of-Memory (OOM) failures even when aggregate free memory appears sufficient.
   napkin_math: |
     **Assumptions & Constraints:**
     - Jetson Orin LPDDR5: 32 GB.
@@ -26,11 +27,12 @@ details:
     **Calculations:**
     - Dynamic fragmentation = 15-25% of allocated memory becomes unusable.
     - 4.9 GB * 20% = 980 MB wasted holes.
-    - Arena allocation approach: 0% fragmentation.
+    - Arena allocation approach: no steady-state fragmentation inside the planned 6 GB pool.
     - Pre-allocate a contiguous 6 GB block (4.9 GB models + 1.1 GB padding).
+    - Memory outside the pool: 28 GB available for models - 6 GB pool = 22 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: 22 GB free (Fragmentation Prevented).** This static 6 GB block leaves 22 GB free, guarantees zero allocation failures over 24 hours, and ensures deterministic latency.
+    - **Result: 22 GB remains outside the planned pool, and model-serving allocations become deterministic.** This prevents fragmentation within the TensorRT serving arena, while system-level allocation failures still need monitoring and startup checks.
 status: published
 provenance: imported
 requires_explanation: true

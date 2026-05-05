@@ -11,25 +11,32 @@ title: On-Device LLM Intersectional Fairness Sizing
 scenario: You are deploying an on-device LLM on the Google Tensor G3 for real-time text summarization. To preserve privacy, intersectional fairness evaluation must run entirely on-device overnight while the phone is charging. The Tensor G3 has a 7.5 TOPS TPU and 12 GB LPDDR5X memory.
 question: How would you size an on-device LLM fairness evaluation so subgroup analysis does not exceed memory or latency budgets?
 details:
-  realistic_solution: The candidate should identify that LLM inference is memory-bandwidth bound, not compute bound, and calculate throughput based on the LPDDR5X specifications. They must propose quantizing the model to 4-bit (INT4) to ensure the model and context easily fit within a strict 1.5-2 GB budget allocated from the 12 GB RAM. The evaluation dataset must be sized so that the total generation time, including thermal throttling overhead, fits within the 8-hour overnight charging window.
+  realistic_solution: |
+    Size the fairness run from both memory residency and measured token throughput. First fix the model precision, context length, KV-cache allocation, and batch size so a single evaluation stream fits the app's background memory budget. Then choose the subgroup grid and examples per subgroup so the total generated tokens fit the overnight thermal window. For intersectional coverage, prefer a minimum examples-per-cell target and reduce the number of subgroup sweeps or generated tokens per prompt before increasing batch size, because batch size increases KV memory and can reduce sustained throughput on mobile.
   common_mistake: |
-    **The Pitfall:** Neglecting memory bandwidth bottlenecks for autoregressive generation.
-    **The Rationale:** Candidates often propose running exhaustive fairness benchmarks without calculating the memory bandwidth bottleneck, assuming the 7.5 TOPS TPU can instantly process the dataset.
-    **The Consequence:** This leads to out-of-memory crashes by forgetting the OS memory footprint or exceeding the safe 8-hour overnight charging window due to slow generation.
+    **The Pitfall:** Sizing the benchmark from subgroup count alone.
+    **The Rationale:** Candidates forget that each prompt also reserves KV cache and consumes sustained decode bandwidth, so adding cells, examples, or output tokens all draw from the same mobile budget.
+    **The Consequence:** The evaluation either runs past the charging window or gets killed under memory pressure when several long-context prompts are queued.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 2B parameter model quantized to 4-bit (INT4).
-    - ~50 GB/s memory bandwidth on LPDDR5X.
-    - Evaluation dataset: 15,000 prompts, 100 tokens each (1.5M tokens).
+    - 2B parameter model quantized to 4-bit (INT4): ~1.0 GB weights.
+    - Background eval memory budget: 2.0 GB from the 12 GB system.
+    - KV cache: 65,536 bytes/token, 512-token prompt plus 100 generated tokens.
+    - Workspace and runtime reserve: 300 MB.
+    - Measured sustained decode throughput after thermal margin: 14 tokens/sec.
+    - Safe overnight eval window: 6 hours inside an 8-hour charging period.
+    - Subgroup grid: 72 intersectional cells.
 
     **Calculations:**
-    - Model footprint: 2B * 0.5 bytes = ~1 GB.
-    - Throughput: 50 GB/s / 1 GB = 50 tokens/sec.
-    - Time constraint: 1.5M tokens / 50 tokens/sec = 30,000 seconds.
-    - Total time: 30,000 seconds = 8.3 hours.
+    - KV per active prompt = (512 + 100) * 65,536 bytes = 40 MB.
+    - Batch-1 peak memory = 1.0 GB weights + 0.040 GB KV + 0.300 GB reserve = 1.34 GB, which fits the 2.0 GB budget.
+    - Token budget in 6 hours = 6 * 3600 * 14 = 302,400 generated tokens.
+    - Prompt budget at 100 generated tokens each = 302,400 / 100 = 3,024 prompts.
+    - Prompts per subgroup = 3,024 / 72 = 42 prompts/cell.
+    - A conservative 30 prompts/cell plan uses 72 * 30 * 100 = 216,000 generated tokens and takes 216,000 / 14 = 15,429 seconds = 4.3 hours.
 
     **Conclusion & Interpretation:**
-    - **Result: 8.3 hours (Memory-Bandwidth Bound)**. The generation exceeds the safe 6-hour thermal window.
+    - **Result: 30 prompts per subgroup fits**. Batch-1 evaluation stays under the 2.0 GB memory budget and finishes in about 4.3 hours, leaving thermal and retry margin within the safe overnight window.
 status: published
 provenance: imported
 requires_explanation: false

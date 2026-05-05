@@ -8,10 +8,10 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Evaluating MoE Serving Topologies on H100 Nodes
-scenario: 'Your team is deploying an 8x22B Mixture of Experts (MoE) LLM (141B total parameters, 39B active per token) on a node with 8x GPUs connected via NVSwitch. Serving with standard Tensor Parallelism (TP=8) yields poor throughput due to massive communication bottlenecks during expert routing.'
+scenario: Your team is deploying an 8x22B Mixture of Experts (MoE) LLM (141B total parameters, 39B active per token) on a node with 8x GPUs connected via NVSwitch. Serving with standard Tensor Parallelism (TP=8) yields poor throughput due to massive communication bottlenecks during expert routing.
 question: Which parallelization topology should you use for the 8x22B MoE on 8x GPUs, and why is it better than pure TP or pipeline parallelism?
 details:
-  realistic_solution: 'Implement a hybrid strategy using Tensor Parallelism for the dense attention layers and Expert Parallelism (EP=8) for the MoE layers. By placing one expert on each GPU, you isolate the massive parameters while utilizing the NVSwitch efficiently for All-to-All token routing.'
+  realistic_solution: Implement a hybrid strategy using Tensor Parallelism for the dense attention layers and Expert Parallelism (EP=8) for the MoE layers. By placing one expert on each GPU, you isolate the massive parameters while utilizing the NVSwitch efficiently for All-to-All token routing.
   common_mistake: |
     **The Pitfall:** Treating the MoE model exactly like a dense model by defaulting to TP=8 across all layers.
     **The Rationale:** TP=8 is the standard, easy-to-deploy strategy for large dense models.
@@ -20,14 +20,19 @@ details:
     **Assumptions & Constraints:**
     - 141B params FP16 = 282GB.
     - Node VRAM = 8 * 80GB = 640GB.
-    - NVSwitch = 900 GB/s.
-    
+    - EP=8 places one expert per GPU.
+    - One MoE layer routes 256 * 2048 = 524,288 tokens with top-2 routing.
+    - Hidden size = 4096, FP16 activations = 2 bytes/value.
+    - Effective NVSwitch bandwidth = 900 GB/s.
+
     **Calculations:**
-    - Transfer size (batch 256, seq 2048, hidden 4096): 256 * 2048 * 4096 * 2 bytes ≈ 4.3GB.
-    - Transfer time over NVSwitch < 5ms per layer.
-    
+    - Activation per token = 4096 * 2 bytes = 8192 bytes.
+    - Routed payload = 524,288 tokens * 2 experts * 8192 bytes ≈ 8.6 GB sent to experts.
+    - Return payload after expert compute is similar, so total All-to-All traffic ≈ 17.2 GB per MoE layer.
+    - Communication time lower bound = 17.2 GB / 900 GB/s ≈ 19 ms before contention and imbalance.
+
     **Conclusion & Interpretation:**
-    - **Result: <5ms (Network-Bound)**. The transfer time is trivial compared to the compute gains of isolating experts via EP.
+    - **Result: Communication is material but bounded by routed activation volume, not by moving all weights.** Hybrid TP for dense layers plus EP for experts is better than pure TP because it avoids repeatedly splitting every expert's weights across GPUs, but the design still needs batching, load balancing, and NVSwitch-aware placement.
 status: published
 provenance: imported
 requires_explanation: false

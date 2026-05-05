@@ -11,7 +11,7 @@ title: Implementing memory-efficient backprop for on-device RL on A17 Pro
 scenario: You are implementing a mobile game AI using PPO on a device with 8GB RAM. The policy network (500K params) updates after 64 steps. PPO requires the ratio of new to old policy probabilities, which OOMs when keeping two full autograd graphs.
 question: How do you compute PPO old-policy ratios without keeping two full autograd graphs in memory?
 details:
-  realistic_solution: 'For PPO ratio computation, the old policy probabilities are constants (no gradient needed): compute old_log_probs with torch.no_grad() before the update, store the scalar log probabilities (64 floats = 256 bytes), then discard the old policy graph. Only the new policy forward pass needs the computational graph. For 500K params at batch=64: new policy activations ≈ 50MB — fits easily in 8GB.'
+  realistic_solution: 'For PPO ratio computation, the old policy probabilities are constants: compute old_log_probs with torch.no_grad() before the update, store the selected-action log probabilities (64 floats = 256 bytes), then discard the old policy graph. Only the new policy forward pass needs the computational graph. For a 500K-parameter policy at batch=64, weights are about 2 MB, Adam state is about 4 MB, and new-policy activations/workspace might be on the order of tens of MB depending on architecture. The memory win is from storing old scalar log-probs instead of keeping a second full autograd tape.'
   common_mistake: |
     **The Pitfall:** Running both old and new policy forward passes with autograd enabled.
     **The Rationale:** Blindly porting PPO implementations that rely on huge cloud GPU VRAM to store massive parallel computational graphs.
@@ -20,16 +20,18 @@ details:
     **Assumptions & Constraints:**
     - Model: 500K parameters (FP32 = 2 MB).
     - Batch size: 64 steps.
-    - Device RAM: 8GB (OS limits usable RAM).
+    - Optimizer: Adam with two FP32 state tensors.
+    - New-policy activations/workspace: assume about 50 MB for the chosen architecture and batch.
 
     **Calculations:**
     - Old Policy (no_grad): 64 scalar floats * 4 bytes = 256 bytes (0 MB graph).
-    - New Policy (autograd): Activations for 64 steps ≈ 10 MB.
-    - Total Model Weights: 2 MB * 2 policies = 4 MB.
-    - Total Peak Memory: 256 bytes + 10 MB + 4 MB ≈ 14 MB.
+    - Policy Weights: 500K * 4 bytes = 2 MB.
+    - Adam State: 500K * 4 bytes * 2 = 4 MB.
+    - New Policy Autograd Activations: about 50 MB.
+    - Total Training State for Ratio Computation: 256 bytes + 2 MB + 4 MB + 50 MB = about 56 MB, before framework overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: ~14 MB peak memory (Compute-Bound)**. Training fits cleanly in ~14 MB by detaching the old policy's computational graph.
+    - **Result: old-policy storage is only 256 bytes, while peak memory is dominated by the new-policy graph and optimizer state.** Detaching the old policy avoids storing two full autograd graphs.
 status: published
 provenance: imported
 requires_explanation: false

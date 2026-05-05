@@ -8,51 +8,28 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: RDMA QP (Queue Pair) Scalability Limits on Large H100 Clusters
-scenario: An RDMA-based AllReduce library on a 1024-H100 cluster creates one Queue Pair per peer connection.
-  The HCA reports QP creation failures at job startup.
-question: Why does one RDMA Queue Pair per peer fail to scale on 1024 H100s, and what connection strategy
-  should replace it?
+scenario: An RDMA-based AllReduce library on a 1024-H100 cluster creates one Queue Pair per peer connection. The HCA reports QP creation failures at job startup.
+question: Why does one RDMA Queue Pair per peer fail to scale on 1024 H100s, and what connection strategy should replace it?
 details:
-  realistic_solution: 'With N=1024 GPUs, all-to-all QPs: 1024×1023/2 ≈ 524K QPs total, 1023 QPs per GPU.
-    Mellanox ConnectX-6 HDR supports ~4M QPs total but memory: each QP requires ~512 bytes HCA memory
-    → 524K×512B=268MB per HCA. More critical: HCA cache for active QPs is typically 1K-4K. With 1023 active
-    QPs, cache misses dominate. Fix: (1) Shared Receive Queue (SRQ): single receive buffer pool, O(N)
-    not O(N²). (2) RC→UD transport: Unreliable Datagram uses one QP for all destinations. (3) Connection
-    reuse: connect only to ring neighbors (2 QPs per GPU for ring AllReduce). For ring AllReduce: 2 QPs
-    per GPU regardless of cluster size. Switching from all-to-all QPs to ring-only: 1023 QPs → 2 QPs.
-    Startup time: O(1) vs O(N).'
-  common_mistake: '**The Pitfall:** Assuming HCAs can handle unlimited Queue Pairs.
-
-    **The Rationale:** Candidates don''t recognize that RDMA QP count scales as O(N²) for all-to-all connectivity,
-    exhausting HCA SRAM cache and leading to severe performance drops or outright connection failures.
-
+  realistic_solution: 'With N=1024 GPUs, one RC Queue Pair per peer gives each GPU/HCA 1023 peer QPs, and the cluster has about 1024×1023/2 = 524K peer connections. At 512B of QP state, that is about 511KiB per GPU/HCA for this simplified state estimate and about 268MiB cluster-wide, before completion queues, memory regions, work queues, and cache effects. The more important scaling failure is that all-to-all RC state and connection setup scale as O(N²) cluster-wide and keep too many QPs active for HCA caches. Replace it with connection reuse matched to the collective: ring AllReduce needs only neighbor connections, hierarchical collectives need local groups plus leaders, and UD or SRQ-based designs can share receive resources instead of creating one receive queue per peer.'
+  common_mistake: |
+    **The Pitfall:** Assuming HCAs can handle unlimited Queue Pairs.
+    **The Rationale:** Candidates don't recognize that RDMA QP count scales as O(N²) for all-to-all connectivity, exhausting HCA SRAM cache and leading to severe performance drops or outright connection failures.
     **The Consequence:** Network hangs, job startup failures, and unscalable distributed infrastructure.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  napkin_math: |
+    **Assumptions & Constraints:**
     - N=1024 GPUs, all-to-all QPs means 1023 QPs per node.
-
     - Memory per QP = 256B send WR + 256B recv WR = 512B.
-
     - HCA SRAM cache is ~4MB.
 
-
     **Calculations:**
-
-    - Total QP memory = 1023 × 512B ≈ 511 KB per node.
-
-    - HCA Cache consumption = 511KB / 4MB ≈ 12.8% (causes thrashing with active QPs).
-
-    - Ring-only replacement = 2 QPs per node × 512B = 1 KB.
-
+    - Per GPU/HCA state = 1023 × 512B = 523,776B ≈ 511KiB.
+    - Cluster-wide peer connections = 1024 × 1023 / 2 = 523,776.
+    - Simplified cluster-wide QP state = 523,776 × 512B ≈ 268MB, before other HCA queues and metadata.
+    - Ring-only replacement = 2 neighbor QPs per GPU × 512B = 1KiB per GPU, with O(N) cluster-wide connections.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 1 KB Memory (Memory-Bound)**. Replacing all-to-all with ring topology eliminates cache
-    misses and connection overhead.
-
-    '
+    - **Result: O(1) Neighbor State per GPU.** One-QP-per-peer creates 1023 QPs per GPU and about 524K peer connections cluster-wide; ring, hierarchical, UD, or SRQ-based connection strategies reduce connection state and startup pressure.
 status: published
 provenance: imported
 requires_explanation: false

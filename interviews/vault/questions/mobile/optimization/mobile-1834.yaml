@@ -19,16 +19,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - LLM Layers: 32.
-    - Base model dimensions: 2048^2.
+    - Hidden size: 2048.
     - LoRA Rank: 4.
+    - FP16 tensors: 2 bytes/element.
 
     **Calculations:**
-    - Full attention backward: 32 layers x (4 projections x 2048^2 x 2 bytes) = 32 x 32MB = 1GB activation storage.
-    - LoRA adapters: 32 layers x 4 adapters x (2048x4 + 4x2048) x 2 bytes = 32 x 4 x 32KB = 4MB.
-    - Backward time reduction: 800ms x (4MB / 1GB) = ~3ms.
+    - If the frozen base forward is tracked, autograd must retain large per-layer activation tensors for 32 transformer layers.
+    - A single batch-token hidden activation is 2048 * 2 bytes = 4 KB before intermediate tensors and batch/sequence scaling.
+    - LoRA trainable weights per projection: 2048 * 4 + 4 * 2048 = 16,384 elements = 32 KB FP16.
+    - Four LoRA projections per layer across 32 layers: 32 * 4 * 32 KB = about 4 MB of adapter weights.
+    - Detaching the frozen base prevents storing the full base-model backward graph; only adapter inputs/outputs and LoRA parameters need gradient tracking.
 
     **Conclusion & Interpretation:**
-    - **Result: 267x Speedup (Memory-Bandwidth-Bound)**. Pruning autograd DAG structures radically reduces memory bandwidth constraints during edge fine-tuning.
+    - **Result: much smaller autograd graph, not a fixed 267x speedup.** The defensible claim is memory reduction from full-layer activation tracking to LoRA-adapter tracking, with actual runtime savings depending on sequence length, checkpointing, and kernels.
 status: published
 provenance: imported
 requires_explanation: false

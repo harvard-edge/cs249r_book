@@ -8,46 +8,27 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Diagnose Systolic Array Underutilization for Non-Square Matrices
-scenario: 'A TPU v5e (256x256 systolic array, 197 TOPS BF16) is running a transformer''s feedforward layer
-  with matrix dimensions W: [8192x4096] multiplied by batch X: [1x8192] (decode mode, batch size 1). Profiling
-  shows only 0.4% hardware utilization.'
-question: Why does TPU v5e utilization collapse to 0.4% at batch size 1, and what minimum batch gives
-  over 50% utilization?
+scenario: 'A TPU v5e (256x256 systolic array, 197 TOPS BF16) is running a transformer''s feedforward layer with matrix dimensions W: [8192x4096] multiplied by batch X: [1x8192] (decode mode, batch size 1). Profiling shows only 0.4% hardware utilization.'
+question: Why does TPU v5e utilization collapse to 0.4% at batch size 1, and what minimum batch gives over 50% utilization?
 details:
-  realistic_solution: 'Systolic 256×256 array operates on 256 rows simultaneously. Input [1×8192] feeds
-    only 1 row → 255/256 = 99.6% of PEs idle. For 50% utilization: need at least 128 rows = batch size
-    128. At batch 128: X=[128×8192], W=[8192×4096]. The array can process 256 rows; 128/256=50% row utilization.
-    Column dimension: 4096/256=16 tiles, each 100% utilized. Effective utilization: 50%×100%=50%. Minimum
-    batch for 50%: 128. Practical recommendation: batch=256 for full utilization. For latency-constrained
-    decode: use continuous batching to aggregate requests.'
-  common_mistake: '**The Pitfall:** Attributing low utilization to a memory bandwidth bottleneck.
-
-    **The Rationale:** It''s a common heuristic that "batch size 1 is memory bound," but engineers miss
-    the hard geometric constraint of the systolic array hardware itself.
-
-    **The Consequence:** Engineers waste time optimizing memory access patterns or trying quantization,
-    when the actual compute engine physically cannot accept the small matrix shape.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    The collapse is a GEMM shape/tiling problem, not primarily a bandwidth diagnosis. In decode, the matmul is X=[B x 8192] times W=[8192 x 4096]. A 256 x 256 systolic array tile has 256 row lanes and 256 column lanes. With B=1, each output-channel tile can keep the 256 columns busy, but only 1 of 256 row lanes carries useful work, so row-lane occupancy is about 1/256 = 0.39%. The 4096 output columns create 16 column tiles, but those tiles do not fix the single active row in each tile. Batch 128 reaches 50% row occupancy; the smallest batch strictly over 50% is 129, and batch 256 fills the row dimension. In decode serving, continuous batching groups independent requests so the array sees a taller B dimension while preserving per-request autoregressive semantics.
+  common_mistake: |
+    **The Pitfall:** Attributing low utilization to a memory bandwidth bottleneck.
+    **The Rationale:** It's a common heuristic that "batch size 1 is memory bound," but engineers miss the hard geometric constraint of the systolic array hardware itself.
+    **The Consequence:** Engineers waste time optimizing memory access patterns or trying quantization, when the actual compute engine physically cannot accept the small matrix shape.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Array Geometry: 256 x 256 processing elements.
-
     **Calculations:**
-
-    - Batch 1 Utilization: Input `[1x8192]` feeds only 1 row of the array. 1 / 256 = 0.39% row utilization
-    (approx 0.4%).
-
-    - Batch 128 Utilization: 128 / 256 = 50%.
-
-    - Batch 256 Utilization: 256 / 256 = 100%.
-
+    - GEMM shape: X=[B x 8192], W=[8192 x 4096], output=[B x 4096].
+    - Column tiling: 4096 / 256 = 16 column tiles; columns are well matched.
+    - Row occupancy at B=1: min(1, 256) / 256 = 0.0039 = 0.39%, so each tile has only one useful row.
+    - Row occupancy at B=128: 128 / 256 = 50%.
+    - Smallest batch strictly above 50%: B=129 gives 129 / 256 = 50.4%.
+    - Full row occupancy: B=256 gives 100%.
     **Conclusion & Interpretation:**
-
-    **Batch size 128 is the minimum for >50% utilization**, and continuous batching is required to aggregate
-    requests.
-
-    '
+    **Batch 1 maps to about 0.4% row-lane occupancy; batch 128 reaches 50%, and batch 129 is the minimum for >50%.** Continuous batching is the practical fix for decode.
 status: published
 provenance: imported
 requires_explanation: false

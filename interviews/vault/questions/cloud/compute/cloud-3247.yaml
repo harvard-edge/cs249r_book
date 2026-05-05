@@ -11,7 +11,7 @@ title: AMD MI300X Accelerator Selection for Large Language Model Inference
 scenario: Your team is tasked with deploying a new large language model (LLM) for real-time inference, which requires extremely low latency and high throughput. You are considering various accelerator options, and the AMD MI300X has been proposed as a primary candidate.
 question: How would you design an MI300X-based LLM inference architecture and justify it against GPUs, TPUs, and custom ASICs?
 details:
-  realistic_solution: A realistic solution would involve a detailed breakdown of the LLM's memory footprint (model weights, activations, key-value cache), estimated computational requirements for a given batch size and sequence length, and a comparative analysis of the MI300X's specifications against those of competing hardware. This should include discussing the benefits of the MI300X's 192 GB HBM3 for large models that don't fit on typical GPUs, its high memory bandwidth for efficient data movement, and the potential for sparse computation. Furthermore, the solution should address the software ecosystem (ROCm vs. CUDA, compilers, inference engines) and the effort required for optimization, especially when integrating with existing cloud infrastructure.
+  realistic_solution: A realistic solution would involve a detailed breakdown of the LLM's memory footprint (model weights, activations, key-value cache), estimated computational requirements for a given batch size and sequence length, and a comparative analysis of the MI300X's specifications against those of competing hardware. This should include discussing the benefits of the MI300X's 192 GB HBM3 for large models, while noting that a 100B FP16 model needs about 200 GB for weights alone and therefore requires quantization, tensor parallelism, or offload. Furthermore, the solution should address the software ecosystem (ROCm vs. CUDA, compilers, inference engines) and the effort required for optimization, especially when integrating with existing cloud infrastructure.
   common_mistake: |
     **The Pitfall:** Overemphasizing raw TFLOPS.
     **The Rationale:** Peak compute numbers are highly marketed and easy to compare.
@@ -20,12 +20,14 @@ details:
     1. **Assumptions & Constraints:**
        - 100B parameter model (FP16) = 200 GB weights.
        - MI300X: 192 GB HBM3, 5.3 TB/s bandwidth, 1300 TFLOPs FP16.
-       - Compute per inference: 100 TFLOPs.
+       - Batch-1 decode, weights resident if quantized or sharded; KV-cache traffic is additional.
     2. **Calculations:**
-       - Compute bound max throughput: 1300 TFLOPs / 100 TFLOPs = 13 inferences/sec.
-       - Memory bandwidth max throughput: 5.3 TB/s / 200 GB = 26 inferences/sec.
+       - FP16 capacity check: 100B * 2 bytes = 200 GB, which exceeds 192 GB before KV cache and runtime overhead.
+       - INT8 weight-only size is about 100 GB, leaving HBM for KV cache and activations on one MI300X; FP16 serving needs at least 2-way sharding or offload.
+       - Decode lower-bound weight traffic: 200 GB/token in FP16 or 100 GB/token in INT8. Bandwidth lower bounds are 200/5300 = ~37.7 ms/token FP16 and 100/5300 = ~18.9 ms/token INT8, before cache and kernel overheads.
+       - Compute lower bound per token is about 2 * 100B = 200 GFLOPs; 200 GFLOPs / 1300 TFLOPs/s = ~0.15 ms at peak, so small-batch decode is dominated by memory movement.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound. The bottleneck shifts between compute and memory bandwidth depending on batch size, but MI300X's 192 GB HBM3 natively fits near-100B models.**
+       - **Result: Capacity and bandwidth constrained at low batch.** A 100B FP16 model does not natively fit on one MI300X; use quantization or multi-GPU sharding, then size throughput from per-token weight and KV-cache traffic plus achieved kernel efficiency.
 status: published
 provenance: imported
 requires_explanation: true
@@ -39,7 +41,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- MI300X TFLOPS is 1300 instead of 1307
+  - MI300X TFLOPS is 1300 instead of 1307
 human_reviewed:
   status: not-reviewed
   by: null

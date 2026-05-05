@@ -8,49 +8,28 @@ competency_area: architecture
 bloom_level: evaluate
 phase: inference
 title: Architecting a Vision-Language Model on Snapdragon 8 Gen 3
-scenario: Your team wants to deploy a 3B parameter Vision-Language Model for real-time augmented reality
-  translation. The application has a strict 4 GB memory budget.
-question: How should a 3B Snapdragon vision-language model fit a 4GB memory budget and handle bandwidth-bound
-  decoding?
+scenario: Your team wants to deploy a 3B parameter Vision-Language Model for real-time augmented reality translation. The application has a strict 4 GB memory budget.
+question: How should a 3B Snapdragon vision-language model fit a 4GB memory budget and handle bandwidth-bound decoding?
 details:
-  realistic_solution: Implement W8A8 static quantization to map seamlessly to INT8 TOPS while fitting
-    the footprint constraint. Reserve exactly 3 GB for weights and 1 GB for dynamic KV cache and activations,
-    enforcing strict maximum sequence lengths to prevent OOM.
-  common_mistake: '**The Pitfall:** Ignoring the KV cache size and memory bandwidth limits.
-
-    **The Rationale:** Candidates assume that because a 3B model fits in 3GB of RAM, the 4GB budget is
-    sufficient, and they treat the compute capacity as the primary performance indicator.
-
-    **The Consequence:** The model crashes due to OOM when the KV cache fills up, and inference is severely
-    delayed because the system is actually bound by memory bandwidth, not compute.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: Use INT8 or mixed INT8/INT4 quantization only as the starting point, then design for bandwidth-bound decoding. Keep the weight package below the nominal 3 GB target by accounting for scales and runtime workspaces, cap the text context, quantize or compress KV where quality allows, and use sliding-window or chunked decoding for long AR sessions. Profile bytes moved per generated token and reduce memory traffic with fused dequantization, cache-aware tiling, and speculative or assisted decoding when it improves end-to-end latency.
+  common_mistake: |
+    **The Pitfall:** Ignoring the KV cache size and memory bandwidth limits.
+    **The Rationale:** Candidates assume that because a 3B model fits in 3GB of RAM, the 4GB budget is sufficient, and they treat the compute capacity as the primary performance indicator.
+    **The Consequence:** The model crashes due to OOM when the KV cache fills up, and inference is severely delayed because the system is actually bound by memory bandwidth, not compute.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Model: 3B params.
-
     - Budget: 4 GB.
-
     - Hardware: 45 TOPS INT8, memory bandwidth ~64 GB/s.
 
-
     **Calculations:**
-
-    - Weights = 3B * 1 byte = 3.0 GB.
-
-    - Remaining = 4.0 - 3.0 = 1.0 GB for KV cache.
-
-    - Compute limit = 6 GOPs/token -> 7,500 tokens/sec max.
-
-    - Bandwidth limit = 64 GB/s / 3.0 GB = ~21.3 tokens/sec.
-
+    - INT8 weights = 3B * 1 byte = 3.0 GB before scales, alignment, and delegate workspaces, so a practical package needs either compression below INT8 for some weights or a smaller active model.
+    - A safer budget might reserve about 2.6-2.8 GB for weights, 0.6-0.8 GB for KV cache, and the rest for activations and runtime buffers.
+    - If profiled decoding moves 1.5-3.0 GB of weights, KV, and metadata per generated token, 64 GB/s supports roughly 21-43 tokens/sec before contention and overhead.
+    - Peak compute does not set throughput unless per-token operations and effective utilization are measured for the deployed graph.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Bandwidth-Bound**. The architecture is throttled by LPDDR5X memory bandwidth at ~21 tokens/sec,
-    proving TOPS is not the limiting factor.
-
-    '
+    - **Result: Bandwidth-Bound**. Throughput should be derived from measured bytes/token, so the design must shrink memory traffic and bound KV growth instead of relying on TOPS or a nominal 3 GB weight fit.
 status: published
 provenance: imported
 requires_explanation: true

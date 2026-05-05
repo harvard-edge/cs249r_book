@@ -8,31 +8,32 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: Google TPU v5e Inference Degradation Strategy
-scenario: 'You are deploying a large language model (LLM) for real-time inference on a fleet of Google TPU v5e accelerators. Each TPU v5e unit boasts 16 GB of HBM, 197 TFLOPS (BF16), and a memory bandwidth of 1.6 TB/s. Due to an unexpected surge in traffic, the TPUs are operating at 95% utilization, leading to increased latency and occasional inference failures.'
-question: 'How would you gracefully degrade a TPU v5e LLM service running at 95% utilization to reduce latency and inference failures?'
+scenario: You are deploying a large language model (LLM) for real-time inference on a fleet of Google TPU v5e accelerators. Each TPU v5e unit boasts 16 GB of HBM, 197 TFLOPS (BF16), and a memory bandwidth of 1.6 TB/s. Due to an unexpected surge in traffic, the TPUs are operating at 95% utilization, leading to increased latency and occasional inference failures.
+question: How would you gracefully degrade a TPU v5e LLM service running at 95% utilization to reduce latency and inference failures?
 details:
-  realistic_solution: 'Implement a multi-tier degradation ladder:
-
+  realistic_solution: |
+    Implement a multi-tier degradation ladder:
     1.  **Tier 1 (Soft Degradation):** Initially, reduce the batch size for inference requests or dynamically prune less critical output features from the LLM, maintaining the primary model on the TPU. This slightly reduces computational load and HBM usage.
-
     2.  **Tier 2 (Model Fallback):** If congestion persists, switch to a smaller, more efficient LLM version (e.g., a distilled model) that requires less HBM and fewer TFLOPS, still running on the TPU v5e. This provides acceptable quality with higher throughput.
-
-    3.  **Tier 3 (QoS Shedding/Fail-operational):** For extremely high load, implement quality-of-service shedding by prioritizing critical requests and queueing or rate-limiting less critical ones. Simultaneously, set up a CPU-based fallback inference service (e.g., on a GCE instance with high core count) for the smallest, most robust model, to handle overflow traffic or complete TPU failure. This ensures the service remains operational, albeit at a significantly reduced quality and higher latency.'
+    3.  **Tier 3 (QoS Shedding/Fail-operational):** For extremely high load, implement quality-of-service shedding by prioritizing critical requests and queueing or rate-limiting less critical ones. Simultaneously, set up a CPU-based fallback inference service (e.g., on a GCE instance with high core count) for the smallest, most robust model, to handle overflow traffic or complete TPU failure. This ensures the service remains operational, albeit at a significantly reduced quality and higher latency.
   common_mistake: |
     **The Pitfall:** Only having a single, high-performance model with no prepared fallback options.
     **The Rationale:** Engineers optimize for the happy path, assuming autoscaling will always save them.
     **The Consequence:** When the primary system degrades under extreme load, the service completely collapses instead of offering a reduced but functional experience.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Primary model inference time on TPU = T_primary.
-    - CPU fallback inference time T_cpu = 10 * T_primary.
-    - TPUs are saturated.
+    - Current TPU utilization is 95%.
+    - Target steady-state utilization after degradation is 80% to restore queueing headroom.
+    - Arrival rate and per-request service cost are otherwise unchanged.
 
     **Calculations:**
-    - Offloading 10% of traffic to the CPU fallback increases overall capacity but introduces a long tail of latency.
+    - Current normalized load = 0.95 of TPU capacity.
+    - Load that must be removed to reach 80% = 0.95 - 0.80 = 0.15 of TPU capacity.
+    - Required offload or shedding fraction of current traffic = 0.15 / 0.95 = 15.8%.
+    - A 10% offload would leave utilization at 0.95 * 0.90 = 85.5%, which may still have high tail latency.
 
     **Conclusion & Interpretation:**
-    - **Result: 10% Traffic Offload (Queue Stabilization)**. By shifting 10% of the load to a CPU fallback, the TPU can stabilize its queue, preventing cascading failure across the remaining 90% of requests.
+    - **Result: About 16% load reduction for queue stabilization.** Use cheaper model tiers, QoS shedding, or overflow fallback to remove that load from the TPU path; CPU fallback is useful for fail-operational coverage but will have a slower latency tier.
 status: published
 provenance: imported
 requires_explanation: false

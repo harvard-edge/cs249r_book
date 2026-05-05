@@ -7,54 +7,31 @@ topic: systolic-dataflow
 competency_area: compute
 bloom_level: evaluate
 phase: both
-title: 'Systolic Array Mastery: Roofline Analysis for Custom LLM Kernel'
-scenario: 'A custom fused LLM decoding kernel on TPU v5e (197 TFLOPS BF16, 819 GB/s) shows 12 TFLOPS effective
-  throughput during profiling (6.1% MFU). The kernel does: load attention KV cache (batch=1, L=512, H=16,
-  D=128, BF16), and compute 1 decode step.'
-question: Is the 12 TFLOPS decode kernel compute- or memory-bound, what is the attainable performance,
-  and which optimization gives the largest gain?
+title: TPU v5e Roofline Analysis for Batch-1 LLM Decode
+scenario: 'A custom fused LLM decoding kernel on one TPU v5e chip (197 TFLOPS BF16 peak, 819 GB/s) shows 12 TFLOPS effective throughput during profiling (6.1% MFU). The kernel does: load attention KV cache (batch=1, L=512, H=16, D=128, BF16), and compute 1 decode step.'
+question: Is the 12 TFLOPS decode kernel compute- or memory-bound, what is the attainable performance, and which optimization gives the largest gain?
 details:
-  realistic_solution: 'Decode step (batch=1): load KV for all 512 context tokens. KV size: 512 * 16 heads
-    * 128 * 2 * 2 bytes = 4MB. Weight loads: 4 projection matrices * 4096^2 * 2 = 134MB. Attention compute:
-    2*1*512*128*16 = 2M FLOPs. Weight FLOPs: 2*4096^2*4 = 134M FLOPs. Total FLOPs ~136M. AI = 136M / 138MB
-    ≈ 1 FLOP/byte. The kernel is extremely memory bound. The memory roofline limit is 138MB / 819GB/s
-    = 0.168 ms, capping maximum throughput at ~0.8 TFLOPS. Therefore, the 12 TFLOPS figure from profiling
-    is physically impossible and indicates a profiling error. To optimize the memory bottleneck, use Grouped
-    Query Attention (GQA) and increase batch size.'
-  common_mistake: '**The Pitfall:** Blaming compute efficiency (low MFU) for the poor performance.
-
-    **The Rationale:** Candidates see 6.1% MFU and assume the kernel logic is bad, failing to realize
-    that batch=1 decoding is overwhelmingly memory-bandwidth bound.
-
-    **The Consequence:** Wasting time unrolling loops or tweaking instructions when the only way to improve
-    throughput is to reduce memory traffic (e.g., using Grouped Query Attention) or increase batch size.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Hardware: TPU v5e (197 TFLOPS BF16, 819 GB/s).
-
+  realistic_solution: Decode step batch=1 loads KV for all 512 context tokens. KV cache traffic is 512 * 16 * 128 * 2 tensors * 2 bytes = 4 MiB. If the fused kernel also streams four 4096x4096 BF16 projection matrices, weight traffic is 4 * 4096^2 * 2 = 128 MiB. Compute is about 136M FLOPs, so AI is roughly 136M / 132 MiB = 1 FLOP/byte. The memory roofline is about 819 GB/s * 1 FLOP/byte = 0.8 TFLOPS, far below the 197 TFLOPS compute peak. A reported 12 TFLOPS is likely using a different FLOP accounting or excluding weight/KV traffic; under the stated traffic model it is not attainable. The largest gains come from reducing bytes per token, such as GQA/MQA, KV quantization, batching, and weight reuse.
+  common_mistake: |
+    **The Pitfall:** Blaming compute efficiency (low MFU) for the poor performance.
+    **The Rationale:** Candidates see 6.1% MFU and assume the kernel logic is bad, failing to realize that batch=1 decoding is overwhelmingly memory-bandwidth bound.
+    **The Consequence:** Wasting time unrolling loops or tweaking instructions when the only way to improve throughput is to reduce memory traffic (e.g., using Grouped Query Attention) or increase batch size.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Hardware: one TPU v5e chip, using 197 TFLOPS BF16 peak and 819 GB/s HBM bandwidth.
     - Config: Batch=1, L=512, H=16, D=128, BF16.
 
-
     **Calculations:**
-
-    - Memory: KV = 4 MB, Weights = 134 MB. Total = 138 MB.
-
-    - Compute: KV = 2M FLOPs, Weights = 134M FLOPs. Total = 136M FLOPs.
-
-    - AI = 136M / 138MB ≈ 1 FLOP/byte.
-
-    - Roofline limits: Compute min time = 136M / 197T = 0.00069 ms. Memory min time = 138MB / 819GB/s
-    = 0.168 ms.
-
-    - Max Throughput: 136M FLOPs / 0.168 ms ≈ 0.8 TFLOPS.
-
+    - KV traffic = 512 * 16 * 128 * 2 * 2 = 4,194,304 bytes = 4 MiB.
+    - Weight traffic = 4 * 4096 * 4096 * 2 = 134,217,728 bytes = 128 MiB.
+    - Total traffic = 132 MiB = 138.4 MB.
+    - Compute = attention dot products (~2M FLOPs) + four projections (~134M FLOPs) = ~136M FLOPs.
+    - AI = 136M FLOPs / 138.4M bytes = 0.98 FLOPs/byte.
+    - Memory roofline = 819 GB/s * 0.98 FLOPs/byte = 0.80 TFLOPS.
+    - Equivalent memory time = 138.4MB / 819GB/s = 0.169ms; 136M / 0.169ms = 0.80 TFLOPS.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Physically Impossible**. The kernel is strictly memory-bound to a maximum of 0.8 TFLOPS,
-    making the profiled 12 TFLOPS an impossibility.'
+    - **Result: Memory-Bound Decode.** Under the stated bytes-read model, attainable performance is about 0.8 TFLOPS; optimize by reducing KV/weight traffic or increasing reuse, not by tuning the systolic matmul alone.
 status: published
 provenance: imported
 requires_explanation: true

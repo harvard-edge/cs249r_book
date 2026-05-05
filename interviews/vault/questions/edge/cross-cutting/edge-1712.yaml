@@ -11,7 +11,7 @@ title: Optimizing Privacy Guardrails on Edge TPU
 scenario: A privacy guardrail model on a Coral Edge TPU (4 TOPS INT8, 2W) experienced a latency spike to 80ms after a fairness-aware custom activation was added.
 question: What is causing the Coral privacy model's 80ms latency spike, and how would you refactor it to be fully TPU-compatible?
 details:
-  realistic_solution: The Edge TPU compiler lacks support for the custom activation function, forcing a graph partition. The TPU executes the first half, copies intermediate tensors over the slow USB/PCIe bus to the host CPU for the custom activation, and then copies data back. Refactor the model to replace the custom activation with an INT8-supported equivalent (e.g., ReLU6) and use Quantization-Aware Training (QAT) to recover fairness metrics, eliminating host-memory round-trips.
+  realistic_solution: The Edge TPU compiler lacks support for the custom activation function, forcing a graph partition. The TPU executes the supported subgraphs, copies intermediate tensors over USB to the host CPU for the custom activation, and then copies data back. Refactor the model to replace the custom activation with an INT8-supported equivalent or approximate it with supported layers, then recalibrate or retrain to recover fairness metrics while eliminating host-memory round-trips.
   common_mistake: |
     **The Pitfall:** Abandoning the 2W constraint by switching to heavier hardware.
     **The Rationale:** Believing the 80ms latency is due to a lack of raw compute power rather than intermediate I/O synchronization overhead.
@@ -23,11 +23,11 @@ details:
 
     **Calculations:**
     - Theoretical TPU Compute: 600,000,000 / 4,000,000,000,000 = 0.15 ms.
-    - I/O Overhead (PCIe/USB): ~8 ms base.
-    - Host fallback penalty: 80ms - 8.15ms = ~71.85 ms.
+    - Observed partitioned latency is 80 ms, far above the sub-millisecond ideal compute estimate.
+    - The excess time comes from graph partitioning: USB synchronization, host CPU execution of the custom activation, and loss of a single TPU schedule.
 
     **Conclusion & Interpretation:**
-    - **Result: ~71.85 ms penalty (I/O-Bound)**. CPU fallback causes a 71.85ms penalty. Recompiling fully to INT8 reduces total latency to ~8ms.
+    - **Result: host fallback dominates the 80 ms spike (Partition/I/O Bound)**. The exact post-refactor latency must be measured after compilation, but only the TPU-supported portion benefits from the 4 TOPS throughput until the custom activation is removed.
 status: published
 provenance: imported
 requires_explanation: false

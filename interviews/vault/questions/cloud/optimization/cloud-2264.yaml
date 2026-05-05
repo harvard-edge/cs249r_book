@@ -9,23 +9,30 @@ bloom_level: evaluate
 phase: training
 title: The Custom Op Compiler Co-Design
 scenario: Your research team invents a novel 'Gated Linear Attention' (GLA) operator that replaces softmax attention. It achieves great accuracy but runs 2× slower than FlashAttention-2 despite having lower theoretical FLOP count. The operator involves a recurrent scan over sequence positions that cannot be expressed as a single GEMM call.
-question: "Why can't the compiler generate efficient code for GLA, and how would you close the gap with FlashAttention-2?"
+question: Why can't the compiler generate efficient code for GLA, and how would you close the gap with FlashAttention-2?
 details:
-  realistic_solution: 'The performance gap has three sources rooted in compiler-hardware mismatch: (1) **No hardware primitive**: FlashAttention-2 maps to HMMA Tensor Core instructions because it is fundamentally a sequence of GEMMs. GLA''s recurrent scan maps to no hardware primitive — the compiler generates scalar FFMA loops, underutilizing the Tensor Cores by ~15×. (2) **Suboptimal memory access pattern**: The scan''s recurrent state (a d×d matrix per head, updated at each position) creates a loop-carried dependency. The compiler cannot tile across the sequence dimension because each position depends on the previous one. This forces sequential shared memory reads with no opportunity for the TMA to prefetch. (3) **Missing fusion opportunity**: The compiler cannot fuse the scan with the preceding linear projection because the scan has a data-dependent loop structure that breaks standard fusion patterns. Strategy to close the gap: (a) Implement a chunkwise parallel scan — process the sequence in chunks of 64 positions, compute intra-chunk with a parallel scan (maps to warp-level reductions), then propagate inter-chunk state serially. This converts O(L) serial steps to O(L/64) serial steps with O(64) parallel work per step. (b) Write a custom Triton kernel that fuses the linear projection with the chunked scan, manually managing the recurrent state in shared memory. (c) Register the fused operator with the compiler so it appears as a single opaque node that is not lowered through standard passes. Expected result: 1.3-1.5× slower than FlashAttention instead of 2× — the residual gap is the irreducible cost of the serial dependency.'
+  realistic_solution: |
+    The gap is not just a missing compiler pattern. FlashAttention-2 is efficient because the algorithm is reformulated around tiled matrix products and on-chip reductions; a GLA-style recurrence has loop-carried state across sequence positions, so a compiler cannot automatically recover the same parallel schedule from a naive scan expression. Some parts may still use vectorized or matrix instructions, but the recurrence limits full tiling across the sequence dimension and can expose extra memory traffic and launch overhead.
+
+    To close the gap, first derive an algorithmic reformulation that is valid for the specific recurrence: chunk the sequence, compute per-chunk summaries, and combine chunks only if the update operator is associative or can be represented as a composable state transform. Then write a custom CUDA/Triton kernel that fuses projections, gating, scan work, and output materialization so intermediate tensors stay in registers/shared memory where possible. Finally, register the fused op with the compiler so graph-level scheduling treats it as one optimized primitive. The realistic target is to reduce overhead substantially, not to assume the compiler alone can make the recurrence match FlashAttention-2.
   common_mistake: |
-    **The Pitfall:** Assuming the operator is just inherently slower because recurrence is fundamentally sequential.
-    **The Rationale:** Developers often blame algorithmic complexity without analyzing how loop-carried dependencies prevent TMA prefetching and compiler unrolling.
-    **The Consequence:** Accepting a 2x slowdown instead of employing parallel scan algorithms and chunking to map the problem onto warp-level reductions.
+    **The Pitfall:** Assuming either that recurrence makes the operator hopeless, or that the compiler can automatically make it FlashAttention-like.
+    **The Rationale:** Developers often skip the algorithmic question: whether the recurrence has an associative or otherwise composable form that supports chunking and fusion.
+    **The Consequence:** Teams either accept a 2x slowdown or chase compiler flags instead of building a valid fused kernel around the operator's actual dependency structure.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - seq_len=4096, d=128.
-       - Naive GLA scan has serial dependency.
-    2. **Calculations:**
-       - FlashAttention-2 at seq_len=4096: ~0.8ms.
-       - Naive GLA scan: 4096 sequential steps. At ~200ns per HBM read, 4096 * 200ns = ~0.8ms of purely sequential memory stall time.
-       - With scalar FFMA overheads, naive kernel takes ~1.6ms (2x slower).
-       - Chunked scan (chunk=64): 64 inter-chunk serial steps * ~200ns = ~12.8μs stall + parallel intra-chunk computation.
-    3. **Conclusion & Interpretation:** **Result: Memory-Bound (Latency)**. With Triton fusion, it achieves ~1.0-1.1ms. The 1.4x gap is the irreducible cost of the serial dependency.
+    **Assumptions & Constraints:**
+    - Sequence length: 4096, hidden size per head: 128.
+    - Baseline observation from profiling: naive GLA is about 2x slower than the FlashAttention-2 path for the same shape.
+    - The recurrence cannot be tiled across all sequence positions unless its state update is reformulated into a composable chunk summary.
+
+    **Calculations:**
+    - Naive expression: one long dependency chain, separate projection/scan/output kernels, and repeated reads/writes of intermediate tensors.
+    - Fused chunked expression: projection, gate update, scan state, and output are fused; intermediate tensors are materialized less often.
+    - If profiling shows 35-45% of time in intermediate tensor traffic and launch overhead, a fused kernel can plausibly recover much of that portion.
+    - The remaining gap is governed by the recurrence's true dependency structure, not by a generic HBM latency constant or a guaranteed O(L/64) serial reduction.
+
+    **Conclusion & Interpretation:**
+    - **Result: Algorithm-and-kernel-bound.** A valid chunked reformulation plus fused CUDA/Triton implementation can narrow the 2x gap, but FlashAttention-like efficiency is not automatically recoverable from compiler lowering alone.
 status: published
 provenance: imported
 requires_explanation: false

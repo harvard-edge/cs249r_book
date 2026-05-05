@@ -11,22 +11,24 @@ title: MoE Inference Batching Strategy for Throughput
 scenario: You are operating an online inference service using a 64-expert MoE on 4x MI300X. At low request rates (batch size 1-4), GPU utilization is 8%. A colleague suggests padding every batch to 64 tokens to improve expert routing efficiency.
 question: Should you pad low-rate MoE batches to 64 tokens on MI300X, or use another approach to improve utilization?
 details:
-  realistic_solution: Use continuous batching to aggregate requests from multiple users into a single large batch rather than padding a single request. At batch size 64, each expert receives ~2 tokens on average (top-2 routing), spreading load across all 64 experts. This improves MFU from ~8% to ~40% on MI300X without artificial latency padding.
+  realistic_solution: Use continuous batching to aggregate real requests from multiple users instead of padding a single low-rate request. Padding creates dummy tokens that still consume compute and memory bandwidth, but it does not add useful work or guarantee balanced expert routing. Continuous batching, admission control, and per-expert capacity limits improve utilization by increasing the number of real tokens available to schedule while bounding hot experts.
   common_mistake: |
     **The Pitfall:** Assuming that larger batches always improve utilization regardless of how they are constructed.
     **The Rationale:** Engineers apply standard dense model intuition to MoE architectures.
     **The Consequence:** Padding adds pure latency without proportionally improving utilization, because the routed tokens may still cluster to a few experts while the rest remain idle.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hardware: MI300X with 5.3 TB/s memory bandwidth.
-    - Expert load: 1B params * 2 bytes (BF16) = 2 GB per expert.
+    - Low-rate service receives 1-4 real tokens per scheduling window.
+    - Padding to 64 creates 60-63 dummy tokens.
+    - Top-2 routing can still send many real tokens to the same hot experts.
 
     **Calculations:**
-    - Latency at batch=1: 2 GB / 5.3 TB/s ≈ 0.38 ms to load weights.
-    - Latency at batch=64: 2 GB amortized over 64 tokens = 0.38 ms / 64 = 5.9 µs/token.
+    - If only 4 tokens are real, padding to 64 makes 60/64 = 93.75% of the batch artificial work.
+    - Each token still needs router dispatch, expert execution, and output combine, so dummy tokens add latency without increasing served throughput.
+    - Continuous batching with 64 real tokens performs up to 16x more useful work than a 4-token window while using the same nominal batch size.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bandwidth Bound**. Continuous batching provides a 10x improvement in memory efficiency without the artificial latency of padding.
+    - **Result: Utilization Bound**. Improve MoE utilization by batching real requests and controlling expert capacity; padding low-rate traffic wastes compute and does not fix routed-token imbalance.
 status: published
 provenance: imported
 requires_explanation: false

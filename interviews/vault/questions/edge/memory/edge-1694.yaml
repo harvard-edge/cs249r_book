@@ -11,7 +11,7 @@ title: Hailo-8 Zero-Copy Stream Optimization
 scenario: We are deploying a 4-camera traffic monitoring pipeline on an edge gateway equipped with a Hailo-8 accelerator. The pipeline processes 1080p frames but is bottlenecked at 40 FPS. Profiling reveals the Hailo-8 is idle 85% of the time while the host ARM CPU is pegged at 100% performing user-space to kernel-space buffer copies.
 question: What host-device data movement bottleneck stalls the pipeline, and how would zero-copy DMA fix it?
 details:
-  realistic_solution: The host CPU is choking on massive `memcpy` operations required to shift the uncompressed 1080p tensors from the V4L2 capture buffers into the HailoRT execution buffers. To resolve this, implement a zero-copy DMA pipeline using the Linux `dma_buf` framework. By allocating contiguous, page-locked (pinned) memory, the capture driver and the Hailo-8 PCIe DMA controller can share the exact same physical memory addresses. This completely bypasses the CPU data path, offloading the transfer to the DMA controller and unlocking the NPU's true compute capacity.
+  realistic_solution: The host CPU is choking on `memcpy` operations required to move uncompressed 1080p tensors from V4L2 capture buffers into HailoRT execution buffers. To resolve this, implement a zero-copy DMA pipeline using dma-buf-backed buffers that both the capture driver and HailoRT can import. This removes the user-space CPU copy and lets the device DMA from shared buffers where supported, but it does not make transfer latency literally zero; PCIe/DMA setup and bandwidth costs still remain.
   common_mistake: |
     **The Pitfall:** Attempting to solve low NPU utilization by increasing batch sizes or heavily compressing the input images.
     **The Rationale:** Candidates incorrectly assume the NPU is inefficiently scheduled, failing to recognize that the pipeline is hard-locked by the host CPU's memory bandwidth limits.
@@ -25,10 +25,11 @@ details:
     **Calculations:**
     - CPU read+write copy time = (6.22 MB * 2) / 2000 MB/s = ~6.2 ms per frame.
     - Current theoretical max FPS (CPU bound) = 1000 ms / 6.2 ms = 161 FPS (split across 4 cameras = ~40 FPS).
-    - Zero-copy DMA time = Overhead drops to PCIe latency only (bypass CPU).
+    - Zero-copy DMA removes the 6.2ms host memcpy from the CPU critical path.
+    - Remaining device transfer cost is DMA/PCIe dependent, not literally zero, and should be measured separately.
 
     **Conclusion & Interpretation:**
-    - **Result: 0 ms Copy Overhead (Compute-Bound)**. Eliminating the 6.2 ms CPU copy overhead transitions the pipeline from severely Host-CPU-Bound to NPU-Compute-Bound.
+    - **Result: ~6.2ms CPU-copy overhead removed**. Zero-copy DMA transitions the pipeline away from a host-CPU memcpy bottleneck, while remaining DMA/PCIe transfer time still counts in the end-to-end latency budget.
 status: published
 provenance: imported
 requires_explanation: false

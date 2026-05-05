@@ -8,46 +8,27 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: KV Cache Quantization Quality-Throughput Frontier
-scenario: 'Your 70B LLM serving fleet is KV-cache-limited: at BF16, each H100 can batch only 8 concurrent
-  8K-context requests. Product wants to 4× the throughput without adding GPUs.'
-question: What KV-cache quantization system would you deploy to get 4× throughput without adding GPUs
-  while keeping quality loss under 1%?
+scenario: 'Your 70B LLM serving fleet is KV-cache-limited: at BF16, each H100 can batch only 8 concurrent 8K-context requests. Product wants to 4× the throughput without adding GPUs.'
+question: What KV-cache quantization system would you deploy to get 4× throughput without adding GPUs while keeping quality loss under 1%?
 details:
-  realistic_solution: 'Step 1 — Profile per-layer sensitivity: Run eval suite with per-layer KV cache
-    quantization. Typically, the first 5-10% and last 5-10% of layers are most sensitive (they handle
-    input normalization and output logit formation). Middle layers are robust to aggressive quantization.
-    Step 2 — Mixed-precision KV cache: Keep early/late layers at BF16 or FP8, quantize middle layers to
-    INT4. This gives ~3× compression (not 4×, due to the BF16 layers) with <0.5% quality loss typically.
-    Step 3 — FP8 (E4M3) as compromise: FP8 gives 2× compression with near-zero quality loss (maintains
-    dynamic range better than INT8). Combined with INT4 for robust middle layers: ~3.5× compression. Step
-    4 — Measure: 3.5× KV cache compression → 3.5× batch size → ~3.5× throughput. To reach 4×, also implement
-    paged KV cache (vLLM-style) to eliminate fragmentation overhead (~10-15% waste), achieving the remaining
-    throughput gap.'
-  common_mistake: '**The Pitfall:** Blindly quantizing all KV cache to INT4 for maximum compression.
-
-    **The Rationale:** Engineers assume uniform sensitivity to quantization across all layers and attention
-    heads.
-
-    **The Consequence:** Disproportionate quality loss occurs in early layers that handle normalization,
-    causing the model outputs to degrade far past the 1% target.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: 'Step 1 — Profile per-layer sensitivity: Run eval suite with per-layer KV cache quantization. Typically, the first 5-10% and last 5-10% of layers are most sensitive (they handle input normalization and output logit formation). Middle layers are robust to aggressive quantization. Step 2 — Mixed-precision KV cache: Keep early/late layers at BF16 or FP8, quantize middle layers to INT4. This gives ~3× compression (not 4×, due to the BF16 layers) with <0.5% quality loss typically. Step 3 — FP8 (E4M3) as compromise: FP8 gives 2× compression with near-zero quality loss (maintains dynamic range better than INT8). Combined with INT4 for robust middle layers: ~3.5× compression. Step 4 — Measure: 3.5× KV cache compression → 3.5× batch size → ~3.5× throughput. To reach 4×, also implement paged KV cache (vLLM-style) to eliminate fragmentation overhead (~10-15% waste), achieving the remaining throughput gap.'
+  common_mistake: |
+    **The Pitfall:** Blindly quantizing all KV cache to INT4 for maximum compression.
+    **The Rationale:** Engineers assume uniform sensitivity to quantization across all layers and attention heads.
+    **The Consequence:** Disproportionate quality loss occurs in early layers that handle normalization, causing the model outputs to degrade far past the 1% target.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 70B at 8K context, BF16 KV.
-
+    - Current BF16 serving limit is 8 concurrent requests per H100.
+    - After weights and runtime overhead, assume 38 GB of HBM is available for KV cache, with 15% lost to fragmentation before paging.
     **Calculations:**
-
-    - 80 GB HBM - 42 GB = 38 GB for KV. Batch 8 = 20 GB + overhead.
-
-    - INT4 KV: ~0.63 GB/req -> batch 32 -> 4x throughput.
-
-    - Mixed BF16/INT4: ~0.72 GB/req -> batch 28 -> 3.5x throughput.
-
+    - Usable KV capacity before paging: 38 GB * 0.85 = 32.3 GB.
+    - Implied BF16 KV per request: 32.3 GB / 8 = ~4.0 GB/request.
+    - Mixed BF16/FP8/INT4 policy with ~3.5x effective compression: 4.0 GB / 3.5 = ~1.15 GB/request.
+    - Batch with compression but no paging: floor(32.3 / 1.15) = 28 requests, or 3.5x throughput if decode remains batch-limited.
+    - Batch with paged KV cache: floor(38 / 1.15) = 33 requests, so a target batch of 32 is feasible.
     **Conclusion & Interpretation:**
-
-    Adding Paged attention eliminates 15% fragmentation, expanding batch 28 to batch 32, achieving the
-    4x target.'
+    Mixed-precision KV quantization provides about 3.5x capacity gain, and paged KV cache recovers fragmentation enough to move from 28 to at least 32 concurrent requests. The 4x throughput target follows only if decode throughput is KV-capacity-limited and scales with the larger batch under the P99 latency target.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,14 +9,14 @@ bloom_level: create
 phase: both
 title: SRAM Tiering for Generation
 scenario: An Edge TPU design has 16MB of SRAM and ample LPDDR5. A transformer model has 50MB of weights.
-question: Design a memory tiering strategy that maximizes the utilization of the SRAM during the generation phase.
+question: Design a memory tiering strategy that maximizes the utilization of the SRAM during the generation phase?
 visual:
   kind: svg
   path: edge-2340.svg
   alt: Bar chart showing huge 2TB/s SRAM bandwidth vs small 100GB/s DRAM bandwidth
   caption: Bandwidth Hierarchy Capabilities
 details:
-  realistic_solution: 'SRAM is too small for weights. Pin dynamic KV-cache and frequently accessed norm/head weights in the 16MB SRAM. Stream the remaining 34MB weights from LPDDR5 per token. Compute bottleneck shifts entirely to the 100GB/s DRAM.'
+  realistic_solution: Treat the 16MB SRAM as a scratchpad for the generation working set, not as a full weight cache. Keep the active token's KV-cache slices, activations, lookup tables, and latency-critical per-layer parameters in SRAM. Stream the 50MB model weights from LPDDR5 tile-by-tile by layer, reusing each tile while the layer computes, then evict it for the next tile. Across tokens the weights are reused logically but cannot all remain resident in SRAM, so the design minimizes LPDDR5 traffic for dynamic state while accepting tiled weight streaming for the cold bulk parameters.
   common_mistake: |
     **The Pitfall:** Over-batching queries to improve throughput.
     **The Rationale:** Candidates attempt to batch queries to improve throughput without realizing batching massively expands the KV cache footprint.
@@ -28,30 +28,31 @@ details:
     - Model Weights: 50MB.
 
     **Calculations:**
-    - SRAM is too small for 50MB weights.
-    - Strategy: Pin dynamic KV-cache and frequently accessed norm/head weights in 16MB SRAM.
-    - Remaining Weights: Stream 34MB weights from LPDDR5 per token.
+    - SRAM cannot hold all 50MB of weights at once, so full-model pinning is impossible.
+    - Reserve SRAM for hot dynamic state and small per-layer structures that are reused during attention and projection work.
+    - Stream weights from LPDDR5 in tiles sized to leave room for KV slices and activations; each tile is consumed before the next tile is loaded.
+    - Do not compute "50MB - 16MB = 34MB per token" as a residual cache. SRAM capacity defines the working tile size, not a permanent split of the model.
 
     **Conclusion & Interpretation:**
-    - **Result: DRAM-Bound Generation (Memory-Bound).** By caching dynamic state in SRAM, the compute bottleneck shifts entirely to the 100GB/s DRAM streaming the remaining weights.
+    - **Result: Tiled SRAM Working Set (Memory-Bound).** SRAM should be spent on hot KV and activation data plus the current weight tile. The design reduces repeated dynamic-state traffic while LPDDR5 still supplies the larger weight stream; it does not imply that exactly 34MB of weights are reread as a fixed residual per token.
 status: published
 provenance: llm-draft
-expected_time_minutes: 9
 requires_explanation: true
+expected_time_minutes: 9
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-design-L6+
+  - gemini-generated
+  - target-design-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

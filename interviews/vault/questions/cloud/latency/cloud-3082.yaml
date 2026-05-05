@@ -11,22 +11,30 @@ title: 'Queueing Theory Specification: Design a Latency SLO Budget'
 scenario: Specify a complete latency budget for a three-tier inference system serving Claude-Haiku-scale requests. Total P99 SLO = 500ms. Arrival rate λ=1000 req/s.
 question: How would you allocate the 500ms P99 latency budget across the load balancer, router, and GPU tiers, and size each M/M/c tier?
 details:
-  realistic_solution: 'Three tiers in series: P99_total = P99_LB + P99_router + P99_GPU. GPU tier dominates (service time ~50ms for small model). Budget: LB ≤ 5ms P99, Router ≤ 15ms P99, GPU ≤ 480ms P99. LB: µ=100K req/s, λ=1000, ρ=0.01, Wq≈0, P99 ≈ service time = 1ms. Router: µ=10K req/s, λ=1000, ρ=0.1, Wq=0.1/(10K*0.9)=11µs, P99=service+queue=0.1ms+0.011ms≈0.1ms. GPU workers: need P99<480ms. With µ=20 req/s per worker and 100 workers: c=100, ρ=1000/2000=0.5. M/M/c P99 << M/M/1, W≈55ms. P99≈4.6*55=253ms < 480ms.'
+  realistic_solution: 'Allocate the 500ms P99 budget by giving tiny budgets to lightweight tiers and most of the budget to GPU service: LB 5ms, router 15ms, GPU 480ms. For the LB, one worker at μ=100,000 req/s has ρ=0.01 and P99 well below 5ms. For the router, one worker at μ=10,000 req/s has ρ=0.10 and P99 well below 15ms. For the GPU tier, assume each worker has mean service 50ms, so μ=20 req/s. The offered load is a=λ/μ=50 Erlangs, so c must exceed 50. Using Erlang C with c=51 gives ρ=1000/(51*20)=0.98, P(wait)≈0.84, and P99 queue wait ≈ ln(0.84/0.01)/(1020-1000)=222ms. Adding 50ms service gives about 272ms, under the 480ms GPU budget. Thus a mathematical minimum is LB=1, router=1, GPU=51 workers; in production, add headroom above 51 for burst and model error.'
   common_mistake: |
     **The Pitfall:** Allocating latency budgets by equal thirds across all tiers.
     **The Rationale:** Candidates avoid complex queueing theory math and default to evenly distributing the SLA.
     **The Consequence:** Massively over-provisioning lightweight tiers (LB, Router) while starving the bottleneck GPU tier, leading to certain SLA violations.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Total P99 Budget: 500ms. Arrival (λ): 1000 req/s.
-       - GPU Service Time: ~50ms.
-    2. **Calculations:**
-       - GPU Target P99: 500 - 2(LB) - 0.5(Router) = 497.5ms.
-       - 60 GPU Workers (µ=20): Capacity = 1200 req/s. ρ = 0.833.
-       - Mean Wait (Wq): ~25ms. Total W = 75ms.
-       - Tail P99 Approx: 4.6 * 75 = 345ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Queueing-Bound.** 345ms < 497.5ms. A minimal pool of 60 GPU workers reliably absorbs the variance without breaching the tight SLA.
+    **Assumptions & Constraints:**
+    - Total P99 budget = 500ms. Arrival rate λ = 1000 req/s.
+    - Budget allocation: LB 5ms, router 15ms, GPU 480ms.
+    - LB μ = 100,000 req/s. Router μ = 10,000 req/s.
+    - GPU mean service time = 50ms, so μ_gpu = 20 req/s per worker.
+
+    **Calculations:**
+    - LB with c=1: ρ = 1000/100000 = 0.01, so P99 is far below 5ms.
+    - Router with c=1: ρ = 1000/10000 = 0.10, so P99 is far below 15ms.
+    - GPU offered load a = λ/μ_gpu = 1000/20 = 50 Erlangs; c must be greater than 50 for stability.
+    - Check c=51: ρ = 1000/(51*20) = 0.980.
+    - Erlang C gives P(wait) ≈ 0.84.
+    - M/M/c queue tail: P(Wq > t) = P(wait) * exp(-(cμ-λ)t).
+    - P99 queue wait = ln(0.84/0.01)/(1020-1000) = 222ms.
+    - GPU P99 response ≈ 222ms + 50ms = 272ms < 480ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: LB=1, router=1, and GPU=51 workers is the mathematical minimum under these assumptions.** Production sizing should add headroom above the minimum because 98% GPU utilization leaves little margin.
 status: published
 provenance: imported
 requires_explanation: true

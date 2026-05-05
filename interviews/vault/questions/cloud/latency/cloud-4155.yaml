@@ -8,26 +8,29 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: Queueing Theory Applied to GPU Batch Scheduling
-scenario: 'Your H100 inference server batches requests every 20ms to maximize throughput. At 200 req/s, the average batch size is 4 requests.'
-question: "Using M/D/1, what is the expected wait at 20ms batching, and why can a 50ms batch window improve P99 despite more queueing?"
+scenario: Your H100 inference server batches requests every 20ms to maximize throughput. At 200 req/s, the average batch size is 4 requests.
+question: Using M/D/1, what is the expected wait at 20ms batching, and why can a 50ms batch window improve P99 despite more queueing?
 details:
   realistic_solution: 'M/D/1 queue with 20ms batch window: avg wait = 10ms (half the window). Per-request compute at batch=4: decode takes 12ms per token (weights loaded once for 4 requests). Total = 10ms wait + 12ms compute = 22ms per request. With 50ms window: avg wait = 25ms. Per-request compute at batch=10: weights loaded once for 10 requests, decode = 5ms per token (memory bandwidth amortized). Total = 25ms + 5ms = 30ms average but P99 improves because: (1) larger batches have lower variance in compute time, (2) GPU utilization increases from 30% to 75%, reducing queueing from bursty arrivals. Optimal window: ~35ms, balancing wait time against amortization.'
   common_mistake: |
-    **The Pitfall:** Assuming larger batches always strictly increase tail latency.
-    **The Rationale:** Focusing solely on the increased queueing delay without considering the reduction in per-request compute time.
-    **The Consequence:** Keeping batch windows too small, resulting in poor memory bandwidth amortization and ironically worse P99 under burst load.
+    **The Pitfall:** Choosing the smallest possible batch window because it minimizes batching wait in isolation.
+    **The Rationale:** This ignores that small batches may waste GPU memory bandwidth and create higher service-time variance under bursty arrivals.
+    **The Consequence:** The system can show a better average wait but a worse P99 because under-sized batches fail to amortize compute and let bursts build a backlog.
   napkin_math: |
     **Assumptions & Constraints:**
     - Arrival rate: 200 req/s (1 every 5ms).
-    - 20ms window (Batch=4): Compute 12ms/token.
-    - 50ms window (Batch=10): Compute 5ms/token.
+    - 20ms window: expected batch size = 200 req/s * 0.020s = 4 requests.
+    - 50ms window: expected batch size = 200 req/s * 0.050s = 10 requests.
+    - Approximate compute per request: 12ms at batch 4, 5ms at batch 10.
 
     **Calculations:**
-    - Batch=4: Avg wait = 10ms. Total = 10ms + 12ms = 22ms. GPU Util = 2.4x parallelism needed during bursts (Overwhelmed).
-    - Batch=10: Avg wait = 25ms. Total = 25ms + 5ms = 30ms. GPU Util is < 100%, handling bursts easily.
+    - 20ms window: average batching wait is approximately W/2 = 10ms; average latency contribution = 10ms + 12ms = 22ms.
+    - 50ms window: average batching wait is approximately W/2 = 25ms; average latency contribution = 25ms + 5ms = 30ms.
+    - The 50ms window does not win on average latency from these numbers alone.
+    - It can improve P99 when larger batches reduce service-time variance and prevent burst backlog by amortizing memory-bandwidth-bound work.
 
     **Conclusion & Interpretation:**
-    - **Result: 30ms average latency with lower P99 (Compute-Bound during bursts).**
+    - **Result: 20ms batching has ~10ms average wait, while 50ms batching has ~25ms average wait.** A larger window can still lower P99 if the throughput and variance gains are larger than the added queueing delay under bursts.
 status: published
 provenance: imported
 requires_explanation: false

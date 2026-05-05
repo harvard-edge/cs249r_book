@@ -8,40 +8,30 @@ competency_area: networking
 bloom_level: apply
 phase: both
 title: Buffer Management with Dynamic Thresholds
-scenario: Your 64-port 400G switch has 64MB of shared buffer serving a MI300X cluster. You notice that
-  during AllReduce, 4 elephant flows consume 80% of the buffer, causing packet drops for 60 smaller flows
-  sharing the remaining 20%. The switch uses static per-port buffer allocation of 1MB each.
-question: How would you redesign switch buffer management so 4 elephant flows do not starve 60 mice flows
-  on the 64-port 400G switch?
+scenario: Your 64-port 400G switch has 64MB of shared buffer serving a MI300X cluster. You notice that during AllReduce, 4 elephant flows consume 80% of the buffer, causing packet drops for 60 smaller flows sharing the remaining 20%. The switch uses static per-port buffer allocation of 1MB each.
+question: How would you redesign switch buffer management so 4 elephant flows do not starve 60 mice flows on the 64-port 400G switch?
 details:
-  realistic_solution: 'Switch from static to dynamic buffer management using the alpha threshold algorithm.
-    Set alpha = 8 for the AllReduce traffic class, allowing a single port to use up to alpha/(1+alpha)
-    × free_buffer = 8/9 × free_buffer when other ports are idle. Reserve 8MB (12.5%) as a headroom pool
-    that only PFC-paused ports can use. Configure per-traffic-class minimums: 256KB guaranteed per port
-    for mice flows (TC3), with the remaining buffer dynamically shared for elephant flows (TC0). This
-    ensures that when 4 ports run elephant flows, each can burst up to ~14MB during incast, while mice
-    flows always have their 256KB × 64 = 16MB guaranteed pool. Enable ECN at 40% of per-port dynamic limit.'
-  common_mistake: '**The Pitfall:** Keeping static per-port allocation or setting the dynamic threshold
-    alpha too low.
-
-    **The Rationale:** Assuming strict static limits prevent starvation, or using overly conservative
-    dynamic parameters.
-
-    **The Consequence:** Wasting buffer on idle ports while artificially throttling active elephant flows
-    and degrading AllReduce throughput.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - 64MB buffer
+  realistic_solution: Replace static 1MB-per-port allocation with per-class minimums plus a shared dynamic pool. Reserve 16MB for mice traffic by guaranteeing 256KB per port across 64 ports, and reserve 8MB as PFC headroom. The remaining 40MB becomes the shared pool for elephant bursts, controlled by a dynamic threshold so no elephant port can monopolize the pool while others are active. With 4 elephant ports, cap each near 10MB plus any small per-port minimum, and start ECN around 4MB per elephant queue so senders slow before the shared pool is exhausted. This gives mice their guaranteed space, lets elephants use idle buffer, and bounds worst-case starvation.
+  common_mistake: |
+    **The Pitfall:** Keeping static per-port allocation or setting the dynamic threshold alpha too low.
+    **The Rationale:** Assuming strict static limits prevent starvation, or using overly conservative dynamic parameters.
+    **The Consequence:** Wasting buffer on idle ports while artificially throttling active elephant flows and degrading AllReduce throughput.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Total shared buffer: 64MB.
+    - 64 ports need a mice guarantee of 256KB each.
+    - Reserve 8MB for PFC headroom.
+    - 4 elephant flows share the remaining dynamic pool.
 
     **Calculations:**
-
-    - Mice provision: 256KB guaranteed at 100Mbps = 20.48ms buffering.
+    - Mice reserved pool: 64 * 256KB = 16MB.
+    - Dynamic elephant pool: 64MB - 16MB - 8MB = 40MB.
+    - Fair active-elephant share: 40MB / 4 = 10MB per elephant flow.
+    - Existing static allocation gives each port 1MB, so 4 elephant ports can use only 4MB without stealing from others.
+    - Proposed allocation preserves 16MB for mice while allowing up to 40MB total elephant burst absorption.
 
     **Conclusion & Interpretation:**
-
-    - Elephant flows can burst significantly.'
+    - **Result: 16MB guaranteed for mice, 8MB headroom, and 40MB dynamically shared by elephants (Buffer-Allocation-Bound)**. Four elephants can each absorb about 10MB of burst without consuming the mice reserve.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,25 +11,27 @@ title: FlashAttention for Cross-Attention in Multimodal Models
 scenario: You build a multimodal model where a 2048-token text sequence cross-attends to 16384 image patch tokens on a GPU. The Q comes from text (2048 tokens) and K,V come from image patches (16384 tokens). Standard cross-attention materializes a 2048x16384 matrix.
 question: Is this cross-attention operation memory-bound or compute-bound with standard attention, and how does FlashAttention-2 change this?
 details:
-  realistic_solution: Standard cross-attention requires massive HBM read/write volume for the rectangular attention matrix, bottlenecking on memory bandwidth. FlashAttention-2 avoids materializing this matrix to HBM, drastically increasing the arithmetic intensity and making it compute-bound.
+  realistic_solution: Standard cross-attention materializes a large rectangular score/probability matrix, so it has much higher HBM traffic than the fused attention work actually needs. On a GPU with a 200 FLOP/byte roofline, the standard implementation is memory-bound at roughly 120 FLOP/byte. FlashAttention-2 avoids writing the attention matrix to HBM, raising arithmetic intensity to roughly 1900 FLOP/byte in this setup; that can shift the kernel toward compute-bound on GPUs whose compute-to-bandwidth roofline is below that value, but it is not universally compute-bound on every device.
   common_mistake: |
     **The Pitfall:** Treating cross-attention identically to self-attention for FlashAttention analysis.
     **The Rationale:** Engineers assume a square NxN attention matrix, forgetting that cross-attention produces a rectangular MxN matrix, which alters the tiling and IO arithmetic intensity.
     **The Consequence:** Incorrect IO bandwidth and speedup estimations for multimodal workloads.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 2048 text tokens, 16384 image tokens, 64 heads, 1.1 TFLOPs compute.
+    - 2048 text tokens, 16384 image tokens, 64 heads, FP16 elements.
+    - Total attention compute across heads is 1.1 TFLOPs.
+    - Example GPU roofline: 200 FLOP/byte.
 
     **Calculations:**
-    - Q = 0.5MB, K = 4MB, V = 4MB.
-    - Standard Matrix S: 2048 × 16384 × 2 bytes ≈ 67.1MB.
-    - Standard IO per head: 0.5 + 4 + 4 + (2 × 67.1) + 0.5 = 143.2MB. Total = 64 × 143.2MB ≈ 9.16GB.
-    - Standard Intensity: 1.1 TFLOPs / 9.16GB ≈ 120 FLOPs/Byte.
-    - Flash IO: Drops matrix S. Total = 64 × 9MB = 576MB.
-    - Flash Intensity: 1.1 TFLOPs / 576MB ≈ 1910 FLOPs/Byte.
+    - Per head Q read: 2048 × 64 × 2B ≈ 0.25 MiB; K and V reads: 16384 × 64 × 2B ≈ 2 MiB each.
+    - Attention matrix per head: 2048 × 16384 × 2B = 64 MiB. Writing and rereading scores/probabilities is roughly 128 MiB per head.
+    - Standard IO per head is about 0.25 + 2 + 2 + 128 + 0.25 = 132.5 MiB, or about 8.3 GiB across 64 heads.
+    - Standard arithmetic intensity ≈ 1.1e12 FLOP / 8.9e9 bytes ≈ 124 FLOP/byte, below the 200 FLOP/byte roofline.
+    - FlashAttention-2 avoids HBM traffic for the attention matrix. Per-head IO is roughly Q + K + V + output ≈ 4.5 MiB, or about 288 MiB across 64 heads.
+    - Flash arithmetic intensity ≈ 1.1e12 FLOP / 3.0e8 bytes ≈ 3600 FLOP/byte.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound**. FlashAttention-2 transforms the operation from memory-bound (~120 FLOPs/Byte) to compute-bound (~1910 FLOPs/Byte).
+    - **Result: Standard is memory-bound on the stated roofline; FlashAttention-2 removes the dominant HBM traffic and can make this workload compute-bound on such hardware.**
 status: published
 provenance: imported
 requires_explanation: false

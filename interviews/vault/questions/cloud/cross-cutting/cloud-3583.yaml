@@ -8,66 +8,33 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: both
 title: Fairness-Aware LLM Evaluation on AMD MI300X
-scenario: 'Your team is deploying a large language model (LLM) for a high-stakes application (e.g., clinical
-  decision support) where ensuring algorithmic fairness is paramount. You are tasked with designing and
-  implementing a robust post-deployment fairness evaluation pipeline. The LLM will run on a cluster of
-  AMD MI300X accelerators, each boasting 192 GB HBM3 memory, 1,307 TFLOPS FP16 sparse performance, and
-  5.3 TB/s memory bandwidth. The evaluation requires computing multiple fairness metrics (demographic
-  parity, equalized odds, intersectional fairness) across a massive, diverse dataset with numerous sensitive
-  attributes and potentially hundreds of subgroups. Your goal is to compare two architectural approaches
-  for this evaluation: one relying on sequential processing per subgroup on individual MI300X units, and
-  another employing a distributed, parallel strategy. How would you design and evaluate these architectures
-  to ensure comprehensive, efficient, and timely fairness assessments without compromising the depth of
-  analysis, especially for thinly represented intersectional subgroups?'
-question: How would you compare sequential versus distributed fairness evaluation on MI300X while preserving
-  deep intersectional subgroup analysis?
+scenario: 'Your team is deploying a large language model (LLM) for a high-stakes application (e.g., clinical decision support) where ensuring algorithmic fairness is paramount. You are tasked with designing and implementing a robust post-deployment fairness evaluation pipeline. The LLM will run on a cluster of AMD MI300X accelerators, each boasting 192 GB HBM3 memory, 1,307 TFLOPS FP16 sparse performance, and 5.3 TB/s memory bandwidth. The evaluation requires computing multiple fairness metrics (demographic parity, equalized odds, intersectional fairness) across a massive, diverse dataset with numerous sensitive attributes and potentially hundreds of subgroups. Your goal is to compare two architectural approaches for this evaluation: one relying on sequential processing per subgroup on individual MI300X units, and another employing a distributed, parallel strategy. How would you design and evaluate these architectures to ensure comprehensive, efficient, and timely fairness assessments without
+  compromising the depth of analysis, especially for thinly represented intersectional subgroups?'
+question: How would you compare sequential versus distributed fairness evaluation on MI300X while preserving deep intersectional subgroup analysis?
 details:
-  realistic_solution: 'A realistic solution involves a hybrid distributed evaluation architecture. Utilize
-    the MI300X''s 192 GB HBM3 and 5.3 TB/s bandwidth for holding and rapidly processing large mini-batches
-    of evaluation data on each node. Implement data parallelism where different MI300X instances (or even
-    different GPUs within an instance if multi-GPU setups are considered) simultaneously evaluate distinct
-    data subsets or specific subgroups. Employ optimized data structures and custom kernels (potentially
-    in ROCm/HIP) to accelerate the computation of fairness metrics, leveraging the 1,307 TFLOPS FP16 sparse
-    performance where applicable (e.g., for sparse representations of subgroup indicators or metric aggregations).
-    A tiered evaluation strategy would also be key: performing rapid, high-level fairness checks frequently,
-    and then triggering deeper, more computationally intensive intersectional analyses only for models
-    or updates that show potential disparities, using dynamic resource allocation from the cluster.'
-  common_mistake: '**The Pitfall:** Underestimating the computational and I/O overhead of comprehensive
-    fairness evaluations with high-cardinality attributes.
-
-    **The Rationale:** Teams fail to design pipelines that fully leverage the available memory bandwidth
-    and compute parallelism of accelerators like the MI300X.
-
-    **The Consequence:** This results in either simplifying the evaluation (e.g., checking only top-level
-    parity) or experiencing prohibitively long evaluation bottlenecks.'
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: 'A realistic solution involves a hybrid distributed evaluation architecture. Utilize the MI300X''s 192 GB HBM3 and 5.3 TB/s bandwidth for holding and rapidly processing large mini-batches of evaluation data on each node. Implement data parallelism where different MI300X instances (or even different GPUs within an instance if multi-GPU setups are considered) simultaneously evaluate distinct data subsets or specific subgroups. Employ optimized data structures and custom kernels (potentially in ROCm/HIP) to accelerate the computation of fairness metrics, leveraging the 1,307 TFLOPS FP16 sparse performance where applicable (e.g., for sparse representations of subgroup indicators or metric aggregations). A tiered evaluation strategy would also be key: performing rapid, high-level fairness checks frequently, and then triggering deeper, more computationally intensive intersectional analyses only for models or updates that show potential disparities, using dynamic resource
+    allocation from the cluster.'
+  common_mistake: |
+    **The Pitfall:** Underestimating the computational and I/O overhead of comprehensive fairness evaluations with high-cardinality attributes.
+    **The Rationale:** Teams fail to design pipelines that fully leverage the available memory bandwidth and compute parallelism of accelerators like the MI300X.
+    **The Consequence:** This results in either simplifying the evaluation (e.g., checking only top-level parity) or experiencing prohibitively long evaluation bottlenecks.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Evaluation dataset: 500 GB.
-
     - Data sample size: 1 KB (500 million samples).
-
     - Bandwidth (single MI300X): 5.3 TB/s.
-
     - Compute: ~100 FP16 operations per sample.
 
-
     **Calculations:**
-
-    - Data load time (1 unit): 500 GB / 5.3 TB/s = ~0.094 seconds per epoch.
-
-    - Data load time (8 units): ~0.012 seconds.
-
+    - Sequential single-MI300X scan time lower bound: 500 GB / 5.3 TB/s = ~0.094 seconds if data is already local and read once.
+    - Distributed 8-MI300X scan lower bound with perfect partitioning: (500 GB / 8) / 5.3 TB/s = ~0.012 seconds per device.
     - Total operations: 500 million * 100 = 5e10 FP16 ops.
-
-    - Practical compute (10% utilization): 1.3e14 ops/sec.
-
-    - Compute time: 5e10 / 1.3e14 = ~0.0004 seconds per epoch.
-
+    - Even at 10 TFLOPS sustained dense-equivalent metric throughput, compute time is 5e10 / 1e13 = ~0.005 seconds, below the scan time.
+    - Add aggregation overhead for subgroup counts, confusion matrices, and confidence intervals; this grows with subgroup cardinality but is small if metrics are reduced locally before all-reduce.
+    - Thin intersectional groups should not be dropped in the distributed design; preserve raw counts and uncertainty intervals so rare groups are flagged for deeper offline review.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Memory-Bandwidth-Bound.** Memory bandwidth and efficient data loading, not raw FP16 compute,
-    are the primary bottlenecks for iterating over massive fairness datasets.'
+    - **Result: Scan- and Aggregation-Bound.** Distributed evaluation can reduce the scan lower bound from ~0.094s to ~0.012s under ideal locality, but end-to-end time is set by data movement, local reductions, all-reduce, and preserving intersectional subgroup statistics.
 status: published
 provenance: imported
 requires_explanation: false

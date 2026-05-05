@@ -8,11 +8,11 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: Real-time Multimodal Assistant Latency on Hexagon NPU
-scenario: "You are architecting an on-device real-time visual assistant running entirely on a smartphone powered by the Qualcomm Hexagon NPU. The application streams 30fps camera frames and user audio, processes them through a local 7B parameter multimodal LLM, and outputs synthesized speech. The system must guarantee a Time-to-First-Token (TTFT) under 600ms and a Time-Per-Output-Token (TPOT) under 80ms."
-question: "How would you schedule a real-time multimodal assistant on Hexagon NPU while avoiding shared memory bottlenecks?"
+scenario: You are architecting an on-device real-time visual assistant running entirely on a smartphone powered by the Qualcomm Hexagon NPU. The application streams 30fps camera frames and user audio, processes them through a local 7B parameter multimodal LLM, and outputs synthesized speech. The system must guarantee a Time-to-First-Token (TTFT) under 600ms and a Time-Per-Output-Token (TPOT) under 80ms.
+question: How would you schedule a real-time multimodal assistant on Hexagon NPU while avoiding shared memory bottlenecks?
 details:
   realistic_solution: |
-    Strict subsystem isolation is required to mitigate LPDDR5X bus contention. Offload all audio/video pre-processing to the DSP and ISP. Quantize the 7B LLM to W4A8 (INT4 weights, INT8 activations) to shrink memory bandwidth requirements during the autoregressive decode phase. Chunk the prompt prefill phase to prevent the high-throughput NPU compute from starving the ISP's continuous DMA streams.
+    Use a priority schedule, not just quantization. Give camera ISP DMA and audio DSP capture hard real-time priority with reserved bandwidth, run audio preprocessing continuously on the DSP, and run vision preprocessing in ISP/GPU tiles that write bounded ring buffers. The LLM uses W4A8 weights and two NPU modes: chunked prefill in short bursts that yield between camera frame deadlines, then steady decode slots paced to a TPOT budget. Speech output is buffered one phrase ahead, while decode DMA is rate-limited with QoS so model weight/KV reads cannot starve camera or audio streams.
   common_mistake: |
     **The Pitfall:** Treating the NPU as a standalone black box.
     **The Rationale:** Candidates ignore memory bandwidth contention on the shared LPDDR5X bus from the camera ISP and DSP audio processing.
@@ -23,15 +23,19 @@ details:
     - ISP/DSP/OS background usage: 20 GB/s. Available for NPU: 48 GB/s.
     - 7B Model (INT4): ~3.5 GB footprint.
     - NPU Effective Compute: 18 TOPS (40% utilization of 45 TOPS).
-    - Prefill compute (500 tokens): 500 * 7B * 2 = 7 TFLOPs.
+    - Decode traffic assumption: one full INT4 weight stream plus about 0.1 GB KV/activation traffic per output token.
+    - Prompt size: 500 tokens.
 
     **Calculations:**
-    - TPOT Memory Time: 3.5 GB / 48 GB/s = 73ms (Under 80ms target).
-    - Prefill Time: 7 TFLOPs / 18 TOPS = 388ms.
-    - Total TTFT: 388ms (Prefill) + 50ms (Pre) + 50ms (Post) = 488ms.
+    - Decode memory traffic per token = 3.5 GB weights + 0.1 GB KV/activations = 3.6 GB.
+    - Decode memory time = 3.6 GB / 48 GB/s = 75 ms/token.
+    - Decode compute per token = 2 * 7B ops = 14 GOP; compute time = 14e9 / 18e12 = 0.78 ms, so TPOT is memory-bound.
+    - Prefill compute approximation = 500 tokens * 2 * 7B ops/token = 7.0 TOP.
+    - Prefill compute time = 7.0 TOP / 18 TOPS = 389 ms, scheduled as 8 chunks of about 49 ms with yields between camera deadlines.
+    - TTFT budget = 389 ms prefill + 50 ms preprocessing + 50 ms speech/postprocessing + about 40 ms scheduling guard = 529 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 73ms TPOT, 488ms TTFT (Memory-Bandwidth Bottleneck)**. W4A8 quantization allows the system to satisfy strict latency deadlines, overcoming the severe memory-bandwidth bottleneck.
+    - **Result: about 75 ms TPOT and 529 ms TTFT under reserved bandwidth.** W4A8 is necessary but not sufficient; the real design requirement is priority DMA/QoS plus chunked prefill and paced decode so multimodal streams keep their deadlines.
 status: published
 provenance: imported
 requires_explanation: true

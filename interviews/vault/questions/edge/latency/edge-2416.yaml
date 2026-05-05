@@ -7,11 +7,16 @@ topic: queueing-theory
 competency_area: latency
 bloom_level: evaluate
 phase: both
-title: 'Coral TPU Batching Effect on Queue Stability'
-scenario: 'A 4-lane traffic-monitoring pipeline on an Edge TPU runs YOLOv5n at a fixed resolution. Per-frame service time is 25 ms for batch-of-1, 32 ms for batch-of-2, and 48 ms for batch-of-4. Frames arrive Poisson at 60 fps aggregated across the four lanes. The system must hold a 95th-percentile response time under 80 ms to satisfy a downstream signal-control SLA.'
-question: 'Evaluate whether batch-of-1, batch-of-2, or batch-of-4 best satisfies the 60 fps arrival rate at the 80 ms p95 SLA using M/D/1 queueing theory.'
+title: Coral TPU Batching Effect on Queue Stability
+scenario: A 4-lane traffic-monitoring pipeline on an Edge TPU runs YOLOv5n at a fixed resolution. Per-frame service time is 25 ms for batch-of-1, 32 ms for batch-of-2, and 48 ms for batch-of-4. Frames arrive Poisson at 60 fps aggregated across the four lanes. The system must hold a 95th-percentile response time under 80 ms to satisfy a downstream signal-control SLA.
+question: Evaluate whether batch-of-1, batch-of-2, or batch-of-4 best satisfies the 60 fps arrival rate at the 80 ms p95 SLA using M/D/1 queueing theory?
 details:
-  realistic_solution: 'Arrival rate lambda = 60 fps. Batch-of-1 (mu=40, rho=1.5) is unstable - drop. Batch-of-2 effective mu = 62.5 fps but the unit of work is a 2-frame batch, so view as M/D/1 with lambda_b = 30 batches/s, mu_b = 31.25 batches/s, rho = 0.96 - very close to instability, expected fill time 1/lambda_b * 1 ~= 33 ms wait for the second frame plus M/D/1 Wq = (rho / (2*mu_b*(1-rho))) = 0.96/(2*31.25*0.04) = 384 ms - fails the SLA badly. Batch-of-4: lambda_b = 15, mu_b = 20.83 (1/0.048), rho = 0.72; M/D/1 Wq = 0.72 / (2*20.83*0.28) = 62 ms; fill time for the slowest frame in a batch of 4 at 60 fps arrivals ~= 3/60 = 50 ms; service 48 ms; total ~= 62 + 50 + 48 = 160 ms total response (head of batch sees less). For p95 with deterministic service and Poisson arrivals, the dominant term is fill + service for the last-arriving frame in the batch, which exceeds 80 ms in every batch >= 2 case at this load. Recommend dropping the offered load (e.g., spatial down-sampling) or upgrading to a faster TPU; static batching cannot meet the 80 ms p95 at 60 fps Poisson here. Use nsys profiling to monitor actual queue depths.'
+  realistic_solution: |
+    Model the server at the batch level, then add batch-formation delay back to each frame. For batch-of-1, service time is 25 ms, so capacity is 40 fps and rho = 60/40 = 1.5; the queue is unstable and cannot satisfy any p95 SLA.
+
+    For batch-of-2, batches arrive at about 30 batches/s and service time is 32 ms, so rho = 30 * 0.032 = 0.96. The M/D/1 mean queue wait is lambda_b * s^2 / (2 * (1 - rho)) = 30 * 0.032^2 / (2 * 0.04) = 384 ms before service. Even before adding fill delay, this fails the 80 ms p95 target.
+
+    For batch-of-4, batches arrive at about 15 batches/s and service time is 48 ms, so rho = 15 * 0.048 = 0.72. The M/D/1 mean queue wait is 15 * 0.048^2 / (2 * 0.28) ~= 62 ms. A frame also waits for batch formation: average fill wait is roughly (B - 1) / (2 * lambda) = 3 / 120 = 25 ms, and the first frame in a batch often waits about 3 / 60 = 50 ms before service. Mean response is already about 62 + 25 + 48 = 135 ms, and a substantial fraction of frames exceed 80 ms from fill plus service alone. Static batching therefore does not meet the p95 SLA at 60 fps; reduce offered load, lower model cost, or use faster hardware.
   common_mistake: |
     **The Pitfall:** Picking the largest batch for the highest throughput ceiling.
     **The Rationale:** Candidates ignore the fill-time penalty required to assemble the batch.
@@ -23,30 +28,31 @@ details:
 
     **Calculations:**
     - B=1: rho = 1.5 (unstable).
-    - B=2: rho = 0.96, W_q = ~384 ms.
-    - B=4: rho = 0.72, W_q = ~62 ms.
-    - B=4 Fill time = ~50 ms. Total = 62 + 50 + 48 = 160 ms.
+    - B=2: lambda_b = 30 batches/s, rho = 30 * 0.032 = 0.96, mean W_q = 30 * 0.032^2 / (2 * 0.04) = 384 ms.
+    - B=4: lambda_b = 15 batches/s, rho = 15 * 0.048 = 0.72, mean W_q = 15 * 0.048^2 / (2 * 0.28) ~= 62 ms.
+    - B=4 average fill wait ~= 3 / (2 * 60) = 25 ms; mean response ~= 62 + 25 + 48 = 135 ms.
+    - B=4 first-frame fill wait is often about 3 / 60 = 50 ms, so fill + service alone is about 98 ms for many frames.
 
     **Conclusion & Interpretation:**
-    - **Result: ~160 ms (Latency-Bound)**. None meets p95 < 80 ms SLA at lambda=60 fps.
+    - **Result: no static batch size meets p95 < 80 ms**. B=1 is unstable, B=2 is near saturation with very large queueing delay, and B=4 has enough throughput but too much fill plus queueing latency.
 status: published
 provenance: llm-draft
-expected_time_minutes: 10
 requires_explanation: true
+expected_time_minutes: 10
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-implement-L5
+  - gemini-generated
+  - target-implement-L5
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

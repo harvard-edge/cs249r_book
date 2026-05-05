@@ -8,34 +8,25 @@ competency_area: parallelism
 bloom_level: understand
 phase: both
 title: Overlapping Parameter Server Pull with Forward Computation
-scenario: In a parameter server architecture (used for recommendation models with large embedding tables),
-  workers pull updated embeddings from PS before each forward pass. The pull takes 15ms for a 10GB embedding
-  table.
+scenario: In a parameter server architecture (used for recommendation models with large embedding tables), workers pull updated embeddings from PS before each forward pass. The pull takes 15ms for a 10GB embedding table.
 question: Can this parameter server pull be overlapped with the forward pass of non-embedding layers?
 details:
-  realistic_solution: 'Partial overlap: (1) The model has two parts: embedding layer (needs PS pull) and
-    MLP tower (needs embedding output). These are sequential — MLP depends on embedding. (2) However,
-    if the model has multiple embedding tables (user embeddings, item embeddings, context embeddings),
-    they can be pulled in parallel AND each embedding''s forward pass can start as soon as its pull completes,
-    before other embeddings are ready. (3) Multi-table overlap: pull(user_emb) || pull(item_emb) || pull(context_emb).
-    As user_emb arrives, start user feature processing while item_emb is still pulling. (4) Additional:
-    overlap this step''s PS pull with the previous step''s PS push (gradient update). Two-phase PS protocol:
-    push(step N gradients) || pull(step N+1 params).'
-  common_mistake: '**The Pitfall:** Waiting for all embeddings to be pulled before starting any forward
-    computation.
-
-    **The Rationale:** Engineers assume the entire model is strictly sequential, ignoring that parallel
-    embedding lookups have independent paths into the MLP tower.
-
-    **The Consequence:** Leaving the compute resources idle while network I/O completes, drastically reducing
-    throughput.
-
-    '
-  napkin_math: "1. **Assumptions & Constraints:**\n   - 3 embedding tables: 5 GB, 3 GB, 2 GB at 10 Gbps\
-    \ network.\n2. **Calculations:**\n   - Sequential pull time: (5 + 3 + 2) GB / 1.25 GB/s = 8 seconds.\n\
-    \   - Parallel pull with 10 PS shards: 5 GB / 12.5 GB/s = 0.4 seconds (limited by largest table).\n\
-    3. **Conclusion & Interpretation:**\n   - **Result: I/O Overlapped. Overlapping pulls with subsequent\
-    \ MLP computation hides the latency of the smaller tables, dramatically improving throughput.**\n"
+  realistic_solution: 'Partial overlap: (1) The model has two parts: embedding layer (needs PS pull) and MLP tower (needs embedding output). These are sequential, so the MLP cannot consume an embedding until that pull and lookup finish. (2) However, if the model has multiple embedding tables (user embeddings, item embeddings, context embeddings), independent pulls can run in parallel and table-specific feature processing can begin as soon as its table arrives. (3) Multi-table overlap: pull(user_emb) || pull(item_emb) || pull(context_emb). As user_emb arrives, start user feature processing while item_emb is still pulling. (4) Additional: overlap this step''s PS pull with the previous step''s PS push (gradient update). Two-phase PS protocol: push(step N gradients) || pull(step N+1 params).'
+  common_mistake: |
+    **The Pitfall:** Waiting for all embeddings to be pulled before starting any forward computation.
+    **The Rationale:** Engineers assume the entire model is strictly sequential, ignoring that parallel embedding lookups have independent paths into the MLP tower.
+    **The Consequence:** Leaving the compute resources idle while network I/O completes, drastically reducing throughput.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Total embedding pull = 10GB and takes 15ms, as observed in the scenario.
+       - The dependent MLP cannot start until its required embeddings are available.
+       - Independent embedding tables or previous-step pushes can overlap with the pull.
+    2. **Calculations:**
+       - If the MLP depends on all pulled embeddings, exposed latency before that MLP remains 15ms.
+       - If independent feature branches exist, each branch can start after its own table arrives, hiding only the portion of the 15ms pull that overlaps unrelated branch compute or other table pulls.
+       - Overlapping push(step N) with pull(step N+1) can hide PS protocol time, but it does not remove the dependency from embeddings to the current forward MLP.
+    3. **Conclusion & Interpretation:**
+       - **Result: Partially I/O Overlapped.** The pull can overlap with independent work, but not with MLP computation that consumes the pulled embeddings.
 status: published
 provenance: imported
 requires_explanation: false

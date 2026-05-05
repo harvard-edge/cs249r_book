@@ -9,10 +9,12 @@ bloom_level: evaluate
 phase: both
 title: TensorRT PTQ Calibration on Orin with 200 Scenes
 scenario: A robotics team is using TensorRT 8.6 on Jetson AGX Orin to deploy a PointPillars LiDAR detector. The team has only 200 unlabeled scenes locally and must choose between TensorRT's INT8 calibrators. A first pass with MinMax produced a 3% mAP drop, but spot-checks on night scenes showed double-digit recall loss. QAT is infeasible.
-question: Evaluate which TensorRT INT8 calibrator best fits the 200-scene constraint, and what concrete TensorRT mitigations are available before resorting to QAT.
+question: Evaluate which TensorRT INT8 calibrator best fits the 200-scene constraint, and what concrete TensorRT mitigations are available before resorting to QAT?
 details:
   realistic_solution: |
-    IInt8EntropyCalibrator2 minimises KL divergence between the FP32 and INT8 activation distributions and is TensorRT's default for vision; on the 3D-feature pyramid in PointPillars it typically beats Min-Max by 1-2% mAP because LiDAR feature distributions have heavy tails that Min-Max stretches across. Mitigations available in TensorRT without labels: (1) keep per-channel quantization on weights (the default; do not disable), it usually preserves 0.5-1% mAP vs per-tensor weights; (2) use layer-precision overrides (`setPrecision(kFP16)`) on the small first convs and the final detection head, which carry the heaviest accuracy burden and have negligible TOPS impact; (3) mixed FP16/INT8 builds via `--best` instead of `--int8`; (4) Orin-specific: offload sensitive layers to DLA in FP16 (`--useDLACore=0/1`) so the GPU INT8 only runs the well-quantized backbone. Recommendation: switch to Entropy calibrator + FP16 head/first-conv override + DLA fallback for sensitive layers; collect a 2k-scene labeled night-driving set for QAT in the next release.
+    Use `IInt8EntropyCalibrator2` as the first TensorRT PTQ choice for the 200 unlabeled scenes because entropy calibration is designed to choose activation scales from representative data rather than stretching every tensor to the most extreme MinMax outlier. With night-scene recall loss, make the calibration cache from a deliberately stratified 200-scene set that includes night, sparse returns, close objects, and high-intensity outliers; do not rely on random daytime samples.
+
+    Before QAT, the concrete TensorRT mitigations are to compare MinMax versus entropy-2 calibration on the same validation slice, inspect per-layer quantization sensitivity, keep sensitive layers or outputs in FP16 through TensorRT precision constraints where the network and builder support them, use explicit dynamic ranges only when they are measured from representative activations, and fall back to FP16 for unsupported or accuracy-critical plugins. Do not present DLA as a generic PointPillars fallback on Orin, and do not treat `--best` as an accuracy-specific INT8 calibration fix; it is a builder tactic/precision search convenience that still needs validation.
   common_mistake: |
     **The Pitfall:** Treating QAT vs Post-Training Quantization (PTQ) as the only available choices.
     **The Rationale:** Unawareness of TensorRT's deep PTQ configuration knobs (calibrator choice, per-layer overrides, DLA fallback).
@@ -23,29 +25,30 @@ details:
     - Constraint: 200 unlabeled scenes (QAT impossible).
 
     **Calculations:**
-    - Calibrator Gain: Entropy Calibrator recovers 1-2% mAP over MinMax.
-    - Precision Override Gain: FP16 on first/last layers saves ~1% mAP with <5% TOPS impact.
+    - MinMax uses observed extrema, so a few LiDAR outliers can widen the scale and reduce useful INT8 resolution for common activations.
+    - Entropy-2 calibration chooses scales from the activation histogram and is usually the better first PTQ test for vision-style networks with limited unlabeled calibration data.
+    - Mixed precision should be applied only to layers shown by ablation to drive the recall loss, then re-benchmarked for latency and accuracy.
 
     **Conclusion & Interpretation:**
-    - **Result: Combining Entropy PTQ + FP16 overrides recovers accuracy without labels (Calibration Data-Bound)**.
+    - **Result: entropy-2 calibration plus measured mixed-precision mitigation**. With only 200 scenes, the defensible answer is representative calibration and targeted FP16 fallbacks, not fixed mAP-gain claims or generic DLA offload.
 status: published
 provenance: llm-draft
-expected_time_minutes: 7
 requires_explanation: true
+expected_time_minutes: 7
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-recall-L5
+  - gemini-generated
+  - target-recall-L5
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

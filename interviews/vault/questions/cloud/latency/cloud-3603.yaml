@@ -8,52 +8,30 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: Work-Conserving Scheduler Analysis for Mixed Priority on MI300X
-scenario: 'An MI300X (192GB HBM3) serves two priority classes: premium (SLA p99<100ms, λ=200/s) and standard
-  (no SLA, λ=800/s). Total service rate µ=1200/s.'
-question: How would you design a preemptive priority queue for premium and standard traffic, and can premium
-  meet p99<100 ms?
+scenario: 'An MI300X (192GB HBM3) serves two priority classes: premium (SLA p99<100ms, λ=200/s) and standard (no SLA, λ=800/s). Total service rate µ=1200/s.'
+question: How would you design a preemptive priority queue for premium and standard traffic, and can premium meet p99<100 ms?
 details:
-  realistic_solution: 'Preemptive priority M/M/1/priority: premium queue is served first always. Premium:
-    ρ1=200/1200=0.167. Mean premium wait = 1/(µ(1-ρ1)) = 1/(1200×0.833) = 1ms! p99≈6ms. Standard: ρ2=800/1200=0.667.
-    Mean standard wait = 1/(µ(1-ρ1)(1-ρ_total)) = 1/(1200×0.833×0.167)=6ms, p99≈40ms. Total system ρ=0.833
-    → stable. Premium SLA of p99<100ms is easily met at 6ms.'
-  common_mistake: '**The Pitfall:** Using weighted fair queueing with weights 1:4 and assuming premium
-    gets proportional latency improvement.
-
-    **The Rationale:** Candidates incorrectly assume WFQ provides strict isolation at high utilization.
-
-    **The Consequence:** WFQ doesn''t isolate premium from standard load at high utilization, causing
-    SLA violations.'
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: 'Use preemptive-resume priority: premium work can interrupt standard work, and standard resumes later. Premium behaves like an M/M/1 with only premium arrivals, so ρ1=200/1200=0.167, mean premium response time is 1/(µ-λ1)=1/1000=1ms, and an exponential-tail approximation gives p99≈ln(100)/1000=4.6ms. Total utilization is (200+800)/1200=0.833, so the system is stable. Standard traffic absorbs the priority penalty; its mean response is approximately (1/µ)/((1-ρ1)(1-ρ_total)) = 0.833ms/(0.833×0.167) ≈ 6ms. Premium easily meets p99<100ms, but it is not zero-latency and it should still be monitored for service-time variance.'
+  common_mistake: |
+    **The Pitfall:** Treating preemptive priority as either weighted fair sharing or absolute zero-latency service for premium requests.
+    **The Rationale:** Preemptive priority removes standard-class interference from premium queueing, but premium requests still queue behind other premium requests and consume finite service time.
+    **The Consequence:** The design either under-isolates premium traffic by using fair sharing, or overstates the SLA margin by ignoring premium self-queueing and service-time variance.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Premium traffic (λ1): 200 req/s. SLA: p99 < 100ms.
-
     - Standard traffic (λ2): 800 req/s.
-
     - Service rate (µ): 1200 req/s.
-
     - Scheduler: Preemptive M/M/1 priority queue.
 
-
     **Calculations:**
-
     - Premium utilization (ρ1): 200 / 1200 = 0.167.
-
     - Total utilization (ρ_total): 1000 / 1200 = 0.833.
-
-    - Premium mean wait time: 1 / (1200 * (1 - 0.167)) = 1 / (1200 * 0.833) = 1ms.
-
-    - Premium p99 wait time: roughly 6ms.
-
-    - Standard mean wait time: 1 / (1200 * (1 - 0.167) * (1 - 0.833)) = 6ms (p99 ≈ 40ms).
-
+    - Premium mean response time under preemptive-resume priority: 1 / (µ - λ1) = 1 / (1200 - 200) = 1ms.
+    - Premium p99 response time approximation: ln(100) / (1200 - 200) = 4.6ms.
+    - Standard mean response time approximation: (1/1200) / ((1 - 0.167) * (1 - 0.833)) = 6ms.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 6ms p99 Premium Latency (Queue-Latency Bound)**. The preemptive priority queue mathematically
-    isolates premium traffic from standard bursts, easily crushing the 100ms SLA.
-
-    '
+    - **Result: ~4.6ms premium p99 response time (Queue-Latency Bound)**. Preemptive priority protects premium traffic from standard-class load, and the 100ms SLA is met with large margin under the stated M/M/1 assumptions.
 status: published
 provenance: imported
 requires_explanation: false

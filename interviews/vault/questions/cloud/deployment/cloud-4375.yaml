@@ -8,64 +8,33 @@ competency_area: deployment
 bloom_level: evaluate
 phase: both
 title: 'TPU v5e vs MI300X: Serving Cost Per Token at Scale'
-scenario: You are choosing infrastructure for serving a 7B LLM at 100B tokens/day. Option A is a cluster
-  of smaller chips ($1.2/chip-hr, 197 TFLOPS BF16, 819 GB/s, 16GB HBM). Option B is a cluster of large
-  GPUs ($5.5/GPU-hr, 1,307 TFLOPS FP16, 5,300 GB/s, 192GB HBM). The 7B model (FP16, 14GB) requires memory
-  bandwidth for decode.
-question: For serving the 7B LLM at 100B tokens/day, how many small chips or large GPUs are needed and
-  what is the cost per 1M tokens?
+scenario: You are choosing infrastructure for serving a 7B LLM at 100B tokens/day. Option A is a cluster of smaller chips ($1.2/chip-hr, 197 TFLOPS BF16, 819 GB/s, 16GB HBM). Option B is a cluster of large GPUs ($5.5/GPU-hr, 1,307 TFLOPS FP16, 5,300 GB/s, 192GB HBM). The 7B model (FP16, 14GB) fits on either device. Assume steady-state decode is memory-bandwidth-bound, each generated token streams about 14GB of weights, and batching is sufficient to saturate bandwidth.
+question: For serving the 7B LLM at 100B tokens/day, how many small chips or large GPUs are needed and what is the cost per 1M tokens?
 details:
-  realistic_solution: 'Option A: 16GB per chip, 14GB model -> only 2GB KV cache per chip -> TP=2 minimum
-    (8GB KV cache per pair). With TP=2: 2 chips share 14GB weights + 2x(16-7)GB = 18GB KV cache. Bandwidth
-    for decode (TP=2): each chip loads half of weights: 7GB per forward pass. Per-chip BW: 819 GB/s ->
-    tokens per chip per second: 819/7 = 117 tok/sec -> 2 chips: 234 tok/sec per TP=2 pair. For 100B tok/day:
-    100B/86400 = 1,157,407 tok/sec needed. Pairs needed: 1,157,407/234 = 4,946 pairs = 9,892 chips. Cost:
-    9,892 x ($1.2/hr) x (24 hr/day) = $284,889/day. Per 1M tokens: $284,889/(100,000) = $2.85/1M tokens.
-    Option B: 14GB model in 192GB, 178GB KV cache. Single card: 5,300/14 = 379 tok/sec. GPUs needed: 1,157,407/379
-    = 3,054. Cost: 3,054 x $5.5 x 24 = $403,128/day. Per 1M tokens: $4.03/1M tokens. Option A wins on
-    cost by 29% despite needing 3.2x more chips.'
-  common_mistake: '**The Pitfall:** Ignoring that the smaller chip has only 16GB HBM.
-
-    **The Rationale:** Candidates calculate raw throughput but forget that a 14GB model leaves only 2GB
-    for KV cache, requiring tensor parallelism (TP=2) across chips to serve concurrently.
-
-    **The Consequence:** Deploying single-chip instances that immediately crash due to out-of-memory errors
-    on the first few concurrent requests.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    With the added decode assumption, throughput is bandwidth divided by bytes streamed per generated token. Option A can run one replica per chip because the 14GB model fits in 16GB; the prompt does not require TP=2 or a specific KV-cache size. A small chip delivers 819GB/s / 14GB = 58.5 tokens/s, so the 1.157M tokens/s workload needs about 19,786 chips. Daily cost is 19,786 * $1.20 * 24 = about $569,837, or $5.70 per 1M tokens. Option B delivers 5300GB/s / 14GB = 378.6 tokens/s, so it needs about 3,057 GPUs. Daily cost is 3,057 * $5.50 * 24 = about $403,524, or $4.04 per 1M tokens. Under these assumptions, the large GPU option is both simpler and cheaper per token despite the higher hourly device price.
+  common_mistake: |
+    **The Pitfall:** Ignoring that the smaller chip has only 16GB HBM.
+    **The Rationale:** Candidates calculate raw throughput but forget that a 14GB model leaves only 2GB for KV cache, requiring tensor parallelism (TP=2) across chips to serve concurrently.
+    **The Consequence:** Deploying single-chip instances that immediately crash due to out-of-memory errors on the first few concurrent requests.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Workload: 100B tokens/day (1.157e6 tok/sec).
-
     - Model: 7B FP16 (14 GB).
-
-    - Option A: $1.2/hr, 819 GB/s BW, 16 GB HBM (requires TP=2 to fit KV cache).
-
+    - Decode model: each generated token streams about 14GB of weights.
+    - Option A: $1.2/hr, 819 GB/s BW, 16 GB HBM.
     - Option B: $5.5/hr, 5300 GB/s BW, 192 GB HBM.
 
-
     **Calculations:**
-
-    - Option A Throughput (TP=2): Each chip loads 7 GB. Chip throughput = 819 GB/s / 7 GB = 117 tok/sec.
-    Pair throughput = 234 tok/sec.
-
-    - Option A Scale: 1.157e6 / 234 = ~4,944 pairs = 9,888 chips.
-
-    - Option A Cost: 9,888 * $1.2 * 24 = $284,774/day -> $2.85 / 1M tokens.
-
-    - Option B Throughput: 5300 GB/s / 14 GB = 379 tok/sec.
-
-    - Option B Scale: 1.157e6 / 379 = ~3,054 GPUs.
-
-    - Option B Cost: 3,054 * $5.5 * 24 = $403,128/day -> $4.03 / 1M tokens.
-
+    - Option A throughput: 819 GB/s / 14 GB/token = 58.5 tok/sec per chip.
+    - Option A scale: ceil(1.157e6 / 58.5) = 19,786 chips.
+    - Option A cost: 19,786 * $1.2 * 24 = $569,837/day -> $5.70 / 1M tokens.
+    - Option B throughput: 5300 GB/s / 14 GB/token = 378.6 tok/sec per GPU.
+    - Option B scale: ceil(1.157e6 / 378.6) = 3,057 GPUs.
+    - Option B cost: 3,057 * $5.5 * 24 = $403,524/day -> $4.04 / 1M tokens.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Memory-Bandwidth Cost Bound**. Option A is 29% cheaper per token, despite requiring over
-    3x more chips and tensor parallelism.
-
-    '
+    - **Result: memory-bandwidth cost bound.** Option B wins at about $4.04 per 1M tokens versus $5.70 for Option A; the original TP=2 requirement was not supported by the prompt.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,55 +8,33 @@ competency_area: optimization
 bloom_level: remember
 phase: inference
 title: FlashAttention Tile Size vs SRAM Capacity
-scenario: An H100 GPU has 256KB of shared memory (SRAM) per SM. FlashAttention must tile Q, K, V blocks
-  to fit within this budget.
-question: For a model with head_dim=128 in FP16, what is the maximum tile size (B_r x B_c) that fits in
-  SRAM, and why does exceeding it force spills to HBM?
+scenario: An H100 GPU has 256KB of shared memory (SRAM) per SM. FlashAttention must tile Q, K, V blocks to fit within this budget.
+question: For a model with head_dim=128 in FP16, what is the maximum tile size (B_r x B_c) that fits in SRAM, and why does exceeding it force spills to HBM?
 details:
-  realistic_solution: Each tile of Q is B_r x 128 x 2B, K is B_c x 128 x 2B, V is B_c x 128 x 2B, output
-    O is B_r x 128 x 2B, plus softmax row-max and row-sum vectors (B_r x 4B each). Total SRAM = 256 *
-    (B_r + 2*B_c) + 256*B_r + 8*B_r bytes. With 256KB = 262,144 bytes, typical tile sizes are B_r = B_c
-    = 128, consuming ~128KB for Q+O tiles and ~128KB for K+V tiles, fitting snugly. Exceeding this forces
-    HBM round-trips for partial results, destroying the IO advantage.
-  common_mistake: '**The Pitfall:** Calculating memory footprint for a single tile at a time, failing
-    to respect the holistic fusion bounds.
-
-    **The Rationale:** Engineers who haven''t written custom CUDA kernels fail to recognize that FlashAttention
-    achieves its speed strictly because Q, K, V, the accumulator output, and softmax reduction statistics
-    must all organically co-reside in SRAM simultaneously.
-
-    **The Consequence:** Selecting overly aggressive tile sizes forces the compiler to spill intermediate
-    matrices to extremely slow device HBM, instantly negating the IO-awareness that gives FlashAttention
-    its performance.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    With head_dim=128 and FP16, each row of Q, K, V, or O costs 128 x 2 = 256 bytes. A simplified SRAM budget that keeps Q, K, V, O, and FP32 softmax row statistics resident is Q: 256B_r, K: 256B_c, V: 256B_c, O: 256B_r, stats: 8B_r, for a total of 520B_r + 512B_c bytes. The bound is therefore 520B_r + 512B_c <= 262,144 bytes. For square tiles, B_r=B_c=B gives 1,032B <= 262,144, so the largest square tile under this simplified budget is B=254. In practice kernels choose aligned sizes such as 128 x 128 to leave room for staging, double buffering, registers, and implementation-specific metadata. Exceeding the SRAM budget forces partial scores, softmax state, or output accumulators to spill to HBM, which removes FlashAttention's IO advantage.
+  common_mistake: |
+    **The Pitfall:** Counting only one QK tile and forgetting that K, V, output accumulators, and softmax row statistics must be live at the same time.
+    **The Rationale:** The SRAM limit applies to the whole fused attention working set, not to a single tensor in isolation.
+    **The Consequence:** The chosen tile appears to fit on paper but spills partial state to HBM, eliminating the IO savings FlashAttention relies on.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 256KB SRAM per SM limit.
-
-    - FP16 (2 bytes per element), head_dim=128. Tile size 128x128.
-
+    - FP16 (2 bytes per element), head_dim=128.
+    - Keep Q, K, V, O, and FP32 row max/sum statistics in SRAM.
 
     **Calculations:**
-
-    - Q Tile: 128 x 128 x 2B = 32 KB.
-
-    - K Tile: 32 KB.
-
-    - V Tile: 32 KB.
-
-    - O Tile: 32 KB.
-
-    - Softmax Stats: 128 x 8B = 1 KB.
-
-    - Total Burden: 32 + 32 + 32 + 32 + 1 = 129 KB.
-
+    - Q tile: B_r * 128 * 2 = 256B_r bytes.
+    - K tile: B_c * 128 * 2 = 256B_c bytes.
+    - V tile: B_c * 128 * 2 = 256B_c bytes.
+    - O tile: B_r * 128 * 2 = 256B_r bytes.
+    - Softmax stats: two FP32 values per query row = 8B_r bytes.
+    - Total simplified SRAM: 520B_r + 512B_c bytes <= 262,144 bytes.
+    - Square tile bound: 1,032B <= 262,144, so B <= 254.
+    - A 128 x 128 tile uses 520*128 + 512*128 = 132,096 bytes, leaving about 130 KB for staging and implementation overhead.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Fits perfectly (Compute-Bound)**. Remains within 256KB SRAM, avoiding HBM spills.
-
-    '
+    - **Result: SRAM-Capacity-Bound.** The simplified maximum square tile is about 254 x 254, while practical kernels often choose smaller aligned tiles such as 128 x 128 to avoid spills.
 status: published
 provenance: imported
 requires_explanation: false

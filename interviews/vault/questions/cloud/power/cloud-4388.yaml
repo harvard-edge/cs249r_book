@@ -7,27 +7,28 @@ topic: datacenter-efficiency
 competency_area: power
 bloom_level: create
 phase: both
-title: Dynamic Voltage and Frequency Scaling for H100 Training Efficiency
+title: Cluster-Level H100 DVFS Power Capping During AllReduce
 scenario: A 256-node cluster operates under a 25 MW facility power budget. GPUs draw 700W during GEMMs and 450W during all-reduce. You are designing a DVFS policy to exploit communication-compute overlap.
 question: What cluster-level DVFS policy would smooth training power under the 25 MW budget while exploiting GEMM and all-reduce phase differences?
 details:
-  realistic_solution: 'Design a two-level policy: (1) Cluster scheduler annotates jobs with topology metadata (TP degree, PP stages, AllReduce frequency). (2) Power controller subscribes to NCCL collective events and preemptively shifts power caps. During communication phases where compute is idle, the GPU does not need 700W; capping it at 450W reclaims 250W. Policy target: smooth the cluster power to a constant 600W average by staggering job phases or applying strict node-level power caps during AllReduce. This allows oversubscribing the facility budget based on average power rather than peak power.'
+  realistic_solution: 'Design a two-level policy: (1) the cluster scheduler annotates jobs with topology metadata such as TP degree, PP stages, and AllReduce frequency; (2) a power controller subscribes to NCCL collective events and preemptively shifts power caps before communication-heavy phases. During all-reduce, cap GPUs near 450W because GEMM throughput is not the bottleneck; during GEMM phases allow the 700W cap. For the stated 2,048-GPU cluster, even the 700W GPU peak is only 1.43 MW, far below the 25 MW facility budget before non-GPU overhead. The policy therefore smooths rack and node power and may improve local headroom, but this specific cluster is not facility-power-bound.'
   common_mistake: |
     **The Pitfall:** Treating DVFS as a per-GPU reactive control loop rather than a cluster-level preemptive policy.
     **The Rationale:** GPU driver tools automatically step down clocks when idle.
     **The Consequence:** Individual GPU DVFS reacts too slowly (10-100ms) to catch AllReduce windows (5-50ms), missing the overlap completely and failing to stabilize peak draw.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 256 nodes × 8 = 2,048 GPUs. Facility power budget: 25 MW.
+    - 256 nodes * 8 = 2,048 GPUs. Facility power budget: 25 MW.
     - Compute: 700W (60% time). Comm: 450W (40% time).
 
     **Calculations:**
-    - Average power = (0.6 × 700W) + (0.4 × 450W) = 600W.
-    - Provision by peak (700W): 25 MW / 700W = 35,714 GPUs.
-    - Provision by average (600W): 25 MW / 600W = 41,666 GPUs.
+    - Per-GPU average power = (0.6 * 700W) + (0.4 * 450W) = 600W.
+    - Cluster GPU peak power = 2,048 * 700W = 1.43 MW.
+    - Cluster GPU average power = 2,048 * 600W = 1.23 MW.
+    - Facility headroom at GPU peak = 25 MW - 1.43 MW = 23.57 MW before non-GPU load.
 
     **Conclusion & Interpretation:**
-    - **Result: Power-Bound.** A cluster-level DVFS scheduler that preemptively caps GPUs during communication allows oversubscribing the facility, safely deploying ~5,950 additional GPUs.
+    - **Result: Not Facility-Power-Bound**. A cluster-level DVFS scheduler can smooth all-reduce phases, but the stated 2,048-GPU cluster does not come close to a 25 MW facility limit based on GPU power alone.
 status: published
 provenance: imported
 requires_explanation: true

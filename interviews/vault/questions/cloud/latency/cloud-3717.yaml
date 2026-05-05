@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: inference
 title: Speculative Decoding Acceptance Rate Impact on H100 Inference Throughput
 scenario: You implement speculative decoding on an H100 with a 70B target model and a 7B draft model. The draft model generates k=5 candidate tokens. The target model verifies in one forward pass. The draft acceptance rate is a=0.8. The target model alone generates 30 tok/s.
-question: "What throughput improvement should speculative decoding deliver with k=5 and a=0.8 versus 30 tok/s target-only decoding?"
+question: What throughput improvement should speculative decoding deliver with k=5 and a=0.8 versus 30 tok/s target-only decoding?
 details:
-  realistic_solution: Expected tokens per speculative step is computed based on acceptance probability. Calculate draft model generation time against HBM bandwidth, and add target verification time. Speculative decoding provides a 2.27x throughput improvement factoring in memory bandwidth costs.
+  realistic_solution: Expected accepted draft tokens per speculative step is the truncated geometric expectation a + a^2 + ... + a^k = 2.69 for k=5, a=0.8. Counting the target model's correction or bonus token, the step emits about 3.69 tokens. Use measured or profiled pass times rather than deriving forward latency from raw parameter bytes. If a 7B draft produces each candidate in about 4ms and batched target verification takes about one 33ms target pass, the cycle is roughly 53ms and delivers about 70 tok/s, or about 2.3x over 30 tok/s. The exact speedup is sensitive to draft and verification latency, so capacity planning should validate those times on hardware.
   common_mistake: |
     **The Pitfall:** Assuming speculative decoding blindly improves throughput by a factor of K.
     **The Rationale:** Candidates forget that speedup is a function of both the mathematical acceptance rate and the computational cost of the draft model relative to the target.
@@ -21,15 +21,16 @@ details:
        - Acceptance rate (a): 0.8.
        - Draft tokens (k): 5.
        - Target baseline: 30 tok/s (~33.3ms per forward pass).
-       - HBM Bandwidth: 3.35 TB/s.
+       - Draft latency assumption: about 4ms per generated draft token from profiling, not from raw weight bytes.
     2. **Calculations:**
-       - Expected tokens per cycle: E[tokens] = (1 - 0.8^6) / (1 - 0.8) = 3.69 tokens.
-       - Draft time for 5 tokens (7B model): 5 * (7B * 2 bytes / 3.35 TB/s) = 5 * 4.18ms = ~20.9ms.
-       - Target verification time: ~33.3ms.
-       - Total cycle time: 20.9ms + 33.3ms = 54.2ms.
-       - Cycle throughput: 3.69 tokens / 0.0542s = 68.08 tokens/s.
+       - Expected accepted draft tokens: E[accepted] = 0.8 + 0.8^2 + 0.8^3 + 0.8^4 + 0.8^5 = 2.69.
+       - Expected emitted tokens, including target correction/bonus token: E[emitted] = 1 + E[accepted] = 3.69 tokens.
+       - Draft time for 5 candidates: 5 * 4ms = 20ms.
+       - Target verification time: about one target forward pass = 1 / 30 tok/s = 33.3ms.
+       - Total cycle time: 20ms + 33.3ms = 53.3ms.
+       - Cycle throughput: 3.69 tokens / 0.0533s = 69.2 tokens/s.
     3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bandwidth Bound.** Effective speedup vs baseline is 68.08 / 30 = ~2.27x, factoring in both the mathematical acceptance rate and the actual memory bandwidth cost of the draft model.
+       - **Result: About 2.3x If Draft Latency Is Low.** Effective speedup vs baseline is 69.2 / 30 = ~2.31x under the profiled-latency assumption. The qualitative takeaway is that acceptance rate alone is insufficient; draft and verification latency determine the realized speedup.
 status: published
 provenance: imported
 requires_explanation: true

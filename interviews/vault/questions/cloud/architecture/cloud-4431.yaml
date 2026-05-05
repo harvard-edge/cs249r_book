@@ -8,54 +8,30 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Reward Model Architecture for RLHF at Scale
-scenario: Design a reward model (RM) for an RLHF pipeline fine-tuning a 70B policy model. The RM needs
-  to score completions at 500 QPS during PPO rollouts. You have a budget of 4x GPUs.
-question: What reward model size, architecture, and serving strategy would you use to score PPO completions
-  at 500 QPS on a 4x GPU budget?
+scenario: Design a reward model (RM) for an RLHF pipeline fine-tuning a 70B policy model. The RM needs to score completions at 500 QPS during PPO rollouts. You have a budget of 4x GPUs.
+question: What reward model size, architecture, and serving strategy would you use to score PPO completions at 500 QPS on a 4x GPU budget?
 details:
-  realistic_solution: 'RM sizing: empirical finding is that RM performance plateaus at 10-20% of policy
-    model size for typical RLHF tasks. Use 7B RM on 2x GPUs in TP=2. Architecture: take a pretrained 7B
-    model, replace next-token prediction head with a scalar output head. Serving for 500 QPS: 7B model
-    on 2x GPUs, BF16, sequence length 512. With continuous batching at batch=16: ~120 QPS per GPU pair
-    = 240 QPS for 2 serving instances. For 500 QPS: need 3 pairs = 6x GPUs. With 4x GPU budget: use 2x
-    GPUs for serving and queue the remaining requests, or serve at FP8 for higher throughput.'
-  common_mistake: '**The Pitfall:** Using the same size model as the policy for the reward model.
-
-    **The Rationale:** Assuming the RM requires identical representational capacity to the 70B policy
-    model.
-
-    **The Consequence:** A 70B RM would require massive compute just to serve, consuming more resources
-    than the policy training itself and missing the latency constraints.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: 'A 7B RM is a reasonable quality baseline, but it does not meet 500 QPS on only 4 GPUs for 512-token scoring. Use a smaller distilled RM, about 3B parameters, trained from a stronger 7B-13B RM teacher on preference pairs and hard negatives. Architecture: decoder-only or encoder-style transformer initialized from a pretrained 3B checkpoint, replace the LM head with a scalar reward head over the final token or pooled representation, and calibrate scores per rollout batch. Serving: run four independent 1-GPU replicas in FP8/BF16 with continuous batching, length bucketing, prompt-prefix caching where rollouts share prompts, and backpressure from the PPO rollout workers. This is a coherent 4-GPU design; if validation requires a 7B RM, the target must be lowered or the GPU budget increased.'
+  common_mistake: |
+    **The Pitfall:** Using the same size model as the policy for the reward model.
+    **The Rationale:** Assuming the RM requires identical representational capacity to the 70B policy model.
+    **The Consequence:** A 70B RM would require massive compute just to serve, consuming more resources than the policy training itself and missing the latency constraints.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Target: 500 QPS.
-
-    - Budget: 4x GPUs (FP8 capable).
-
-    - RM size: 7B parameters.
-
+    - Budget: 4x H100-class GPUs with FP8-capable serving.
+    - RM size: distilled 3B parameters.
+    - Sequence length: 512 tokens.
 
     **Calculations:**
-
-    - 7B forward pass at 512 tokens: ~12ms on one GPU.
-
-    - Single GPU serial throughput: 1000ms / 12ms ≈ 83 QPS.
-
-    - Continuous batching (batch=8) effective throughput: ≈ 200 QPS per GPU.
-
-    - 2x GPUs (TP=2) handle 200 QPS. 4x GPUs in two TP=2 instances handle 400 QPS at BF16.
-
-    - FP8 provides a ~1.5x throughput boost: 400 * 1.5 = 600 QPS.
-
+    - Forward FLOPs per score, using 2 * tokens * params: 2 * 512 * 3B = 3.1T FLOPs.
+    - Conservative effective serving throughput per H100 after batching and overhead: ~400 TFLOP/s.
+    - Per-GPU throughput: 400T / 3.1T = ~129 scores/sec.
+    - Four replicas: 4 * 129 = ~516 QPS before prefix-cache gains.
+    - A 7B RM under the same assumption would be 2 * 512 * 7B = 7.2T FLOPs per score, or only ~56 QPS/GPU and ~224 QPS on 4 GPUs.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 600 QPS using FP8 on 4x GPUs (Compute-Bound)**. Easily meets the 500 QPS requirement within
-    budget.
-
-    '
+    - **Result: 3B Distilled RM on 4 Replicas.** The 4-GPU budget can meet 500 QPS only with a smaller distilled RM and efficient batching; a 7B RM would miss the throughput target under the same serving assumptions.
 status: published
 provenance: imported
 requires_explanation: true

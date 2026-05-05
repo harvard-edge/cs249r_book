@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: inference
 title: TTFT vs TPOT SLO Tension
 scenario: 'Your disaggregated serving cluster has separate TTFT and TPOT SLOs: TTFT < 500 ms, TPOT < 50 ms per token. During a load spike the prefill queue grows. An engineer proposes migrating two decode GPUs to the prefill pool to reduce TTFT.'
-question: "What does moving two decode GPUs to prefill fix and break, and what metric determines the right pool ratio?"
+question: What does moving two decode GPUs to prefill fix and break, and what metric determines the right pool ratio?
 details:
   realistic_solution: 'Moving GPUs from decode to prefill reduces prefill queue depth and TTFT, but each decode GPU now serves more concurrent in-flight sequences. TPOT degrades because decode is already memory-bandwidth-bound: adding sequences increases HBM reads per step proportionally. The right signal is the ratio of prefill throughput (tokens/s processed) to decode throughput (tokens/s generated). If prefill throughput >> decode throughput, the bottleneck is decode and migrating to prefill worsens TPOT. Track P99 of both SLOs independently and model the system as two coupled M/D/c queues — find the pool split where both P99s are met with maximum total throughput.'
   common_mistake: |
@@ -19,13 +19,16 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Prefill processes 200k tokens/s, Decode processes 80k tokens/s.
+    - Moving two GPUs adds 50k tok/s of prefill capacity and removes 20k tok/s of decode capacity.
 
     **Calculations:**
-    - Moving 1 GPU from Decode (-10k tok/s) to Prefill (+25k tok/s).
-    - Widens the bottleneck since Decode is already slower than Prefill.
+    - Before move: Prefill 200k tok/s, Decode 80k tok/s. Decode is the lower-capacity stage.
+    - After move: Prefill = 200k + 50k = 250k tok/s.
+    - After move: Decode = 80k - 20k = 60k tok/s.
+    - Prefill/decode capacity ratio changes from 200/80 = 2.5 to 250/60 = 4.17, so the decode bottleneck gets worse.
 
     **Conclusion & Interpretation:**
-    - **Result: Worsens TPOT for all in-flight sequences (Compute-Bound).**
+    - **Result: Decode-Bound.** Moving two GPUs to prefill can reduce TTFT queueing, but it cuts decode capacity by 25% and worsens TPOT unless decode already has headroom.
 status: published
 provenance: imported
 requires_explanation: false

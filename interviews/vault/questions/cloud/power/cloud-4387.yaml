@@ -8,10 +8,10 @@ competency_area: power
 bloom_level: evaluate
 phase: both
 title: 'MI300X vs H100: Energy-per-Token at Scale for LLM Inference'
-scenario: 'You are selecting the accelerator platform for a 100B-token-per-day LLM inference service comparing the MI300X and H100 SXM5. The service runs Llama-3 70B in FP16 (140 GiB model weight).'
-question: 'For 100B tokens/day of Llama-3 70B FP16 inference, which platform has lower energy per token after sharding and bandwidth effects?'
+scenario: You are selecting the accelerator platform for a 100B-token-per-day LLM inference service comparing the MI300X and H100 SXM5. The service runs Llama-3 70B in FP16 (140 GiB model weight).
+question: How should you compare MI300X and H100 energy per token for 100B tokens/day of Llama-3 70B FP16 inference?
 details:
-  realistic_solution: 'MI300X: Single chip fits 70B FP16 (140 GiB < 192 GiB). No tensor parallelism overhead. Token throughput: 5,300 GB/s / (140 GiB / 187 tokens) ≈ 7,079 tok/s (bandwidth-bound). Power: 750W. Energy/token: 750W / 7,079 tok/s = 0.106 J/token. H100 (2-chip TP): Each chip holds 70 GiB of the 140 GiB model. NVLink overhead for TP2 ~7% latency penalty. Effective throughput per 2-GPU pair: ~(3.35 TB/s per chip × 2 chips × 0.93 efficiency) / (140 GiB / 187 tokens) ≈ 8,323 tok/s. Power: 2 × 700W = 1,400W. Energy/token: 1,400W / 8,323 tok/s = 0.168 J/token. MI300X is 37% more energy efficient per token for this workload.'
+  realistic_solution: 'Do not estimate LLM serving throughput by dividing HBM bandwidth by model size. The defensible comparison is measured tokens/sec at the target sequence lengths, batch sizes, precision, KV-cache policy, and SLA, then energy/token = board power / delivered tokens/sec. MI300X has a structural advantage because the 140 GiB FP16 weights fit on one 192 GiB GPU, avoiding mandatory tensor parallelism for weights. H100 80 GiB requires at least TP2, which adds NVLink traffic for collectives and synchronization, plus duplicated or partitioned KV/activation state depending on the engine. With 750W for one MI300X and 1,400W for a TP2 H100 pair, MI300X is lower energy/token whenever its measured throughput is more than 750/1400 = 54% of the H100 pair. The 100B tokens/day requirement is a capacity-planning constraint: provision enough replicas using measured throughput, but do not let it replace the per-token energy measurement.'
   common_mistake: |
     **The Pitfall:** Evaluating only theoretical FLOPS/Watt and ignoring model sharding overhead.
     **The Rationale:** Candidates overlook that the 140 GiB model fits on a single MI300X but requires Tensor Parallelism across two H100s.
@@ -19,17 +19,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: Llama-3 70B FP16 (140 GiB weights).
-    - Sequence size: 187 tokens/pass.
-    - MI300X: 1 chip, 192 GiB HBM3, 5,300 GB/s, 750W TDP.
-    - H100: 2 chips (TP2), 80 GiB HBM3e each, 3,350 GB/s each, 700W TDP each.
+    - MI300X: 1 chip, 192 GiB HBM, about 750W board power.
+    - H100: minimum TP2 for 140 GiB FP16 weights on 80 GiB GPUs, about 2 * 700W = 1,400W.
+    - Compare measured serving throughput at the same SLA, batch, context length, and precision.
 
     **Calculations:**
-    - MI300X (1 chip): Fits 140 GiB. Throughput = 5,300 GB/s / (140 GiB/pass) * 187 tokens/pass ≈ 7,079 tok/s. Energy/token = 750W / 7,079 = 0.106 J/tok.
-    - H100 (2 chips): Throughput = (2 * 3,350 GB/s * 0.93 TP efficiency) / 140 GiB * 187 tokens ≈ 8,323 tok/s. Energy/token = 1,400W / 8,323 = 0.168 J/tok.
-    - Efficiency ratio: 0.168 / 0.106 = 1.58x.
+    - Energy/token(MI300X) = 750W / measured_MI300X_tok_s.
+    - Energy/token(H100 TP2) = 1,400W / measured_H100_pair_tok_s.
+    - MI300X wins when 750 / T_MI < 1,400 / T_H100_pair.
+    - Break-even: T_MI > (750 / 1,400) * T_H100_pair = 0.54 * T_H100_pair.
+    - Required average throughput for the service: 100B tokens/day / 86,400s/day ≈ 1.16M tok/s across the fleet.
 
     **Conclusion & Interpretation:**
-    - **Result: MI300X is ~37% more energy-efficient per token (Power-Bound)**.
+    - **Result: Measurement-Bound**. MI300X is likely favored if its single-GPU measured throughput is at least 54% of an H100 TP2 pair; the exact energy/token must come from benchmarked throughput, not model-size divided by HBM bandwidth.
 status: published
 provenance: imported
 requires_explanation: false

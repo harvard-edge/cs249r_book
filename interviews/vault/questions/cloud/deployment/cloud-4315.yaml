@@ -8,52 +8,33 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Disaggregated Serving Cost Model
-scenario: 'Build a cost model for a disaggregated serving deployment at 10,000 requests/hour, 70B FP16
-  model, mixed workload (50% short: 256 input/64 output; 50% long: 2048 input/512 output). GPU costs:
-  H100 at $3.50/hr, MI300X at $4.50/hr.'
-question: What H100 prefill to MI300X decode pool ratio minimizes cost at 10,000 req/hr while meeting
-  200 ms TTFT and 50 ms TPOT?
+scenario: 'Build a cost model for a disaggregated serving deployment at 10,000 requests/hour, 70B FP16 model, mixed workload (50% short: 256 input/64 output; 50% long: 2048 input/512 output). GPU costs: H100 at $3.50/hr, MI300X at $4.50/hr.'
+question: What H100 prefill to MI300X decode pool ratio minimizes cost at 10,000 req/hr while meeting 200 ms TTFT and 50 ms TPOT?
 details:
-  realistic_solution: 'Step 1: Characterize load. 10k req/hr = 2.78 req/s. Short: 1.39 req/s * 256 input
-    = 356 tok/s prefill, 1.39 * 64 = 89 tok/s decode. Long: 1.39 * 2048 = 2847 tok/s prefill, 1.39 * 512
-    = 711 tok/s decode. Total: prefill = 3203 tok/s, decode = 800 tok/s. Step 2: Capacity per GPU. H100
-    prefill: 200k tok/s per GPU. Required prefill GPUs: 3203 / 200k = 0.016 GPUs (trivially 1 GPU handles
-    this load). MI300X decode: 37.8 tok/s per sequence, concurrent sequences = 135 per MI300X. Using Little''s
-    Law, total concurrent sequences = 21. MI300X needed: 21 / 135 -> 1 MI300X. Step 3: Cost. 1 H100 *
-    $3.50/hr + 1 MI300X * $4.50/hr = $8.00/hr. The optimal ratio is 1:1.'
-  common_mistake: '**The Pitfall:** Optimizing GPU count without accounting for varying utilization bounds.
-
-    **The Rationale:** Engineers assume they can drive both prefill and decode GPUs to 100% capacity identically.
-
-    **The Consequence:** Driving decode at 90%+ utilization causes catastrophic queuing latency explosions;
-    they must be conservatively sized, though in this low-load scenario, 1 GPU handles the throughput
-    with ample headroom.'
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: 'Step 1: Characterize load. 10k req/hr = 2.78 req/s. Short: 1.39 req/s * 256 input = 356 tok/s prefill, 1.39 * 64 = 89 tok/s decode. Long: 1.39 * 2048 = 2847 tok/s prefill, 1.39 * 512 = 711 tok/s decode. Total: prefill = 3203 tok/s, decode = 800 tok/s. Step 2: Check SLO capacity. One H100 at 200k prefill tok/s has only 1.6% average utilization, and the long 2048-token prefill lower bound is about 10 ms of service time, well below the 200 ms TTFT budget before queueing. One MI300X at 37.8 tok/s per active sequence gives about 26.5 ms TPOT, below the 50 ms SLO, and supports up to 135 concurrent sequences. Little''s Law gives about 21 active decode sequences at this load, so one MI300X has enough concurrency headroom. Step 3: Cost optimization. A disaggregated deployment needs at least one prefill GPU and one decode GPU; 1 H100 + 1 MI300X is feasible and costs $8/hr. Any 1:2, 2:1, or larger ratio increases hourly cost without being required by TTFT or TPOT, so the cost-minimizing
+    feasible ratio is 1:1.'
+  common_mistake: |
+    **The Pitfall:** Choosing the ratio from raw token throughput alone.
+    **The Rationale:** It is tempting to divide prefill tokens by H100 throughput and decode tokens by MI300X throughput, then stop.
+    **The Consequence:** The result may ignore TTFT, TPOT, and minimum deployable pool sizes. Here those SLO checks are what justify that the minimum 1:1 pool is also the cheapest feasible ratio.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Workload: 10,000 req/hr (2.78 req/s), 50% short (256/64), 50% long (2048/512).
-
     - MI300X decode throughput: 37.8 tok/s per sequence, 135 sequences max.
-
     - H100 prefill throughput: 200k tok/s.
 
-
     **Calculations:**
-
     - Prefill load: 3203 tok/s. H100 capacity: 200k tok/s. GPUs needed: 1 (easily handles load).
-
+    - Long prefill service lower bound at 200k tok/s: 2048 / 200k = 10.2 ms, below the 200 ms TTFT budget before queueing.
+    - Decode TPOT lower bound from per-sequence throughput: 1 / 37.8 = 26.5 ms/token, below the 50 ms target.
     - Decode load: 800 tok/s. Avg decode time: short = 1.69s, long = 13.5s.
-
-    - Concurrent sequences (Little''s Law): short = 1.39 * 1.69 = 2.3. long = 1.39 * 13.5 = 18.8. Total
-    = 21.
-
+    - Concurrent sequences (Little's Law): short = 1.39 * 1.69 = 2.3. long = 1.39 * 13.5 = 18.8. Total = 21.
     - MI300X holds 135 sequences. 1 MI300X is completely sufficient.
-
+    - Since at least one prefill GPU and one decode GPU are required, every larger feasible pool costs more than the 1+1 minimum.
     - Cost: 1 H100 + 1 MI300X = $3.50 + $4.50 = $8/hr.
 
-
     **Conclusion & Interpretation:**
-
-    - **Result: 1:1 Ratio minimizes cost**. 1 H100 and 1 MI300X meet the requirements for $8/hr.'
+    - **Result: 1:1 Ratio minimizes cost**. 1 H100 and 1 MI300X meet the requirements for $8/hr.
 status: published
 provenance: imported
 requires_explanation: true

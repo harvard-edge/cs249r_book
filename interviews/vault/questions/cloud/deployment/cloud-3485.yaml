@@ -7,7 +7,7 @@ topic: mlops-lifecycle
 competency_area: deployment
 bloom_level: analyze
 phase: both
-title: MLOps Challenges with LLM Deployment on AMD MI300X
+title: MI300X LLM Serving Latency Spikes in Staging
 scenario: You are deploying an LLM on AMD MI300X accelerators (192 GB HBM3, 1,307 TFLOPS FP16, 5.3 TB/s). During staging load testing, you observe frequent, unpredictable latency spikes and inconsistent throughput that did not appear in development.
 question: Why might MI300X LLM inference show staging-only latency spikes despite strong hardware, and how would you diagnose and fix the bottlenecks?
 details:
@@ -17,15 +17,19 @@ details:
     **The Rationale:** Peak compute is the most heavily advertised spec for AI accelerators.
     **The Consequence:** Ignoring memory access patterns and host-to-device transfer bottlenecks, resulting in "starved" compute units and severe latency spikes in production.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model size: 70B parameters in FP16 (~140 GB).
-       - KV Cache Size: Batch of 100 requests * 1 GB = 100 GB.
-       - Theoretical MI300X HBM3 Bandwidth: 5.3 TB/s.
-    2. **Calculations:**
-       - Theoretical Model Load Time: 140 GB / 5,300 GB/s = ~26 ms.
-       - Theoretical KV Cache Load Time: 100 GB / 5,300 GB/s = ~19 ms.
-       - Total Theoretical Memory Time: ~45 ms per step.
-    3. **Conclusion & Interpretation:** **~45 ms ideal load time, degraded by non-contiguous access (Memory Bandwidth-Bound).**
+    **Assumptions & Constraints:**
+    - MI300X has 192 GB HBM3.
+    - A 70B FP16 model uses about 140 GB and stays resident during serving.
+    - Available KV-cache headroom before fragmentation and runtime reserve is roughly 40 GB.
+    - Staging test uses 100 concurrent long-context requests.
+
+    **Calculations:**
+    - If each active request needs 0.5 GB of KV cache, demand is 100 * 0.5 GB = 50 GB.
+    - 50 GB KV demand exceeds the rough 40 GB headroom, causing paging, eviction, smaller batches, or allocation stalls.
+    - Even when it fits, fragmented KV blocks and host-device transfers can add latency spikes that peak HBM bandwidth alone does not predict.
+
+    **Conclusion & Interpretation:**
+    - **Result: KV-Cache and Runtime Pressure.** Diagnose staging-only spikes with representative concurrency, context lengths, batching, allocator traces, H2D transfer metrics, and kernel timelines rather than assuming weights are reloaded each step.
 status: published
 provenance: imported
 requires_explanation: false

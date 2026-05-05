@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: inference
 title: 'Inference Serving Cost Optimization: Batching Strategy for RAG'
 scenario: A RAG (Retrieval Augmented Generation) pipeline on GPUs embeds documents using BGE-M3 (570M params, 2.1 GFLOP per 512-token doc) and then generates answers with Llama-3-8B. The embedding phase processes 10,000 docs/day, answer generation handles 1,000 queries/day. The team wants to minimize GPU hour cost.
-question: "How should you batch the 10,000 daily embeddings versus 1,000 daily generations to minimize compute cost?"
+question: How should you batch the 10,000 daily embeddings versus 1,000 daily generations to minimize compute cost?
 details:
-  realistic_solution: 'Embedding phase: 10K docs × 2.1 GFLOP = 21 TFLOP/day. GPU at 312 TFLOPS sustained: 21T/312T = 0.067 seconds. Batch all embeddings: at batch=512, fully saturates GPU tensor cores. Total embedding time: 21T at 312 TFLOPS = 0.067s GPU-hours. Cost: 0.067s × ($3/hr) = $0.00006. Generation: 1000 queries × avg 500 tokens output / 30 tok/s = 1000×500/30 = 16,667 seconds = 4.6 GPU-hours. Cost: 4.6 × $3 = $13.8. Optimization: batch embeddings offline in 5-minute windows on a spot instance. Use continuous batching for generation. Total: $0.001 embedding + $13.8 generation per day. Generation dominates 99.99% of cost — optimize it, not embedding.'
+  realistic_solution: 'Embedding phase: 10K docs × 2.1 GFLOP = 21 TFLOP/day. At 312 TFLOPS sustained, this is 21/312 = 0.067 seconds of one GPU, or 0.0000186 GPU-hours. At $3/hr, embedding compute costs about $0.000056/day before minimum billing and utilization overhead. Batch embeddings offline in large micro-batches, such as 5-minute windows, to keep the GPU saturated and avoid holding a low-latency serving GPU open. Generation: 1000 queries × 500 output tokens = 500,000 tokens/day. If one serving GPU-equivalent sustains 30 tok/s aggregate, generation time is 16,667 seconds = 4.63 GPU-hours, costing about $13.89/day. Use continuous batching for generation. Under these assumptions, generation is about 99.9996% of raw GPU compute cost, so optimization effort should focus on generation while embeddings run as offline batches.'
   common_mistake: |
     **The Pitfall:** Running embedding and generation on the same GPU instance simultaneously.
     **The Rationale:** Treating RAG as a single monolithic pipeline without isolating differing compute profiles.
@@ -22,11 +22,13 @@ details:
        - Generation Workload: 1,000 queries * 500 tokens at 30 tok/s.
        - GPU Cost: $3/hr. Hardware: 312 TFLOPS FP16.
     2. **Calculations:**
-       - Embedding Time = 21 TFLOP / 312 TFLOPS = 0.067 seconds ($0.00006/day).
-       - Generation Time = 500,000 tokens / 30 tok/s = 16,667 seconds = 4.63 hours.
+       - Embedding time = 21 TFLOP / 312 TFLOPS = 0.067 seconds = 0.0000186 GPU-hours.
+       - Embedding cost = 0.0000186 GPU-hours * $3/hr = $0.000056/day.
+       - Generation time = 500,000 tokens / 30 tok/s = 16,667 seconds = 4.63 GPU-hours, assuming 30 tok/s aggregate on one GPU-equivalent.
        - Generation Cost = 4.63 hours * $3/hr = $13.89/day.
+       - Generation cost share = 13.89 / (13.89 + 0.000056) = 99.9996%.
     3. **Conclusion & Interpretation:**
-       - **Result: Generation Dominates 99.9% of Cost (Compute-Bound).** Embeddings should be done offline in micro-batches; all engineering effort should focus on optimizing generation.
+       - **Result: Generation Dominates Raw GPU Compute Cost.** Embeddings should be done offline in large micro-batches; generation should use continuous batching and receive the main optimization effort.
 status: published
 provenance: imported
 requires_explanation: false

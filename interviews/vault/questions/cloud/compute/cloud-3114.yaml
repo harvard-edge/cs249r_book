@@ -8,54 +8,41 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: 'Transformer Cost Mastery: Full Training and Inference Cost Analysis for LLM Product'
-scenario: 'Build a complete financial model for a 30B parameter transformer LLM product: training cost
-  on GPUs, inference cost at 1000 req/s with 500 output tokens, and break-even monthly revenue. Training:
-  1T tokens, 40% MFU. Inference: INT4 quantization (15GB model), target P99 < 2s.'
-question: What are the training cost, inference fleet cost at 1000 req/s, and break-even monthly revenue
-  for the 30B LLM product?
+scenario: 'Build a complete financial model for a 30B parameter transformer LLM product: training cost on GPUs, inference cost at 1000 req/s with 500 output tokens, and break-even monthly revenue. Training: 1T tokens, 40% MFU, 1000 H100s at $2.50/GPU-hour and 989 TFLOP/s peak. Inference: INT4 quantization (15GB model), H100 bandwidth 3.35 TB/s, target P99 < 2s, 70% serving utilization.'
+question: What are the training cost, inference fleet cost at 1000 req/s, and break-even monthly revenue for the 30B LLM product?
 details:
-  realistic_solution: Calculate training FLOPs and inference decode latency. The training cost will be
-    around $316k. Target P99 requires speculative decoding to meet the 2s SLA. Monthly inference costs
-    rapidly dwarf the one-time training costs, landing at roughly $1.46M/month.
-  common_mistake: '**The Pitfall:** Calculating training cost once and ignoring ongoing inference costs.
-
-    **The Rationale:** Training involves a massive upfront capital expense, which intuitively feels like
-    the primary cost driver.
-
-    **The Consequence:** The business model fails because monthly inference costs at scale ($1.46M/month)
-    rapidly destroy unit economics.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: Training requires 6 * 30B * 1T = 1.8e23 FLOPs. On 1000 H100s at 40% MFU, effective throughput is 3.956e17 FLOP/s, so training takes about 126.4 hours and costs about $316K. For inference, reading a 15GB INT4 model from 3.35 TB/s memory bandwidth gives 4.48 ms/token, so a 500-token response takes 2.24s and misses the P99 < 2s target. With speculative decoding giving a 4x decode speedup, request time is about 560 ms, or 1.79 req/s per GPU at 100% utilization. At 70% serving utilization, each GPU supports about 1.25 req/s, so 1000 req/s needs ceil(1000 / 1.25) = 800 H100s. Monthly inference cost is 800 * $2.50/hr * 730 hr = $1.46M/month. Break-even monthly revenue must exceed $1.46M for inference-only costs, or about $1.49M/month if the one-time training cost is amortized over 12 months.
+  common_mistake: |
+    **The Pitfall:** Calculating training cost once and ignoring ongoing inference costs.
+    **The Rationale:** Training involves a massive upfront capital expense, which intuitively feels like the primary cost driver.
+    **The Consequence:** The business model fails because monthly inference costs at scale ($1.46M/month) rapidly destroy unit economics.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 30B model, 1T tokens.
-
+    - Training cluster: 1000 H100s, 989 TFLOP/s peak per GPU, 40% MFU.
     - GPU cost = $2.50/hr.
-
+    - Inference model size: 15GB INT4.
+    - H100 memory bandwidth: 3.35 TB/s = 3350 GB/s.
+    - Response length: 500 output tokens.
+    - Serving utilization target: 70%.
 
     **Calculations:**
-
     - Training FLOPs: 6 * 30e9 * 1e12 = 1.8e23.
-
     - Cluster Throughput: 1000 GPUs * 989e12 FLOPs/s * 0.40 = ~3.956e17 FLOPs/s.
-
     - Training Time: 1.8e23 / 3.956e17 ≈ 455,005 seconds ≈ 126.4 hours.
-
     - Training Cost: 1000 GPUs * $2.50 * 126.4 hours ≈ $316,000.
-
-    - Inference Time (500 tokens): 2.24s (misses SLA) -> Speculative Decode = 560ms.
-
-    - Fleet Size at 70% util: 800 servers.
-
-    - Monthly Cost: 800 * $2.50 * 730 hours ≈ $1.46M.
-
+    - Inference latency per token: 15GB / 3350 GB/s = 0.00448s = 4.48 ms/token.
+    - Baseline 500-token latency: 4.48 ms/token * 500 = 2.24s, which misses the 2s P99 target.
+    - With 4x speculative decoding speedup: 2.24s / 4 = 0.56s/request.
+    - Per-GPU request throughput at 100% utilization: 1 / 0.56s = 1.79 req/s.
+    - Per-GPU request throughput at 70% utilization: 1.79 * 0.70 = 1.25 req/s.
+    - Fleet size for 1000 req/s: ceil(1000 / 1.25) = 800 GPUs.
+    - Monthly inference cost: 800 GPUs * $2.50/hr * 730 hr = $1,460,000/month.
+    - 12-month training amortization: $316,000 / 12 = $26,333/month.
+    - Break-even including amortized training: $1,460,000 + $26,333 = $1,486,333/month.
 
     **Conclusion & Interpretation:**
-
-    - **Result: $1.46M/month (Cost-Bound)**. Break-even Revenue must exceed $1.46M/month. Inference dominates
-    long-term expenditure.
-
-    '
+    - **Result: $316K one-time training cost and $1.46M/month inference cost (Cost-Bound)**. Break-even revenue must exceed $1.46M/month for inference-only service cost, or about $1.49M/month with training amortized over 12 months.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,43 +8,34 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: Graceful Degradation on Hailo-8 for Edge Surveillance
-scenario: Your team is deploying an AI-powered surveillance system on edge devices, with each device featuring
-  a Hailo-8 accelerator (26 TOPS INT8, 2.5W dataflow accelerator) for real-time object detection. The
-  system's primary goal is continuous, reliable operation, but it faces unpredictable environmental factors
-  such as fluctuating network bandwidth, variable camera feed complexity, and potential power fluctuations.
-question: How would you design a Hailo-8 surveillance degradation strategy with ladders, model fallbacks,
-  QoS shedding, and fail-safe versus fail-operational trade-offs?
+scenario: Your team is deploying an AI-powered surveillance system on edge devices, with each device featuring a Hailo-8 accelerator (26 TOPS INT8, 2.5W dataflow accelerator) for real-time object detection. The system's primary goal is continuous, reliable operation, but it faces unpredictable environmental factors such as fluctuating network bandwidth, variable camera feed complexity, and potential power fluctuations.
+question: How would you design a Hailo-8 surveillance degradation strategy with ladders, model fallbacks, QoS shedding, and fail-safe versus fail-operational trade-offs?
 details:
-  realistic_solution: 'Implement a multi-stage degradation ladder:
-
-    1. **Optimal Mode:** Primary high-accuracy INT8 model on Hailo-8 at target FPS (e.g., 15 FPS, consuming
-    ~2W).
-
-    2. **QoS Shedding:** If utilization exceeds 80% or latency spikes, drop frames (e.g., 5 FPS) or filter
-    classes.
-
-    3. **Model Fallback:** Reconfigure Hailo-8 with a tiny YOLO variant, trading accuracy for latency.
-
-    4. **Fail-Operational Baseline:** CPU-based motion detection sending metadata only. For surveillance,
-    fail-operational is critical; completely shutting down (''fail-safe'') creates unacceptable security
-    blind spots.'
-  common_mistake: '**The Pitfall:** Implementing binary fallbacks or defaulting to fail-safe.
-
-    **The Rationale:** Engineers often propose a simple ''full model or no model'' approach, or they overlook
-    the 2.5W power budget implications and just default to shutting the system down (fail-safe) upon load.
-
-    **The Consequence:** The system experiences jarring service interruptions or total outages, destroying
-    the core utility of a continuous surveillance product.
-
-    '
-  napkin_math: "**Assumptions & Constraints:**\n   - Hailo-8 accelerator: 26 TOPS INT8, 2.5W budget.\n\
-    \   - High-accuracy model requires 2 TOPS INT8.\n   - Fallback model requires 0.5 TOPS INT8.\n   -\
-    \ CPU-based fail-operational mode consumes 3W.\n**Calculations:**\n   - High-accuracy throughput =\
-    \ 26 TOPS / 2 TOPS = 13 FPS maximum.\n   - Fallback throughput = 26 TOPS / 0.5 TOPS = 52 FPS.\n  \
-    \ - System power interaction: Degrading inference drops total power below the required threshold.\n\
-    **Conclusion & Interpretation:**\n   - **Result: Graceful Degradation**. Scaling model complexity\
-    \ maintains the strict 2.5W accelerator budget, preventing thermal/battery collapse while remaining\
-    \ fail-operational.\n"
+  realistic_solution: |
+    Implement a multi-stage degradation ladder:
+    1. **Optimal Mode:** Primary high-accuracy INT8 detector on Hailo-8 at the target FPS while staying inside the accelerator power envelope.
+    2. **QoS Shedding:** If latency, queue depth, thermals, or power exceed thresholds, reduce frame rate, resolution, or class set before dropping service entirely.
+    3. **Model Fallback:** Reconfigure Hailo-8 with a smaller detector that preserves critical classes and lowers accelerator duty cycle.
+    4. **Fail-Operational Baseline:** If the accelerator path cannot meet watchdog deadlines, keep a minimal host-side motion or background-subtraction path only when the system-level power budget allows it; otherwise enter fail-safe by alerting upstream systems and marking coverage degraded.
+    The design should explicitly choose fail-operational for security continuity when degraded results are better than no coverage, and fail-safe when stale or misleading detections would create unacceptable risk.
+  common_mistake: |
+    **The Pitfall:** Implementing binary fallbacks or defaulting to fail-safe.
+    **The Rationale:** Engineers often propose a simple 'full model or no model' approach, or they overlook the 2.5W power budget implications and just default to shutting the system down (fail-safe) upon load.
+    **The Consequence:** The system experiences jarring service interruptions or total outages, destroying the core utility of a continuous surveillance product.
+  napkin_math: |
+    **Assumptions & Constraints:**
+       - Hailo-8 accelerator: 26 TOPS INT8, 2.5W budget.
+       - Target rate: 15 FPS.
+       - High-accuracy model cost: 2 TOPS sustained at 15 FPS, drawing about 2.0W on the accelerator.
+       - Fallback model cost: 0.5 TOPS sustained at 15 FPS, drawing about 0.8W on the accelerator.
+       - Host fail-operational motion detection consumes 0.7W host power and is outside the accelerator budget.
+    **Calculations:**
+       - Primary mode accelerator margin: 2.5W - 2.0W = 0.5W.
+       - Fallback model accelerator margin: 2.5W - 0.8W = 1.7W.
+       - QoS shedding from 15 FPS to 5 FPS reduces accelerator duty cycle by about 67% if per-frame cost is unchanged.
+       - Host motion detection must be checked against a separate system power budget because 0.7W host power is not covered by the 2.5W accelerator envelope.
+    **Conclusion & Interpretation:**
+       - **Result: graceful degradation follows from power margins and watchdog thresholds, not TOPS divided by FPS.** Use the primary detector while margin exists, shed QoS under stress, switch to the smaller detector for larger margin, and choose fail-operational host motion only when system power and risk analysis allow it.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,47 +8,30 @@ competency_area: reliability
 bloom_level: apply
 phase: inference
 title: Deterministic Execution Timing for On-Device LLM Watchdog
-scenario: You are deploying a safety-critical automotive voice command system using Gemini Nano on the
-  Google Tensor G3. The safety certification requires a strict watchdog timer to trigger a fallback system
-  if the on-device TPU fails to generate a response in time.
-question: What watchdog timeout should guarantee a 20-token emergency LLM response on Tensor G3 assuming
-  50% TPU utilization due to 12 GB LPDDR5X bandwidth constraints?
+scenario: You are deploying a safety-critical automotive voice command system using a 3.2B INT8 LLM on a mobile TPU with 7.5 TOPS peak throughput. The safety certification requires a strict watchdog timer to trigger a fallback system if the on-device TPU fails to generate a response in time. For this bound, assume weights remain resident, each token costs 1 MAC per parameter, and shared-memory contention limits TPU utilization to 50%.
+question: What watchdog timeout should cover a 20-token emergency LLM response at 50% of a 7.5 TOPS mobile TPU?
 details:
-  realistic_solution: The correct approach requires calculating the memory bandwidth bottleneck, since
-    autoregressive LLM decoding at batch size 1 is strictly memory-bound, not compute-bound. We must determine
-    the time to load the model weights for each of the 20 tokens using the 12 GB LPDDR5X bandwidth limit,
-    rather than applying a fixed TPU utilization factor.
-  common_mistake: '**The Pitfall:** Using theoretical peak TOPS instead of effective memory-bound TOPS.
-
-    **The Rationale:** Candidates often calculate the minimum time using the peak 7.5 TOPS without accounting
-    for realistic TPU utilization or memory bandwidth bottlenecks.
-
-    **The Consequence:** This leads to a watchdog timer that is far too aggressive and triggers false
-    positive fallbacks, disabling the primary system unnecessarily.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Model size: 3.2B parameters (approx 3.2 GB in INT8).
-
+  realistic_solution: Use the prompt's compute-bound watchdog model rather than assuming the whole model is reloaded from DRAM for every token. A 3.2B parameter token costs 3.2B MACs, or 6.4 GOP. At 50% utilization, the 7.5 TOPS TPU provides 3.75 TOPS effective throughput, so each token takes 6.4 / 3750 = 1.71 ms. A 20-token response needs 34.1 ms of compute, so a practical watchdog should be set above that floor, for example 40 ms before triggering fallback.
+  common_mistake: |
+    **The Pitfall:** Using theoretical peak TOPS or assuming the full model is reloaded from DRAM for every token.
+    **The Rationale:** Candidates often calculate the minimum time using the peak 7.5 TOPS without accounting for the stated 50% utilization, or they switch to an unstated weight-streaming model.
+    **The Consequence:** This leads to a watchdog timer that is far too aggressive and triggers false positive fallbacks, disabling the primary system unnecessarily.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model size: 3.2B parameters.
     - Target: 20 tokens.
-
-    - Effective memory bandwidth: 60 GB/s (standard for LPDDR5X).
-
+    - Peak TPU throughput: 7.5 TOPS.
+    - Effective utilization: 50%, so effective throughput = 3.75 TOPS.
+    - Per-token compute model: 1 MAC per parameter = 2 ops per parameter.
 
     **Calculations:**
-
-    - Memory loaded per token: 3.2 GB.
-
-    - Time per token = 3.2 GB / 60 GB/s = 0.0533 seconds (53.3 ms).
-
-    - Total time for 20 tokens = 53.3 ms * 20 = 1.066 seconds.
-
+    - Operations per token: 3.2B MACs * 2 ops/MAC = 6.4 GOP/token.
+    - Time per token = 6.4 GOP / 3,750 GOP/s = 0.00171 seconds = 1.71 ms.
+    - Total compute time for 20 tokens = 1.71 ms * 20 = 34.1 ms.
+    - Watchdog setting with modest scheduling margin: about 40 ms.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 1.066 seconds (Memory-Bound)**. The watchdog timeout must be set slightly above 1066 ms
-    to account for the memory bandwidth bottleneck.'
+    - **Result: 40 ms watchdog setting (Compute-Bound Sizing Floor).** The computed 20-token floor is 34.1 ms, so a 40 ms timeout gives a small margin before fallback.
 status: published
 provenance: imported
 requires_explanation: false

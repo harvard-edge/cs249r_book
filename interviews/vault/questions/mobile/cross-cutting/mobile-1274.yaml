@@ -18,15 +18,17 @@ details:
     **The Consequence:** They fail to identify LPDDR5X memory bandwidth saturation as the true hardware bottleneck.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Memory bandwidth: Snapdragon 8 Gen 3 LPDDR5X provides ~77 GB/s.
+    - The 3B INT8 assistant stores roughly 3 GB of weights.
+    - Autoregressive decoding has poor weight reuse at batch size 1, so many weights are streamed repeatedly.
+    - The guardrail has a separate real-time SLA and must fetch its own weights/activations while the main model is decoding.
 
     **Calculations:**
-    - Main model (3B INT8) at 20 tok/sec: 3 GB * 20 = 60 GB/s (78% of total bandwidth).
-    - System overhead: OS, display, and background tasks consume ~16 GB/s.
-    - Guardrail model (0.5B): Requires >0.5 GB/s memory reads.
+    - A rough upper-bound traffic estimate is model_size * token_rate = 3 GB * 20 tokens/sec = 60 GB/s if most weights are reread each token.
+    - Real implementations cache and tile some data, so the exact demand may be lower; the key point is that decoding can still be memory-service-bound even at low compute utilization.
+    - The guardrail competes for the same memory subsystem, so its small compute load can miss deadlines when queued behind the main model's memory traffic.
 
     **Conclusion & Interpretation:**
-    - **Result: 76.5 GB/s (Bandwidth-Bound)**. 60 + 16 + 0.5 = 76.5 GB/s, completely saturating the bus and starving the guardrail.
+    - **Result: Bandwidth-Bound Guardrail Starvation.** The observed low NPU utilization is consistent with memory stalls; the fix is scheduling or reserving bandwidth for the guardrail, not adding more TOPS.
 status: published
 provenance: imported
 requires_explanation: false

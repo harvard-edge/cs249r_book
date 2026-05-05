@@ -11,7 +11,7 @@ title: Rail-Optimized DP Topology Bandwidth
 scenario: You are training a model on a 64-node cluster (8x GPUs/node) using an 8-rail 400Gbps InfiniBand network. The ToR (leaf) switches connect GPUs of the same local index across nodes, but the spine connecting different rails is 4:1 oversubscribed. You use TP=1, PP=8, DP=64.
 question: For TP=1, PP=8, DP=64 on a 4:1 oversubscribed spine, what is the effective per-GPU gradient sync bandwidth for naive versus rail-optimized placement?
 details:
-  realistic_solution: Pin each pipeline stage to a specific local GPU index (e.g., PP stage 0 always on GPU 0 across all nodes). This confines the 64-way DP AllReduce traffic for each stage entirely within its dedicated non-blocking leaf switch.
+  realistic_solution: Naive placement lets DP traffic for a pipeline stage cross rails and hit the 4:1 oversubscribed spine, reducing effective per-GPU sync bandwidth from 400 Gbps to about 100 Gbps, or 12.5 GB/s. Rail-optimized placement pins each pipeline stage to a specific local GPU index across nodes, keeping its 64-way DP AllReduce on one non-blocking 400 Gbps rail, or 50 GB/s. The optimized layout is therefore about 4x faster for gradient sync.
   common_mistake: |
     **The Pitfall:** Placing pipeline stages arbitrarily across local GPU indices.
     **The Rationale:** Candidates assume the network is a flat, non-blocking fabric and ignore the physical topology of multi-rail clusters.
@@ -23,12 +23,13 @@ details:
     - TP=1, PP=8, DP=64.
 
     **Calculations:**
-    - Spine bandwidth = 400 Gbps / 4 = 100 Gbps (12.5 GB/s).
-    - Naive Placement: DP traffic randomly crosses rails via the spine, limited to 12.5 GB/s.
-    - Rail-Optimized Placement: Pin each pipeline stage to a specific local GPU index, confining traffic to the leaf switch.
+    - Rail line rate = 400 Gbps = 50 GB/s.
+    - Naive placement through 4:1 oversubscribed spine: 400 Gbps / 4 = 100 Gbps = 12.5 GB/s effective per GPU.
+    - Rail-optimized placement: DP traffic stays on the matching rail, so effective per-GPU bandwidth is 400 Gbps = 50 GB/s.
+    - Improvement factor = 50 GB/s / 12.5 GB/s = 4x.
 
     **Conclusion & Interpretation:**
-    - **Result: 50 GB/s (Network-Bound)**. Rail-optimized effective bandwidth = 400 Gbps (50 GB/s), a 4x throughput speedup over naive placement.
+    - **Result: 12.5 GB/s naive vs 50 GB/s rail-optimized (Network-Bound)**. Pinning PP stages to rail-aligned GPU indices avoids the oversubscribed spine.
 status: published
 provenance: imported
 requires_explanation: false

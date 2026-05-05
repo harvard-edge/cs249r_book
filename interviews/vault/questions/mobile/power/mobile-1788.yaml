@@ -8,54 +8,30 @@ competency_area: power
 bloom_level: understand
 phase: inference
 title: Thermal Aware Inference Scheduling on iPhone During Photo Processing
-scenario: An iPhone 15 Pro (A17 Pro) runs Neural Engine at 35 TOPS during video capture (camera ISP +
-  scene understanding). The device reaches thermal state 2 (1 of 4 Apple thermal states) after 15 minutes
-  of 4K30 video + ML processing. The OS throttles Neural Engine to 60% throughput. A photo organization
-  app launches and needs 5s of intensive ML inference.
-question: How should a photo ML task schedule 5s of A17 Pro Neural Engine work during 4K30 capture at
-  thermal state 2?
+scenario: An iPhone 15 Pro (A17 Pro) runs Neural Engine at 35 TOPS during video capture (camera ISP + scene understanding). The device reaches thermal state 2 (1 of 4 Apple thermal states) after 15 minutes of 4K30 video + ML processing. The OS throttles Neural Engine to 60% throughput. A photo organization app launches and needs 5s of intensive ML inference.
+question: How should a photo ML task schedule 5s of A17 Pro Neural Engine work during 4K30 capture at thermal state 2?
 details:
-  realistic_solution: 'Thermal state 2: NE at 60% = 21 TOPS effective. Camera+scene understanding: ~10
-    TOPS. Available for photo app: 21-10 = 11 TOPS. Photo ML task: set QoS=.userInitiated for active processing.
-    iOS will preempt background NE tasks. At 11 TOPS for 5 seconds: 11T × 5 = 55T operations = can process
-    ~550,000 high-res photos at 100M FLOPs each. Strategy: (1) Mark inference task as .background during
-    camera active → iOS defers. (2) Detect camera session end → promote to .userInitiated → full remaining
-    NE budget. (3) Use Core ML task priority API to yield NE when thermal pressure increases. If user
-    explicitly opens photo app, iOS elevates it — camera ISP gets hardware lane, NE available for app.'
-  common_mistake: '**The Pitfall:** Assuming all ML workloads compete equally for Neural Engine resources.
-
-    **The Rationale:** iOS uses QoS classes and thermal state awareness to prioritize user-interactive
-    tasks over background processing.
-
-    **The Consequence:** Incorrectly scheduling active processing, leading to poor user experience.'
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: Thermal state 2 reduces the nominal Neural Engine budget from 35 TOPS to about 21 TOPS. If camera scene understanding is already consuming roughly 10 TOPS-equivalent sustained work, the photo task should assume only about 11 TOPS of remaining effective budget and should avoid competing aggressively during capture. Schedule batch organization as background or utility work while the camera is active, pause or chunk work when thermal pressure rises, and promote priority only for explicit user-initiated photo actions. QoS and Core ML scheduling influence priority and deferral, but they should not be described as direct preemption of a fixed Neural Engine capacity slice.
+  common_mistake: |
+    **The Pitfall:** Assuming all ML workloads compete equally for Neural Engine resources.
+    **The Rationale:** iOS uses QoS classes and thermal state awareness to prioritize user-interactive tasks over background processing.
+    **The Consequence:** Incorrectly scheduling active processing, leading to poor user experience.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Neural Engine: 35 TOPS max.
-
     - Thermal State 2 constraint: Throttled to 60% throughput.
-
     - Camera ML requirement: ~10 TOPS.
-
     - High-res photo processing cost: 100M FLOPs per photo.
 
-
     **Calculations:**
-
     - Throttled NPU: 35 TOPS * 0.6 = 21 TOPS.
-
     - Available TOPS: 21 TOPS - 10 TOPS = 11 TOPS.
-
-    - Compute over 5s: 11 TOPS * 5s = 55 TOPS.
-
-    - Photos processed: 55 TOPS / 100M FLOPs = 550,000 photos.
-
+    - Compute over 5s: 11 TOPS * 5s = 55 trillion operations.
+    - Photos processed at 100M FLOPs each: 55e12 / 100e6 = 550,000 photos as a pure peak-throughput upper bound.
+    - Real scheduling decision: use smaller chunks or defer because sustained throughput, memory traffic, camera load, and thermal policy reduce usable throughput below the peak arithmetic bound.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 550,000 photos (Compute-Bound).** Intelligent QoS scheduling prevents UI jank while still
-    yielding immense processing capability under thermal throttling.
-
-    '
+    - **Result: defer or chunk background work under thermal pressure.** The consistent arithmetic gives a 550,000-photo theoretical upper bound, but the practical answer is to schedule conservatively around camera and thermal load rather than assume direct access to all remaining TOPS.
 status: published
 provenance: imported
 requires_explanation: false
@@ -69,7 +45,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- 55T ops / 100M FLOPs per photo is 550,000 photos, not 550. Missing factor of 1000.
+  - 55T ops / 100M FLOPs per photo is 550,000 photos, not 550. Missing factor of 1000.
 human_reviewed:
   status: not-reviewed
   by: null

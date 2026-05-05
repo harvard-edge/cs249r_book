@@ -11,22 +11,25 @@ title: 'Jetson Orin LLM Deployment: Activation Memory Bottleneck & Checkpointing
 scenario: You are deploying a 7B parameter transformer model (quantized to INT8) for real-time natural language processing on an NVIDIA Jetson Orin device. Initial benchmarks show that even with aggressive INT8 quantization, the model's forward-pass activation storage frequently hits the memory limit, leading to out-of-memory errors or forcing an extremely small effective batch size.
 question: How would you diagnose Jetson Orin OOMs from forward activations in the 7B INT8 transformer and reduce peak memory without killing throughput?
 details:
-  realistic_solution: 'The primary challenge is excessive forward-pass activation storage during inference. While gradient checkpointing is primarily a training-time memory optimization technique, a similar layer-wise execution with activation recomputation can be optimized for inference by only recomputing necessary activations on-the-fly for subsequent layers.'
+  realistic_solution: |
+    The first step is to profile which tensors cause the peak: batch-size activations, long-context KV-cache, TensorRT workspace, or temporary attention/MLP buffers. For inference, reduce peak memory by lowering batch size or sequence length, bounding KV-cache growth, using fused kernels and in-place buffers, quantizing KV-cache where accuracy allows, and offloading only non-critical tensors if latency remains acceptable. Activation recomputation is a last-resort custom inference tradeoff because it usually reduces throughput; it should be used only when profiling shows the memory saved is worth the added compute.
   common_mistake: |
     **The Pitfall:** Overlooking the distinct memory requirements for activations versus model parameters.
     **The Rationale:** Candidates assume that model parameter quantization alone sufficiently addresses memory constraints.
     **The Consequence:** They fail to differentiate between memory strategies suitable for training versus inference, leaving the core memory bottleneck unresolved.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model: 7B INT8 transformer (e.g., N=30 layers)
-       - Storage: Each layer's activations consume A GB (e.g., 1 GB)
-       - Checkpointing: Store max M layers (e.g., 2 layers)
-    2. **Calculations:**
-       - Unoptimized Memory: N * A = 30 * 1 GB = 30 GB
-       - Checkpointed Memory: M * A = 2 * 1 GB = 2 GB
-       - Memory Savings: 30 GB - 2 GB = 28 GB
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory Capacity-Bound.** Adapting checkpointing for inference fundamentally drops the peak activation footprint from 30 GB to 2 GB, unlocking large batch sizes without triggering Jetson Orin OOM crashes.
+    **Assumptions & Constraints:**
+       - 7B INT8 weights use about 7 GB.
+       - Jetson Orin memory budget is 32 GB before OS, runtime, and TensorRT workspace reservations.
+       - Example decode KV-cache: 32 layers, 32 heads, head dim 128, 2048-token context, FP16 K and V.
+       - Example temporary activation/workspace peak: 10 GB at batch 4, approximately linear with batch.
+    **Calculations:**
+       - KV-cache = 32 * 32 * 2048 * 128 * 2 (K&V) * 2 bytes = 1,073,741,824 bytes = 1 GiB per sequence.
+       - Batch-4 temporary peak = 10 GB; batch-1 temporary peak is about 10 GB / 4 = 2.5 GB.
+       - Batch-4 rough memory = 7 GB weights + 1 GB KV + 10 GB temp + runtime/workspace, which can approach the available budget.
+       - Batch-1 rough memory = 7 GB weights + 1 GB KV + 2.5 GB temp + runtime/workspace, leaving much more headroom.
+    **Conclusion & Interpretation:**
+       - **Result: inference memory is batch, context, KV-cache, and workspace bound.** Reducing batch/context and using fused or quantized buffers is the standard fix; recomputation may save memory but must be traded against lower throughput.
 status: published
 provenance: imported
 requires_explanation: false

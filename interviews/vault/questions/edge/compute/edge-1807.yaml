@@ -8,50 +8,30 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Inference Compute Specification for Cloud AI 100
-scenario: You are tasked with specifying the compute execution strategy for a high-throughput computer
-  vision pipeline deploying on an on-premise Qualcomm Cloud AI 100. The system must process multiple camera
-  streams efficiently. The hardware features 400 TOPS INT8 peak compute, 32 GB of LPDDR4x memory, and
-  a strict 75W TDP limit.
-question: How do you balance batch size and operational intensity to maximize the INT8 compute utilization
-  without hitting the LPDDR4x memory bandwidth wall?
+scenario: You are tasked with specifying the compute execution strategy for a high-throughput computer vision pipeline deploying on an on-premise Qualcomm Cloud AI 100. The system must process multiple camera streams efficiently. The hardware features 400 TOPS INT8 peak compute, 32 GB of LPDDR4x memory, and a strict 75W TDP limit.
+question: How do you balance batch size and operational intensity to maximize the INT8 compute utilization without hitting the LPDDR4x memory bandwidth wall?
 details:
-  realistic_solution: The specification must dictate a batched execution model to increase operational
-    intensity (compute operations per byte accessed). Specify a batch size large enough to ensure model
-    weights, once loaded into the local SRAM from the 32 GB LPDDR4x, are reused across multiple inputs.
-  common_mistake: '**The Pitfall:** Specifying a batch size of 1 to minimize latency without analyzing
-    operational intensity.
-
-    **The Rationale:** Developers assume that minimizing latency is the only priority, completely ignoring
-    the memory bandwidth wall.
-
-    **The Consequence:** Memory bandwidth bottlenecks the execution because weights must be loaded from
-    memory for every single input, starving the 400 TOPS compute units.'
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: The specification should choose the smallest micro-batch that raises operational intensity enough to keep the INT8 cores busy without violating stream latency. Profile the model's per-frame operations, weight bytes, activation bytes, and memory bandwidth; then require B such that the per-frame memory traffic is roughly weights/B plus activations and the resulting bandwidth stays below the LPDDR4x limit with headroom. Increase B only until weight reuse stops improving throughput or latency/queueing exceeds the camera deadline, and prefer fused operators and layouts that keep activations local because batching alone cannot fix activation-bandwidth bottlenecks.
+  common_mistake: |
+    **The Pitfall:** Specifying a batch size of 1 to minimize latency without analyzing operational intensity.
+    **The Rationale:** Developers assume that minimizing latency is the only priority, completely ignoring the memory bandwidth wall.
+    **The Consequence:** Memory bandwidth bottlenecks the execution because weights must be loaded from memory for every single input, starving the 400 TOPS compute units.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - LPDDR4x bandwidth: ~136 GB/s.
-
     - Peak compute: 400 TOPS INT8.
-
-    - Model: 10 GOPs/frame, 2 GB of INT8 weights.
-
+    - Profiled model compute: 10 GOPs/frame.
+    - Let W be model-weight bytes read per batch and A be activation/input bytes per frame.
 
     **Calculations:**
-
-    - Batch size 1 weight read time: 2 GB / 136 GB/s = 14.7ms.
-
-    - Batch size 1 max throughput: 1 / 14.7ms ≈ 68 FPS (680 GOPs/s, or 0.17% compute utilization).
-
-    - Target 50% compute utilization (200 TOPS): 20,000 FPS.
-
-    - Minimum batch size to reach 50% utilization: 20,000 / 68 ≈ 294.
-
+    - Compute-only peak throughput = 400,000 GOPS / 10 GOPs per frame = 40,000 FPS.
+    - 50% compute utilization target = 200,000 GOPS/s / 10 GOPs per frame = 20,000 FPS.
+    - Per-frame memory traffic with batch size B is approximately W/B + A.
+    - Required bandwidth at target FPS is target_FPS * (W/B + A), which must stay below 136 GB/s with margin.
+    - Choose the smallest B satisfying the bandwidth inequality and the per-stream latency budget.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Batch Size 294 (Memory-Bound)**. The specification must require a massive batch size to
-    amortize weight reads and prevent memory starvation.
-
-    '
+    - **Result: batch size is a profiled bandwidth-latency tradeoff, not a fixed 294**. Micro-batching should amortize weight reads while avoiding activation traffic, queueing delay, and LPDDR4x saturation.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,22 +11,25 @@ title: Context Parallelism vs Sequence Parallelism
 scenario: Megatron's 'sequence parallelism' and 'context parallelism' (Ring Attention) both split the sequence dimension, but they solve different architectural problems.
 question: What is the difference between sequence parallelism and context parallelism, and when would you use each?
 details:
-  realistic_solution: 'Sequence Parallelism (SP) splits the sequence dimension ONLY for non-TP operations (LayerNorm, Dropout) to save activation memory, reusing the existing TP group. Context Parallelism (CP) splits the actual attention computation across dedicated GPUs by ring-passing KV blocks, allowing infinite context scaling.'
+  realistic_solution: Sequence Parallelism (SP) shards selected activations and reductions across the existing tensor-parallel ranks, commonly around operations such as LayerNorm and dropout, so each TP rank stores less activation memory while preserving the same logical sequence. Context Parallelism (CP) shards the actual sequence/context used by attention across context-parallel ranks, exchanging K/V blocks or partial attention results so longer contexts fit. Use SP when activation memory inside a TP group is the bottleneck. Use CP when attention KV/context length is the bottleneck. CP extends usable context length, but it is still bounded by communication, compute, and memory.
   common_mistake: |
     **The Pitfall:** Using the terms SP and CP interchangeably.
     **The Rationale:** Engineers see both splitting the sequence dimension and assume identical logic.
     **The Consequence:** Misconfiguring parallelism strategies, resulting in OOM errors or wasted GPU interconnects.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Context = 128K tokens.
-    - KV elements = 21.47 billion.
+    - Both techniques may partition along sequence-like dimensions.
+    - SP operates within a TP group to reduce activation residency.
+    - CP partitions attention context/KV work across context-parallel ranks.
 
     **Calculations:**
-    - BF16 size = 21.47B * 2 bytes = ~40 GiB.
-    - With CP=4: 40 GiB / 4 = ~10 GiB per GPU.
+    - SP target: activation memory for non-matmul and reduction paths inside TP.
+    - CP target: attention memory and compute that grow with context length.
+    - SP communication is tied to TP collectives; CP adds context/KV exchange patterns such as ring attention.
+    - Neither technique makes context length unlimited; CP trades per-rank KV memory for more communication.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Capacity Bound (CP reduces single-GPU KV requirement to 10 GiB).**
+    - **Result: Use SP for TP activation-memory pressure and CP for long-context attention/KV pressure.** They are complementary, not interchangeable.
 status: published
 provenance: imported
 requires_explanation: false

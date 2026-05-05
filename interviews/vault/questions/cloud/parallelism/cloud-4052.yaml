@@ -11,7 +11,7 @@ title: Gradient Synchronization for FSDP with Activation Checkpointing
 scenario: You are specifying the gradient synchronization strategy for FSDP (Fully Sharded Data Parallelism) training a 65B LLM on 256 GPUs with activation checkpointing. FSDP shards parameters across GPUs and requires all-gather before each layer's forward/backward and reduce-scatter after each layer's backward. Activation checkpointing means the forward pass runs twice.
 question: With activation checkpointing, what total FSDP communication volume and scheduling constraints apply for the 65B LLM on 256 GPUs?
 details:
-  realistic_solution: With activation checkpointing, the communication includes 1L all-gathers for forward, 1L all-gathers for recompute, 1L all-gathers for backward, and 1L reduce-scatters for backward. Total is 4L operations, not 3L.
+  realistic_solution: With activation checkpointing, the communication includes 1L all-gathers for the original forward, 1L all-gathers for recompute, 1L all-gathers for backward, and 1L reduce-scatters for backward. For a 65B FP16 model, total parameter bytes are 130GB. Under an equal-layer estimate with 80 layers, each layer has 1.625GB of parameters, and each FSDP collective moves (255/256)×1.625GB ≈ 1.619GB per layer. Total checkpointed communication is 4×80×1.619GB ≈ 518GB per iteration, versus about 389GB without checkpointing. The schedule constraint is that the recompute all-gather becomes part of the backward critical path; all-gathers must be prefetched just before each layer use, and each reduce-scatter can only run after that layer's backward gradient is produced.
   common_mistake: |
     **The Pitfall:** Forgetting that activation checkpointing doubles the forward-pass all-gather operations.
     **The Rationale:** Engineers calculate communication volume based on standard FSDP (3L operations), failing to account for the extra recompute pass induced by activation checkpointing.
@@ -23,14 +23,16 @@ details:
     - FSDP standard = 3L. With checkpointing = 4L.
 
     **Calculations:**
-    - Volume per collective: 65B × 2 bytes / L = 1.625GB per layer.
-    - Standard (3L): 240 collectives. Volume = 240 × 1.625GB = 390GB.
+    - Total parameter bytes: 65B × 2 bytes = 130GB.
+    - Equal-layer parameter bytes: 130GB / 80 = 1.625GB per layer.
+    - FSDP collective traffic per layer operation: (255/256) × 1.625GB = 1.619GB.
+    - Standard (3L): 240 collectives. Volume = 240 × 1.619GB = 388.5GB.
     - With Checkpointing (4L): 1L fwd + 1L recompute + 1L bwd_gather + 1L bwd_reduce = 320 collectives.
-    - Total Volume: 320 × 1.625GB = 520GB.
-    - Total Time @ 400GB/s: 520GB / 400GB/s = 1.3s.
+    - Total Volume: 320 × 1.619GB = 518.0GB.
+    - Total Time @ 400GB/s if fully exposed: 518.0GB / 400GB/s = 1.30s.
 
     **Conclusion & Interpretation:**
-    - **Result: Network-Bound**. Activation checkpointing inflates communication to 320 collectives, requiring strict 4L scheduling.
+    - **Result: 518GB per iteration under this equal-layer model.** Activation checkpointing adds the recompute all-gather stream, so scheduling must overlap prefetches carefully while respecting layer-use and gradient-ready dependencies.
 status: published
 provenance: imported
 requires_explanation: true

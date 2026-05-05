@@ -9,24 +9,26 @@ bloom_level: analyze
 phase: both
 title: Evaluating Congestion Control Strategies in an A100 GPU Cluster
 scenario: 'You are managing a large-scale distributed ML training cluster comprised of 512 GPUs utilizing a high-speed Ethernet fabric. During peak training phases, you observe significant incast congestion where many GPUs simultaneously send gradient updates to parameter servers. Your team has identified two primary architectural proposals: (A) DCQCN-centric with specific NIC and core switch configurations, and (B) PFC/ECN/Scheduling utilizing Priority Flow Control.'
-question: 'Which proposal would you choose for the 512-GPU incast problem, and what are the trade-offs of DCQCN versus PFC/ECN with flow scheduling?'
+question: Which proposal would you choose for the 512-GPU incast problem, and what are the trade-offs of DCQCN versus PFC/ECN with flow scheduling?
 details:
-  realistic_solution: 'For massive GPU incast scenarios, relying solely on reactive link-layer controls like DCQCN or generic PFC is insufficient and frequently leads to Head-of-Line (HoL) blocking or PFC pause storms. Proposal B is superior when augmented with framework-level flow scheduling (e.g., dynamic gradient bucketing or NVSHMEM topology-aware routing). Combining Priority Flow Control (PFC) with Explicit Congestion Notification (ECN) and intelligent layer-7 backoff proactively limits the microbursts before they hit the spine switch queues.'
+  realistic_solution: For massive GPU incast scenarios, relying solely on reactive link-layer controls like DCQCN or generic PFC is insufficient and frequently leads to Head-of-Line (HoL) blocking or PFC pause storms. Proposal B is superior when augmented with framework-level flow scheduling (e.g., dynamic gradient bucketing or NVSHMEM topology-aware routing). Combining Priority Flow Control (PFC) with Explicit Congestion Notification (ECN) and intelligent layer-7 backoff proactively limits the microbursts before they hit the spine switch queues.
   common_mistake: |
     **The Pitfall:** Applying generic TCP/IP congestion control mechanisms to ML training.
     **The Rationale:** Network engineers default to standard CUBIC or Reno, failing to account for the unique, synchronized, bursty all-reduce patterns of ML workloads.
     **The Consequence:** These protocols react too slowly to microbursts, failing to prevent severe queue build-up and packet drops during massive incast events.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 64 GPUs simultaneously send 1GB gradients to a single parameter server.
-    - Time window: 100µs.
+    - 512 GPUs participate in the incast.
+    - Each sends a 64 MB gradient shard toward a small set of aggregation targets.
+    - The burst arrives over a 1ms scheduling window.
 
     **Calculations:**
-    - Total data burst: 64 GPUs * 1 GB = 64 GB.
-    - Required ingress bandwidth: 64 GB / 0.0001 seconds = 640,000 GB/s (640 TB/s).
+    - Total burst size = 512 * 64 MB = 32,768 MB = 32 GB.
+    - Instantaneous offered load over 1ms = 32 GB / 0.001s = 32 TB/s.
+    - A single 400 Gbps egress carries about 50 GB/s, so unscheduled fan-in can exceed one output by hundreds of times.
 
     **Conclusion & Interpretation:**
-    - **Result: 640 TB/s demand (Network-Bandwidth-Bound)**. 640 TB/s instantaneous demand completely overwhelms 400 Gbps switches; network-layer congestion control must be augmented by application-layer scheduling.
+    - **Result: 32 TB/s Burst Demand.** At 512-GPU scale, DCQCN/PFC/ECN should be paired with flow scheduling or gradient bucketing so the synchronized burst is shaped before switch queues overflow.
 status: published
 provenance: imported
 requires_explanation: false

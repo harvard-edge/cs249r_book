@@ -9,9 +9,10 @@ bloom_level: apply
 phase: inference
 title: 'RLHF-Lite: Implicit Feedback Collection for Mobile Fine-Tuning'
 scenario: A mobile keyboard app collects implicit user feedback (accept/reject/edit of autocomplete suggestions) to fine-tune a local LoRA adapter.
-question: 'How would you design a lightweight on-device RLHF pipeline that runs without a dedicated reward model?'
+question: How would you design a lightweight on-device RLHF pipeline that runs without a dedicated reward model?
 details:
-  realistic_solution: 'Lightweight RLHF without dedicated RM: (1) Reward signal design: accepted suggestion = +1, edited suggestion = partial reward based on edit distance (1 - editdist/len), rejected = -1, ignored after 3s = 0 (neutral). (2) Implicit reward calibration: normalize rewards per session to account for user behavior variance. Use z-score normalization per user. (3) Algorithm: use DPO-lite. When user accepts suggestion A over having previously rejected suggestion B on similar prompt, form a preference pair. Train LoRA update with DPO objective every 50 preference pairs (micro-update). (4) Privacy: all training data and adapter weights stay on device. Opt-in federated aggregation for global improvement. (5) Computational budget: DPO step on 1B model with 50 pairs, all on NPU at 10 TOPS: 100 forward passes * 1B * 6 FLOP * 128 tokens = 76.8T FLOP / 10T = 7.7 seconds. Run during background charging.'
+  realistic_solution: 'Lightweight RLHF without dedicated RM: (1) Reward signal design: accepted suggestion = +1, edited suggestion = partial reward based on edit distance (1 - editdist/len), rejected = -1, ignored after 3s = 0 (neutral). (2) Implicit reward calibration: normalize rewards per session to account for user behavior variance. Use z-score normalization per user. (3) Algorithm: use DPO-lite. When user accepts suggestion A over having previously rejected suggestion B on a similar prompt, form a preference pair. Train LoRA updates only when the phone is idle, charging, and thermally cool; cap each job by time and battery budget. (4) Privacy: all training data and adapter weights stay on device. Opt-in federated aggregation can improve the global model without uploading raw keystrokes. (5) Computational budget: treat 50-pair updates on a 1B model as a background maintenance task that may take tens of seconds once backward passes, memory bandwidth, and mobile accelerator utilization
+    are included.'
   common_mistake: |
     **The Pitfall:** Treating implicit signals as equivalent to explicit preference labels without correction for selection bias.
     **The Rationale:** Candidates fail to account for the fact that users who accept suggestions may do so out of laziness rather than quality preference.
@@ -19,16 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 1B params, Sequence Length: 128 tokens.
-    - Compute Limit: 10 TOPS (NPU).
+    - Peak compute limit: 10 TOPS, but training utilization is well below peak and may fall back for unsupported backward ops.
     - DPO Update Batch: 50 preference pairs (100 forward passes).
+    - LoRA update requires forward and backward work plus optimizer and memory traffic.
 
     **Calculations:**
-    - Total FLOPs per Update: 100 passes * 1B params * 6 FLOPs * 128 tokens = 76.8 * 10^12 FLOPs (76.8 TFLOPs).
-    - Compute Time: 76.8 TFLOPs / 10 TOPS = 7.68 seconds.
-    - LoRA r=4 Adapter Size: <3MB total delta accumulated over 30 days.
+    - Idealized forward-only lower bound: 100 passes * 1B params * 6 FLOPs * 128 tokens = 76.8 TFLOPs.
+    - At peak 10 TOPS, that lower bound is 7.68 seconds.
+    - Training adds backward/optimizer work and mobile efficiency losses; at 10-30% effective utilization with backward overhead, the job can be on the order of tens of seconds rather than 7.7 seconds.
+    - Adapter size should be estimated from the exact LoRA target modules and rank, not from the number of days of updates.
 
     **Conclusion & Interpretation:**
-    - **Result: 7.68 seconds (Compute-Bound)**. Running the DPO update step takes just ~7.7 seconds, allowing seamless background execution while charging.
+    - **Result: Background-only compute budget.** DPO-lite can be feasible on device only if updates are small, interruptible, thermally gated, and scheduled while charging; the design should not promise seamless foreground updates from peak TOPS arithmetic.
 status: published
 provenance: imported
 requires_explanation: false

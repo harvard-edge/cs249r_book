@@ -7,28 +7,31 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: apply
 phase: training
-title: Calculating Communication-Compute Overlap Ceiling
-scenario: 'A training step takes 80ms of compute on a single GPU. AllReduce for a 10B parameter model (gradient size: 20GB in FP16) across 1024 GPUs using ring AllReduce over 200 Gb/s InfiniBand takes 2×(N-1)/N × 20GB / 200 Gb/s.'
-question: What is the AllReduce time for the 20GB gradient across 1024 GPUs over 200 Gb/s InfiniBand, and what training efficiency results?
+title: Sparse Gradient AllReduce Efficiency for a 10B Model
+scenario: A training step takes 80ms of compute. A dense 10B-parameter FP16 gradient is 20GB. Gradient pruning keeps 10% of entries and adds 0.2GB of sparse metadata, so each sparse AllReduce message is 2.2GB. Use ring AllReduce across 1024 GPUs over 200 Gb/s InfiniBand.
+question: How much does 90% sparse gradient AllReduce reduce communication time and training efficiency versus the dense 20GB baseline?
 details:
-  realistic_solution: 'Ring AllReduce time: 2 × (N-1)/N × message_size / bandwidth. N=1024, message=20GB=160Gb, bandwidth=200 Gb/s. Time = 2 × (1023/1024) × 160Gb / 200Gb/s = 2 × 0.999 × 0.8s = 1.598s ≈ 1.6s. Compute time: 80ms. AllReduce time: 1,600ms. Without overlap: step time = 80 + 1600 = 1680ms. Training efficiency = 80/1680 = 4.8%. With perfect overlap (overlap AllReduce with next forward pass): step time = max(80, 1600) = 1600ms. Efficiency = 80/1600 = 5.0%. The cluster is 95% communication-bound — a physical ceiling. Solutions: (1) gradient compression (reduce 20GB to 2GB → 160ms AllReduce), (2) pipeline parallelism (reduce data-parallel degree), (3) overlap gradients layer-by-layer instead of all at once.'
+  realistic_solution: 'Ring AllReduce time: 2 × (N-1)/N × message_size / bandwidth. Dense baseline: 200 Gb/s = 25 GB/s, so 2 × 1023/1024 × 20GB / 25GB/s ≈ 1.6s. Sparse gradient pruning sends 2GB of values plus 0.2GB of indices/metadata, so 2 × 1023/1024 × 2.2GB / 25GB/s ≈ 176ms. Without overlap, dense step time is 80 + 1600 = 1680ms, for 4.8% compute efficiency. Sparse step time is 80 + 176 = 256ms, for 31.3% efficiency. Pruning gives about a 9.1× communication reduction and a 6.5× efficiency improvement, but the job remains communication-bound unless sparsity, overlap, or bandwidth improves further.'
   common_mistake: |
-    **The Pitfall:** Failing to properly convert bits to bytes, or forgetting the 2x multiplier native to the Ring AllReduce algorithm.
-    **The Rationale:** Engineers constantly mix up network nomenclature (gigabits Gbps) with memory capacity (gigabytes GB), and superficially read the collective formula without realizing Ring AllReduce demands two distinct passes (reduce-scatter and all-gather).
-    **The Consequence:** The projected communication time is miscalculated by an order of magnitude (usually 16x too fast), leading to disastrously naive scaling expectations for massive clusters.
+    **The Pitfall:** Treating 90% gradient sparsity as an exact 10x network speedup with no metadata or collective overhead.
+    **The Rationale:** Sparse gradients still need indices or masks, and ring AllReduce still performs reduce-scatter plus all-gather over the transmitted sparse payload.
+    **The Consequence:** The communication savings are overstated, leading to pruning targets that do not actually recover enough training efficiency.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 10B model, 20GB FP16 gradients.
+    - 10B model, 20GB dense FP16 gradients.
+    - 90% sparse gradient payload: 2GB values + 0.2GB metadata = 2.2GB.
     - 1024 GPUs, 200 Gb/s InfiniBand.
     - Compute step: 80ms.
 
     **Calculations:**
     - Bandwidth Conversion: 200 Gb/s = 25 GB/s.
-    - Ring AllReduce Time: 2 * (1023/1024) * 20 GB / 25 GB/s ≈ 1.6 seconds (1600ms).
-    - Efficiency (Without Overlap): 80ms / (80ms + 1600ms) = 4.8%.
+    - Dense Ring AllReduce: 2 * (1023/1024) * 20 GB / 25 GB/s ≈ 1.6 seconds (1600ms).
+    - Sparse Ring AllReduce: 2 * (1023/1024) * 2.2 GB / 25 GB/s ≈ 0.176 seconds (176ms).
+    - Dense Efficiency: 80ms / (80ms + 1600ms) = 4.8%.
+    - Sparse Efficiency: 80ms / (80ms + 176ms) = 31.3%.
 
     **Conclusion & Interpretation:**
-    - **Result: 4.8% efficiency (Network-Bandwidth-Bound)**. The cluster is natively 95% bound by communication waits.
+    - **Result: 176ms sparse AllReduce and 31.3% efficiency (Sparsity-Bandwidth-Bound)**. Gradient pruning cuts communication by about 9.1x after metadata, but communication still dominates the step.
 status: published
 provenance: imported
 requires_explanation: false

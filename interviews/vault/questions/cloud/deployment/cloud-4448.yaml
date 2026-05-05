@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: inference
 title: MI300X vs H100 Decode Pool Economics
 scenario: 'Your team is choosing between H100 SXM5 and MI300X for the decode pool of a 70B disaggregated serving cluster. Cost: H100 ~$3/hr, MI300X ~$4/hr.'
-question: 'Which GPU would you choose for the 70B decode pool, H100 SXM5 or MI300X, based on cost per token and memory capacity?'
+question: Which GPU would you choose for the 70B decode pool, H100 SXM5 or MI300X, based on cost per token and memory capacity?
 details:
-  realistic_solution: 'Decode is memory-bandwidth bound: throughput proportional to HBM bandwidth. H100 decode tokens/sec per GPU: bandwidth / model_bytes_per_token = 3.35TB/s / (70B*2B) = 3.35e12 / 140e9 = 23.9 tok/sec at batch=1. MI300X: 5.3TB/s / 140GB = 37.9 tok/sec at batch=1. At large batches, both scale roughly proportionally with bandwidth. Cost comparison: H100 pair (TP=2) at $6/hr vs MI300X single at $4/hr. For single-GPU batch decode, MI300X 19% more cost-efficient. Memory capacity advantage: MI300X 192GB vs H100 80GB. 70B model weights: 140GB BF16. H100: needs 2×H100 (TP=2) for 70B decode. MI300X: fits on single GPU with 52GB KV headroom. H100 pair: $6/hr at TP=2. MI300X single: $4/hr. MI300X wins decisively for 70B decode.'
+  realistic_solution: 'Decode is usually memory-bandwidth bound once batching is high enough, and the 70B BF16 weights are about 140GB. A single 80GB H100 cannot hold the model, so use 2x H100 with tensor parallelism: about 6.7 TB/s aggregate HBM before TP overhead at $6/hr. A single MI300X fits the model in 192GB HBM with about 52GB left for KV cache, provides 5.3 TB/s, and costs about $4/hr. Normalized by bandwidth per dollar, H100 TP=2 gives 6.7 / 6 = 1.12 TB/s per $/hr, while MI300X gives 5.3 / 4 = 1.33 TB/s per $/hr, about 19% better before accounting for avoided TP communication. Choose MI300X for this decode pool if software maturity and kernel coverage are acceptable.'
   common_mistake: |
     **The Pitfall:** Comparing the GPUs solely on their peak TFLOPS compute capability instead of their Memory Bandwidth (GB/s per dollar).
     **The Rationale:** Engineers default to evaluating hardware by raw compute power, failing to recognize that LLM auto-regressive decoding is strictly memory-bandwidth bound at typical serving batch sizes.
@@ -25,12 +25,16 @@ details:
     **Calculations:**
     - H100 requires 2 GPUs (TP=2) to fit the 140GB model. Cost = $6/hr.
     - MI300X fits the 140GB model on a single GPU. Cost = $4/hr.
-    - H100 (TP=2) effective bandwidth ≈ 6.7 TB/s (minus sync overhead).
-    - At high batch sizes (e.g., 128), H100 TP=2 yields ~6,000 tok/sec ($0.000272/K-tok).
-    - MI300X single yields ~4,800 tok/sec ($0.000229/K-tok).
+    - H100 (TP=2) aggregate bandwidth ≈ 6.7 TB/s before tensor-parallel communication overhead.
+    - MI300X single-GPU bandwidth ≈ 5.3 TB/s and avoids TP all-reduce overhead.
+    - Bandwidth per dollar: H100 pair = 6.7 / 6 = 1.12 TB/s per $/hr.
+    - Bandwidth per dollar: MI300X = 5.3 / 4 = 1.33 TB/s per $/hr.
+    - Relative cost efficiency: 1.33 / 1.12 - 1 ≈ 19% better for MI300X under bandwidth-bound decode.
+    - If a benchmark gives H100 TP=2 about 6000 tok/sec, proportional MI300X throughput is 6000 * 5.3 / 6.7 ≈ 4746 tok/sec before TP-overhead adjustments.
+    - Cost per 1000 tokens: H100 pair = 6 / (6000 * 3600) * 1000 = $0.000278; MI300X = 4 / (4746 * 3600) * 1000 = $0.000234.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Capacity & Bandwidth Bound**. The MI300X wins decisively. By fitting the model on a single node, it avoids tensor-parallel overhead and provides a ~16% cheaper cost-per-token for 70B decoding.
+    - **Result: Memory-Capacity & Bandwidth Bound.** MI300X is about 16-19% cheaper per token under these assumptions and has enough memory for model weights plus KV headroom.
 status: published
 provenance: imported
 requires_explanation: false
@@ -44,7 +48,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- 'Batching throughput calculated incorrectly; batch=128 yields ~6000 tok/sec, not 47.8 tok/sec'
+  - Batching throughput calculated incorrectly; batch=128 yields ~6000 tok/sec, not 47.8 tok/sec
 human_reviewed:
   status: not-reviewed
   by: null

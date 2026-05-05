@@ -8,10 +8,10 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: DLRM Training on TPU v5e Pod
-scenario: 'Your team proposes training DLRM on a TPU v5e pod (256 chips). The embedding tables total 500 GB; the dense MLP is 5B params.'
-question: 'Which DLRM components map well to a TPU v5e pod, which do not, and what architectural change makes the model TPU-trainable?'
+scenario: Your team proposes training DLRM on a TPU v5e pod (256 chips). The embedding tables total 500 GB; the dense MLP is 5B params.
+question: Which DLRM components map well to a TPU v5e pod, which do not, and what architectural change makes the model TPU-trainable?
 details:
-  realistic_solution: 'MLP components are dense matrix operations and fit perfectly on TPU systolic arrays. Embedding lookups are sparse, random-access reads from large tables which bottleneck TPU HBM controllers. Offload embedding lookups from TPU to CPU/host memory and use TPUs only for dense operations.'
+  realistic_solution: 'Dense MLP components map well to TPU v5e because they are large BF16 matrix multiplies on systolic arrays. The 500 GB sparse embedding tables map poorly: lookups are random, require sharding, and create all-to-all routing between sparse IDs and the dense TPU computation. A TPU-trainable architecture shards or hosts embeddings in a TPU-compatible embedding system or CPU/host-memory parameter-server tier, keeps only hot rows or small tables on device when useful, and sends dense activations to the TPU pod for the 5B-parameter MLP. The key change is not simply moving all embeddings to CPU; it is separating sparse embedding storage/update from dense TPU compute with a batched input pipeline, row-wise sharding, caching, and explicit aggregation of sparse gradients.'
   common_mistake: |
     **The Pitfall:** Assuming embedding lookup performance is determined solely by dividing the full 500 GB table size by total memory bandwidth.
     **The Rationale:** Candidates fail to consider that TPUs struggle with the random memory access patterns and the all-to-all communication required to route sparse lookups across the interconnect.
@@ -19,17 +19,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Hardware: TPU v5e pod (256 chips, 197 TFLOPS/chip).
-    - Dense MLP: 5B params, batch=262k.
-    - Embedding tables: 100 tables, 256 bytes.
+    - Dense MLP: 5B params, global batch=262k.
+    - Embedding tables: 500 GB total, sharded outside the dense TPU compute path.
+    - Sparse lookups: assume 100 IDs/example and 64-dim BF16 embeddings (128 bytes/vector).
+    - Effective dense MFU: 50%.
 
     **Calculations:**
     - Pod Compute Capacity = 256 * 197 TFLOPS = 50.4 PFLOPS BF16.
-    - Dense MLP FLOPs = 2 * 5e9 * 262,144 = 2.62 PFLOPS per step.
+    - Dense MLP FLOPs = 2 * 5e9 * 262,144 = 2.62 PFLOP per step.
     - Dense Compute Time (50% MFU) = 2.62 / (50.4 * 0.5) = 104 ms/step.
-    - Embedding Lookup Volume = 262,144 * 100 * 256 bytes = 6.7 GB per step.
+    - Embedding Lookup Volume = 262,144 * 100 * 128 bytes ≈ 3.36 GB per step of read activations.
+    - Sparse gradient/update traffic is of the same order before deduplication, so the sparse path must move several GB/step with random access and all-to-all routing.
+    - The 500 GB table size determines placement/sharding; per-step traffic is determined by batch size, lookup count, vector width, cache hit rate, and duplicate IDs.
 
     **Conclusion & Interpretation:**
-    - **Result: 6.7 GB Sparse Volume (Bandwidth-Bound)**. The unfused overhead and all-to-all ICI communication for random scatter-gather dominates step time, exceeding the dense MLP time.
+    - **Result: Split Sparse/Dense Architecture (Input-Bound)**. The dense MLP can run efficiently on TPUs, but the embedding path needs TPU-aware sharding, host-side storage/caching, and batched sparse-gradient aggregation; otherwise random lookup latency and all-to-all routing, not dense FLOPs, limit training.
 status: published
 provenance: imported
 requires_explanation: true

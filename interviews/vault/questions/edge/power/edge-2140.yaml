@@ -8,35 +8,27 @@ competency_area: power
 bloom_level: apply
 phase: both
 title: Power Budget Allocation for Multi-Model Pipeline on Jetson Orin 60W
-scenario: A Jetson AGX Orin operates in 60W MODE with the following pipeline running sequentially or concurrently
-  depending on hardware mapping. The models map to detection (GPU, 20W), tracking (CPU, 8W), segmentation
-  (GPU, 25W), and postprocessing (CPU, 4W). System overhead (DRAM, storage, networking) utilizes a constant
-  10W.
-question: What is the peak power of this Orin pipeline, and can DLA-offloading detection fit it within
-  a 45W TDP?
+scenario: A Jetson AGX Orin operates in 60W MODE with the following pipeline running sequentially or concurrently depending on hardware mapping. The models map to detection (GPU, 20W), tracking (CPU, 8W), segmentation (GPU, 25W), and postprocessing (CPU, 4W). System overhead (DRAM, storage, networking) utilizes a constant 10W.
+question: What is the peak power of this Orin pipeline, and can DLA-offloading detection fit it within a 45W TDP?
 details:
-  realistic_solution: 'Sequential pipeline: GPU handles detection and segmentation in sequence. Peak GPU
-    power: max(20W, 25W) = 25W. Concurrent GPU+CPU scenario: GPU 25W + CPU tracking 8W + CPU postprocessing
-    4W + system 10W = 47W > 45W. Adding DLA for detection: DLA ~5W vs GPU 20W for detection. New pipeline:
-    DLA detection (5W) || GPU segmentation (25W). Peak: DLA 5W + GPU 25W + CPU 8W + CPU 4W + system 10W
-    = 52W > 45W. Solution: reduce GPU segmentation to power-cap mode (18W): 5+18+8+4+10 = 45W exactly.'
-  common_mistake: '**The Pitfall:** Summing peak power for all components simultaneously.
-
-    **The Rationale:** Engineers often overlook whether pipeline stages are fundamentally sequential or
-    capable of concurrent execution on independent hardware blocks.
-
-    **The Consequence:** Drastically overestimating peak power draw and unnecessarily restricting model
-    capabilities.
-
-    '
-  napkin_math: "**Assumptions & Constraints:**\n   - Jetson Orin 60W mode. Target TDP = 45W.\n   - Detection\
-    \ (GPU) = 20W, Segmentation (GPU) = 25W.\n   - Tracking (CPU) = 8W, Postprocessing (CPU) = 4W. Base\
-    \ = 10W.\n   - DLA Detection Offload = 5W.\n**Calculations:**\n   - Baseline Peak (Concurrent) = max(20,25)\
-    \ + 8 + 4 + 10 = 47W (> 45W limit).\n   - DLA Offload Peak = 5(DLA) + 25(GPU) + 8(CPU) + 4(CPU) +\
-    \ 10(Base) = 52W (> 45W limit).\n   - Power-cap GPU to 18W: 5 + 18 + 8 + 4 + 10 = 45W.\n**Conclusion\
-    \ & Interpretation:**\n   - **Result: Power-Capping Required**. Offloading detection to DLA allows\
-    \ concurrent execution but raises peak power to 52W. Power-capping the GPU segmentation to 18W enforces\
-    \ the strict 45W TDP constraint.\n"
+  realistic_solution: 'Use a steady-state streaming model: stages on the same hardware block serialize, but GPU, CPU, DLA, and fixed system load can overlap across frames. Baseline GPU detection and segmentation cannot peak together, so GPU peak is max(20W,25W)=25W; CPU tracking and postprocessing may overlap with the GPU stage, giving 25W + 8W + 4W + 10W = 47W, which misses a 45W TDP. DLA offloading detection reduces detection from 20W GPU to 5W DLA, but it also allows DLA detection to overlap with GPU segmentation, so peak becomes 5W + 25W + 8W + 4W + 10W = 52W. DLA offload alone does not fit 45W; fitting requires power-capping GPU segmentation to 18W, or serializing/throttling CPU work, so 5+18+8+4+10 = 45W.'
+  common_mistake: |
+    **The Pitfall:** Summing peak power for all components simultaneously.
+    **The Rationale:** Engineers often overlook whether pipeline stages are fundamentally sequential or capable of concurrent execution on independent hardware blocks.
+    **The Consequence:** Drastically overestimating peak power draw and unnecessarily restricting model capabilities.
+  napkin_math: |
+    **Assumptions & Constraints:**
+       - Jetson Orin 60W mode. Target TDP = 45W.
+       - Detection (GPU) = 20W, Segmentation (GPU) = 25W.
+       - Tracking (CPU) = 8W, Postprocessing (CPU) = 4W. Base = 10W.
+       - DLA Detection Offload = 5W.
+       - Same-block stages serialize; independent hardware blocks can overlap in steady-state streaming.
+    **Calculations:**
+       - Baseline Peak = max(20W GPU detection, 25W GPU segmentation) + 8W CPU + 4W CPU + 10W base = 47W (> 45W limit).
+       - DLA Offload Peak = 5W DLA detection + 25W GPU segmentation + 8W CPU + 4W CPU + 10W base = 52W (> 45W limit).
+       - Power-cap GPU to 18W: 5 + 18 + 8 + 4 + 10 = 45W.
+    **Conclusion & Interpretation:**
+       - **Result: DLA offload alone is insufficient; power-capping or serialization is required.** With this scheduling model, the 45W target is met only after reducing GPU segmentation to 18W or removing equivalent concurrent load.
 status: published
 provenance: imported
 requires_explanation: false

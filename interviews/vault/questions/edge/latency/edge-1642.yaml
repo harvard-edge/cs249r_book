@@ -8,39 +8,32 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: Dataflow-Aware Dynamic Batching for Multi-Camera Hailo-8 Edge Appliances
-scenario: You are designing an edge inference appliance to process 4 concurrent 1080p camera streams at
-  30 FPS using a single Hailo-8 accelerator (26 TOPS INT8, 2.5W). The Hailo-8 operates as a dataflow accelerator
-  without local DRAM, meaning it must stream input tensors directly from host memory over PCIe. To minimize
-  host-to-device memory transfer overhead and hit strict 33ms latency targets per frame, you need to synthesize
-  a custom batching strategy. Design an architecture that dynamically batches asynchronous frames from
-  these cameras while accounting for the PCIe bandwidth constraints and the accelerator's strict dataflow
-  nature.
-question: How would you dynamically batch 4 asynchronous 1080p 30 FPS camera streams on a DRAM-less Hailo-8
-  while meeting the 33 ms target?
+scenario: You are designing an edge inference appliance to process 4 concurrent 1080p camera streams at 30 FPS using a single Hailo-8 accelerator (26 TOPS INT8, 2.5W). The Hailo-8 operates as a dataflow accelerator without local DRAM, meaning it must stream input tensors directly from host memory over PCIe. To minimize host-to-device memory transfer overhead and hit strict 33ms latency targets per frame, you need to synthesize a custom batching strategy. Design an architecture that dynamically batches asynchronous frames from these cameras while accounting for the PCIe bandwidth constraints and the accelerator's strict dataflow nature.
+question: How would you dynamically batch 4 asynchronous 1080p 30 FPS camera streams on a DRAM-less Hailo-8 while meeting the 33 ms target?
 details:
-  realistic_solution: The optimal design employs a host-side memory pooling strategy to spatially concatenate
-    incoming frames into a unified 'mega-tensor' (e.g., a 2x2 grid) in pinned host memory before streaming
-    it to the Hailo-8 as a single batch-1 execution. This perfectly leverages the accelerator's spatial
-    dataflow pipeline without incurring the overhead of multiple small PCIe transfers or requiring on-device
-    buffering. The architecture should use a strict time-bound trigger (e.g., 20ms) to pad missing frames
-    with zeros if a camera lags, ensuring the dataflow pipeline never stalls and the 33ms end-to-end latency
-    budget is preserved.
-  common_mistake: '**The Pitfall:** Proposing standard dynamic batching strategies on device memory.
+  realistic_solution: Use a host-side dynamic micro-batcher, not an on-device queue. Each stream writes decoded frames into pinned host buffers with timestamps. The scheduler forms batches of up to 4 frames across streams, flushes immediately when all streams have a fresh frame, and otherwise flushes on a short timeout such as 5-8 ms so the oldest frame still has room for PCIe transfer, Hailo execution, and postprocessing inside the 33 ms budget. Missing streams skip that batch or reuse an explicit padding frame only if the model was compiled for it. This handles asynchronous arrivals while respecting Hailo-8's DRAM-less dataflow execution.
+  common_mistake: |
+    **The Pitfall:** Proposing standard dynamic batching strategies on device memory.
+    **The Rationale:** Candidates assume the Hailo-8 operates like a standard GPU with local DRAM, failing to account for its DRAM-less spatial dataflow architecture.
+    **The Consequence:** Attempting to accumulate batches on-device causes massive PCIe thrashing and host memory bottlenecks, destroying real-time performance.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 4 asynchronous 1080p 30 FPS streams, or 120 frames/s aggregate.
+    - Frame size = 1920 * 1080 * 3 bytes ≈ 6.22 MB.
+    - Hailo-8 compute: 26 TOPS = 26,000 GOPS/s.
+    - Model requires 8 GOPS per frame.
+    - Dynamic batches contain 1 to 4 frames and flush on completion or timeout.
 
-    **The Rationale:** Candidates assume the Hailo-8 operates like a standard GPU with local DRAM, failing
-    to account for its DRAM-less spatial dataflow architecture.
+    **Calculations:**
+    - Aggregate input bandwidth if every frame is transferred once = 6.22 MB/frame * 120 frames/s = 746.4 MB/s.
+    - Full 4-frame batch payload = 4 * 6.22 MB = 24.88 MB.
+    - Full 4-frame batch compute = 4 * 8 GOPS = 32 GOPS.
+    - Full-batch compute latency = 32 GOPS / 26,000 GOPS/s = 0.00123 s = 1.23 ms.
+    - Average batch cadence at full load = 30 batches/s if every batch contains one frame from each stream.
+    - A 5-8 ms timeout plus about 1.23 ms compute leaves roughly 24 ms or more for transfer, preprocessing, postprocessing, and scheduling within the 33 ms frame budget.
 
-    **The Consequence:** Attempting to accumulate batches on-device causes massive PCIe thrashing and
-    host memory bottlenecks, destroying real-time performance.
-
-    '
-  napkin_math: "**Assumptions & Constraints:**\n   - 4 asynchronous 1080p 30 FPS streams (Batch interval:\
-    \ 33.3 ms).\n   - Frame size = 1920 * 1080 * 3 bytes ≈ 6.22 MB.\n   - Hailo-8 compute: 26 TOPS. Model\
-    \ requires 8 GOPS per frame.\n**Calculations:**\n   - Spatially batched tensor = 4 * 6.22 MB = 24.88\
-    \ MB.\n   - PCIe stream bandwidth = 24.88 MB * 30 FPS = ~746 MB/s.\n   - Batched execution compute\
-    \ = 32 GOPS / 26,000 GOPS = 0.0012 seconds (1.2 ms).\n**Conclusion & Interpretation:**\n   - **Result:\
-    \ 746 MB/s bandwidth, 1.2 ms compute.** Inference latency is dominated by host-to-device streaming.\
-    \ The spatial batching strategy perfectly resolves this **I/O-Bandwidth-Bound** constraint.\n"
+    **Conclusion & Interpretation:**
+    - **Result: about 746 MB/s aggregate input bandwidth and 1.23 ms compute for a full 4-frame micro-batch.** The correct policy is timeout-bounded host micro-batching; it reduces launch overhead but still requires PCIe bandwidth and scheduling headroom.
 status: published
 provenance: imported
 requires_explanation: true

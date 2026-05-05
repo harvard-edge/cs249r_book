@@ -11,13 +11,7 @@ title: Multi-Tenant Operator Scheduling on Qualcomm Cloud AI 100
 scenario: You are tasked with designing the inference execution engine for a multi-tenant on-premise deployment utilizing the Qualcomm Cloud AI 100 accelerator. The system must schedule concurrent execution of multiple transformer-based models within the power envelope while maximizing the INT8 compute capacity. You must architect a scheduling system that handles operator fusion, memory reuse across tenants, and execution order optimization to minimize memory thrashing and ensure high throughput.
 question: How would you schedule multiple transformer models on Cloud AI 100 to maximize 400 INT8 TOPS without LPDDR4x memory thrashing?
 details:
-  realistic_solution: 'The optimal design involves a two-tiered scheduler: a static
-    compiler pass for aggressive operator fusion and layer scheduling to maximize
-    local SRAM reuse, paired with a dynamic runtime scheduler. The runtime scheduler
-    should implement memory pooling for intermediate activations and prioritize execution
-    order based on current memory availability, ensuring the combined working set
-    of concurrent models fits within the 32 GB LPDDR4x while keeping the 400 TOPS
-    compute units saturated.'
+  realistic_solution: 'The scheduler should use admission control before execution: admit only model sets whose weights, KV cache, runtime reserve, and peak activation buffers fit in the 32 GB LPDDR4x budget. Compile each tenant with operator fusion and planned layer ordering so its peak intermediate buffer is capped, then run the admitted tenants with per-model queues and short time slices rather than launching all ready work at once. If a model would exceed its activation budget, queue it or lower its batch size instead of allowing LPDDR4x spill and thrash.'
   common_mistake: |
     **The Pitfall:** Designing a static scheduling approach tailored for a single model instead of multi-tenant environments.
     **The Rationale:** Candidates overlook the necessity of dynamic memory pooling and the severe impact of unfused operators on LPDDR4x bandwidth.
@@ -26,15 +20,19 @@ details:
     **Assumptions & Constraints:**
     - Concurrent Models: 4.
     - Static Memory per Model: 5 GB INT8 weights + 1 GB KV Cache (6 GB total).
-    - Total SRAM/LPDDR4x Available for dynamic buffers: 32 GB - (4 * 6 GB) = 8 GB.
+    - LPDDR4x limit: 32 GB.
+    - Runtime reserve for OS, DMA queues, and fragmentation: 4 GB.
     - Unfused intermediate block: 3 GB. Fused intermediate block: 1 GB.
 
     **Calculations:**
-    - Unfused Concurrency Limit: 8 GB / 3 GB = 2 models maximum.
-    - Fused Concurrency Limit: 8 GB / 1 GB = 8 models maximum (all 4 can run).
+    - Static footprint for 4 models: 4 * 6 GB = 24 GB.
+    - Memory left after static footprint: 32 GB - 24 GB = 8 GB.
+    - Safe dynamic-buffer budget after reserve: 8 GB - 4 GB = 4 GB.
+    - Unfused active concurrency: floor(4 GB / 3 GB) = 1 model.
+    - Fused active concurrency: floor(4 GB / 1 GB) = 4 models.
 
     **Conclusion & Interpretation:**
-    - **Result: Operator fusion enables 4 concurrent models (Memory Footprint-Bound).** Maximize TOPS by fitting all intermediate buffers into 8GB.
+    - **Result: Operator fusion enables 4 active tenants (Memory Footprint-Bound).** TOPS utilization improves only after the scheduler proves the fused working set fits inside the 4 GB dynamic-buffer budget.
 status: published
 provenance: imported
 requires_explanation: true

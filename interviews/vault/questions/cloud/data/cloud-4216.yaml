@@ -8,10 +8,10 @@ competency_area: data
 bloom_level: understand
 phase: both
 title: Columnar vs Row Format for Feature Tables
-scenario: 'A tabular dataset has 500 columns and 100M rows (200 GB uncompressed). Your training pipeline only uses 20 columns.'
-question: 'How much I/O does a columnar format save versus a row format, and what enables this savings?'
+scenario: A tabular dataset has 500 columns and 100M rows (200 GB uncompressed). Your training pipeline only uses 20 columns.
+question: How much I/O does a columnar format save versus a row format, and what enables this savings?
 details:
-  realistic_solution: 'Columnar formats like Parquet store data sequentially by column rather than by row. This enables Column Pruning: the I/O reader strictly bypasses the 480 unused columns on disk, skipping 96% of the raw data. Furthermore, adjacent data of the same type possesses extremely low entropy, allowing Parquet to leverage dictionary encoding and run-length encoding (RLE) to achieve far superior compression ratios (often 3-10x) compared to CSV/TFRecord.'
+  realistic_solution: 'Columnar formats like Parquet store data by column rather than by row. This enables column pruning: when the training job needs 20 of 500 columns, the reader can load only those column chunks instead of reading full rows. Compression techniques such as dictionary encoding and RLE can further reduce bytes read, but the primary I/O-saving mechanism is the physical columnar layout plus projection pushdown. The exact savings depend on column sizes, compression, row-group metadata, and storage layout; it is a rough byte-read reduction, not a guaranteed runtime speedup.'
   common_mistake: |
     **The Pitfall:** Assuming the savings is exactly the ratio of columns used (20/500 = 96%).
     **The Rationale:** Candidates accurately understand column pruning but completely ignore the drastic differences in compression ratios between columnar and row formats.
@@ -24,12 +24,13 @@ details:
     - Column format compression: ~5x.
 
     **Calculations:**
-    - Row format (CSV): Must read all 200 GB. Compressed = 200 / 3 = ~67 GB I/O.
-    - Column format (Parquet): Reads 20/500 cols = 8 GB raw. Compressed = 8 / 5 = 1.6 GB I/O.
-    - Speedup multiplier: 67 GB / 1.6 GB = 42x speedup.
+    - Column fraction used: 20 / 500 = 4% of columns.
+    - If columns are similarly sized, column pruning reduces raw bytes from 200 GB to about 200 GB * 4% = 8 GB before compression.
+    - A row format generally must read and decompress substantially more of each row to access the 20 columns, so it cannot assume the same 96% physical skip.
+    - Compression can further reduce bytes, but the exact ratio is data-dependent and should not be treated as a guaranteed runtime multiplier.
 
     **Conclusion & Interpretation:**
-    - **Result: 42x speedup (Disk-I/O-Bound)**. I/O-Bound mitigation yields a 42x speedup by combining column pruning with dictionary encoding.
+    - **Result: large byte-read reduction, not a fixed speedup.** Columnar layout plus column pruning is the core savings mechanism; dictionary/RLE compression is an additional benefit.
 status: published
 provenance: imported
 requires_explanation: false

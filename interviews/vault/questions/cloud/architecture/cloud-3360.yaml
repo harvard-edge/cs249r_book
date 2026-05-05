@@ -11,27 +11,27 @@ title: Scaling a 1 Trillion Parameter Mixture of Experts Model on NVIDIA A100s
 scenario: Your team is tasked with deploying a 1 trillion parameter Mixture of Experts (MoE) Language Model, where each expert has 10 billion parameters. The model needs to handle a peak inference load of 10,000 queries per second (QPS) with an average token generation latency of 50ms. Each input sequence is 1024 tokens, and output sequence is 512 tokens. Assume a router selects 2 experts per token.
 question: How would you design and size a cost-minimal MoE inference system for 10,000 QPS at 50 ms token latency?
 details:
-  realistic_solution: "Implement a hybrid parallelism approach combining data parallelism for the shared components and expert parallelism for the MoE layers. Develop a smart router with dynamic load balancing, potentially using a hash-based routing coupled with a backup mechanism for overloaded experts. Utilize mixed-precision inference (FP16) and optimize kernel fusion and memory access patterns to maximize memory bandwidth utilization on the A100s, especially for memory-bound operations. Explore techniques like quantization and sparse attention to further reduce memory footprint and computation."
+  realistic_solution: Size the system from both throughput and per-token latency. Store the 1T FP16 parameters across at least 25 A100 80GB GPUs, but treat that as a floor only; at 10,000 QPS with 1024-token prefill and 512-token decode, the active top-2 experts create hundreds of PFLOP/s of sustained work. A cost-minimal design would shard experts with expert parallelism, replicate hot experts to reduce all-to-all traffic, and use data-parallel serving replicas sized to sustained rather than peak TFLOPS. Use batching for prefill, smaller latency-bounded batches for decode, capacity-aware routing for tail latency, and quantization or FP8/INT8 where quality permits. The design should explicitly budget network all-to-all and KV-cache memory, because adding GPUs only for parameter storage will not meet the 50 ms/token decode SLA.
   common_mistake: |
     **The Pitfall:** Underestimating dynamic expert load balancing and neglecting tail latency due to cold experts or network overhead.
     **The Rationale:** Assuming uniform expert activation and ignoring communication costs for routing tokens across GPUs.
     **The Consequence:** Severe performance degradation and massive tail latency spikes during skewed traffic.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Parameters: 1 Trillion FP16 (2 bytes/param).
-    - Workload: 10,000 QPS, 512 tokens generated per query.
-    - Compute footprint: ~120 GFLOPs/token. Target latency: 50ms/token.
-    - GPU Assumption: A generic high-end GPU with 80GB memory and 312 TFLOPS compute.
+    - Parameters: 1T FP16 total; each token activates 2 experts * 10B parameters = 20B active parameters.
+    - Workload: 10,000 QPS, 1024 input tokens and 512 output tokens per query.
+    - A100 assumption: 80GB HBM, 312 TFLOPS FP16 peak; use 35% sustained efficiency for sizing.
+    - Target decode latency: 50 ms/token, with prefill batched separately from decode.
 
     **Calculations:**
-    - Parameter Storage: 1 Trillion \times 2 bytes = 2 TB.
-    - Storage GPUs needed: 2000 GB / 80 GB = 25 GPUs minimum for weights.
-    - Total Tokens/sec: 10,000 queries/sec \times 512 tokens = 5,120,000 tokens/sec.
-    - FLOPs Required: 5,120,000 \times 120 GFLOPs = 614.4 PFLOPS.
-    - Compute GPUs needed: 614.4 PFLOPS / 312 TFLOPS per GPU \approx 1969 GPUs.
+    - Parameter storage floor = 1T * 2 bytes = 2 TB; 2 TB / 80 GB = 25 A100s before replicas, KV cache, and fragmentation.
+    - Active compute per token ≈ 2 * 20B = 40 GFLOPs.
+    - Token workload = 10,000 * (1024 + 512) = 15.36M tokens/sec across prefill and decode.
+    - Sustained compute needed ≈ 15.36M * 40 GFLOPs = 614 PFLOP/s.
+    - Sustained compute per A100 ≈ 312 * 0.35 = 109 TFLOP/s, so compute sizing ≈ 614,000 / 109 ≈ 5630 A100s before communication overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 1969 GPUs required for compute (Compute-Bound)**. Compute is the true bottleneck, far exceeding the 25 needed for storage.
+    - **Result: Throughput and communication bound, not storage-only.** The 25-GPU storage floor is far below the thousands of A100s implied by the active-token workload; a practical cost-minimal design depends on batching, expert replication, quantization, and routing locality to reduce compute and all-to-all overhead while preserving the 50 ms/token decode SLA.
 status: published
 provenance: imported
 requires_explanation: true

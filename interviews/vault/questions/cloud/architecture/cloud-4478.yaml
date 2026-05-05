@@ -11,7 +11,8 @@ title: Request Deduplication in High-Frequency Recommendation Serving
 scenario: A recommendation serving system receives 100K QPS. Analysis shows 15% of requests are exact duplicates (same user, same context, within 100ms). Each serving call takes 50ms on average.
 question: How would you design a deduplication layer for 100K QPS when 15% of requests are exact duplicates within 100ms?
 details:
-  realistic_solution: 'Request deduplication design: (1) Cache key definition: hash(user_id + context_hash + timestamp_bucket). Context hash: a short hash of the recommendation context (page type, recent actions). timestamp_bucket: round timestamp to nearest 100ms bucket. This groups requests with identical context within 100ms. (2) Implementation: use a lightweight in-process cache (hash map) at each serving replica. Cache size: 100K QPS * 100ms window = 10K active requests. At 200B per cache entry (user_id + hash): 2MB per replica — trivial. (3) Coalescing: when request R arrives and a cache entry exists: if the previous request for this key is still in-flight, queue R to receive the same result. If completed, return cached result. This collapses 15% * 100K = 15K duplicate QPS to immediate cache returns. Savings: 15K * 50ms = 750 GPU-seconds/sec → 750 GPUs. At $3/hr: $2250/hr savings. (4) TTL: cache entry expires after 200ms (slightly longer than timestamp_bucket to ensure all coalesced requests are served).'
+  realistic_solution: |
+    Request deduplication design: (1) Cache key definition: use a stable request fingerprint, such as a canonical hash of the full request payload and all ranking-affecting context. Do not use timestamp buckets as part of identity; use time only as an expiry window. (2) Implementation: keep an in-flight map per serving replica, or route identical fingerprints to the same shard before the model call. A request that finds an in-flight entry attaches as a waiter and receives the same response. A request that arrives shortly after completion can receive the cached result until the 100-200ms TTL expires. (3) Capacity: at 100K QPS and a 100ms dedupe window, each globally sharded layer must track about 10K recent request arrivals, plus completed entries for the TTL. With roughly 200-500B per key and waiter metadata, this is single-digit MB per global window before replication overhead. (4) Savings: 15% duplicates means up to 15K model calls/sec avoided. At 50ms average service time, that removes about 750 request-seconds/sec of model work, or 750 concurrent in-flight request slots. Convert that to GPUs only after measuring per-GPU serving concurrency and batching.
   common_mistake: |
     **The Pitfall:** Implementing deduplication keyed only on user_id in a distributed cache.
     **The Rationale:** Engineers apply standard web-tier caching logic without understanding recommendation dynamics.
@@ -19,14 +20,14 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Volume: 100K QPS. Cost: 50ms per request. Duplicates: 15%.
-       - Cost: $3/hr per GPU.
+       - Convert saved work to hardware only after measuring per-GPU concurrency.
     2. **Calculations:**
        - Duplicate Load: 15,000 req/s.
-       - Compute Savings: 15,000 * 50ms = 750 GPU-seconds/sec.
-       - Equivalent Hardware: 750 GPUs.
-       - Dollar Savings: 750 * $3 = $2,250/hr = ~$19.7M/yr.
+       - Saved work: 15,000 * 50ms = 750 request-seconds/sec.
+       - Interpretation: this is 750 fewer concurrent in-flight request slots, not automatically 750 GPUs.
+       - Cache footprint: 100,000 req/s * 0.1s = 10,000 recent arrivals; at 200-500B per entry, track roughly 2-5MB before replication and waiter metadata.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound.** Short-window request coalescing completely skips redundant dense compute, unlocking massive infrastructure savings with a sub-2MB cache.
+       - **Result: Compute-Bound.** Short-window coalescing skips redundant dense compute, but hardware savings must be derived from measured per-GPU throughput and batching.
 status: published
 provenance: imported
 requires_explanation: false

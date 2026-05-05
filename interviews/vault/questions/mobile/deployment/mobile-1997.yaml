@@ -8,67 +8,50 @@ competency_area: deployment
 bloom_level: evaluate
 phase: both
 title: Mobile NPU versus GPU Memory Bandwidth Tradeoffs
-scenario: An on-device LLM on an iPhone 15 Pro uses the A17 Pro SoC to serve autocomplete requests, dynamically
-  switching hardware blocks.
-question: Should the A17 Pro Neural Engine or the GPU handle KV cache updates for a 1B parameter INT8
-  model to maximize throughput?
+scenario: An on-device LLM on an iPhone 15 Pro uses the A17 Pro SoC to serve autocomplete requests, dynamically switching hardware blocks.
+question: Should the A17 Pro Neural Engine or the GPU handle KV cache updates for a 1B parameter INT8 model to maximize throughput?
 details:
-  realistic_solution: While the Neural Engine excels at dense INT8 matrix multiplications (offering massive
-    compute capacity), token generation for a 1B parameter model is heavily memory-bandwidth bound. Every
-    token requires fetching the entire 1 GB model. The GPU's architecture and wider shared memory bus
-    provide higher memory bandwidth, making it better suited for the high memory bandwidth demands of
-    token generation and shifting cache data.
-  common_mistake: '**The Pitfall:** Blindly assigning all LLM tasks to the Neural Engine.
+  realistic_solution: |
+    Do not model KV-cache updates as rereading the 1 GB INT8 model per token. The KV path appends the current token's K/V vectors and, during attention, reads prior K/V entries from the cache. Those are memory-layout and bandwidth-sensitive operations with gathers, appends, transposes, and cache management, while the Neural Engine is strongest on dense tiled matrix multiplies. A practical A17 Pro split is to keep dense projections and MLPs on the Neural Engine when supported, but run KV-cache update/layout work on the GPU or a dedicated memory path with Metal kernels. The GPU is preferable for the KV-cache updates specifically because it is more programmable for irregular memory movement, not because it avoids a fictitious 1 GB model fetch per token.
+  common_mistake: |
+    **The Pitfall:** Blindly assigning all LLM tasks to the Neural Engine.
 
+    **The Rationale:** Developers assume the AI accelerator is universally best for all layers of an AI workload.
 
-    **The Rationale:** Developers assume the AI accelerator is universally best for all layers of an AI
-    workload.
-
-
-    **The Consequence:** Autoregressive decoding performance tanks because the memory-bound KV cache operations
-    stall on the NPU''s internal data paths.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Model size: 1B INT8 params = 1 GB per forward pass.
-
-    - NPU Peak compute: 35 TOPS (35,000 GOPS).
-
-    - Operations per token: ~2 GOPS.
-
-    - System Memory Bandwidth: ~50 GB/s.
-
+    **The Consequence:** Autoregressive decoding performance tanks because the memory-bound KV cache operations stall on the NPU's internal data paths.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Example transformer: 24 layers, hidden size 2048.
+    - INT8 KV cache: K and V each store one byte per hidden element.
+    - Context length for attention read example: 1024 tokens.
+    - System memory bandwidth is the limiting shared resource for cache movement.
 
     **Calculations:**
-
-    - Compute Limit: 35,000 GOPS / 2 GOPS/tok = 17,500 tok/s.
-
-    - Memory Limit: 50 GB/s / 1 GB/tok = 50 tok/s.
-
+    - KV bytes appended per new token = 24 layers * 2 tensors * 2048 bytes = 98,304 bytes, or about 96 KB.
+    - KV bytes read for attention at 1024-token context = 96 KB/token * 1024 = about 96 MB per generated token.
+    - This is cache traffic, not model-weight traffic; the 1 GB model is not a valid per-token KV-update cost.
+    - The hardware decision should minimize cache movement and layout conversion, so use GPU/Metal for programmable KV append and cache-layout kernels while reserving the Neural Engine for dense INT8 compute.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Memory-Bound.** The system is severely memory-bandwidth bound (~50 tok/s) well before
-    reaching the NPU''s compute limit, making the higher-bandwidth GPU preferable.'
+    - **Result: GPU for KV-cache updates; Neural Engine for dense matmuls when possible.** KV-cache work is dominated by cache reads/writes and layout handling, so the GPU's programmable memory pipeline is the better fit for updates even though the Neural Engine may be better for dense model layers.
 status: published
 provenance: llm-draft
-expected_time_minutes: 12
 requires_explanation: true
+expected_time_minutes: 12
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-mastery-L5
+  - gemini-generated
+  - target-mastery-L5
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

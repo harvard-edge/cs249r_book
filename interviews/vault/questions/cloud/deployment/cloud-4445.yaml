@@ -7,57 +7,30 @@ topic: disaggregated-serving
 competency_area: deployment
 bloom_level: apply
 phase: inference
-title: KV Cache Network Topology for High-Bandwidth Transfer
-scenario: A disaggregated serving cluster has prefill nodes and decode nodes in separate racks, connected
-  via 400 Gbps InfiniBand HDR. KV cache transfer adds 4ms P99 latency. The network team proposes moving
-  to InfiniBand NDR (800 Gbps).
-question: How much P99 latency would 800 Gbps NDR save over 400 Gbps HDR for KV transfer, and what alternative
-  would you propose?
+title: HDR vs NDR KV Cache Transfer Latency
+scenario: A disaggregated serving cluster has prefill nodes and decode nodes in separate racks, connected via 400 Gbps InfiniBand HDR. KV cache transfer adds 4ms P99 latency. The network team proposes moving to InfiniBand NDR (800 Gbps).
+question: How much P99 latency would 800 Gbps NDR save over 400 Gbps HDR for KV transfer, and what alternative would you propose?
 details:
-  realistic_solution: 'KV cache size analysis: for 7B model (16 KV heads), 512 tokens: 2*32*16*128*512*2B
-    = 134MB. At 400 Gbps (50 GB/s): transfer = 134MB / 50 GB/s = 2.68ms + fabric latency ~1.5ms = 4.18ms.
-    NDR upgrade (100 GB/s): 134MB / 100 GB/s = 1.34ms + 1.5ms = 2.84ms. Saves 1.34ms. Cost of NDR upgrade:
-    ~$30K per port. The benefit is marginal. Alternative: co-locate prefill and decode on the same DGX
-    node using NVLink (900 GB/s): 134MB / 900 GB/s = 0.15ms. This yields zero network cost and is ~18x
-    faster than HDR.
-
-    '
-  common_mistake: '**The Pitfall:** Assuming doubling link bandwidth directly halves the total transfer
-    time.
-
-    **The Rationale:** Focusing purely on serialization delay while ignoring the fixed fabric latency
-    (1-3us per hop across multiple switches).
-
-    **The Consequence:** Spending millions on network upgrades for a trivial 1-2ms improvement when the
-    workload is latency-bound, not just bandwidth-bound.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - 7B model (16 KV heads), 512 tokens.
-
+  realistic_solution: |
+    KV cache size analysis: assume a 7B-style model with 32 layers, 16 KV heads, 128 head_dim, BF16 KV, and a 512-token prompt. KV bytes = 2 for K/V * 32 * 16 * 128 * 512 * 2 bytes = 134,217,728 bytes, about 134 MB. At 400 Gbps HDR (50 GB/s), serialization is about 2.68ms; adding 1.5ms fabric overhead gives about 4.18ms. At 800 Gbps NDR (100 GB/s), serialization is about 1.34ms; total is about 2.84ms. NDR saves only about 1.34ms P99. Alternative: co-locate prefill and decode on the same DGX node using NVLink-class transfer (900 GB/s), where serialization is about 0.15ms and the cross-rack fabric hop is avoided.
+  common_mistake: |
+    **The Pitfall:** Assuming doubling link bandwidth directly halves the total transfer time.
+    **The Rationale:** Focusing purely on serialization delay while ignoring the fixed fabric latency (1-3us per hop across multiple switches).
+    **The Consequence:** Spending millions on network upgrades for a trivial 1-2ms improvement when the workload is latency-bound, not just bandwidth-bound.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B-style model: 32 layers, 16 KV heads, 128 head_dim, BF16 KV, 512 tokens.
     - Fabric latency is ~1.5ms per hop.
-
     - HDR at 50 GB/s, NDR at 100 GB/s, NVLink at 900 GB/s.
 
-
     **Calculations:**
-
-    - KV Cache Size: 2 * 32 * 16 * 128 * 512 * 2B = 134MB.
-
+    - KV cache size: 2 for K/V * 32 layers * 16 KV heads * 128 head_dim * 512 tokens * 2B = 134,217,728 bytes ≈ 134 MB.
     - HDR Transfer: 134MB / 50GB/s = 2.68ms + 1.5ms = 4.18ms.
-
     - NDR Transfer: 134MB / 100GB/s = 1.34ms + 1.5ms = 2.84ms (Saves ~1.34ms).
-
     - NVLink Alternative: 134MB / 900 GB/s = 0.15ms.
 
-
     **Conclusion & Interpretation:**
-
-    - **Result: 0.15ms (Bandwidth-Bound)**. Co-locating prefill and decode via NVLink is 18x faster and
-    completely avoids the costly NDR network upgrade for trivial gains.
-
-    '
+    - **Result: NDR saves about 1.34ms P99 versus HDR.** Co-locating prefill and decode with NVLink-class transfer is the better architectural alternative when placement is feasible.
 status: published
 provenance: imported
 requires_explanation: true

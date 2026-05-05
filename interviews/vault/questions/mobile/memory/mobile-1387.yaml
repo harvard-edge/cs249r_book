@@ -11,7 +11,7 @@ title: LLM Memory Co-Design on Exynos 2400 NPU
 scenario: You are leading the deployment of a 4B parameter local LLM on the Samsung Exynos 2400 NPU for real-time live captioning. During concurrent 4K video recording, the ISP and GPU consume massive bandwidth, causing severe memory starvation and high latency during the LLM's autoregressive generation phase.
 question: How do you design a memory hierarchy and execution architecture to guarantee 20 tokens/s generation without dropping camera frames?
 details:
-  realistic_solution: 'A robust L6+ solution synthesizes a memory-aware execution strategy. The architecture must compress the KV cache using Grouped-Query Attention (GQA) and pin the hot KV cache partitions in the NPU''s local SRAM. To solve the DRAM bandwidth bottleneck, the candidate should propose speculative decoding with a lightweight draft model to batch weight loads, or a weight-stationary dataflow that pipelines weight fetching from the shared 12 GB LPDDR5X asynchronously, ensuring the NPU''s memory accesses don''t block the ISP''s real-time deadlines.'
+  realistic_solution: A robust design treats 20 tokens/s as a shared-memory scheduling problem. Use a 4B-class INT4 model with GQA to keep KV traffic small, a paged KV cache with only the current tile staged in accelerator scratch, and QoS limits that reserve ISP/GPU bandwidth before LLM decode starts. To reduce weight traffic, use a small draft model for speculative decoding so each accepted main-model pass emits several tokens, or use an equivalent batching scheme that amortizes main-model weight reads. The runtime should prefetch model pages asynchronously, pace decode around camera frame deadlines, and degrade to a smaller draft/assistant mode if acceptance rate or bandwidth headroom drops.
   common_mistake: |
     **The Pitfall:** Treating the device's RAM as dedicated NPU memory and focusing solely on compute limits.
     **The Rationale:** Candidates forget that mobile architectures use shared memory pools, where the ISP and GPU compete fiercely for bandwidth during multitasking.
@@ -22,14 +22,22 @@ details:
     - Target rate: 20 tokens/sec.
     - LPDDR5X peak bandwidth: ~68 GB/s.
     - ISP/GPU concurrent bandwidth requirement: 35 GB/s.
+    - Draft model: 50 MB, streamed once per emitted token.
+    - Speculative acceptance: 4 accepted tokens per main-model verification pass.
+    - KV/activation traffic: about 0.1 GB per emitted token.
 
     **Calculations:**
-    - Naive Bandwidth: 2 GB * 20 tokens/sec = 40 GB/s.
+    - Naive main-model bandwidth if weights are streamed once per output token: 2 GB/token * 20 tokens/s = 40 GB/s.
     - Total system bandwidth: 40 + 35 = 75 GB/s (Exceeds 68 GB/s).
-    - Speculative Decoding (with 50MB draft model): Main model read rate drops to 5 times/sec (2 GB * 5 = 10 GB/s).
+    - Speculative main-model passes = 20 tokens/s / 4 tokens/pass = 5 passes/s.
+    - Main-model bandwidth with speculation = 2 GB/pass * 5 passes/s = 10 GB/s.
+    - Draft bandwidth = 50 MB/token * 20 tokens/s = 1 GB/s.
+    - KV/activation bandwidth = 0.1 GB/token * 20 tokens/s = 2 GB/s.
+    - Total LLM bandwidth = 10 + 1 + 2 = 13 GB/s.
+    - System bandwidth with camera active = 35 + 13 = 48 GB/s, leaving about 20 GB/s headroom below the 68 GB/s peak.
 
     **Conclusion & Interpretation:**
-    - **Result: ~11 GB/s (Memory-Bandwidth Bound)**. Total LLM memory bandwidth drops from 40 GB/s to safely allow concurrent 4K video processing, avoiding being memory-bandwidth bound.
+    - **Result: about 13 GB/s LLM bandwidth and 48 GB/s total system bandwidth.** The 20 tokens/s target is plausible only with bandwidth reservation and a high speculative acceptance rate; without amortizing main-model weight reads, camera traffic would exceed the shared-memory budget.
 status: published
 provenance: imported
 requires_explanation: true

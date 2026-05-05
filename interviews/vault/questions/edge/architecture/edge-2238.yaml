@@ -7,11 +7,11 @@ topic: model-adaptation-systems
 competency_area: architecture
 bloom_level: create
 phase: both
-title: 'PEFT Memory Budgets on Jetson Orin for On-Device Fine-tuning'
-scenario: 'An edge robotics system needs to continuously fine-tune a 1B parameter model on-device using LoRA as new task demonstrations are collected.'
-question: 'What memory budget and training throughput should you expect for on-device LoRA fine-tuning of a 1B model on Jetson Orin?'
+title: PEFT Memory Budgets on Jetson Orin for On-Device Fine-tuning
+scenario: An edge robotics system needs to continuously fine-tune a 1B parameter model on-device using LoRA as new task demonstrations are collected.
+question: What memory budget and training throughput should you expect for on-device LoRA fine-tuning of a 1B model on Jetson Orin?
 details:
-  realistic_solution: '1B model BF16: 2 GB. LoRA rank-8 adapters: 2x8x2048x24x2B = 3.1 MB. Adam states: 6.2 MB. Activations (batch=1, seq=512): ~0.5 GB. Total: ~2.5 GB out of 64 GB — comfortable. Training throughput: Orin GPU at ~30 TFLOPS FP16. Forward pass 1B model (seq=512, batch=1): 2 x 1B x 512 = ~1 TFLOP. With backward (3x forward): ~3 TFLOP total. Time: 3T / 30T = ~100ms/step. Fine-tuning in background while inference runs: ~3 FPS inference capacity (350ms/inf), leaving 650ms/sec for training = ~5-6 training steps/sec.'
+  realistic_solution: '1B frozen base weights in BF16 require about 2GB. LoRA rank-8 adapters for hidden_dim=2048 across 24 adapted layers have 2*8*2048*24 = 786,432 trainable params, or about 1.6MB in BF16. Adam typically keeps two FP32 moment buffers plus often FP32 master weights, so optimizer-related memory is about 786,432*(4+4+4) = 9.4MB, plus the BF16 adapter weights. Activations for batch=1, seq=512 are workload-dependent; assume roughly 0.5GB only after profiling or checkpointing. Compute estimate: if one training step is about 3 TFLOP and sustained Orin FP16 throughput is 30 TFLOP/s, the lower-bound step time is 0.1s, or at most 10 steps/sec before memory bandwidth, thermal limits, and concurrent inference.'
   common_mistake: |
     **The Pitfall:** Treating edge LoRA training like cloud training and assuming unlimited memory.
     **The Rationale:** Candidates forget that the Orin has unified LPDDR5 shared between CPU and GPU, lacking dedicated GPU memory.
@@ -19,16 +19,22 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Weights: 1B model in BF16 = 2 GB.
-    - LoRA Adapters: Rank-8 (2 $\times$ 8 $\times$ 2048 $\times$ 24) = 786K params $\times$ 2B = 1.6 MB.
-    - Optimizer (Adam): FP32 states = 3.2 MB.
-    - Activations: (batch=1, seq=512) = 100 MB.
+    - LoRA adapters: rank-8, hidden_dim=2048, 24 adapted layers.
+    - Adapter params = 2 * 8 * 2048 * 24 = 786,432 params.
+    - Adapter weights: BF16 = 786,432 * 2 bytes = 1.6 MB.
+    - Adam optimizer memory: two FP32 moments plus FP32 master weights = 786,432 * 12 bytes = 9.4 MB.
+    - Activations: assume ~0.5 GB for batch=1, seq=512 after profiling/checkpointing.
+    - Sustained training throughput reference: 30 TFLOP/s FP16.
 
     **Calculations:**
-    - Total Memory = 2.1 GB.
-    - Compute: Forward+backward is $3 \times 2 \times 1\text{B} \times 512$ FLOPs = ~3 TFLOPS.
-    - Throughput: 3 TFLOPS / 30 TFLOPS GPU.
+    - Trainable-state memory = 1.6 MB + 9.4 MB = 11 MB.
+    - Total rough memory = 2.0 GB base weights + 0.011 GB trainable state + 0.5 GB activations = about 2.5 GB.
+    - Compute per step = ~3 TFLOP.
+    - Lower-bound step time = 3 TFLOP / 30 TFLOP/s = 0.1s per step.
+    - Upper-bound training throughput before overheads = 1 / 0.1s = 10 steps/sec.
+    - If only 650ms/sec is available for background training, budgeted throughput = 0.65s / 0.1s = 6.5 steps/sec before overheads.
 
     **Conclusion & Interpretation:**
-    - **Result: ~100ms/step (Compute-Bound)**. Background training requires low memory and leaves enough capacity for concurrent inference.
+    - **Result: about 2.5GB memory and 100ms/step lower-bound latency (Compute-Bound).** A 5-6 steps/sec background target is plausible only after reserving time for inference and accounting for bandwidth, thermals, and scheduler overhead.
 status: published
 provenance: imported

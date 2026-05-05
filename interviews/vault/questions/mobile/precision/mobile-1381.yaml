@@ -7,12 +7,12 @@ topic: extreme-quantization
 competency_area: precision
 bloom_level: create
 phase: inference
-title: 'Sub-3-bit LLM Deployment on Exynos NPU'
-scenario: 'You are leading the deployment of an 8B parameter generative assistant on the Samsung Exynos 2400. During heavy camera usage, concurrent subsystems reserve 8.5 GB, leaving only 3.5 GB for your model and KV cache.'
-question: 'How can an 8B assistant be quantized below 4 bits to fit the Exynos 2400 memory budget during heavy camera use?'
+title: Sub-3-bit LLM Deployment on Exynos NPU
+scenario: You are leading the deployment of an 8B parameter generative assistant on the Samsung Exynos 2400. During heavy camera usage, concurrent subsystems reserve 8.5 GB, leaving only 3.5 GB for your model and KV cache.
+question: How can an 8B assistant be quantized below 4 bits to fit the Exynos 2400 memory budget during heavy camera use?
 details:
   realistic_solution: |
-    The candidate should design a mixed-precision architecture where sensitive layers remain in 4-bit, while most MLP layers are aggressively pushed to 2-bit or 2.5-bit using techniques like QuIP or AQLM. Since the NPU likely accelerates INT4/INT8 natively, they must propose an on-the-fly weight unpacking kernel in the NPU's SRAM. To fit the 3.5 GB budget, 8B params must average 3 bits/param to leave 500 MB for the KV cache.
+    The candidate should design a mixed-precision deployment where embeddings, output projection, and attention-sensitive layers remain near 4-bit, while most MLP blocks use 2-bit to 3-bit weight-only quantization such as AQLM, QuIP-style lattice quantization, or grouped GPTQ/AWQ variants. The runtime should keep weights in one packed read-only mapping, dequantize into the accelerator's supported INT8/FP16 execution path by tile, and reserve explicit memory for KV cache, scales, metadata, and scratch buffers. The goal is an average payload around 2.8-3.0 bits/parameter, not an unsupported custom NPU SRAM unpacking requirement.
   common_mistake: |
     **The Pitfall:** Proposing uniform 4-bit quantization (like standard AWQ or GPTQ).
     **The Rationale:** Engineers default to standard 4-bit quantization without doing the precise memory math required for extreme edge constraints.
@@ -25,11 +25,13 @@ details:
 
     **Calculations:**
     - Weight Budget = 3.5 GB - 0.5 GB = 3.0 GB.
-    - Target Bit-width = (3.0 GB * 8 bits/byte) / 8 Billion params = 3.0 bits/param average.
-    - Bandwidth at 20 tok/sec = 3.0 GB/token * 20 tok/sec = 60 GB/s.
+    - If 0.15 GB is reserved for scales, codebooks, alignment, and graph metadata, packed weight payload budget = 2.85 GB.
+    - Target average payload = (2.85 GB * 8 bits/byte) / 8B params = 2.85 bits/param.
+    - Uniform 4-bit weights would require 8B * 0.5 bytes = 4.0 GB before KV cache or metadata, exceeding the 3.5 GB limit.
+    - A mixed plan can keep 25% of weights at 4 bits and 75% at 2.5 bits: (0.25 * 4) + (0.75 * 2.5) = 2.875 bits/param, or about 2.875 GB of payload.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.0 bits/param (Memory-Capacity-Bound)**. Sub-3-bit quantization is mandatory to leave space for KV Cache.
+    - **Result: about 2.9 bits/parameter average.** The deployment is memory-capacity-bound: below-4-bit mixed precision is required, but the exact threshold comes from weights plus KV cache and metadata, not a per-token bandwidth calculation.
 status: published
 provenance: imported
 validated: true

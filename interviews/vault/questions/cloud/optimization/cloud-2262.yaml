@@ -7,9 +7,9 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: analyze
 phase: training
-title: The Tensor Core Codegen Gap
+title: HMMA to FFMA fallback in Tensor Core codegen
 scenario: You profile a compiled transformer training job on GPUs and find that Tensor Core utilization is only 35% despite the workload being compute-bound. The compiler's generated SASS shows that many matrix multiplies are using FFMA (FP32 fused multiply-add) instructions instead of HMMA (half-precision matrix multiply-accumulate on Tensor Cores). Diagnose why the compiler's target-specific code generation is failing to use the Tensor Cores and identify at which compilation stage the fix must be applied.
-question: "Why is codegen falling back to FFMA instead of HMMA, and where in the compiler should you fix it?"
+question: Why is codegen falling back to FFMA instead of HMMA, and where in the compiler should you fix it?
 details:
   realistic_solution: |
     Tensor Cores have strict shape and alignment requirements: matrix dimensions must be multiples of 16 (for FP16 HMMA) or 8 (for FP8), input tensors must be in specific memory layouts (row-major A, column-major B for `mma.sync`), and data must be aligned to 128-byte boundaries in shared memory. The compiler's code generation is falling back to FFMA because one or more of these preconditions fails. Common causes: (1) The tiling pass chose tile sizes that are not multiples of 16 — this is a mid-level IR problem (affine/SCF dialect). (2) The memory layout pass did not insert the required transpose to get operand B into column-major — this is a lowering pass problem. (3) Padding was not inserted for non-aligned dimensions (e.g., hidden_dim=768 is fine, but sequence_length=513 is not a multiple of 16). The fix must be applied at the tiling and layout passes in the mid-level IR, not at the final code generation. By the time the compiler reaches NVVM/PTX emission, the tile shapes and layouts are already locked in.

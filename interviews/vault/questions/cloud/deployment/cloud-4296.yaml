@@ -7,11 +7,11 @@ topic: disaggregated-serving
 competency_area: deployment
 bloom_level: evaluate
 phase: inference
-title: MI300X KV Pool Sizing vs H100
+title: 80GB vs 192GB GPU Decode Pool Sizing
 scenario: You are choosing the GPU for your decode pool in a disaggregated serving deployment for a 70B FP16 model. You must compare an 80GB GPU against a 192GB GPU.
 question: For a 70B FP16 decode pool, how do the two GPUs compare on concurrency and token throughput, and which is better?
 details:
-  realistic_solution: 'Model weights for 70B FP16 = 140 GB. GPU A (80GB): 140 GB exceeds 80 GB → needs tensor parallelism (TP=2, two GPUs), leaving each GPU with 80-70=10 GB for KV. GPU B (192GB): 192 GB fits entire model on one GPU with 52 GB free for KV. Total KV per sequence at 4096 tokens (96 layers, 8 KV heads GQA, head_dim 128, FP16) = 1.5 GB. GPU A TP=2 (sharded KV, 0.75 GB/GPU): 10 GB / 0.75 GB ≈ 13 sequences. GPU B (unsharded KV, 1.5 GB/GPU): 52 GB / 1.5 GB ≈ 34 sequences. Token throughput (bandwidth-limited): GPU A pair at 2×3.35 TB/s = 6.7 TB/s / 140 GB = 47.8 tokens/s per sequence × 13 = 621 tok/s aggregate. GPU B at 5.3 TB/s / 140 GB = 37.8 tokens/s single sequence × 34 = 1285 tok/s aggregate. GPU B wins on aggregate throughput per GPU-unit for decode, especially when eliminating TP communication overhead.'
+  realistic_solution: Model weights for 70B FP16 are about 140 GB. The 80GB option needs TP=2, so each GPU stores about 70 GB of weights and has about 10 GB left for KV; the two-GPU pool has 20 GB total free KV memory. Assume TP shards KV across the two GPUs, so a sequence needing 1.5 GB total KV consumes 0.75 GB on each GPU and the pair supports about 13 sequences. The 192GB option fits the whole model on one GPU and leaves about 52 GB for unsharded KV, or about 34 sequences. A simple decode roofline gives the TP=2 pair about 6.7/140 = 47.9 tok/s per active sequence before communication overhead, while the 192GB GPU gives 5.3/140 = 37.9 tok/s per active sequence. At full concurrency that is about 623 tok/s for the TP pair versus 1289 tok/s for the 192GB GPU, but this assumes bandwidth scales cleanly and enough requests exist to fill the KV pool.
   common_mistake: |
     **The Pitfall:** Choosing the larger GPU purely for memory capacity without calculating bandwidth.
     **The Rationale:** Knowing that decode is memory-bound, but forgetting that token generation throughput scales directly with memory *bandwidth*, not just capacity.
@@ -24,15 +24,15 @@ details:
     - GPU B: 192 GB capacity, 5.3 TB/s bandwidth. Fits on 1 GPU.
 
     **Calculations:**
-    - GPU A (TP=2) Free Memory: (2 × 80 GB) - 140 GB = 20 GB (10 GB/GPU).
-    - GPU A Concurrency: 20 GB / 1.5 GB = ~13 sequences.
-    - GPU A Throughput: (2 × 3.35 TB/s) / 140 GB = 47.8 tok/s × 13 = 621 aggregate tok/s.
+    - GPU A (TP=2) Free Memory: each GPU stores 70 GB of weights, leaving 10 GB/GPU and 20 GB per TP pair.
+    - With KV sharded by TP, a 1.5 GB sequence consumes 0.75 GB/GPU, so concurrency is 10 / 0.75 = ~13 sequences per TP pair.
+    - GPU A Throughput: (2 × 3.35 TB/s) / 140 GB = 47.9 tok/s per active sequence; 47.9 × 13 = 623 aggregate tok/s per 2-GPU pool before TP communication overhead.
     - GPU B Free Memory: 192 GB - 140 GB = 52 GB.
     - GPU B Concurrency: 52 GB / 1.5 GB = ~34 sequences.
-    - GPU B Throughput: 5.3 TB/s / 140 GB = 37.8 tok/s × 34 = 1285 aggregate tok/s.
+    - GPU B Throughput: 5.3 TB/s / 140 GB = 37.9 tok/s per active sequence; 37.9 × 34 = 1289 aggregate tok/s.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bandwidth-Bound**. GPU B supports 2.6x more concurrency and delivers double the aggregate throughput by avoiding TP memory fragmentation.
+    - **Result: Memory-Bandwidth-Bound**. Under these simplified assumptions, the 192GB GPU supports about 2.6x more concurrency and about 2.1x more aggregate decode throughput per pool, while the TP=2 option has higher per-sequence bandwidth but lower KV capacity and added communication overhead.
 status: published
 provenance: imported
 requires_explanation: false

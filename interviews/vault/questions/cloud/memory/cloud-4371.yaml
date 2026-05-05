@@ -8,53 +8,29 @@ competency_area: memory
 bloom_level: apply
 phase: both
 title: MI300X Unified Memory for CPU-GPU Tensor Offloading vs H100 PCIe
-scenario: A 180GB model with a 50GB working set and 130GB KV cache needs to be served using either CPU
-  DRAM via PCIe 5.0 or unified memory on modern accelerators.
-question: For a 180GB model with a 50GB working set and 130GB KV cache, how does PCIe offload compare
-  with unified memory for cold cache fetch latency?
+scenario: A 180GB model with a 50GB working set and 130GB KV cache needs to be served using either CPU DRAM via PCIe 5.0 or unified memory on modern accelerators.
+question: For a 180GB model with a 50GB working set and 130GB KV cache, how does PCIe offload compare with unified memory for cold cache fetch latency?
 details:
-  realistic_solution: 'H100 PCIe offloading: 80GB VRAM holds model weights. Keep hot KV cache (50GB) on
-    GPU, offload cold KV (130GB) to CPU DRAM via PCIe 5.0. Fetch latency: 1GB KV block / 64 GB/s = 15.6ms
-    per fetch. At 200 concurrent requests (assuming 5% cache miss rate, i.e., 10 fetches): 10 × 15.6ms
-    = 156ms latency spike for p99. MI300X: 192GB unified pool. 180GB model weight in GPU-local HBM, 12GB
-    for hot KV. Cold KV (130GB) in CPU-accessible pages of the unified pool — accessed via NUMA-local
-    path with ~900 GB/s effective bandwidth. Fetch latency: 1GB / 900 GB/s = 1.1ms vs 15.6ms on H100 PCIe.
-    The unified memory path bounds the p99 latency spike to 11ms, meeting strict serving SLAs.'
-  common_mistake: '**The Pitfall:** Assuming unified memory provides uniform bandwidth to all components.
-
-    **The Rationale:** The term "unified pool" leads engineers to ignore NUMA distances and driver-level
-    access overheads.
-
-    **The Consequence:** Placing critical hot parameters in CPU-pinned pages accessed by the GPU, incurring
-    high latency through the IOMMU path and crashing inference speed.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - PCIe 5.0 offload bandwidth: ~64 GB/s per direction.
-
-    - Unified memory NUMA bandwidth: ~900 GB/s.
-
+  realistic_solution: |
+    Compare the cold miss path, not vendor-specific memory capacity claims. If a 1GB cold KV block is offloaded to host DRAM over PCIe 5.0, the transfer floor is about 1GB / 64GB/s = 15.6ms before driver, page-fault, and scheduling overhead. A unified-memory system can avoid explicit copies and simplify placement, but a cold page resident in host memory is still limited by the CPU-GPU/NUMA path, not by GPU-local HBM bandwidth. At a plausible 100GB/s effective cold-fetch path, the same 1GB miss is about 10ms. For p99, if cold misses occur in the slowest 1% of requests, add one cold-miss penalty to those requests; do not multiply by 10 misses from a 200-request batch. Unified memory reduces software overhead and may lower the cold-miss penalty, but it does not make host-resident cold KV behave like local HBM.
+  common_mistake: |
+    **The Pitfall:** Assuming unified memory provides uniform bandwidth to all components.
+    **The Rationale:** The term "unified pool" leads engineers to ignore NUMA distances and driver-level access overheads.
+    **The Consequence:** Placing critical hot parameters in CPU-pinned pages accessed by the GPU, incurring high latency through the IOMMU path and crashing inference speed.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - PCIe 5.0 offload bandwidth: about 64 GB/s per direction.
+    - Unified-memory cold host-page bandwidth assumption: about 100 GB/s effective over the CPU-GPU/NUMA path.
     - Fetch block: 1GB.
-
-    - Concurrent requests: 200 (5% miss rate = 10 misses for p99).
-
+    - p99 is a request-latency percentile; if cold misses land in the slowest 1%, add one cold-fetch penalty to those requests.
 
     **Calculations:**
-
     - PCIe 1GB fetch: 1GB / 64 GB/s = 15.6ms.
-
-    - Unified memory 1GB fetch: 1GB / 900 GB/s = 1.1ms.
-
-    - For p99: PCIe adds 10 * 15.6ms = 156ms.
-
-    - For p99: Unified memory adds 10 * 1.1ms = 11ms.
-
+    - Unified-memory cold 1GB fetch: 1GB / 100 GB/s = 10ms.
+    - p99 cold-miss request: baseline serving latency + one cold-fetch penalty, so PCIe adds at least 15.6ms and unified memory adds about 10ms under these assumptions.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Bandwidth-Bound.** PCIe severely blows the p99 latency budget. Unified memory''s faster
-    access maintains sub-20ms cold-cache overhead.'
+    - **Result: cold-fetch bandwidth and placement bound.** Unified memory can reduce copy overhead and improve placement ergonomics, but cold host-resident KV is still much slower than local HBM and does not justify an 11ms p99 claim from a 900GB/s assumption.
 status: published
 provenance: imported
 requires_explanation: false

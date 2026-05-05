@@ -17,15 +17,18 @@ details:
     **The Rationale:** Global scheduling ignores NUMA boundaries, causing cross-socket interconnect traffic. Adding more workers exacerbates the traffic on the already bottlenecked inter-socket link.
     **The Consequence:** Persistent GPU starvation and wasted compute resources, regardless of how many CPU cores are thrown at the problem.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware: 8x A100 per node, PCIe Gen4 x16 (~32 GB/s per GPU).
-       - Interconnect: AMD xGMI inter-socket link (~72 GB/s limit).
-       - Local memory: 8-channel DDR4-3200 (~204 GB/s).
-    2. **Calculations:**
-       - Target bandwidth for GPUs 4-7 on Socket 1: 4 GPUs * 32 GB/s = 128 GB/s demand.
-       - Threads globally scheduled on Socket 0 push data over xGMI to Socket 1.
-       - Throughput ratio: 72 GB/s max capacity / 128 GB/s demand = 56.25%.
-    3. **Conclusion & Interpretation:** **Throughput bottlenecked to roughly 56% of theoretical max. Interconnect-Bandwidth-Bound.**
+    **Assumptions & Constraints:**
+    - Dual-socket AMD EPYC node with GPUs 0-3 attached to NUMA node 0 and GPUs 4-7 attached to NUMA node 1.
+    - Data-loader workers are globally scheduled, so CPU execution and memory pages can land on the wrong socket.
+    - Remote DRAM and cross-socket PCIe-root-complex paths add latency and reduce effective host-to-GPU feeding throughput.
+
+    **Calculations:**
+    - A worker feeding GPU 4 from NUMA node 0 must fetch or stage data across the socket boundary before the transfer reaches the GPU attached to NUMA node 1.
+    - With global placement, some fraction of the 96 workers and their memory allocations will be remote for GPUs 4-7, so those GPUs wait on cross-socket traffic instead of being fed from local DRAM and the local PCIe root complex.
+    - Pinning workers and memory allocations per GPU group keeps GPU 0-3 input pipelines local to node 0 and GPU 4-7 pipelines local to node 1.
+
+    **Conclusion & Interpretation:**
+    - **Result: NUMA-affinity bottleneck.** The 30% lower utilization on GPUs 4-7 is caused by remote CPU and memory placement starving those GPUs; redesign the data loader with per-socket worker pools, CPU pinning, and local memory binding.
 status: published
 provenance: imported
 requires_explanation: false

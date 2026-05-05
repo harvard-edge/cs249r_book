@@ -9,9 +9,9 @@ bloom_level: create
 phase: training
 title: 'Pipeline Parallelism Specification: Design for <10% Bubble with Memory Constraint'
 scenario: You must specify a pipeline parallelism configuration for a 175B GPT-3 scale model on 80GB GPUs that achieves a bubble overhead below 10% while keeping per-GPU peak memory under 70GB. The training uses BF16 weights with ZeRO-2 optimizer sharding.
-question: "What TP, PP, DP, and micro-batch settings keep a 175B GPT-style model under 70GB per GPU with pipeline bubble below 10%?"
+question: What TP, PP, DP, and micro-batch settings keep a 175B GPT-style model under 70GB per GPU with pipeline bubble below 10%?
 details:
-  realistic_solution: '175B params, BF16 = 350GB model weight. With TP=8 (NVLink within node) and PP=8 stages: effective params/device = 175B/(8*8) = 2.73B. Weights: 5.5GB. ZeRO-2 shards gradients (not weights/optimizer): gradients = 5.5GB / DP replicas. With DP=8: grad shard = 0.69GB. Optimizer (FP32 Adam, ZeRO-3): 175B*12/512 = 4.1GB. Activations (checkpointed): ~3GB. Total: ~13.3GB — well under 70GB. Bubble with m=72: (8-1)/(72+7) = 8.9% < 10%. Spec: p=8, TP=8, DP=8, m=72.'
+  realistic_solution: '175B params, BF16 = 350GB model weight. With TP=8 (NVLink within node) and PP=8 stages: effective params/device = 175B/(8*8) = 2.73B. Weights are not sharded by ZeRO-2, so BF16 weights are 5.47GB per GPU. ZeRO-2 shards gradients and optimizer states across DP replicas. With DP=8, the BF16 gradient shard is 5.47GB/8 = 0.68GB. FP32 Adam states plus master weights are 12 bytes/parameter for the local TP/PP shard, then sharded over DP: 2.73B × 12B / 8 = 4.10GB. Add ~3GB checkpointed activations for a peak of about 13.25GB, well under 70GB. Bubble with m=72: (8-1)/(72+7) = 8.9% < 10%. Spec: PP=8, TP=8, DP=8, m=72.'
   common_mistake: |
     **The Pitfall:** Failing to account for ZeRO-2 optimizer state distribution across data parallel ranks.
     **The Rationale:** Candidates often assume that all optimizer states must fit entirely on each GPU without sharding, leading to impossible memory constraints.
@@ -25,7 +25,7 @@ details:
     - Total weights: 175B * 2 bytes = 350GB.
     - Weights per device (TP=8, PP=8): 350GB / 64 = 5.47GB.
     - Gradients (ZeRO-2 over DP=8): 5.47GB / 8 = 0.68GB.
-    - Optimizer (ZeRO-3 over 512 GPUs): 175B * 12 bytes / 512 = 4.1GB.
+    - Optimizer states + master weights (ZeRO-2 over DP=8): (175B / 64) * 12 bytes / 8 = 4.1GB.
     - Activations (checkpointed): ~3.0GB.
     - Peak Memory = 5.47 + 0.68 + 4.1 + 3.0 = 13.25GB.
     - Pipeline Bubble (m=72): (8 - 1) / (72 + 8 - 1) = 8.8%.

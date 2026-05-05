@@ -8,24 +8,29 @@ competency_area: cross-cutting
 bloom_level: evaluate
 phase: both
 title: Privacy-Utility Tradeoff in LLM Fine-Tuning
-scenario: "Your team fine-tunes GPT-2 (1.5B params) on private medical records using DP-SGD. At epsilon = 8.0 (moderate privacy), the model achieves 72% accuracy on medical NER. At epsilon = 1.0 (strong privacy), accuracy drops to 41% \u2014 barely above the 38% random baseline. The non-private baseline is 89%."
-question: "Is full DP-SGD viable for GPT-2 medical NER at \u03b5=1, and what alternatives improve the privacy-utility tradeoff?"
+scenario: Your team fine-tunes a 1.5B-parameter LLM on private medical records using DP-SGD. At epsilon = 8.0 (moderate privacy), the model achieves 72% accuracy on medical NER. At epsilon = 1.0 (strong privacy), accuracy drops to 41% — barely above the 38% random baseline. The non-private baseline is 89%.
+question: Is full DP-SGD viable for 1.5B-parameter medical NER at ε=1, and what alternatives improve privacy-utility?
 details:
-  realistic_solution: "The noise in DP-SGD scales with the gradient clipping norm divided by batch size, multiplied by a factor dependent on epsilon. With 1.5B parameters, the gradient norm is large, requiring aggressive clipping that distorts learning signals. Alternatives: (1) DP-LoRA: freeze the base model, apply DP-SGD only to LoRA adapters (e.g., rank 16: 1.5B -> ~10M trainable params). Sensitivity decreases by ~150x because gradients are over far fewer parameters. (2) PATE: train an ensemble of teacher models on disjoint private data partitions. (3) Pre-train on public medical text, then DP fine-tune only the classifier head."
+  realistic_solution: 'Full-model DP-SGD is not viable at ε=1 for this setting because the observed 41% NER accuracy is barely above the 38% baseline. The issue is not a simple per-parameter noise total; privacy loss depends on the sampling rate, number of steps, clipping norm, noise multiplier, and accountant. Full fine-tuning also forces clipping and noisy updates across a very high-dimensional model, which hurts utility and memory. Alternatives: (1) DP-LoRA: freeze the base model and train only adapter weights under DP. This does not reduce DP sensitivity merely by parameter count, but it improves utility by restricting the noisy optimization problem to far fewer trainable degrees of freedom. (2) Public medical pretraining followed by DP fine-tuning of adapters or a classifier head. (3) PATE or private aggregation when labeled private data can be partitioned across teachers.'
   common_mistake: |
-    **The Pitfall:** Concluding that differential privacy is fundamentally incompatible with LLMs.
-    **The Rationale:** Applying vanilla DP-SGD to all 1.5 billion parameters requires massive noise injection because sensitivity scales with model size.
-    **The Consequence:** Abandoning privacy efforts entirely instead of utilizing parameter-efficient methods (like DP-LoRA) that radically reduce the noise requirement.
+    **The Pitfall:** Treating the ε=1 failure of full fine-tuning as proof that private LLM adaptation is impossible.
+    **The Rationale:** Candidates conflate full-model DP-SGD with all DP training strategies and assume utility loss is unavoidable.
+    **The Consequence:** They miss parameter-efficient and public-pretraining approaches that can improve utility while still accounting for privacy rigorously.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - DP-SGD noise formula: \u03c3 = C * \u221a(2 ln(1.25/\u03b4)) / (\u03b5 * batch_size).
-       - \u03b5=1.0, \u03b4=1e-5, batch_size=256, C=1.0.
-    2. **Calculations:**
-       - Factor calculation: \u221a(2 * ln(1.25/1e-5)) = \u221a(2 * 11.736) = \u221a23.47 \u2248 4.84.
-       - Step Noise: \u03c3 = 1.0 * 4.84 / 256 \u2248 0.0189 per parameter per step.
-       - Full Model Impact: 1.5B params * 0.0189 \u2248 28.3M absolute noise magnitude injected.
-    3. **Conclusion & Interpretation:**
-       **DP-LoRA reduces the noise dimensionality footprint by 150x. Result: Utility-Bound without parameter reduction.**
+    **Assumptions & Constraints:**
+    - Full-model DP-SGD at ε=1 gives 41% accuracy.
+    - Random baseline is 38%; non-private baseline is 89%.
+    - Privacy accounting must use sampling rate, steps, clipping norm, noise multiplier, and δ.
+
+    **Calculations:**
+    - Utility gain over random at ε=1 = 41% - 38% = 3 percentage points.
+    - Gap to non-private baseline = 89% - 41% = 48 percentage points.
+    - Gap to the ε=8 run = 72% - 41% = 31 percentage points.
+    - A closed-form single-step noise formula is not enough to judge the full training run; use an RDP/PLD accountant for the actual schedule.
+    - DP-LoRA reduces trainable parameters from 1.5B to perhaps tens of millions, improving optimization and memory, but the clipped per-example update still determines sensitivity.
+
+    **Conclusion & Interpretation:**
+    - **Result: utility-bound.** Full DP-SGD at ε=1 is not viable as stated; use parameter-efficient DP fine-tuning, public pretraining, or private aggregation rather than claiming sensitivity falls with parameter count.
 status: published
 provenance: imported
 requires_explanation: false
@@ -39,8 +44,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- DP-SGD noise multiplier calculation `\u221a(2*ln(1.25/1e-5))` is approximately 4.84,
-  not 4.06.
+  - DP-SGD noise multiplier calculation `\u221a(2*ln(1.25/1e-5))` is approximately 4.84, not 4.06.
 human_reviewed:
   status: not-reviewed
   by: null

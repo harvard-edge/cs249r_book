@@ -8,10 +8,10 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Diagnosing Elastic Scaling Collapse
-scenario: 'You are observing an elastic pre-training job for a 13B parameter LLM. The job uses a strict static global batch size of 2048 sequences. When the cluster scheduler dynamically scales the job from 64 to 128 GPUs, the global throughput only increases by 15%. The network is verified to be fully operational.'
-question: 'Why does throughput rise only 15% when scaling from 64 to 128 GPUs with a static global batch size, and what should the scheduler do?'
+scenario: You are observing an elastic pre-training job for a 13B parameter LLM. The job uses a strict static global batch size of 2048 sequences. When the cluster scheduler dynamically scales the job from 64 to 128 GPUs, the global throughput only increases by 15%. The network is verified to be fully operational.
+question: Why does throughput rise only 15% when scaling from 64 to 128 GPUs with a static global batch size, and what should the scheduler do?
 details:
-  realistic_solution: 'With a static global batch size, doubling the GPU count halves the micro-batch size per GPU. This decreases the arithmetic intensity, causing the compute time to shrink so much that the fixed AllReduce communication latency dominates the step time. To fix this, the scheduler should continuously profile the empirical scaling efficiency curve and set a strict upper bound on worker allocation.'
+  realistic_solution: With a static global batch size, doubling the GPU count halves the per-GPU micro-batch from 32 to 16 sequences, assuming the framework shards each global batch evenly across workers. That reduces useful compute per GPU while the synchronization latency remains roughly fixed, so communication consumes a larger share of each step. The scheduler should use measured scaling curves to either increase the effective global batch or accumulation policy when adding GPUs, or stop scaling past the efficiency knee when the batch cannot grow.
   common_mistake: |
     **The Pitfall:** Assuming an undetected network failure or straggler node.
     **The Rationale:** Candidates often jump to hardware or network anomalies rather than mathematically analyzing the impact of static batching on per-GPU utilization as worker counts increase.
@@ -20,15 +20,16 @@ details:
     **Assumptions & Constraints:**
     - Global Batch Size: 2048.
     - 64 GPUs: MBS = 32. 128 GPUs: MBS = 16.
-    - AllReduce time ~15ms.
+    - Fixed synchronization time: 15ms.
+    - Per-GPU compute time is proportional to per-GPU micro-batch.
 
     **Calculations:**
-    - 64 GPUs: Compute = 40ms. Step = max(40, 15) = 40ms. Throughput = 2048 / 0.040 = 51,200 seq/s.
-    - 128 GPUs: Compute = 20ms. Step = max(20, 15) = 20ms (practical ~35ms). Throughput = 2048 / 0.035 = 58,514 seq/s.
-    - Gain: 58,514 / 51,200 = ~1.14x (+14%).
+    - 64 GPUs: compute 40ms + sync 15ms = 55ms/step. Throughput = 2048 / 0.055 = 37,236 seq/s.
+    - 128 GPUs with the same global batch: compute 20ms + sync 28ms = 48ms/step, where the larger worker count adds synchronization overhead. Throughput = 2048 / 0.048 = 42,667 seq/s.
+    - Gain: 42,667 / 37,236 = 1.146x, or about +15%.
 
     **Conclusion & Interpretation:**
-    - **Result: ~14% throughput gain (Communication Latency-Bound)**. Doubling GPUs yields marginal gains because fixed communication latency dominates the shrunken compute time.
+    - **Result: ~15% throughput gain (Communication-Heavy Scaling)**. Fixed global batch size shrinks per-GPU work, so the scheduler should grow effective batch size when valid or cap allocation at the measured efficiency knee.
 status: published
 provenance: imported
 requires_explanation: false

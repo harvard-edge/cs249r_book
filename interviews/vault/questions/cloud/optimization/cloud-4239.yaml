@@ -9,24 +9,28 @@ bloom_level: understand
 phase: training
 title: Understanding why torch.compile retraces after dynamic batch size changes
 scenario: A team trains a model on an accelerator (312 TFLOPS, 2TB/s) with variable batch sizes from a data loader that pads batches differently each step. After enabling `torch.compile`, they notice periodic 3-5 second stalls every few hundred steps, during which GPU utilization drops to 0%.
-question: "What causes the 3-5 second torch.compile stalls with variable padded batch sizes, and how would you eliminate them?"
+question: What causes the 3-5 second torch.compile stalls with variable padded batch sizes, and how would you eliminate them?
 details:
   realistic_solution: The stalls are caused by TorchDynamo recompiling the computation graph. `torch.compile` defaults to static shapes; every time the data loader yields a novel padded batch size, it triggers a cache miss and forces a synchronous re-tracing and recompilation of the execution graph via Triton/Inductor. Fix this by explicitly setting `torch.compile(model, dynamic=True)` to generate shape-agnostic symbolic kernels, or deliberately bucket/pad the data loader into 2-3 discrete fixed sizes to cap the total number of compilations.
   common_mistake: |
     **The Pitfall:** Assuming `torch.compile` is a "free" JIT that universally handles dynamic Python logic seamlessly.
-    **The Rationale:** Engineers treat the compiler like a black box, not understanding that underneath, it relies on strict static tensor shape hashing to emit optimized C++/PTX code.
-    **The Consequence:** The training loop spends more time blocked on the host CPU running the LLVM/Triton compiler stack than actually executing FLOPs on the GPU.
+    **The Rationale:** Engineers miss that novel padded shapes can miss the graph cache or trigger graph breaks, forcing TorchDynamo and Inductor to trace and compile a new variant synchronously.
+    **The Consequence:** GPU work pauses during those cache misses, so utilization drops to zero until the host-side compile finishes.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Compilation time: ~3 seconds per unique shape.
-       - Shape frequency: New batch size every 100 steps.
-       - Total training run: 10,000 steps.
-    2. **Calculations:**
-       - Number of unique shapes encountered: 10,000 / 100 = 100 recompiles.
-       - Total compilation overhead: 100 * 3 seconds = 300 seconds.
-       - If base step time is 50ms: 10,000 * 0.05s = 500 seconds.
-    3. **Conclusion & Interpretation:**
-       - **Result: 300s Compilation Overhead.** The pipeline is disastrously **Host-Compiler-Bound**, adding 60% overhead to the entire training run due to shape variability.
+    **Assumptions & Constraints:**
+    - Stalls occur about every 250 steps, consistent with "every few hundred steps."
+    - Each stall is a novel padded shape that takes 4 seconds to compile.
+    - Total training run: 10,000 steps.
+    - Base step time: 50 ms.
+
+    **Calculations:**
+    - Approximate recompiles: 10,000 / 250 = 40.
+    - Compile overhead: 40 × 4 seconds = 160 seconds.
+    - Baseline training time: 10,000 × 0.05 seconds = 500 seconds.
+    - Overhead fraction: 160 / 500 = 32%.
+
+    **Conclusion & Interpretation:**
+    - **Result: Host compile stalls.** Shape bucketing or dynamic shapes can remove roughly minutes of synchronous compile overhead in this run; the exact percentage depends on how many distinct padded shapes are encountered.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,11 +7,11 @@ topic: congestion-control
 competency_area: networking
 bloom_level: analyze
 phase: both
-title: 'Incast Congestion During AllReduce Reduce-Scatter'
-scenario: 'During the reduce-scatter phase of ring AllReduce on a 128-H100 cluster, you observe periodic 50ms latency spikes on specific ToR switches. The pattern correlates with gradient synchronization boundaries. Buffer utilization on affected switches spikes from 10% to 98%.'
-question: 'What incast pattern is causing the 50ms reduce-scatter spikes, and why is reduce-scatter more vulnerable than all-gather?'
+title: Incast Congestion During AllReduce Reduce-Scatter
+scenario: During the reduce-scatter phase of ring AllReduce on a 128-H100 cluster, you observe periodic 50ms latency spikes on specific ToR switches. The pattern correlates with gradient synchronization boundaries. Buffer utilization on affected switches spikes from 10% to 98%.
+question: What incast pattern is causing the 50ms reduce-scatter spikes, and why is reduce-scatter more vulnerable than all-gather?
 details:
-  realistic_solution: 'In reduce-scatter, N GPUs may simultaneously send chunks to a single destination port, creating N:1 incast. With H100s at 400Gbps, this creates massive instantaneous demand. Solutions include staggering send times with jitter (50-200μs), using hierarchical AllReduce, and configuring ECN thresholds at 30% buffer occupancy to trigger DCQCN.'
+  realistic_solution: In reduce-scatter, N GPUs may simultaneously send chunks to a single destination port, creating N:1 incast. With H100s at 400Gbps, this creates massive instantaneous demand. Solutions include staggering send times with jitter (50-200μs), using hierarchical AllReduce, and configuring ECN thresholds at 30% buffer occupancy to trigger DCQCN.
   common_mistake: |
     **The Pitfall:** Treating incast congestion as a simple average bandwidth problem.
     **The Rationale:** Candidates look at the average network utilization and assume the links have plenty of capacity, ignoring the bursty, temporally correlated nature of synchronized communications.
@@ -19,15 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 8 H100s per ToR switch, sending 32MB chunks.
-    - 400Gbps links.
+    - Each sender has a 400Gbps ingress link and the hot receiver has one 400Gbps egress link.
     - ToR shared buffer size: 32-64MB.
 
     **Calculations:**
-    - Instantaneous burst: 8 GPUs × 32MB = 256MB arriving at one switch port.
-    - Buffer capacity: 64MB.
-    - Oversubscription ratio: 256MB / 64MB = 4x oversubscription.
+    - Aggregate offered ingress: 8 * 400Gbps = 3.2Tbps.
+    - Egress capacity to the hot receiver: 400Gbps.
+    - Bandwidth oversubscription: 3.2Tbps / 400Gbps = 8:1.
+    - Excess queue growth rate: (3.2Tbps - 0.4Tbps) / 8 = 350GB/s.
+    - Time to fill 64MB of buffer: 64MB / 350GB/s ~= 183us.
+    - Time to fill 32MB of buffer: 32MB / 350GB/s ~= 91us.
 
     **Conclusion & Interpretation:**
-    - **Result: 4x buffer oversubscription (Micro-Burst-Buffer-Bound)**. Guarantees packet drops and latency spikes during gradient synch.
+    - **Result: 8:1 egress bandwidth oversubscription (Micro-Burst-Buffer-Bound)**. A synchronized burst lasting longer than roughly 90-180us can exhaust a 32-64MB buffer and create drops or long queueing delay.
 status: published
 provenance: imported

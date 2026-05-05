@@ -11,7 +11,7 @@ title: Go-Back-N Penalty in 800G RoCEv2 Fabrics
 scenario: Your team is building a 4,096-GPU training cluster (H100s) using an 800 Gbps RoCEv2 Ethernet fabric. During 2GB AllReduce operations, microbursts induce a 0.1% packet drop rate. The networking vendor proposes using standard Go-Back-N (GBN) retransmission to simplify NIC hardware, arguing the drop rate is low enough. You must evaluate the true bandwidth penalty of Go-Back-N at this scale compared to Selective Repeat, and justify whether to accept this vendor's NICs.
 question: Should you accept the vendor's Go-Back-N RoCE NICs for 2GB AllReduce at 800Gbps with 0.1% packet loss, and what bandwidth penalty results?
 details:
-  realistic_solution: Reject the vendor's GBN proposal. At 800 Gbps, the BDP is large enough that a single dropped packet forces the retransmission of hundreds of already-received packets. Selective Repeat (or advanced transports like SRD) must be used to only retransmit the single lost MTU, preserving fabric goodput.
+  realistic_solution: Reject the vendor's GBN proposal. With 800 Gbps and 10 us RTT, the BDP is about 1 MB, or 250 packets at a 4 KB MTU. At 0.1% loss, a GBN-style retry wastes about half a window per random loss on average, giving roughly an 11% goodput penalty, with a worst case near 20% before timeout and congestion effects. Selective Repeat or a congestion-tolerant transport retransmits only the lost packet and avoids this window-scale amplification.
   common_mistake: |
     **The Pitfall:** Assuming a low drop rate (0.1%) means retransmission overhead is negligible.
     **The Rationale:** Failing to calculate the multiplicative penalty caused by the large Bandwidth-Delay Product (BDP) in modern high-speed fabrics.
@@ -25,11 +25,15 @@ details:
     **Calculations:**
     - Bandwidth-Delay Product (BDP): 100 GB/s × 10 µs = 1 MB.
     - Unacknowledged window: 1 MB / 4 KB = 250 packets.
-    - 0.1% drop rate triggers one GBN retransmission every ~4 RTTs.
-    - GBN resends up to 250 packets per drop.
+    - 0.1% packet loss means about 1 dropped packet per 1,000 original packets.
+    - Worst-case GBN retry per drop: retransmit the dropped packet plus the 249 packets behind it = 250 packets.
+    - Average random-position retry per drop: about (250 + 1) / 2 = 125.5 packets.
+    - Average transmitted packets per 1,000 useful packets: 1,000 + 125.5 = 1,125.5.
+    - Average goodput: 1,000 / 1,125.5 = 88.8%, so the bandwidth penalty is about 11.2%.
+    - Worst-case goodput bound: 1,000 / (1,000 + 250) = 80%, or a 20% penalty.
 
     **Conclusion & Interpretation:**
-    - **Result: Network-Bound**. At an 800 Gbps scale, the massive BDP causes GBN to retransmit hundreds of good packets per drop, wasting ~25% of fabric goodput.
+    - **Result: Reject GBN NICs.** Under the stated loss and BDP assumptions, GBN wastes about 11% of goodput on average and up to 20% in the worst case before secondary congestion effects; Selective Repeat keeps the retransmission penalty near the raw 0.1% loss rate.
 status: published
 provenance: imported
 requires_explanation: true

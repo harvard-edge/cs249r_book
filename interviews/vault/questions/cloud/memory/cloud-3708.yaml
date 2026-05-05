@@ -7,30 +7,34 @@ topic: memory-hierarchy-design
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: 'HBM3 vs L2 Cache Access Patterns for Transformer Weights on H100'
-scenario: 'A GPU has 80MB L2 cache and 3.35 TB/s HBM3 memory bandwidth. During LLM inference at batch_size=1, the attention QKV projection for a layer with d_model=8192 requires loading weights of shape [8192, 3x8192] = 3x8192²x2 bytes = 402MB.'
-question: 'Will the 402MB QKV weight matrix fit in L2 cache during batch-1 decode, and what per-token latency does HBM streaming imply?'
+title: HBM3 vs L2 Cache Access Patterns for Transformer Weights on H100
+scenario: A GPU has 80MB L2 cache and 3.35 TB/s HBM3 memory bandwidth. During LLM inference at batch_size=1, the attention QKV projection for a layer with d_model=8192 requires loading weights of shape [8192, 3x8192] = 3x8192²x2 bytes = 402MB.
+question: Will the 402MB QKV weight matrix fit in L2 cache during batch-1 decode, and what per-token latency does HBM streaming imply?
 details:
-  realistic_solution: 'QKV weight matrix: 402MB >> 80MB L2. Cache miss rate near 100% for weight access. Each token decode must stream 402MB from HBM. Full layer (add MLP) ≈ 1.47GB per layer. For 80-layer model: 118GB per token decode. Key insight: model weights must be kept in HBM for large models; increasing batch size amortizes weight loading cost.'
+  realistic_solution: 'QKV weight matrix: 8192 × 24576 × 2 bytes = 402.7 MB decimal, or about 384 MiB, which is far larger than the 80 MB L2 cache. Cache miss rate is near 100% for batch-1 weight streaming. The common MLP up/down projections are 2 × 8192 × 32768 × 2 bytes = 1.074 GB decimal. Full layer weights are therefore about 1.48 GB decimal, so an 80-layer model streams about 118 GB per token. At 3.35 TB/s HBM bandwidth, the lower-bound weight-streaming time is about 35 ms/token, or ~28 tokens/s.'
   common_mistake: |
     **The Pitfall:** Assuming model weights stay warm in the L2 cache between consecutive token generation steps.
     **The Rationale:** In standard CPU programming, frequently accessed variables stay in L1/L2 cache.
     **The Consequence:** Engineers underestimate memory traffic by orders of magnitude, failing to realize the entire model must be re-streamed from HBM for every single token generated.
   napkin_math: |
     **Assumptions & Constraints:**
+    - Use decimal units for bandwidth math: MB=10^6 bytes, GB=10^9 bytes, TB=10^12 bytes.
     - 80MB L2 cache, 3.35 TB/s HBM3.
-    - QKV projection: [8192, 3x8192] = 402MB.
+    - QKV projection shape: [8192, 3×8192].
     - 80-layer model.
 
     **Calculations:**
-    - L2 cache constraint: 402MB QKV > 80MB L2. Must stream from HBM.
-    - QKV stream time: 402MB / 3.35 TB/s = 0.12ms.
-    - Full layer weights: QKV (402MB) + MLP (2 * 8192 * 32768 * 2B = 1.07GB) ≈ 1.47GB per layer.
-    - Full model transfer: 80 * 1.47GB = 118GB streamed per token.
-    - Token latency: 118GB / 3.35 TB/s = ~35ms/token.
+    - QKV bytes = 8192 × 24576 × 2 = 402,653,184 bytes = 402.7 MB decimal (~384 MiB).
+    - L2 cache constraint: 402.7 MB QKV > 80 MB L2, so QKV weights cannot fit in L2.
+    - QKV stream time lower bound: 402.7 MB / 3.35 TB/s = 0.120 ms.
+    - One MLP projection = 8192 × 32768 × 2 = 536,870,912 bytes = 536.9 MB.
+    - MLP up/down projections = 2 × 536.9 MB = 1.074 GB.
+    - Full layer weight traffic ≈ 0.403 GB + 1.074 GB = 1.477 GB.
+    - Full model transfer: 80 × 1.477 GB = 118.2 GB streamed per token.
+    - Token latency lower bound: 118.2 GB / 3.35 TB/s = 35.3 ms/token.
 
     **Conclusion & Interpretation:**
-    - **Result: ~28 tokens/second (Memory-Bound)**. The system is heavily memory-bound due to weights eviction from L2 cache.
+    - **Result: ~28 tokens/second (Memory-Bound)**. The system is memory-bound because batch-1 decode streams model weights from HBM each token.
 status: published
 provenance: imported
 requires_explanation: false

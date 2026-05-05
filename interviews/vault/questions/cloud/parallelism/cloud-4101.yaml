@@ -8,11 +8,11 @@ competency_area: parallelism
 bloom_level: evaluate
 phase: training
 title: TP Scaling Efficiency Cliff
-scenario: 'You are analyzing the Model FLOP Utilization (MFU) of a 13B parameter model as the Tensor Parallelism (TP) degree increases from 1 to 8 on H100 NVLink nodes.'
-question: 'For a 13B model on H100 NVLink, how does MFU change from TP=1 to TP=8, and at what TP degree does efficiency drop sharply?'
+scenario: You are analyzing the Model FLOP Utilization (MFU) of a 13B parameter model as the Tensor Parallelism (TP) degree increases from 1 to 8 on H100 NVLink nodes.
+question: For a 13B model on H100 NVLink, how does MFU change from TP=1 to TP=8, and at what TP degree does efficiency drop sharply?
 details:
   realistic_solution: |
-    For a 13B model (hidden=5120, 40 layers, 40 heads): TP=1: Each GEMM is large ([batch, 5120] x [5120, 20480]), achieving near-peak Tensor Core utilization. MFU ~55-60%. TP=2: GEMMs halve in one dimension, still large enough for good utilization. Comms are tiny on NVLink. MFU ~52-55%. TP=4: GEMMs are 1/4 size. Still reasonable. MFU ~45-50%. TP=8: Each GPU handles [batch, 5120] x [5120, 2560] — the output dimension is only 2560. For small batch sizes, this GEMM becomes memory-bound (low arithmetic intensity). Meanwhile, 2 AllReduces per block x 40 blocks = 80 AllReduces per forward pass. MFU drops to ~30-35%. The cliff hits between TP=4 and TP=8 for 13B models because the GEMM dimensions shrink below the Tensor Core efficiency threshold (~4096 in the smallest dimension). Rule of thumb: TP is efficient when hidden_dim / TP >= 2048.
+    For a 13B model (hidden=5120, 40 layers, 40 heads): TP=1: each GEMM is large ([batch, 5120] x [5120, 20480]), achieving near-peak Tensor Core utilization. MFU is about 55-60%. TP=2: GEMMs halve in one dimension, still large enough for good utilization, and NVLink communication is small. MFU is about 52-55%. TP=4: GEMMs are one quarter of the original output width, so compute efficiency starts to fall but is still reasonable. MFU is about 45-50%. TP=8: each GPU handles [batch, 5120] x [5120, 2560] for the MLP expansion, while the model still pays 2 AllReduces per block x 40 blocks = 80 AllReduces per forward pass. At typical microbatch sizes this becomes communication- and memory-limited, so MFU drops to about 30-35%. The sharp drop is therefore between TP=4 and TP=8 for this model size.
   common_mistake: |
     **The Pitfall:** Assuming linear scaling where doubling TP always halves time.
     **The Rationale:** Each GPU's GEMM shrinks (lowering arithmetic intensity) while communication stays constant, collapsing the compute-to-communication ratio.
@@ -20,15 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 13B Model: hidden_dim=5120.
-    - TP Threshold Rule: Efficient when hidden_dim / TP >= 2048.
+    - Efficiency is estimated from shrinking local GEMMs and fixed TP communication.
 
     **Calculations:**
-    - TP=4: 5120 / 4 = 1280 (Borderline, MFU ~45-50%).
-    - TP=8: 5120 / 8 = 640 (Well below threshold, memory-bound).
+    - MLP expansion output width is 4 × hidden_dim = 20,480.
+    - TP=1 local output width: 20,480, MFU ~55-60%.
+    - TP=2 local output width: 10,240, MFU ~52-55%.
+    - TP=4 local output width: 5,120, MFU ~45-50%.
+    - TP=8 local output width: 2,560, with the same 80 forward AllReduces per step, MFU ~30-35%.
     - With TP=8, 80 AllReduces per forward pass drop MFU to ~30-35%.
 
     **Conclusion & Interpretation:**
-    - **Result: ~30-35% MFU (Compute-Bound)**. The efficiency cliff hits between TP=4 and TP=8 as GEMMs lose arithmetic intensity and become memory-bound.
+    - **Result: ~30-35% MFU (Communication/Memory-Limited).** The efficiency cliff hits between TP=4 and TP=8 as local GEMMs shrink and communication becomes a larger fraction of step time.
 status: published
 provenance: imported
 requires_explanation: false

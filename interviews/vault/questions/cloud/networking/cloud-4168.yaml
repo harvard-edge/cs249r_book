@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: both
 title: NVLink vs Infinity Fabric for Tensor Parallelism
 scenario: You must choose between 8x NVLink GPUs and 8x Infinity Fabric GPUs for 8-way tensor parallelism on a 70B model.
-question: What architectural differences between NVLink and Infinity Fabric affect tensor parallel efficiency, and which do you recommend given the per-GPU FP16 parameter shard size versus activation shard AllReduce transfers?
+question: How do NVLink and Infinity Fabric differ for tensor parallelism, and which is better for the given shard and AllReduce sizes?
 details:
-  realistic_solution: '8.75B parameters at FP16 = 17.5 GB. In tensor parallelism, AllReduce transfers activations, not weights. An activation shard (seq * hidden/8 * 2B) is typically around 4 MB, not 17.5 GB.'
+  realistic_solution: NVLink is the better choice for 8-way tensor parallelism when both systems have similar GPUs because the repeated collective is activation communication after each layer, and NVLink provides much higher local collective bandwidth and lower latency. The 70B parameter count determines shard storage (70B/8 × 2 bytes = 17.5 GB per GPU), but the AllReduce payload is the activation tensor, not the parameter shard. For seq=2048 and hidden=1024, the full activation is about 4 MB; a ring AllReduce moves about 2 × (7/8) × 4 MB = 7 MB per GPU. At 900 GB/s this is about 7.8 μs on NVLink; an Infinity Fabric system with lower effective collective bandwidth would take proportionally longer. If Infinity Fabric bandwidth were 400 GB/s, the same collective would be about 17.5 μs.
   common_mistake: |
     **The Pitfall:** Comparing only peak bandwidth numbers and conflating parameter size with activation size.
     **The Rationale:** Tensor parallelism AllReduce transfers activations, not weights.
@@ -22,15 +22,18 @@ details:
     - Precision: FP16 (2 bytes)
     - TP factor: 8
     - Seq: 2048, Hidden: 1024
-    - NVLink Bandwidth: 900 GB/s
+    - NVLink effective bandwidth: 900 GB/s.
+    - Example Infinity Fabric effective bandwidth: 400 GB/s.
 
     **Calculations:**
-    - NVLink AllReduce per layer params: 70B/8 = 8.75B
-    - Activation shard size: 2048 * 1024 * 2 bytes = 4 MB
-    - Transfer time: 4 MB / 900 GB/s = 4.4 μs
+    - Parameter shard storage: 70B / 8 * 2 bytes = 17.5 GB per GPU, but this is not the per-layer AllReduce payload.
+    - Activation tensor size: 2048 * 1024 * 2 bytes = 4,194,304 bytes ≈ 4 MB.
+    - Ring AllReduce traffic per GPU: 2 * (8 - 1) / 8 * 4 MB = 7 MB.
+    - NVLink time: 7 MB / 900 GB/s ≈ 7.8 μs.
+    - Infinity Fabric example time: 7 MB / 400 GB/s ≈ 17.5 μs.
 
     **Conclusion & Interpretation:**
-    - **Result: 4.4 μs (Compute-Bound)**. Transfer time is only 4.4 μs.
+    - **Result: NVLink is better for this TP collective.** The comparison should be based on activation AllReduce traffic, not the 17.5 GB parameter shard.
 status: published
 provenance: imported
 requires_explanation: true

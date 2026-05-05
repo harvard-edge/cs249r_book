@@ -7,26 +7,26 @@ topic: data-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: The Liquid-Cooled Scheduling Frontier
+title: Scheduling a 1,000-GPU Job Across H100 and B200 Fleets
 scenario: Your company is deploying next-generation B200 GPUs alongside the existing H100 fleet. The B200s require direct-to-chip liquid cooling. 30% of your datacenter has liquid cooling (500 B200s); the rest is air-cooled (2,000 H100s). A critical 1,000-GPU LLM pre-training job needs the fastest possible time-to-completion. B200s are 2x faster per GPU for training.
-question: "How would you schedule the job to maximize speed, and can both GPU types be used synchronously?"
+question: How would you schedule the job to maximize speed, and can both GPU types be used synchronously?
 details:
-  realistic_solution: 'You cannot naively mix GPU types in synchronous training. Three strategies, evaluated by time-to-completion: **Option 1 — B200-only (500 GPUs)**: Use all 500 B200s. Each B200 is 2x faster than H100, so effective throughput = 500 × 2 = 1,000 H100-equivalent. Time = T_base. **Option 2 — H100-only (1,000 GPUs)**: Use 1,000 H100s. More GPUs but slower each. Throughput = 1,000 H100-equivalent, but communication overhead increases with more nodes. Time ≈ T_base × 1.15 (15% communication overhead from 2x nodes). **Option 3 — Heterogeneous with async**: Use B200s for the primary training job (fast iterations). Run H100s on a separate replica with asynchronous gradient exchange (DiLoCo-style). B200s do 500 inner steps, H100s do 500 inner steps, then exchange outer gradients every N steps. This requires algorithmic changes but utilizes both fleets. **Best option**: Option 1 (500 B200s) is simplest and fastest. The 500 B200s match 1,000 H100-equivalent throughput with half the communication overhead (fewer nodes). The cooling constraint is a hard physical boundary — schedule all B200 jobs in the liquid-cooled zone, use H100 fleet for inference/evaluation. Consider: the scheduler must track cooling zone as a resource dimension alongside GPU type, count, and network topology.'
+  realistic_solution: 'For the job as stated, 500 B200s alone are not a valid schedule because the job requires 1,000 physical GPUs. The fastest valid naive synchronous schedule is therefore 1,000 H100s, because that is the only homogeneous 1,000-GPU pool available. Do not mix 500 B200s and 500 H100s in one ordinary synchronous data-parallel job: the H100 workers become stragglers, the B200 workers wait at every collective, and the step clock is set by the slower tier unless the training stack supports heterogeneous load balancing. The scheduler should model GPU type, cooling zone, and topology as hard placement constraints. If the algorithm is changed to support asynchronous or load-balanced heterogeneous training, then the B200 and H100 fleets can be used together as a separate design, but that is not the same as scheduling one naive synchronous 1,000-GPU job.'
   common_mistake: |
     **The Pitfall:** Mixing B200 and H100 GPUs in a single synchronous data-parallel training job.
     **The Rationale:** Assuming that adding more GPUs automatically increases total throughput, regardless of individual GPU speeds.
     **The Consequence:** Creating a severe straggler problem where the 2x faster B200s idle for 50% of the time waiting for the H100s at every AllReduce synchronization point.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Fleet: 500 B200s (Liquid, 2x faster) and 2,000 H100s (Air).
-       - Job requires 1,000-GPU equivalent compute.
+       - Fleet: 500 B200s (liquid cooled, 2x faster per GPU) and 2,000 H100s (air cooled).
+       - Job requires 1,000 physical GPUs.
+       - Naive synchronous data parallelism advances at the pace of the slowest workers.
     2. **Calculations:**
-       - B200 Fleet (500 GPUs): 500 * 2x speed = 1,000 H100-equivalent compute.
-       - H100 Fleet (1,000 GPUs): 1,000 H100-equivalent compute.
-       - Communication Overhead (B200): 500 GPUs = 63 nodes. AllReduce takes ~5.5s + Compute ~3.5s = 9.0s step.
-       - Communication Overhead (H100): 1,000 GPUs = 125 nodes. AllReduce takes ~7.0s + Compute ~3.5s = 10.5s step.
+       - B200-only schedule: 500 physical GPUs, so it fails the 1,000-GPU requirement even though compute throughput is high.
+       - H100-only schedule: 1,000 physical GPUs, homogeneous synchronous training, valid.
+       - Mixed 500 B200 + 500 H100 schedule: 1,000 physical GPUs, but naive synchronous steps wait for H100-speed workers, so B200 capacity is partly wasted at synchronization barriers.
     3. **Conclusion & Interpretation:**
-       - **Result: Network-Bound Synchronization.** 500 B200s outperform 1,000 H100s by ~15% due to lower node count and reduced AllReduce overhead.
+       - **Result: Straggler-Bound Synchronization.** Schedule 1,000 H100s for the fastest valid naive synchronous job, and treat B200s as a separate liquid-cooled pool unless the training algorithm explicitly supports heterogeneous async or load-balanced execution.
 status: published
 provenance: imported
 requires_explanation: true

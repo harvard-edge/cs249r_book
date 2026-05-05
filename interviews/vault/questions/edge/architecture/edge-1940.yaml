@@ -15,7 +15,7 @@ details:
     1. **Parameter & Weight Memory Estimation**: Calculate the memory required for INT8 weights (e.g., param_count * 1 byte/param).
     2. **Activation Memory Estimation**: Run a dummy inference with a representative input size on a quantized model and profile peak memory usage for activations. Alternatively, analytical estimation based on layer output shapes.
     3. **TOPS Requirement Calculation**: Determine the total number of INT8 operations the model performs for a single inference. Then multiply by the required FPS.
-    4. **Feasibility Check**: Compare calculated memory footprint against Coral's available memory (e.g., 8MB SRAM for model, 1GB RAM for system) and required operations against Coral's 4 TOPS peak.
+    4. **Feasibility Check**: Compare calculated model size against the Edge TPU compiler's placement limits and required operations against Coral's 4 TOPS peak as an upper bound. Do not treat board RAM as TPU-local SRAM, and verify that every operator is compiled to the TPU rather than falling back to the host CPU.
     5. **Tools**: Use tools like pytorch_model_summary, onnx_optimizer to get layer-wise operations and memory. TensorFlow Lite Converter can provide detailed insights into quantized model size and operations.
   common_mistake: |
     **The Pitfall:** Overlooking activation memory or directly comparing FP32 FLOPs to INT8 TOPS.
@@ -24,7 +24,7 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 2.5M parameters (INT8), ~220M INT8 operations per inference.
-    - Hardware: 4 TOPS INT8, 512MB RAM.
+    - Hardware: Coral Edge TPU, 4 TOPS INT8 peak; host board RAM is not the same as TPU-local working memory.
     - Target: 30 FPS.
 
     **Calculations:**
@@ -32,9 +32,11 @@ details:
     - Activation Memory: Estimated peak ~12 MB.
     - Total Footprint: 2.5 MB + 12 MB = 14.5 MB.
     - Required Compute: 220M ops/frame * 30 FPS = 6.6 GOPS = 0.0066 TOPS.
+    - Ideal compute utilization: 0.0066 / 4 = 0.165% of peak.
+    - If effective utilization is only 10% after compiler placement and memory overhead, available throughput is ~0.4 TOPS, still above 0.0066 TOPS, but unsupported ops or excess activation spilling can dominate latency.
 
     **Conclusion & Interpretation:**
-    - **Result: 14.5 MB and 0.0066 TOPS (Compute-Bound)**. The requirement is < 0.2% of the Coral's 4 TOPS peak. Feasibility is guaranteed.
+    - **Result: Rough Compute Feasibility, Deployment Not Guaranteed**. The peak-TOPS check is favorable, but real Coral feasibility depends on TFLite Edge TPU compilation, operator coverage, activation placement, and measured FPS.
 status: published
 provenance: imported
 requires_explanation: false

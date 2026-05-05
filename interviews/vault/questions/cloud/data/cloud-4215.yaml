@@ -11,15 +11,25 @@ title: Parquet vs TFRecord for Training Throughput
 scenario: Your team must choose between Parquet and TFRecord for storing a 5 TB image classification dataset (10M images, 500 KB average). Training runs on 8× A100 GPUs. The data pipeline must sustain 10 GB/s aggregate read throughput to avoid GPU starvation.
 question: Which format, Parquet or TFRecord, should you use for the 5 TB image dataset to sustain 10 GB/s on 8× A100s, and why?
 details:
-  realistic_solution: 'TFRecord wins for this workload. Parquet''s columnar layout means reading a full image record requires seeking across column chunks — for wide binary blobs (images), this creates random I/O. TFRecord stores records sequentially as length-prefixed protobufs, enabling pure sequential reads. The real differentiator is the I/O pattern: TFRecord files are pre-sharded enabling embarrassingly parallel reads across 8 GPUs. Parquet supports predicate pushdown and column pruning — irrelevant for image training where you read every pixel.'
+  realistic_solution: TFRecord is the better fit for this workload. Image training reads whole examples sequentially, so the format should deliver large contiguous records with low per-example decode overhead and easy sharding across workers. TFRecord stores length-prefixed records and is commonly pre-sharded so the 8 GPU input workers can read in parallel. Parquet is excellent when training uses a subset of columns, but column pruning is not useful when every image byte is needed; nested/binary image records can add decoding and record-assembly overhead. The decision should be validated by measuring sustained end-to-end throughput, including preprocessing, against the 10 GB/s target.
   common_mistake: |
     **The Pitfall:** Choosing Parquet strictly because it is the "industry standard" for big data.
     **The Rationale:** Parquet is columnar and excels at analytical SQL queries, but ML training reads entire records sequentially.
     **The Consequence:** Column reassembly overhead drastically reduces I/O throughput for wide binary blobs (images), starving the GPUs.
   napkin_math: |
-    1. **Assumptions & Constraints:** 5 TB dataset, 10M images (500 KB avg). Target throughput = 10 GB/s across 8 GPUs. Hardware includes high-speed NVMe SSDs.
-    2. **Calculations:** TFRecord reads length-prefixed protobufs sequentially, easily saturating NVMe bandwidth (e.g., 2 drives × 7 GB/s = 14 GB/s). Parquet full-record reads of binary blobs incur ~30% software penalty for column reassembly, yielding ~5 GB/s.
-    3. **Conclusion & Interpretation:** **Result: TFRecord achieves 14 GB/s vs Parquet's 5 GB/s. IOPS-Bound on column assembly.**
+    **Assumptions & Constraints:**
+    - Dataset: 5 TB total, 10M images, 500 KB average.
+    - Required aggregate input throughput: 10 GB/s across 8 GPUs.
+    - Storage can provide at least 10 GB/s sustained sequential bandwidth when reads are parallelized.
+
+    **Calculations:**
+    - Full-dataset scan time at target throughput: 5 TB / 10 GB/s = 500 seconds, or about 8.3 minutes per epoch before preprocessing.
+    - TFRecord sharding can assign sequential shards to workers, so the main question is whether storage plus decode/preprocessing sustains >=10 GB/s.
+    - Parquet does not gain from column pruning because image training reads the full image record; any column/record assembly and decoder overhead subtracts from the same 10 GB/s budget.
+    - If preprocessing reduces delivered throughput below 10 GB/s, GPUs starve regardless of raw drive bandwidth.
+
+    **Conclusion & Interpretation:**
+    - **Result: Bandwidth and decode bound.** Prefer sharded TFRecord for sequential whole-image training, and verify the measured input pipeline sustains the 10 GB/s target.
 status: published
 provenance: imported
 requires_explanation: false

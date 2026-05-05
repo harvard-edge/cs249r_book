@@ -8,36 +8,27 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: 'Jetson Orin: Latency vs. Throughput in Edge Inference Batching'
-scenario: A smart city surveillance system utilizes a YOLOv7-based object detection model for real-time
-  traffic analysis, processing video streams from multiple cameras. Initially, the model uses a fixed
-  batch size of 1 for minimum latency per frame. During peak hours, the aggregate frame rate exceeds single-inference
-  throughput, leading to queue build-up and increased end-to-end latency.
-question: How would you batch and schedule multi-camera YOLOv7 to maximize effective FPS while keeping
-  every frame under 100ms latency?
+scenario: A smart city surveillance system utilizes a YOLOv7-based object detection model for real-time traffic analysis, processing video streams from multiple cameras. Initially, the model uses a fixed batch size of 1 for minimum latency per frame. During peak hours, the aggregate frame rate exceeds single-inference throughput, leading to queue build-up and increased end-to-end latency.
+question: How would you batch and schedule multi-camera YOLOv7 to maximize effective FPS while keeping every frame under 100ms latency?
 details:
-  realistic_solution: Implement a dynamic batching strategy. Start with a minimum batch size (e.g., 1
-    or 2) to maintain low latency for individual frames. Monitor the incoming request queue depth and
-    GPU utilization. If the queue grows beyond a threshold or GPU utilization drops below a target (e.g.,
-    80%), dynamically increase the batch size up to a predetermined maximum (e.g., 16, empirically determined
-    to handle the 150 FPS peak). A scheduling policy could involve a small, fixed-size 'express lane'
-    queue for single-inference high-priority frames, while a larger queue accumulates frames for dynamic
-    batching.
-  common_mistake: '**The Pitfall:** Implementing continuous batching without considering overheads or
-    using static batching that starves latency.
-
-    **The Rationale:** Engineers assume more complex batching is always superior, missing memory bandwidth
-    constraints or framework overheads.
-
+  realistic_solution: Implement a dynamic batching strategy. Start with a minimum batch size (e.g., 1 or 2) to maintain low latency for individual frames. Monitor the incoming request queue depth and GPU utilization. If the queue grows beyond a threshold or GPU utilization drops below a target (e.g., 80%), dynamically increase the batch size up to a predetermined maximum (e.g., 16, empirically determined to handle the 150 FPS peak). A scheduling policy could involve a small, fixed-size 'express lane' queue for single-inference high-priority frames, while a larger queue accumulates frames for dynamic batching.
+  common_mistake: |
+    **The Pitfall:** Implementing continuous batching without considering overheads or using static batching that starves latency.
+    **The Rationale:** Engineers assume more complex batching is always superior, missing memory bandwidth constraints or framework overheads.
     **The Consequence:** Sub-optimal throughput or violating the strict 100ms per-frame latency deadline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Max latency budget: 100ms.
+    - Peak input: 150 FPS (5 cameras at 30 FPS).
+    - Measured service times: batch=1 takes 20ms, batch=8 takes 60ms, batch=16 takes 90ms.
 
-    '
-  napkin_math: "1. **Assumptions & Constraints:**\n   - Max latency budget: 100ms. Peak input: 150 FPS\
-    \ (5 cameras @ 30 FPS).\n2. **Calculations:**\n   - Batch=1 latency: 20ms. Throughput = 50 FPS (fails\
-    \ to meet 150 FPS input).\n   - Batch=8 latency: 60ms. Throughput = 133 FPS.\n   - Batch=16 latency:\
-    \ 90ms. Throughput = 177 FPS.\n3. **Conclusion & Interpretation:**\n   - **Result: Dynamic Batching\
-    \ Required.** A fixed batch size cannot handle peak arrival rates without queuing delays violating\
-    \ the 100ms budget. Larger batches maximize hardware utilization and successfully clear the 150 FPS\
-    \ peak arrival.\n"
+    **Calculations:**
+    - Batch=1 service rate = 1 / 0.020s = 50 FPS. With 150 FPS arrivals, backlog grows by 100 frames/s, so queueing delay soon dominates even though a single frame's inference is only 20ms.
+    - Batch=8 service rate = 8 / 0.060s = 133 FPS. This is still below 150 FPS, so backlog grows by 17 frames/s during sustained peak.
+    - Batch=16 service rate = 16 / 0.090s = 177 FPS. It can drain the 150 FPS peak, but the scheduler must cap wait time so the oldest frame's queueing delay plus 90ms inference stays under 100ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: dynamic, deadline-aware batching is required.** Static batch=1 and batch=8 cannot keep up with sustained 150 FPS; batch=16 has enough service rate but must be triggered by queue depth and frame age, not by waiting indefinitely for a full batch.
 status: published
 provenance: imported
 requires_explanation: false
@@ -47,7 +38,7 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- Reasoning Competency, Knowledge Area, and Mode are missing for an L4 question.
+  - Reasoning Competency, Knowledge Area, and Mode are missing for an L4 question.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

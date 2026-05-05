@@ -11,24 +11,25 @@ title: Designing a two-phase autograd pipeline for on-device neural style transf
 scenario: You are implementing neural style transfer on a device. Classic Gatys-style NST iterates 300 gradient steps optimizing the input image to minimize content+style loss. The VGG-19 feature extractor is frozen. Each iteration runs a forward pass through VGG-19 and backward to the input image. You have a target of 60 seconds total execution time.
 question: How would you structure neural style transfer so only the input image needs gradients, keeping VGG efficient enough to beat a 60-second target?
 details:
-  realistic_solution: 'Freeze VGG-19: model.requires_grad_(False). Set requires_grad=True only on the input image tensor. The backward graph is only built for operations involving the input image. Use a truncated VGG (only up to relu3_1 for style, relu4_2 for content): reduces model size from 548MB to ~20MB active layers. Convert truncated VGG to Core ML for NPU acceleration. Run gradient step for input image in PyTorch. Total memory: 20MB activations + 3MB input = ~25MB.'
+  realistic_solution: Freeze VGG-19 parameters with model.requires_grad_(False) and set requires_grad=True only on the generated input image. Keep VGG in eval mode, cache the target content/style features, and run each iteration as forward loss plus backward to the image tensor only. Use a truncated feature extractor, mixed precision where numerically stable, lower working resolution, and activation checkpointing if memory is tight. The optimizer updates only the image tensor, so no gradients or optimizer state are stored for VGG weights.
   common_mistake: |
     **The Pitfall:** Keeping the full VGG-19 graph with `requires_grad=True`.
     **The Rationale:** Candidates build a backward graph through all 143M parameters that never need gradients, failing to recognize that only the input image needs autograd.
-    **The Consequence:** Massive memory bloat (>2GB for the backward graph) and execution inefficiency, fundamentally failing to meet the strict 60-second target.
+    **The Consequence:** Unnecessary gradient buffers and optimizer state consume mobile memory and slow each iteration, making the 60-second target much harder to meet.
   napkin_math: |
     **Assumptions & Constraints:**
     - Iterations: 300.
     - Target Time: < 60 seconds.
-    - Core ML Forward Pass Latency: ~1.5ms.
-    - CPU Backward Pass Latency: ~4.5ms.
+    - Optimized truncated VGG forward + loss: ~60ms per iteration.
+    - Backward to input image + optimizer step: ~90ms per iteration.
 
     **Calculations:**
-    - Time per step: 1.5ms + 4.5ms = 6ms.
-    - Total Execution: 300 * 6ms = 1.8 seconds.
+    - Time per step: 60ms + 90ms = 150ms.
+    - Total Execution: 300 * 150ms = 45,000ms = 45 seconds.
+    - Target Headroom: 60s - 45s = 15s for scheduling and memory overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound Optimization.** Truncating the graph and compiling it for the NPU meets the 60s target with massive margin (1.8s).
+    - **Result: Input-Only Autograd.** Freezing VGG weights and backpropagating only to the image keeps the graph small enough for mobile memory and leaves plausible runtime headroom under the 60-second target.
 status: published
 provenance: imported
 requires_explanation: false

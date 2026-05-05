@@ -9,11 +9,12 @@ bloom_level: evaluate
 phase: inference
 title: Ring Attention Communication-Computation Overlap Budget
 scenario: 'You are designing Ring Attention for a 70B model across 16 GPUs (2 nodes, 8 NVLink GPUs/node, 400 Gb/s InfiniBand between nodes). Sequence length: 256K tokens split evenly (16K/GPU). Head_dim=128, 8 GQA KV heads.'
-question: 'Is the 400 Gb/s InfiniBand link a bottleneck for Ring Attention across 16 GPUs at 256K context, and what ring ordering should you use?'
+question: Is the 400 Gb/s InfiniBand link a bottleneck for Ring Attention across 16 GPUs at 256K context, and what ring ordering should you use?
 details:
-  realistic_solution: 'KV block per GPU: 16K tokens x 8 KV_heads x 128 dim x 2B x 2(K+V) = 64MB per layer. Per ring step, send 64MB. NVLink intra-node: 900 GB/s, transfer: 0.07ms. InfiniBand inter-node: 400 Gb/s = 50 GB/s, transfer: 1.28ms. Compute per ring step (FlashAttention-2 on 16Kx16K): ~2ms. Naive ring: 2 cross-node transfers per revolution. Since 1.28ms transfer < 2ms compute, it is compute-bound. Topology-aware ring: order GPUs 0-7 (node1), then 8-15 (node2), so only step 7->8 and 15->0 are cross-node.'
+  realistic_solution: |
+    KV block per GPU per layer is 16K tokens x 8 KV heads x 128 dim x 2B x 2(K+V) = 67,108,864 bytes = 64 MiB. Each ring step sends that block for the current layer. NVLink intra-node transfer is about 64 MiB / 900 GB/s = 0.07 ms. InfiniBand is 400 Gb/s = 50 GB/s, so a cross-node step is about 64 MiB / 50 GB/s = 1.3 ms. If the FlashAttention compute for the matching 16K-token block is about 2 ms and communication is overlapped, the link is fast enough per step; without overlap or with repeated unnecessary cross-node edges it can still become the bottleneck. Use a topology-aware ring with each node as a contiguous segment, for example 0-1-...-7-8-9-...-15, so only the 7->8 edge and the 15->0 wraparound cross InfiniBand.
   common_mistake: |
-    **The Pitfall:** Using a naive ring order (GPU 0,1,2,...,15) without considering the physical node boundaries.
+    **The Pitfall:** Using an interleaved ring order such as 0,8,1,9,... without considering the physical node boundaries.
     **The Rationale:** Candidates treat all network links as homogeneous, ignoring the massive bandwidth disparity between NVLink (900 GB/s) and InfiniBand (50 GB/s).
     **The Consequence:** Unnecessary cross-node transfers that saturate the InfiniBand link, severely bottlenecking the Ring Attention pipeline on shorter sequences.
   napkin_math: |
@@ -22,13 +23,14 @@ details:
     - NVLink: 900 GB/s. InfiniBand: 400 Gb/s (50 GB/s).
 
     **Calculations:**
-    - Block size = 16K * 8 * 128 * 2B * 2(K+V) = 64 MB.
-    - NVLink transfer step: 64 MB / 900 GB/s = 0.07 ms.
-    - InfiniBand transfer step: 64 MB / 50 GB/s = 1.28 ms.
+    - Block size = 16K * 8 * 128 * 2B * 2(K+V) = 67,108,864 bytes = 64 MiB.
+    - NVLink transfer step: 64 MiB / 900 GB/s ≈ 0.07 ms.
+    - InfiniBand transfer step: 64 MiB / 50 GB/s ≈ 1.3 ms.
     - Compute step (16Kx16K): ~2.0 ms.
+    - Contiguous node ordering gives two unavoidable cross-node edges per ring revolution: node0->node1 and the wraparound.
 
     **Conclusion & Interpretation:**
-    - **Result: Transfer (1.28ms) overlaps with compute (2.0ms), so InfiniBand is not the bottleneck. (Compute-Bound Overlap)**. Smart topology layout keeps operations compute-bound.
+    - **Result: Overlap-Dependent**. With topology-aware ordering and communication overlap, the 1.3 ms InfiniBand step fits under the ~2 ms compute step; order GPUs contiguously by node to avoid extra cross-node hops.
 status: published
 provenance: imported
 requires_explanation: true

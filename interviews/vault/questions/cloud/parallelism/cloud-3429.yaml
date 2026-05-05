@@ -8,47 +8,33 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Pipeline Bubble on a Heterogeneous TPU v5e Stage Layout
-scenario: A 500B-parameter LLM is split into 8 pipeline stages on 8 TPU v5e devices (16 GB HBM, 197 TFLOPS
-  BF16, 1.6 TB/s HBM bandwidth, ICI inter-chip ~25 GB/s per axis). Stage compute times measured per micro-batch
-  — stages 1-7 each 100 ms, stage 8 (LM head + softmax over a 256K vocab) 175 ms. The pipeline currently
-  runs with 4 micro-batches per global step. Quantify the bubble fraction and the exposed throughput loss
-  from the slowest stage, and identify the smallest schedule change that closes the gap to within 10%.
-question: For an 8-stage TPU v5e pipeline with a 175 ms stage-8 vs 100 ms stage 1-7 and m=4 micro-batches,
-  what is the bubble fraction and what schedule change brings utilization to within 10% of ideal?
+scenario: A 500B-parameter LLM is split into 8 pipeline stages on 8 TPU v5e devices (16 GB HBM, 197 TFLOPS BF16, 1.6 TB/s HBM bandwidth, ICI inter-chip ~25 GB/s per axis). Stage compute times measured per micro-batch — stages 1-7 each 100 ms, stage 8 (LM head + softmax over a 256K vocab) 175 ms. The pipeline currently runs with 4 micro-batches per global step. Quantify the bubble fraction and the exposed throughput loss from the slowest stage, and identify the smallest schedule change that closes the gap to within 10%.
+question: For 8 TPU stages with m=4 and a 175 ms final stage, what bubble fraction and schedule-only change get within 10% of ideal?
 details:
-  realistic_solution: 'Bubble fraction at m=4, k=8 = (k-1)/(m + k - 1) = 7/11 ≈ 63.6% — over half the
-    schedule is bubble. Step time is dominated by max(stage_i) = 175 ms (stage 8), so steady-state pipeline
-    rate = 1 / 175 ms regardless of how many other stages are 100 ms. Two changes are needed: (a) shrink
-    the stage-8 imbalance by splitting the LM head across two ICI-connected chips (stage-8 compute drops
-    to ~95 ms, matching the others) — this restores max(stage) ≈ 100 ms; (b) raise micro-batches to m=32
-    so bubble fraction drops to (8-1)/(32 + 8 - 1) = 7/39 ≈ 17.9%. Together, utilization climbs from ~36%
-    to ~82% — within 10% of the 91% ideal asymptote.'
-  common_mistake: '**The Pitfall:**
-
-    Increasing m alone without rebalancing the stages. Bubble fraction shrinks but every micro-batch still
-    pays the 175 ms stage-8 cost — pipeline rate is bounded by the slowest stage, not by the bubble.
-
+  realistic_solution: Bubble fraction at m=4, k=8 is (k-1)/(m+k-1) = 7/11 = 63.6%, so balanced finite-m utilization is only 36.4%. The slow 175 ms stage also caps steady-state throughput at one micro-batch per 175 ms, a 100/175 = 57.1% rate loss versus a balanced 100 ms stage clock. The smallest schedule-only change that gets bubble overhead within 10% of the ideal no-bubble schedule is to raise micro-batches until (k-1)/(m+k-1) <= 10%, which requires m >= 63. That fixes bubbles but not the 175 ms bottleneck; closing both gaps also requires a layout/model change such as splitting or rebalancing the LM head.
+  common_mistake: |
+    **The Pitfall:**
+    Increasing m alone without rebalancing the stages. Bubble fraction shrinks but every micro-batch still pays the 175 ms stage-8 cost — pipeline rate is bounded by the slowest stage, not by the bubble.
     **The Rationale:**
-
     ...
-
     **The Consequence:**
-
-    ...'
-  napkin_math: '**Assumptions & Constraints:**
-
-    Naive pipeline time for one global step at m=4: T = (m + k - 1) * max(stage) = (4 + 7) * 175 = 1925
-    ms. Useful work = m * sum(stage) / k = 4 * (7*100 + 175) / 8 = 437.5 ms. Utilization = 437.5 / 1925
-    ≈ 22.7%. After rebalance (max stage = 100 ms) and m=32: T = (32 + 7) * 100 = 3900 ms, useful work
-    = 32 * 100 = 3200 ms, utilization = 82.0%.
+    ...
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Number of pipeline stages k = 8.
+    - Current micro-batches m = 4.
+    - Stages 1-7 take 100 ms; stage 8 takes 175 ms.
+    - "Within 10% of ideal" means bubble fraction <= 10% for the same stage layout.
 
     **Calculations:**
-
-    (See above)
+    - Bubble fraction = (k - 1) / (m + k - 1) = 7 / (4 + 8 - 1) = 7/11 = 63.6%.
+    - Balanced finite-m utilization from bubbles alone = 1 - 63.6% = 36.4%.
+    - Slow-stage throughput loss versus a balanced 100 ms clock = 1 - 100/175 = 42.9%.
+    - Require 7 / (m + 7) <= 0.10, so m + 7 >= 70 and m >= 63.
+    - At m=63, bubble fraction = 7 / 70 = 10.0%.
 
     **Conclusion & Interpretation:**
-
-    (See above)'
+    - **Result: m=4 has a 63.6% bubble fraction, and the minimum schedule-only fix is m=63.** That brings bubble overhead within 10% of ideal, but the 175 ms stage remains a separate bottleneck that needs rebalancing.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,23 +11,23 @@ title: Chiplet Die-to-Die Bandwidth vs HBM Bandwidth
 scenario: You are profiling a transformer inference kernel on an MI300X and see unexpectedly high latency on attention heads.
 question: What chiplet-level bottleneck should you investigate first?
 details:
-  realistic_solution: 'The attention pattern may be causing KV-cache accesses that span multiple XCDs. If the KV cache for a single sequence is striped across XCDs, each token generation requires cross-fabric reads. Pin KV cache allocation to a single XCD''s local HBM region using ROCm''s NUMA-aware allocator.'
+  realistic_solution: The attention pattern may be causing KV-cache accesses that span multiple XCDs. If the KV cache for a single sequence is striped across XCDs, each token generation requires cross-fabric reads. Pin KV cache allocation to a single XCD's local HBM region using ROCm's NUMA-aware allocator.
   common_mistake: |
     **The Pitfall:** Automatically blaming raw HBM bandwidth.
     **The Rationale:** Engineers assume all memory accesses are local and add parallelism across XCDs (compute dies) to spread the load.
     **The Consequence:** Spreading KV-cache across XCDs actually increases cross-die traffic on the Infinity Fabric, drastically worsening the latency.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Cross-XCD Penalty: Infinity Fabric adds ~1.5-2x latency penalty for remote reads.
-    - KV cache size: 128 GB striped across 8 XCDs.
+    - Cross-XCD remote reads add roughly a 1.5-2x latency penalty versus local HBM reads.
+    - A decode step reads the KV cache for the active sequence; if the cache is striped uniformly across 8 XCDs, about 1/8 of those reads are local to the executing XCD.
 
     **Calculations:**
-    - Local fetch per decode step: 128 GB / 8 = 16 GB.
-    - Remote fetch per decode step: 128 GB - 16 GB = 112 GB.
-    - 112 GB must cross the Infinity Fabric.
+    - Local read fraction = 1 / 8 = 12.5%.
+    - Remote read fraction = 7 / 8 = 87.5%.
+    - Effective latency multiplier range = 0.125 * 1.0 + 0.875 * 1.5 to 0.125 * 1.0 + 0.875 * 2.0 = 1.44x to 1.88x.
 
     **Conclusion & Interpretation:**
-    - **Result: 7x Cross-Fabric Volume (Interconnect-Bound)**. Striping creates a 7x cross-fabric pressure multiplier, heavily bottlenecking the attention computation.
+    - **Result: 87.5% remote KV-cache reads (Latency-Bound).** Investigate whether KV-cache placement is forcing most decode reads across the fabric, then pin or shard by sequence/head to keep hot reads local.
 status: published
 provenance: imported
 requires_explanation: false
