@@ -11,7 +11,7 @@ title: Memory-Mapped On-Device LLM Initialization
 scenario: You are deploying a 3.2 GB on-device LLM to a device running the Google Tensor G3. The device has 12 GB of LPDDR5X memory, but the OS and background services consume 7.5 GB, leaving only 4.5 GB of free RAM. To avoid cold start latency and OOM errors, you use memory mapping (mmap) for the weights.
 question: How would you calculate the required memory bandwidth to achieve 15 tokens per second and determine if the physical RAM is sufficient to hold the model alongside runtime activations?
 details:
-  realistic_solution: Using `mmap` avoids a separate application heap copy, but resident model pages still consume physical RAM through the OS page cache. If each generated token streams most of the 3.2 GB quantized weight file from DRAM, 15 tokens/sec requires about 48 GB/s of sustained memory bandwidth before KV-cache and activation traffic. With only 4.5 GB free, the weights fit, but the remaining 1.3 GB for KV cache, activations, runtime buffers, and fragmentation is tight rather than comfortably safe.
+  realistic_solution: Using `mmap` avoids a separate application heap copy, but resident model pages still consume physical RAM through the OS page cache. If each generated token rereads most of the 3.2 GB quantized weight file from DRAM, 15 tokens/sec requires about 48 GB/s of sustained memory bandwidth before KV-cache and activation traffic; if tiling/cache reuse reduces reads, bandwidth falls proportionally. With only 4.5 GB free, the weights fit, but the remaining 1.3 GB for KV cache, activations, runtime buffers, and fragmentation is tight rather than comfortably safe.
   common_mistake: |
     **The Pitfall:** Assuming loading a 3.2 GB file requires a 3.2 GB application heap allocation.
     **The Rationale:** Candidates forget that memory mapping maps the file directly into virtual address space, relying entirely on the OS page cache rather than application RAM.
@@ -21,17 +21,19 @@ details:
     - Free RAM = 12.0 GB - 7.5 GB = 4.5 GB.
     - Model weight file is 3.2 GB and is memory-mapped into the process.
     - Target throughput is 15 tokens/sec.
-    - Batch-1 decode streams most weights from DRAM once per generated token.
+    - Conservative batch-1 decode assumption: about one full weight-file read from DRAM per generated token after cache reuse and tiling are accounted for.
+    - Usable sustained LPDDR bandwidth for the app must exceed the model traffic plus KV-cache and activation traffic; nominal device bandwidth is not fully available while the OS, display, and other engines are active.
     - KV cache, activations, allocator overhead, and page fragmentation need additional RAM.
 
     **Calculations:**
     - Resident weight pages if fully cached: 3.2 GB.
     - Remaining RAM for KV cache, activations, and runtime buffers: 4.5 GB - 3.2 GB = 1.3 GB.
-    - Weight bandwidth estimate: 3.2 GB/token * 15 tokens/sec = 48.0 GB/s.
+    - Weight bandwidth estimate under the conservative read assumption: 3.2 GB/token * 15 tokens/sec = 48.0 GB/s.
+    - If the usable sustained app bandwidth is below 48 GB/s, the target is bandwidth-bound even before KV-cache and activation traffic; if only half the weights are reread per token, the estimate drops to 24 GB/s.
     - If KV cache and activations require ~0.5-1.0 GB, remaining headroom is only ~0.3-0.8 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: bandwidth-heavy and memory-tight.** The 48 GB/s estimate may be feasible only with enough sustained LPDDR bandwidth left for KV-cache traffic and the OS; physical RAM can hold the mapped weights, but the runtime headroom is narrow.
+    - **Result: bandwidth-heavy and memory-tight.** The 48 GB/s estimate is a conservative per-token DRAM-read bound, not an mmap allocation size. Physical RAM can hold the mapped weights, but the target is feasible only if profiling shows enough sustained LPDDR bandwidth and the remaining runtime headroom is narrow.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: A real-time streaming pipeline on an NVIDIA Jetson Orin ingests 4 unco
 question: Why do four 8K60 streams drop frames on Jetson Orin despite low compute use, and how much LPDDR5 bandwidth do the explicit copies consume?
 details:
   realistic_solution: |
-    The explicit-copy pipeline consumes about 168 GB/s of LPDDR5 data movement: 24 GB/s for capture writes plus six additional 24 GB/s read/write passes for GPU copy, GPU processing, and DLA copy. That leaves little headroom on a 204.8 GB/s shared memory system once CPU, GPU, DLA, display, and cache traffic are included, so frames drop despite low compute use. The fix is zero-copy UMA sharing with NvSciBuf, V4L2 DMA-BUF, or pinned buffers so stages pass references instead of copying full frames.
+    Using decimal units, each 8K RGB frame is 7680 * 4320 * 3 = 99.5 MB, approximated as 100 MB. Four streams at 60 FPS produce about 24 GB/s of capture writes. The explicit-copy pipeline then adds six more full-frame traversals: GPU-copy read, GPU-copy write, GPU-processing read, GPU-processing write, DLA-copy read, and DLA-copy write. Total LPDDR5 movement is therefore 7 * 24 = 168 GB/s. That leaves little headroom on a 204.8 GB/s shared memory system once CPU, GPU, DLA, display, and cache traffic are included, so frames drop despite low compute use. The fix is zero-copy UMA sharing with NvSciBuf, V4L2 DMA-BUF, or pinned buffers so stages pass references instead of copying full frames.
   common_mistake: |
     **The Pitfall:** Assuming total memory footprint determines memory bottlenecks.
     **The Rationale:** Candidates note the 15 GB footprint fits well within the 32 GB capacity, incorrectly concluding memory is not the issue.
@@ -20,16 +20,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Input: 4 streams * 60 FPS.
-    - Frame Size: 8K RGB (7680 * 4320 * 3 bytes = ~100 MB).
+    - Unit convention: decimal MB/GB.
+    - Frame Size: 8K RGB = 7680 * 4320 * 3 bytes = 99.5 MB, approximated as 100 MB.
     - Physical Memory Bandwidth: 204.8 GB/s.
 
     **Calculations:**
     - Base Ingestion Rate: 4 * 60 * 100 MB = 24 GB/s.
-    - Pipeline Bandwidth Cost: Capture write (24 GB/s) + Copy to GPU (24 read + 24 write) + GPU processing (24 read + 24 write) + Copy to DLA (24 read + 24 write).
+    - Pipeline Bandwidth Cost: capture write (24 GB/s) + GPU-copy read (24) + GPU-copy write (24) + GPU-processing read (24) + GPU-processing write (24) + DLA-copy read (24) + DLA-copy write (24).
     - Total Data Movement = 24 * 7 = 168 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: 168 GB/s (Memory-Bandwidth Starvation)**. The 168 GB/s load violently crushes the physical bus margins; explicit memory copies must be zero-copy refactored.
+    - **Result: 168 GB/s (Memory-Bandwidth Starvation)**. The 168 GB/s load consumes most physical bus bandwidth; explicit memory copies must be zero-copy refactored.
 status: published
 provenance: imported
 requires_explanation: false

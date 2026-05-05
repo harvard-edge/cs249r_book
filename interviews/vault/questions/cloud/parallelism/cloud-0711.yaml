@@ -20,20 +20,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 175B parameters = 350 GB FP16 weights and 350 GB FP16 gradients.
-    - Hardware: 64 GPUs. Use 50 GB/s as a conservative effective cross-node bandwidth for critical-path estimates.
-    - ZeRO-1 shards optimizer state but still does one gradient AllReduce per step.
+    - Hardware: 64 GPUs.
+    - ZeRO-1 shards optimizer state but keeps parameters resident and still synchronizes gradients each step.
     - ZeRO-3 shards parameters and gradients, so each layer needs weight AllGather before compute and gradient ReduceScatter after backward.
+    - The observed 40% slowdown is an end-to-end throughput measurement, not a direct byte-ratio measurement.
 
     **Calculations:**
-    - Ring AllReduce traffic per GPU for ZeRO-1 gradients: 2 * 350 GB * (63/64) = 689 GB per step.
-    - ZeRO-3 forward weight AllGather traffic per GPU across the whole model: 350 GB * (63/64) = 344.5 GB.
-    - ZeRO-3 backward weight AllGather if weights are not retained: another 344.5 GB.
-    - ZeRO-3 gradient ReduceScatter traffic: 350 GB * (63/64) = 344.5 GB.
-    - ZeRO-3 total communication exposed to scheduling: 344.5 + 344.5 + 344.5 = 1033.5 GB per GPU.
-    - Serialized lower-bound transfer times at 50 GB/s: ZeRO-1 = 689 / 50 = 13.8 s; ZeRO-3 = 1033.5 / 50 = 20.7 s. Real jobs hide part of this with prefetch and overlap, so the observed slowdown can be 40% rather than the full 1.5x ratio.
+    - A full FP16 model pass represents 350 GB of parameter bytes and 350 GB of gradient bytes globally.
+    - ZeRO-1 pays large gradient synchronization, but the full parameter tensors are already resident before each layer runs.
+    - ZeRO-3 lowers memory residency by replacing that resident parameter copy with per-layer weight AllGathers and gradient ReduceScatters.
+    - Those collectives are smaller and more frequent than a single global statement suggests; their cost depends on bucket size, layer order, prefetch distance, and how much is hidden behind GEMMs.
+    - Therefore the useful calculation is critical-path exposure: if the ZeRO-1 step time is T, a 40% throughput drop means the ZeRO-3 step is about T / 0.60 = 1.67T, so roughly 0.67T of extra wall time is exposed stalls or scheduling overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: Collective stalls on the critical path.** ZeRO-3 moves about 1.5x as many bytes in this simplified comparison, but the throughput loss comes from the unhidden portions of per-layer all-gathers and reduce-scatters, not from a universal fixed communication multiplier.
+    - **Result: Collective stalls on the critical path.** ZeRO-3 can save enough memory to make the model trainable, but the 40% throughput loss comes from unhidden per-layer all-gathers, reduce-scatters, and scheduling gaps rather than a universal fixed byte multiplier.
 status: published
 provenance: imported
 requires_explanation: false

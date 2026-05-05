@@ -11,7 +11,7 @@ title: 'KV-Cache: Specification — KV Cache Constraints for Latency SLA on Tens
 scenario: A 1B LLM chat assistant runs on a Tensor G3, targeting an SLA of 30 tokens/sec. The INT4 weights are resident in DRAM but are effectively streamed once per decode token, and profiling shows 34 GB/s of sustained memory bandwidth is usable after display, OS, and kernel overhead.
 question: Under this bandwidth-bound decode model, what maximum KV cache size, required KV quantization, and context limit should be specified to meet the 30 tokens/sec SLA?
 details:
-  realistic_solution: Use a bandwidth budget, not a raw capacity budget. At 30 tokens/sec the token budget is 33.3 ms. Streaming the 1B INT4 weights costs about 500 MB / 34 GB/s = 14.7 ms per token. Reserve 3 ms for dispatch and 4 ms for compute/activation traffic, leaving about 11.6 ms for KV reads. That gives a KV bandwidth budget of about 394 MB per decode step. With 24 layers, 8 KV heads, head dim 128, INT8 KV costs 49.2 KB/token, so the practical context limit is about 8K tokens. BF16 KV would cost 98.3 KB/token and only supports about 4K tokens within the same budget, so the specification should require INT8 KV and cap context at 8K for SLA margin.
+  realistic_solution: Use a bandwidth budget, not a raw capacity budget. At 30 tokens/sec the token budget is 33.3 ms. Streaming the 1B INT4 weights costs about 500 MB / 34 GB/s = 14.7 ms per token. Reserve 3 ms for dispatch and 4 ms for compute/activation traffic, leaving about 11.6 ms for KV reads. That gives a KV bandwidth budget of about 394 MB per decode step. With 24 layers, 8 KV heads, head dim 128, INT8 KV costs 49,152 bytes/token (48 KiB, about 49.2 KB), so the practical context limit is about 8K tokens. BF16 KV costs 98,304 bytes/token (96 KiB, about 98.3 KB) and only supports about 4K tokens within the same budget, so the specification should require INT8 KV and cap context at 8K for SLA margin.
   common_mistake: |
     **The Pitfall:** Specifying KV cache size without verifying it against bandwidth.
     **The Rationale:** Candidates fail to derive KV constraints directly from the latency SLA and target hardware's lower bandwidth.
@@ -27,11 +27,11 @@ details:
     - Weight traffic: 1B * INT4 (0.5 bytes/param) = 500MB.
     - Weight-read latency: 500MB / 34 GB/s = 14.7ms.
     - Remaining for KV: 33.3ms - 14.7ms - 3ms - 4ms = 11.6ms.
-    - Max KV size budget per decode step: 11.6ms * 34 GB/s = 394MB.
-    - KV per token (FP16/BF16): 24 layers * 2 * 8 * 128 * 2 bytes = 98.3 KB.
-    - Max context (BF16): 394 MB / 98.3 KB = ~4,000 tokens.
-    - KV per token (INT8): 24 * 2 * 8 * 128 * 1 byte = 49.15 KB.
-    - Max context (INT8): 394 MB / 49.15 KB = ~8,000 tokens.
+    - Max KV size budget per decode step: 11.6ms * 34 GB/s = 394MB (decimal bandwidth convention).
+    - KV per token (FP16/BF16): 24 layers * 2 * 8 * 128 * 2 bytes = 98,304 bytes = 96 KiB = 98.3 KB decimal.
+    - Max context (BF16): 394 MB / 98,304 bytes = ~4,000 tokens.
+    - KV per token (INT8): 24 * 2 * 8 * 128 * 1 byte = 49,152 bytes = 48 KiB = 49.2 KB decimal.
+    - Max context (INT8): 394 MB / 49,152 bytes = ~8,000 tokens.
 
     **Conclusion & Interpretation:**
     - **Result: 8K context with INT8 KV (Memory-Bandwidth Bound)**. BF16 KV should be limited to about 4K; INT8 KV is required for an 8K context while maintaining the 30 tokens/sec SLA.

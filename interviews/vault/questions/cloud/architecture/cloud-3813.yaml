@@ -11,7 +11,7 @@ title: 'Expert Offloading: CPU-GPU Expert Swapping for Inference'
 scenario: You want to serve Mixtral 8x7B (93.4 GB FP16) on a single 80 GB GPU (2 TB/s). The model doesn't fit in GPU memory. A colleague proposes keeping shared layers on GPU and swapping experts from CPU RAM over PCIe 4.0 (32 GB/s).
 question: Is CPU expert swapping over PCIe 4.0 viable for serving Mixtral 8x7B under a 50 ms/token interactive latency target?
 details:
-  realistic_solution: 'No: CPU expert swapping over PCIe 4.0 is not viable for a 50 ms/token interactive target. Shared attention layers can stay resident on GPU, but each FP16 expert MLP is about 10.6 GB. With top-2 routing at batch size 1, loading two missing experts costs about 662 ms of PCIe transfer before compute, far above the SLA. Even INT4 expert transfers are about 166 ms for two experts, still too slow if swapping is on the critical path. Practical alternatives are to fit the quantized model fully in GPU memory, shard the model across multiple GPUs, or use offloading only for throughput-oriented batch serving where prefetch and overlap can hide misses.'
+  realistic_solution: 'No: CPU expert swapping over PCIe 4.0 is not viable for a 50 ms/token interactive target when required experts are cold misses on the critical path. Shared attention layers can stay resident on GPU, but each FP16 expert MLP is about 10.6 GB, so loading one cold expert costs at least 331 ms of PCIe transfer before compute. Top-2 routing could require two missing experts, giving a 662 ms cold-miss lower bound. Reuse, caching, prefetch, and overlap can amortize this if the same experts are repeatedly needed or routing is predictable, but they do not rescue an interactive SLA unless missing experts are extremely sparse and highly cacheable. Even INT4 expert transfers are about 166 ms for two cold experts. Practical alternatives are to fit the quantized model fully in GPU memory, shard the model across multiple GPUs, or use offloading only for throughput-oriented serving where misses can be hidden.'
   common_mistake: |
     **The Pitfall:** Assuming you can swap experts continuously in parallel with computation without stalling.
     **The Rationale:** Engineers rely on theoretical pre-fetching, ignoring that routing is data-dependent and unpredictable token-to-token.
@@ -23,13 +23,14 @@ details:
     - SLA target: 50 ms.
 
     **Calculations:**
-    - Transfer time per expert: 10.6 GB / 32 GB/s = 331 ms.
-    - Loading 2 experts (top-2 routing): 331 ms * 2 = 662 ms/token.
+    - Cold transfer lower bound per FP16 expert: 10.6 GB / 32 GB/s = 331 ms.
+    - Cold transfer lower bound for 2 missing experts (top-2 routing): 331 ms * 2 = 662 ms/token before compute.
     - INT4 expert size: 2.65 GB.
-    - INT4 transfer: 2.65 GB / 32 GB/s = 83 ms * 2 = 166 ms.
+    - INT4 cold transfer lower bound: 2.65 GB / 32 GB/s = 83 ms per expert, or 166 ms for 2 missing experts.
+    - Caching, prefetch, and overlap can reduce amortized cost only when expert reuse is high and misses are rare.
 
     **Conclusion & Interpretation:**
-    - **Result: PCIe Bottleneck (IO-Bound).** Swapping experts over PCIe is not viable for 50 ms/token; quantization or multi-GPU placement avoids putting expert transfers on the critical path.
+    - **Result: PCIe Bottleneck (IO-Bound).** Swapping cold experts over PCIe is not viable for 50 ms/token unless misses are extremely sparse and cacheable; quantization or multi-GPU placement avoids putting expert transfers on the critical path.
 status: published
 provenance: imported
 requires_explanation: false

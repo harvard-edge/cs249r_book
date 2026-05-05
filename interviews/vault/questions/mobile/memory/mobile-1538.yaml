@@ -12,7 +12,7 @@ scenario: You are tasked with deploying a 7B LLM on an edge device with 12GB LPD
 question: How would you outline your approach to estimate and manage the VRAM budget effectively?
 details:
   realistic_solution: |
-    Estimate the budget in separate buckets: static weights, peak activations and scratch buffers, KV cache, runtime overhead, and OS safety margin. The BF16 7B weights alone are about 14 GB, so the unmodified model cannot fit in 12 GB. A viable mobile inference plan must quantize weights, commonly to INT8 or lower, then recompute the KV-cache footprint for batch size, context length, layers, heads, head dimension, and cache dtype. Manage the remaining budget with context-length limits, dynamic or paged cache allocation, cache quantization if needed, and NPU profiling to confirm actual activation and allocator overhead.
+    Estimate the budget in separate buckets: static weights, peak BF16 activations and scratch buffers, FP16 KV cache, runtime overhead, and OS safety margin. The BF16 7B weights alone are about 14 GB, so the unmodified model cannot fit in 12 GB; adding the 512-token KV cache, peak activations, and runtime margin pushes the requirement well beyond the device capacity. A viable mobile inference plan must quantize weights, commonly to INT8 or lower, then recompute the KV-cache footprint for batch size, context length, layers, heads, head dimension, and cache dtype. Manage the remaining budget with context-length limits, dynamic or paged cache allocation, cache quantization if needed, and NPU profiling to confirm actual activation and allocator overhead.
   common_mistake: |
     **The Pitfall:** Tunnel vision on the static weight parameters, severely underestimating or entirely omitting KV-cache scaling mechanics.
     **The Rationale:** Candidates fixate exclusively on weight quantization algebra, completely ignoring that runtime memory bounds scale wildly based on context length, layer geometry, and precision matrices.
@@ -21,6 +21,7 @@ details:
     **Assumptions & Constraints:**
     - Target memory capacity: 12 GB LPDDR5X, shared with OS and runtime.
     - Model parameters: 7 billion.
+    - Activations use BF16; reserve 0.5-1.0 GB as a representative peak activation/scratch estimate until measured.
     - KV-cache config: batch 1, sequence length 512, 32 layers, 32 heads, head_dim 128, FP16 storage.
 
     **Calculations:**
@@ -28,9 +29,11 @@ details:
     - INT8 weights: 7e9 params * 1 byte = 7 GB, leaving about 5 GB before OS, activations, runtime buffers, and KV cache.
     - KV-cache elements: 2 (K+V) * 1 batch * 512 tokens * 32 layers * 32 heads * 128 head_dim = 134,217,728 elements.
     - KV-cache memory: 134,217,728 elements * 2 bytes = 268,435,456 bytes, about 256 MiB.
+    - Unmodified total before OS/runtime: 14 GB weights + ~0.25 GB KV cache + 0.5-1.0 GB activations/scratch = ~14.75-15.25 GB.
+    - INT8 total before OS/runtime: 7 GB weights + ~0.25 GB KV cache + 0.5-1.0 GB activations/scratch = ~7.75-8.25 GB, leaving limited room for OS and runtime buffers.
 
     **Conclusion & Interpretation:**
-    - **Result: BF16 weights do not fit; quantized weights plus explicit runtime budgeting are required.** The 512-token FP16 KV cache is manageable, but the static BF16 weight footprint is the release-blocking memory item.
+    - **Result: BF16 weights plus BF16 activations and FP16 KV cache do not fit; quantized weights plus explicit runtime budgeting are required.** The 512-token FP16 KV cache is manageable, but the static BF16 weight footprint is the release-blocking memory item.
 status: published
 provenance: imported
 requires_explanation: false

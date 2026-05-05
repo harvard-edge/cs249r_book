@@ -11,7 +11,7 @@ title: Model Size Estimation for 7B Model Memory
 scenario: In a live interview, you're asked without any reference material to estimate the GPU memory needed for a 7B parameter model at FP16 for inference with a batch of 8, generating up to 512 tokens.
 question: How much GPU memory does a 7B parameter model need at FP16 for inference with a batch of 8, generating up to 512 tokens?
 details:
-  realistic_solution: "Weights: 7B \times 2B (FP16) = 14GB. KV cache for a LLaMA-style 7B model can be estimated as batch \times tokens \times layers \times 2(K,V) \times num_kv_heads \times head_dim \times bytes. With 32 KV heads and 128 head dim, this is equivalent to using hidden_dim=4096: 8 \times 512 \times 32 \times 2 \times 32 \times 128 \times 2B = about 2.15GB. Activations (peak, 1 layer): 8 \times 512 \times 4096 \times 2B = 32MB, plus modest kernel workspace. Total: about 16.1GB before runtime overhead, or roughly 17-18GB as a practical planning estimate. Fits in a single H100 (80GB) or A100 (40/80GB)."
+  realistic_solution: "Weights: 7B \times 2B (FP16) = 14GB. Peak KV cache for a dense-attention LLaMA-style 7B model is batch \times tokens \times layers \times 2(K,V) \times hidden_dim \times bytes. With batch=8, tokens=512, layers=32, hidden_dim=4096, and FP16, the KV cache is 8 \times 512 \times 32 \times 2 \times 4096 \times 2B = about 2.15GB. This is the same as using 32 KV heads \times 128 head dim, not an extra multiplier. Activations for the current layer are about 8 \times 512 \times 4096 \times 2B = 32MB, plus modest kernel workspace. Total: about 16.1GB before runtime overhead, or roughly 17-18GB as a practical planning estimate. Fits in a single H100 (80GB) or A100 (40/80GB)."
   common_mistake: |
     **The Pitfall:** Computing only the memory for the weights and forgetting the dynamic memory.
     **The Rationale:** Candidates often memorize rule-of-thumb parameter sizing but fail to account for the actual runtime requirements of the sequence.
@@ -24,8 +24,9 @@ details:
 
     **Calculations:**
     - Weights Memory: 7B \times 2 Bytes = 14 GB.
-    - KV Cache Formula: Batch(8) \times Tokens(512) \times Layers(32) \times 2(K+V) \times KVHeads(32) \times HeadDim(128) \times Precision(2B). For this dense-attention 7B estimate, KVHeads * HeadDim = HiddenDim(4096).
-    - KV Cache Size: 8 \times 512 \times 2 \times 4096 \times 2 \times 32 = 2.14 GB.
+    - KV Cache Formula: Batch(8) \times Tokens(512) \times Layers(32) \times 2(K,V) \times HiddenDim(4096) \times Precision(2B).
+    - Equivalent head form: HiddenDim(4096) = KVHeads(32) \times HeadDim(128), so do not multiply by both hidden_dim and heads again.
+    - KV Cache Size: 8 \times 512 \times 32 \times 2 \times 4096 \times 2 bytes = 2,147,483,648 bytes = 2.0GiB (~2.15GB).
     - Activations: 8 \times 512 \times 4096 \times 2 Bytes = 32 MB (negligible).
     - Total Footprint: 14 GB + 2.14 GB + small workspace = ~16-18 GB.
 

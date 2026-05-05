@@ -11,7 +11,7 @@ title: TensorRT Graph Fragmentation on Jetson Orin
 scenario: An ONNX model is converted into an INT8 TensorRT engine for a Jetson Orin (Ampere GPU + DLA accelerator, 32 GB LPDDR5). Three custom operations are unsupported by the DLA, causing TensorRT to fragment the graph and delegate these nodes to the GPU, degrading effective throughput.
 question: Why do three DLA-unsupported ONNX operators disproportionately hurt Jetson Orin latency, and what is the new effective throughput?
 details:
-  realistic_solution: When TensorRT falls back to the GPU for unsupported ONNX operators, it must insert synchronization barriers and transfer intermediate activation tensors between the DLA and GPU via the shared 32 GB LPDDR5 memory. This ping-ponging breaks deep hardware pipelining.
+  realistic_solution: When TensorRT falls back to the GPU for unsupported ONNX operators, it fragments the DLA graph into multiple subgraphs. Each boundary needs scheduling synchronization and intermediate activation movement through shared LPDDR5 between the DLA and GPU, so three small unsupported nodes can add more latency than their own compute cost. With the stated 275 GOP model, 275 TOPS peak gives an ideal 1.0 ms frame time; adding 1.5 ms of DLA-GPU boundary overhead raises frame time to 2.5 ms, or 400 FPS. That corresponds to 400 frames/s * 275 GOP/frame = 110,000 GOPS/s = 110 TOPS of useful model throughput.
   common_mistake: |
     **The Pitfall:** Assuming delegating a few unsupported operators only adds the compute latency of those specific operations.
     **The Rationale:** Ignoring the massive synchronization and memory transfer overhead required when alternating between the DLA and GPU.
@@ -27,7 +27,7 @@ details:
     - Context switch overhead = 3 * 0.5ms = 1.5ms per frame.
     - Total time per frame = 1.0ms (compute) + 1.5ms (transfer) = 2.5ms.
     - New framerate = 1000ms / 2.5ms = 400 FPS.
-    - Effective throughput = 400 FPS * 275 GOPs = 110 TOPS.
+    - Effective throughput = 400 frames/s * 275 GOP/frame = 110,000 GOPS/s = 110 TOPS.
 
     **Conclusion & Interpretation:**
     - **Result: 110 TOPS effective throughput (I/O-Bound)**. Graph fragmentation adds 1.5 ms of synchronization and transfer overhead per frame, so the workload delivers only 110 TOPS of useful model work versus the 275 TOPS ideal.

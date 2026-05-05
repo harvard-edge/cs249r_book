@@ -12,7 +12,7 @@ scenario: An 8-node edge cluster broadcasts a 50 MB activation map. They can be 
 question: Evaluate the synchronization latency penalty of using a Ring instead of a Star topology for a one-to-all broadcast?
 details:
   realistic_solution: |
-    A switched Star is the safer choice for one-to-all broadcast, but the penalty is not a fixed catastrophic number. In the Star, the sender serializes one 50 MB frame onto its 10GbE uplink in about 40 ms; the switch then replicates it onto the receiver ports, so the sender uplink is the bottleneck. A Ring only takes 7 full 40 ms transfers if every node stores the complete payload before forwarding. With chunked forwarding, the ring can pipeline the broadcast, and the added tail latency is the time for the last chunk to traverse the remaining hops. The evaluation should therefore state the forwarding model: roughly 240 ms extra for naive store-and-forward, but only a few milliseconds plus per-hop overhead for a well-pipelined ring.
+    A switched Star is the safer choice for one-to-all broadcast, but the penalty depends on the forwarding model. In the Star, the sender serializes one 50 MB frame onto its 10GbE uplink in about 40 ms; the switch then replicates it onto the receiver ports, so the sender uplink is the bottleneck. A Ring takes 7 full 40 ms transfers if every node stores the complete payload before forwarding. With chunked forwarding, the ring can pipeline the broadcast: completion is the 40 ms source serialization plus the tail time for the final chunk to cross the remaining hops. The evaluation should therefore state the model explicitly: roughly 240 ms extra for naive store-and-forward, but only a few milliseconds plus per-hop overhead for a well-pipelined ring.
   common_mistake: |
     **The Pitfall:** Assuming Ring topology is universally optimal for all communication patterns.
     **The Rationale:** Candidates default to Ring AllReduce literature without realizing that sequential hop-and-store mathematically penalizes a simple one-to-all broadcast.
@@ -27,7 +27,9 @@ details:
     - Payload serialization time per 10GbE link = 50 MB / 1.25 GB/s = 40 ms.
     - Switched Star: source sends one copy on its uplink; switch replication keeps the source link as the bottleneck, so completion is about 40 ms plus switch latency.
     - Naive Ring with full store-and-forward: 7 hops * 40 ms = 280 ms, so the Star advantage is about 240 ms.
-    - Pipelined Ring with 1 MB chunks: first chunk serialization = 1 MB / 1.25 GB/s = 0.8 ms; tail reaches the last node after 40 ms + 7 * 0.8 ms = 45.6 ms plus per-hop forwarding overhead.
+    - Pipelined Ring with 1 MB chunks: chunk serialization = 1 MB / 1.25 GB/s = 0.8 ms.
+    - Total pipelined completion time for the last node is source payload serialization plus tail traversal: 40 ms + 7 * 0.8 ms = 45.6 ms plus per-hop forwarding overhead.
+    - Incremental penalty over Star under this chunked model is about 45.6 ms - 40 ms = 5.6 ms plus forwarding overhead.
 
     **Conclusion & Interpretation:**
     - **Result: model-dependent Ring penalty.** A switched Star is about 40 ms for the 50 MB broadcast. The Ring penalty is about 240 ms only for naive store-and-forward; with chunked pipelining it is closer to 5.6 ms plus forwarding overhead.

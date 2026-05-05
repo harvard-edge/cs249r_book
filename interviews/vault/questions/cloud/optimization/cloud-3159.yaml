@@ -12,25 +12,25 @@ scenario: FlashAttention computes attention in FP16/BF16 but maintains softmax s
 question: Why must FlashAttention keep row max and log-sum-exp in FP32 on H100, and what fails if they are kept in FP16?
 details:
   realistic_solution: |
-    FP16 has only a 10-bit mantissa and a minimum subnormal around 6e-8. FlashAttention's online softmax carries a running row max and log-sum-exp across tiles; for seq_len=32K with B_c=128, that is 256 tile updates. When a later tile raises the row max, earlier partial sums are rescaled by exp(m_old - m_new). If that factor is represented in FP16, small but still meaningful earlier contributions can underflow to zero, so the final attention distribution can forget earlier tiles. FP32 keeps the row max and log-sum-exp stable across the whole row, while the per-tile QK and attention-value matmuls can still use FP16/BF16 tensor cores because their accumulations are bounded and immediately folded into the FP32 softmax state.
+    FP16 has only an 11-bit significand including the hidden bit, while FP32 has much more exponent range and precision. FlashAttention's online softmax carries a running row max and log-sum-exp across tiles; for seq_len=32K with B_c=128, that is 256 tile updates. When a later tile raises the row max, earlier partial sums are rescaled by exp(m_old - m_new). Values near 1e-7 are representable as FP16 subnormals, but they have very little precision, and repeated rescaling plus accumulation can round away small earlier contributions. FP32 keeps the row max and log-sum-exp stable across the whole row, while the per-tile QK and attention-value matmuls can still use FP16/BF16 tensor cores because their results are immediately folded into the FP32 softmax state.
   common_mistake: |
     **The Pitfall:** Thinking FP16 is completely safe because the final attention output is FP16 anyway.
     **The Rationale:** Engineers assume that if the inputs and outputs are half-precision, the intermediate state can safely be half-precision as well.
     **The Consequence:** Causing catastrophic failure in long-context tasks because accumulated numerical error in the online softmax zeroes out earlier tiles.
   napkin_math: |
     **Assumptions & Constraints:**
-    - FP16 min subnormal: about 6e-8.
-    - FP32 min: 1.2e-38.
+    - FP16 min normal: about 6e-5; min subnormal: about 6e-8.
+    - FP32 min normal: about 1.2e-38.
     - seq_len=32K with B_c=128 requires 256 accumulations.
 
     **Calculations:**
     - Online softmax update rescales old state by exp(m_old - m_new).
-    - If a later tile's max is 17 larger, exp(-17) = 4.1e-8, below the FP16 subnormal range and rounded to zero.
-    - Once that scale becomes zero, earlier tile contributions cannot be recovered in later reductions.
-    - FP32 keeps the same scale representable because 4.1e-8 is far above the FP32 minimum.
+    - If a later tile's max is 17 larger, exp(-17) = 4.1e-8, which is near the FP16 subnormal floor rather than below it.
+    - Near-subnormal factors have very few effective precision bits; across many tile updates, rescaled partial sums can round to zero or be lost when added to larger FP16 accumulators.
+    - Larger max gaps can underflow outright in FP16, while FP32 keeps both the scale factor and accumulated log-sum-exp state accurate.
 
     **Conclusion & Interpretation:**
-    - **Result: Cross-Tile Softmax Stability**. Row max and log-sum-exp must stay in FP32 so online softmax accumulation preserves earlier tile contributions instead of underflowing them away in FP16.
+    - **Result: Cross-Tile Softmax Stability**. Row max and log-sum-exp must stay in FP32 so online softmax accumulation preserves earlier tile contributions instead of losing them to FP16 underflow and rounding.
 status: published
 provenance: imported
 requires_explanation: false

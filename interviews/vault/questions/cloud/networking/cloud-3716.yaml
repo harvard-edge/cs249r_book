@@ -8,10 +8,10 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: AllToAll Communication for Expert Parallelism in MoE on TPU v5e
-scenario: TPU v5e pods have 256 chips connected via ICI at ~4 TB/s aggregate. A Mixture-of-Experts model uses top-2 routing across 64 experts placed on 64 TPU chips. Each token dispatch requires an AllToAll collective.
-question: What AllToAll volume and latency does top-2 MoE token dispatch create for batch=512, seq_len=2048, token_dim=1024 across 64 TPU chips?
+scenario: TPU v5e pods have 256 chips connected via ICI at ~4 TB/s aggregate. A Mixture-of-Experts model uses a 64-chip slice with 64 experts, top-2 routing, and one expert per chip. Each token dispatch requires an AllToAll collective.
+question: What AllToAll volume and bandwidth lower bound does top-2 MoE dispatch create for batch=512, seq_len=2048, dim=1024?
 details:
-  realistic_solution: 'Tokens per batch: 512 × 2048 = 1,048,576 tokens. Top-2 routing creates 2,097,152 token dispatches. Token payload: 1024 dims × 2B = 2KB. Assuming uniform routing across 64 expert chips, each chip sends about 2,097,152/64 = 32,768 dispatches, or 32,768 × 2KB = 67.1MB one-way. It also receives roughly the same amount, so bidirectional per-chip traffic is about 134.2MB. Cluster-wide one-way traffic is 64 × 67.1MB ≈ 4.29GB, or 8.59GB if counting sent+received. At 4 TB/s aggregate ICI, the one-way bandwidth lower bound is about 1.07ms; equivalently, 67.1MB at 62.5 GB/s per chip is about 1.07ms.'
+  realistic_solution: 'Tokens per batch: 512 × 2048 = 1,048,576 tokens. Top-2 routing creates 2,097,152 token dispatches. Token payload: 1024 dims × 2B = 2KB. Assuming uniform routing across the 64-chip expert slice and an ideal equal share of the 4 TB/s pod aggregate bandwidth, each chip sends about 2,097,152/64 = 32,768 dispatches, or 32,768 × 2KB = 67.1MB one-way. It also receives roughly the same amount, so bidirectional per-chip traffic is about 134.2MB. Cluster-wide one-way traffic is 64 × 67.1MB ≈ 4.29GB, or 8.59GB if counting sent+received. At the idealized 4 TB/s aggregate ICI rate, the one-way bandwidth lower bound is about 1.07ms; actual AllToAll latency will be higher due to topology, synchronization, imbalance, and contention.'
   common_mistake: |
     **The Pitfall:** Calculating AllToAll as if all tokens go to all chips.
     **The Rationale:** Candidates fail to adapt the AllToAll formula to the specifics of expert parallelism sparsity.
@@ -22,6 +22,7 @@ details:
     - Top-2 routing across 64 expert chips.
     - Token payload = 1024 BF16 values = 1024 × 2 bytes = 2048 bytes.
     - Volume is reported as one-way sent bytes, with bidirectional sent+received noted separately.
+    - The latency estimate is only a bandwidth lower bound using an ideal uniform 4 TB/s / 64 per-chip share.
 
     **Calculations:**
     - Tokens: 512 × 2048 = 1,048,576.

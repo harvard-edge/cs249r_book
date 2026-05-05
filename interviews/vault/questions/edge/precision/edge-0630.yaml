@@ -18,19 +18,21 @@ details:
     **The Consequence:** Masking the root cause (dynamic range clipping) and undertaking weeks of expensive infrastructure work instead of correctly diagnosing and resolving the numeric saturation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - FP32 Performance: ~68 TFLOPS. FP16: ~137 TFLOPS. INT8: ~275 TOPS.
+    - FP16 peak: ~137 TOPS-equivalent for this lower-bound estimate.
+    - INT8 peak: ~275 TOPS.
     - Per-inference work after deployment optimization: 5 trillion operations.
-    - Latency Budget: 33ms per frame.
+    - Latency budget: 33ms per frame.
+    - Let f be the profiled fraction of operations kept in FP16 for glare-sensitive layers.
 
     **Calculations:**
     - Pure FP16 lower-bound time: 5 TOP / 137 TOPS = 36.5ms, which already misses 33ms before runtime overhead.
     - Pure INT8 lower-bound time: 5 TOP / 275 TOPS = 18.2ms, but the saturated glare-sensitive layers fail accuracy.
-    - If profiling shows the sensitive layers are about 20% of deployed ops, a sequential lower-bound estimate is (4 TOP / 275 TOPS) + (1 TOP / 137 TOPS) = 14.5ms + 7.3ms = 21.8ms.
-    - Add estimated tensor traffic of 100MB / 204.8 GB/s = ~0.5ms, before framework and synchronization overhead.
-    - This leaves roughly 33ms - 22.3ms = 10.7ms for overhead, but the final gate must be measured end-to-end latency on the Orin engine.
+    - Mixed-precision lower bound = 5 TOP * ((1 - f) / 275 TOPS + f / 137 TOPS).
+    - To fit 33ms before overhead: 18.2ms + f * (36.5ms - 18.2ms) <= 33ms, so f <= about 0.81.
+    - Because runtime overhead and memory movement are not captured by the peak bound, the profiled FP16 island should be much smaller than 81% and must be verified end to end on the Orin TensorRT engine.
 
     **Conclusion & Interpretation:**
-    - **Result: mixed precision is plausible but must be profiled.** Keeping only saturation-prone layers in FP16 can restore dynamic range while the INT8 backbone preserves enough latency headroom to meet the 33ms budget after verification.
+    - **Result: mixed precision is plausible but must be profiled.** Keeping a small saturation-prone subset in FP16 can restore dynamic range while the INT8 backbone preserves latency headroom; the release gate is measured end-to-end latency under 33ms with night/glare accuracy restored.
 status: published
 provenance: imported
 requires_explanation: true

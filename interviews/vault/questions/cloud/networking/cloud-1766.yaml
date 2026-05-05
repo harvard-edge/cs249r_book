@@ -18,17 +18,19 @@ details:
     **The Consequence:** Severe degradation of AllReduce tail latency, causing the entire distributed training job to stall waiting for the slowest gradient sync.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Cluster: 1,024 GPUs, 8 IB rails. Topology limits cross-rail bandwidth.
-    - Strategy A can place a DP group across mixed local GPU indices, causing cross-rail traffic through the spine.
-    - Strategy B keeps each DP group on one local GPU index/rail, assuming nodes are also selected evenly within that rail.
+    - Cluster: 1,024 GPUs, 128 nodes, 8 local GPU indices per node, and 8 IB rails.
+    - TP=8 is node-local, PP=4 uses 4 nodes per model replica, and DP=32 creates 32 replicas.
+    - DP AllReduce happens among the 32 matching TP/PP shards across replicas.
+    - Local GPU index i is attached to rail i; cross-rail bandwidth is limited relative to same-rail collectives.
 
     **Calculations:**
-    - TP=8 consumes all 8 local GPUs within a node; DP communication occurs between corresponding TP/PP shards across nodes.
-    - With unrestricted placement, a shard may communicate across up to 8 rails, adding cross-rail spine paths and contention.
-    - With rail pinning, each corresponding shard uses 1 rail, so cross-rail paths per shard drop from up to 8 to 1 when node placement is balanced.
+    - Each DP collective has 32 participants, one matching shard from each DP replica.
+    - Under unrestricted placement, those 32 participants can be assigned to different local GPU indices, so the collective spans multiple rails and depends on inter-rail forwarding or extra staged movement.
+    - Under identical GPU-index pinning, all 32 participants for a given shard use the same local GPU index and therefore the same rail.
+    - This does not prove a fixed numeric speedup; it removes avoidable cross-rail traffic from the DP collective. The remaining performance depends on selecting nodes so each rail's 32-participant collectives are balanced across the rail fabric.
 
     **Conclusion & Interpretation:**
-    - **Result: Strategy B with topology-aware node placement**. GPU-index pinning reduces DP AllReduce path diversity and contention, but its benefit depends on balanced rail and node assignment.
+    - **Result: Strategy B with topology-aware node placement**. Identical GPU-index pinning is the correct policy because it aligns each DP AllReduce with a single rail; the scheduler must also balance nodes within each rail hierarchy to avoid moving the bottleneck to one oversubscribed leaf.
 status: published
 provenance: imported
 requires_explanation: true

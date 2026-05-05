@@ -11,7 +11,7 @@ title: 'Expert Parallelism + Tensor Parallelism: Hybrid MoE Training'
 scenario: You train a 1.6T parameter MoE model (128 experts, top-2) on 256 MI300X GPUs. Each expert has 12.5B parameters (FP16 = 25 GB). A single MI300X can hold ~6 experts in memory with room for activations.
 question: How would you combine expert parallelism, tensor parallelism, and data parallelism for the 1.6T-parameter MoE on 256 MI300X GPUs?
 details:
-  realistic_solution: 'Use a coherent 8-way data-parallel layout, where each DP replica spans 32 GPUs and contains one full copy of the 128 experts. Inside each 32-GPU replica, use expert parallelism with 4 full experts per GPU: 4 × 25 GB = 100 GB of expert weights, leaving roughly 92 GB on a 192 GB MI300X for shared weights, optimizer shards, activations, and routing buffers. Use tensor parallelism for the dense/shared attention blocks within each 8-GPU node (TP=8), while MoE experts are expert-parallel rather than tensor-parallel because each 25 GB expert fits on one GPU. Across the full 256 GPUs this gives DP=8, EP group size=32 GPUs per replica, and TP=8 for dense blocks within each replica node group. Token dispatch All-to-All stays within each 32-GPU EP group; gradients for replicated dense blocks and replicated expert sets are synchronized across the 8 DP replicas.'
+  realistic_solution: Use one 128-GPU expert-parallel group for the routed experts, with one full 25 GB expert per GPU. Form two such expert replicas across 256 GPUs for data parallelism over the MoE weights. This avoids packing a full 128-expert copy into each 32-GPU group and stays well within the scenario constraint that a single MI300X can hold about 6 experts. Use tensor parallelism for dense/shared attention blocks within smaller groups, such as TP=8 inside each node group, while the routed experts are expert-parallel because each expert fits on one GPU. The high-level layout is therefore DP=2 over expert replicas, EP=128 GPUs per replica for the 128 routed experts, and TP=8 for dense blocks inside each replica. Token dispatch All-to-All occurs within each 128-GPU EP group; gradients for replicated dense blocks and the two expert replicas are synchronized across the two DP copies.
   common_mistake: |
     **The Pitfall:** Putting exactly one expert per GPU (EP=128) and using the remaining 128 GPUs for DP.
     **The Rationale:** It seems like a clean, logical 1:1 mapping of experts to hardware.
@@ -20,21 +20,21 @@ details:
     **Assumptions & Constraints:**
     - 256 MI300X GPUs, 192 GB HBM each.
     - 128 experts, 25 GB per expert, top-2 routing.
-    - One DP replica uses 32 GPUs and processes a local microbatch of 8192 tokens per MoE layer.
+    - One expert-parallel replica uses 128 GPUs and processes a local microbatch of 8192 tokens per MoE layer.
     - Hidden size is 8192, FP16 activations, 16 MoE layers, 50 GB/s conservative inter-node bandwidth.
 
     **Calculations:**
     - Expert weights per full model copy: 128 × 25 GB = 3.2 TB.
-    - Expert placement: 4 experts/GPU × 32 GPUs = 128 experts per DP replica.
-    - Memory per GPU for experts: 4 × 25 GB = 100 GB, leaving about 92 GB on a 192 GB MI300X.
-    - Data parallelism: 256 GPUs / 32 GPUs per replica = 8 DP replicas.
-    - Average routed assignments per GPU per MoE layer: 8192 tokens × top-2 / 32 GPUs = 512 token activations.
-    - All-to-All payload per GPU per direction: 512 × 8192 × 2B ≈ 8 MiB.
-    - Send plus receive per MoE layer is about 16 MiB; across 16 MoE layers that is about 256 MiB per GPU.
-    - Lower-bound transfer time: 256 MiB / 50 GB/s ≈ 5.4 ms, before collectives overhead and contention.
+    - Expert placement per EP replica: 1 expert/GPU × 128 GPUs = 128 experts.
+    - Memory per GPU for experts: 1 × 25 GB = 25 GB, leaving about 167 GB on a 192 GB MI300X for dense weights, optimizer shards, activations, and buffers.
+    - Data parallelism over expert replicas: 256 GPUs / 128 GPUs per replica = 2 DP replicas.
+    - Average routed assignments per GPU per MoE layer: 8192 tokens × top-2 / 128 GPUs = 128 token activations.
+    - All-to-All payload per GPU per direction: 128 × 8192 × 2B ≈ 2 MiB.
+    - Send plus receive per MoE layer is about 4 MiB; across 16 MoE layers that is about 64 MiB per GPU.
+    - Lower-bound transfer time: 64 MiB / 50 GB/s ≈ 1.3 ms, before collective overhead, imbalance, and network contention.
 
     **Conclusion & Interpretation:**
-    - **Result: Hybrid EP/TP/DP layout.** DP=8, EP=32 GPUs per replica with 4 experts/GPU, and TP=8 for dense blocks gives a memory-feasible layout with routed traffic bounded to each EP group.
+    - **Result: Hybrid EP/TP/DP layout.** DP=2, EP=128 GPUs per expert replica with 1 expert/GPU, and TP=8 for dense blocks gives a memory-feasible layout without claiming eight full copies of the 128 experts.
 status: published
 provenance: imported
 requires_explanation: true

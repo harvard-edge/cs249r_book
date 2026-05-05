@@ -11,26 +11,29 @@ title: Speculative Decoding Acceptance Rate Impact on H100 Inference Throughput
 scenario: You implement speculative decoding on an H100 with a 70B target model and a 7B draft model. The draft model generates k=5 candidate tokens at 4ms per token. The target verifies all candidates in one 33.3ms forward pass. The draft acceptance rate is a=0.8. The target model alone generates 30 tok/s.
 question: What approximate throughput improvement can speculative decoding deliver with k=5 and a=0.8 versus 30 tok/s target-only decoding?
 details:
-  realistic_solution: For this speculative decoding protocol, assume independent acceptance probability a=0.8, one target pass verifies all k=5 draft tokens, and each cycle emits accepted drafts plus either a correction token or a bonus token. The expected emitted tokens per verify cycle are 1 + a + a^2 + a^3 + a^4 + a^5 = 3.69. With the stated 7B draft latency of 4ms/token, draft generation costs 5 × 4ms = 20ms. Target verification costs one 33.3ms target pass, so the cycle is 53.3ms and delivers 3.69 / 0.0533 = 69.2 tok/s, or 69.2 / 30 = 2.31x over target-only decoding. Treat this as an approximate upper-bound estimate; measured draft, sampling, and verification latency determine realized speedup.
+  realistic_solution: For a simple speculative decoding estimate, assume independent acceptance probability a=0.8, one target pass verifies all k=5 draft tokens, and each cycle emits accepted drafts plus either a correction token or a bonus token. That idealized protocol gives expected emitted tokens of 1 + a + a^2 + a^3 + a^4 + a^5 = 3.69. Draft generation costs 5 × 4ms = 20ms and target verification costs one 33.3ms pass, so the optimistic cycle throughput is 3.69 / 0.0533 = 69.2 tok/s, or 2.31x over 30 tok/s. Use this as an approximate upper bound, not a guaranteed production throughput; rejection handling, sampling overhead, KV-cache effects, and target verification implementation can reduce realized speedup, so a planning estimate would be closer to about 2x unless measured.'
   common_mistake: |
     **The Pitfall:** Assuming speculative decoding blindly improves throughput by a factor of K.
     **The Rationale:** Candidates forget that speedup is a function of both the mathematical acceptance rate and the computational cost of the draft model relative to the target.
     **The Consequence:** Throughput expectations are wildly exaggerated, leading to poor capacity planning and unmet SLAs.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Acceptance rate (a): 0.8.
-       - Draft tokens (k): 5.
-       - Target baseline: 30 tok/s (~33.3ms per forward pass).
-       - Draft latency: 4ms per generated draft token from profiling, not from raw weight bytes.
-       - Target verification latency: one target forward pass = 33.3ms.
-    2. **Calculations:**
-       - Expected emitted tokens: E[emitted] = 1 + 0.8 + 0.8^2 + 0.8^3 + 0.8^4 + 0.8^5 = 3.69 tokens.
-       - Draft time for 5 candidates: 5 * 4ms = 20ms.
-       - Target verification time: one target forward pass = 33.3ms.
-       - Total cycle time: 20ms + 33.3ms = 53.3ms.
-       - Cycle throughput: 3.69 tokens / 0.0533s = 69.2 tokens/s.
-    3. **Conclusion & Interpretation:**
-       - **Result: About 2.3x Under These Protocol Assumptions.** Effective speedup vs baseline is 69.2 / 30 = ~2.31x as an approximate upper bound. The qualitative takeaway is that acceptance rate alone is insufficient; draft and verification latency determine the realized speedup.
+    **Assumptions & Constraints:**
+    - Acceptance rate (a): 0.8, treated as independent per draft token for this estimate.
+    - Draft tokens (k): 5.
+    - Target baseline: 30 tok/s (~33.3ms per forward pass).
+    - Draft latency: 4ms per generated draft token from profiling, not from raw weight bytes.
+    - Target verification latency: one target forward pass = 33.3ms.
+
+    **Calculations:**
+    - Idealized expected emitted tokens: E[emitted] = 1 + 0.8 + 0.8^2 + 0.8^3 + 0.8^4 + 0.8^5 = 3.69 tokens.
+    - Draft time for 5 candidates: 5 * 4ms = 20ms.
+    - Target verification time: one target forward pass = 33.3ms.
+    - Optimistic cycle time: 20ms + 33.3ms = 53.3ms.
+    - Optimistic cycle throughput: 3.69 tokens / 0.0533s = 69.2 tokens/s.
+    - Upper-bound speedup: 69.2 / 30 = 2.31x; production planning should discount this toward about 2x unless measured.
+
+    **Conclusion & Interpretation:**
+    - **Result: roughly 2x to 2.3x under the stated protocol assumptions.** The exact speedup is protocol- and implementation-dependent; acceptance rate alone is insufficient.
 status: published
 provenance: imported
 requires_explanation: true

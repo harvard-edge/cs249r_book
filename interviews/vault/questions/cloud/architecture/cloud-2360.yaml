@@ -22,12 +22,14 @@ details:
     - Checkpoint size: 80 GB
     - PCIe Gen4 x16 bandwidth: 20 GB/s
     - NVMe write speed: 5 GB/s
+    - The asynchronous checkpoint path overlaps the 4s GPU-to-host copy with the beginning of the host-to-NVMe drain, but the next training step blocks until the 80GB host-side checkpoint write drains.
 
     **Calculations:**
-    - D2H Transfer Time = 80 GB / 20 GB/s = 4 seconds of fully saturated PCIe bus
-    - NVMe Write Time = 80 GB / 5 GB/s = 16 seconds
-    - If the checkpoint pipeline cannot overlap with the next iteration, the visible iteration time is approximately normal compute plus the serialized checkpoint drain: 2.5s + 16s = 18.5s.
-    - The 4s GPU-to-host copy is covered by the longer 16s checkpoint drain in this simplified timeline; if it did not overlap the NVMe write at all, the stall would be closer to 22.5s.
+    - GPU-to-host copy time = 80 GB / 20 GB/s = 4 seconds.
+    - Host-to-NVMe write time = 80 GB / 5 GB/s = 16 seconds.
+    - With double-buffered async checkpointing, the copy can fit inside the longer 16s write phase, so the checkpoint critical path is approximately max(4s, 16s) = 16s.
+    - Visible checkpoint iteration time = normal step time + checkpoint critical path = 2.5s + 16s = 18.5s.
+    - If the D2H copy and NVMe write were fully serialized, the spike would be closer to 2.5s + 4s + 16s = 22.5s; the observed 18.5s implies partial overlap but not full isolation from training.
 
     **Conclusion & Interpretation:**
     - **Result: 18.5 seconds (checkpoint-I/O-bound)**. The observed spike is consistent with a checkpoint pipeline whose long 80GB transfer/write phase is still on the critical path despite being launched asynchronously.

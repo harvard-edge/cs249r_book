@@ -11,7 +11,7 @@ title: Optimizing Inference Latency on AMD MI300X with Queueing Theory
 scenario: You are designing a real-time inference serving system for a large language model (LLM) using an AMD MI300X accelerator. This specific MI300X unit boasts 192 GB HBM3, 1,307 TFLOPS FP16 sparse computation, and 5.3 TB/s memory bandwidth. Your service must maintain a p99 inference latency of under 50ms. Incoming requests exhibit a Poisson arrival process. Each inference request on the MI300X takes, on average, 25ms to complete (service time).
 question: How would you use Little’s Law and M/G/1 queueing to set arrival-rate limits and queue depth for 25 ms MI300X inference under a 50 ms p99 SLA?
 details:
-  realistic_solution: Treat the MI300X as an M/G/1 server for a first-pass model, but size the limit from the tail budget rather than from mean latency alone. The 25 ms mean service time leaves about 25 ms for P99 queueing under a 50 ms P99 target. Use the Pollaczek-Khinchine mean wait, Wq = lambda * E[S^2] / (2 * (1 - rho)), as a sanity check, then validate P99 with trace replay or simulation using the measured service-time distribution. In production, cap queue age near 25 ms, keep only the requests that can still meet their deadline, and throttle arrivals or add MI300X replicas before utilization reaches the point where simulated P99 exceeds 50 ms.
+  realistic_solution: Treat the MI300X as an M/G/1 server for a first-pass model, but size the limit from the tail budget rather than from mean latency alone. The 25 ms mean service time leaves at most about 25 ms for P99 queueing under a 50 ms P99 target, and that budget is only valid if the measured service-time P99 is also near 25 ms. Use the Pollaczek-Khinchine mean wait, Wq = lambda * E[S^2] / (2 * (1 - rho)), as a sanity check, then set the actual arrival cap with trace replay or simulation using the measured service-time distribution. In production, cap queue age near the remaining deadline, keep only the requests that can still meet it, and throttle arrivals or add MI300X replicas before simulated P99 exceeds 50 ms.
   common_mistake: |
     **The Pitfall:** Ignoring the variance in service times and assuming a deterministic service rate.
     **The Rationale:** Candidates often over-optimize for mean latency using simple models like M/M/1.
@@ -21,18 +21,18 @@ details:
     - Target P99 latency: 50 ms.
     - Mean service time E[S]: 25 ms, so service rate mu = 40 requests/s.
     - Approximate service coefficient of variation Cs = 1 until measured.
-    - Reserve 25 ms for P99 queueing delay.
+    - If service P99 is near 25 ms, reserve at most 25 ms for P99 queueing delay.
 
     **Calculations:**
     - For M/G/1, mean queue wait is Wq_mean = lambda * E[S^2] / (2 * (1 - rho)), where rho = lambda * E[S].
     - With Cs = 1, E[S^2] = (1 + Cs^2) * E[S]^2 = 2 * 0.025^2 = 0.00125 s^2.
-    - A conservative exponential-tail approximation is Wq_p99 ≈ 4.6 * Wq_mean.
-    - Require Wq_mean <= 25 ms / 4.6 = 5.4 ms.
-    - Solve 0.00125 * lambda / (2 * (1 - 0.025 * lambda)) <= 0.0054, giving lambda <= about 7 requests/s.
-    - Do not use Little's Law to convert this into a p99 queue-depth guarantee; instead cap queue age near 25 ms and keep at most one waiting request for this single-server conservative policy.
+    - At lambda = 20 requests/s, rho = 0.5 and Wq_mean = 20 * 0.00125 / (2 * 0.5) = 25 ms, so even mean queueing consumes the full tail queue budget.
+    - At lambda = 10 requests/s, rho = 0.25 and Wq_mean = 10 * 0.00125 / (2 * 0.75) ≈ 8.3 ms, leaving room for tail variation but not proving P99 compliance.
+    - Little's Law gives average in-system work L = lambda * W. At 10 requests/s and a 50 ms latency target, L ≈ 0.5 request on average, so a deep FIFO queue is incompatible with the SLA.
+    - Use simulation or trace replay to choose the exact lambda cap; operationally, reject or route requests whose queue age would exceed the remaining deadline.
 
     **Conclusion & Interpretation:**
-    - **Result: about 7 requests/s per MI300X with a one-request deadline queue under these conservative tail assumptions; use measured traces or simulation to relax or tighten the cap.**
+    - **Result: the single MI300X should run well below its 40 requests/s mean capacity, with a shallow deadline queue and an arrival cap set by measured P99 simulation.** The M/G/1 math is a sanity check, not a precise P99 guarantee.
 status: published
 provenance: imported
 requires_explanation: true

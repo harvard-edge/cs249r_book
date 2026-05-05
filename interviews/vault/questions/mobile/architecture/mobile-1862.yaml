@@ -11,7 +11,8 @@ title: On-Device LoRA OOM on an 8GB Phone
 scenario: A mobile application fine-tunes a 1B model on-device using LoRA. Training on an 8GB device causes OOM errors at batch size 1, sequence length 128.
 question: Why does LoRA training for a 1B model OOM at batch 1 on an 8GB phone, and how do you fix it?
 details:
-  realistic_solution: 'Memory breakdown for 1B model LoRA training (r=4, Q+V only): (1) Base model weights in FP16: ~2GB. (2) LoRA adapter weights: under 1MB. (3) Adam state for adapters only: a few MB. Those parts are not the problem. The real peak comes from training-time activations, autograd tape, temporary kernels, and runtime workspace. On an 8GB phone, the OS and allocator usually leave only about 5-6GB usable, so keeping the base model in FP16 plus backward activations can push peak memory past the budget even at batch size 1. Fix: freeze every base-model parameter, verify only LoRA params require grad, use gradient checkpointing and a shorter sequence length if needed, and prefer quantized frozen weights or an explicit QLoRA-style setup for the base model. Do not rely on torch.compile or JIT caching to reduce memory; those can increase peak usage.'
+  realistic_solution: 'Memory breakdown for 1B model LoRA training: (1) Base model weights in FP16: ~2GB. (2) LoRA adapter weights and optimizer state are small relative to the base model when only adapters are trainable. Those parts are not usually the dominant peak. The real peak comes from training-time activations, autograd tape, temporary kernels, allocator slack, and runtime workspace. If any base weights accidentally require gradients, gradients and optimizer state can add multiple GB and make OOM almost guaranteed. On an 8GB phone, the OS and allocator usually leave only about 5-6GB usable, so FP16 base weights plus backward activations/workspace can exceed the budget even at batch size 1. Fix: freeze every base-model parameter, verify only LoRA params require grad, use gradient checkpointing and shorter sequence length, and use quantized frozen weights or an explicit QLoRA-style setup if FP16 frozen weights still do not fit. Do not rely on torch.compile or JIT caching to reduce
+    memory; those can increase peak usage.'
   common_mistake: |
     **The Pitfall:** Assuming LoRA is always memory-cheap because only the adapter weights are trainable.
     **The Rationale:** Candidates count the small adapter tensors but forget that backward activations, autograd metadata, optimizer state, temporary workspaces, and accidental unfrozen base weights still consume memory.
@@ -19,16 +20,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Device RAM: 8GB (~5.5-6GB usable after OS/runtime overhead).
-    - Base model weights (FP16): 1B params = ~2 GB.
-    - LoRA adapter + optimizer state: only a few MB.
-    - Training activations, autograd tape, and runtime workspace: several GB for a 1B transformer even at batch size 1.
+    - Base model weights if stored in FP16: 1B params * 2 bytes = ~2 GB.
+    - Correct LoRA setup: base weights frozen, only adapter tensors require gradients.
+    - LoRA adapter weights and Adam state are small relative to the base model, but accidental unfrozen base weights add gradients and optimizer state for the full 1B params.
+    - Training activations, autograd tape, temporary buffers, allocator slack, and runtime workspace can be several GB for a 1B transformer even at batch size 1.
 
     **Calculations:**
-    - Base model + training workspace: ~2 GB + ~4 GB = ~6 GB.
-    - Add LoRA params, optimizer state, and allocator slack: peak exceeds the ~5.5-6GB usable budget.
+    - Frozen FP16 base weights: ~2 GB resident before training workspace.
+    - Plausible backward activations/workspace/temporary buffers: ~3-4+ GB.
+    - Peak with a correct frozen-base LoRA setup: ~2 GB + ~3-4+ GB + adapter state + allocator slack = ~5-6+ GB, which can exceed a 5.5-6 GB usable budget.
+    - If the base is accidentally unfrozen, base gradients alone add ~2 GB and Adam moments can add ~4 GB or more, far beyond the phone budget.
 
     **Conclusion & Interpretation:**
-    - **Result: OOM from training-time workspace and activations, not LoRA adapter size.** Freeze the base model, checkpoint activations, and use quantized frozen weights if the goal is to make on-device training fit.
+    - **Result: OOM from training-time activations/workspace, or from accidentally training base weights, not from adapter size alone.** First verify the base is fully frozen, then checkpoint activations, reduce sequence length, and use quantized frozen weights/QLoRA if FP16 frozen weights still exceed the practical memory budget.
 status: published
 provenance: imported
 requires_explanation: false

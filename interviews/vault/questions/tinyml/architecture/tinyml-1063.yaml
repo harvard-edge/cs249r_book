@@ -11,7 +11,7 @@ title: Analyzing SRAM OOM in Early Convolution Layers
 scenario: We are deploying an INT8 quantized CNN for audio classification on an ARM Cortex-M4 (STM32F4) microcontroller featuring 256 KB of SRAM and 1 MB of Flash. The compiled model weights and code take 150 KB and are stored in Flash. The first convolutional layer takes a 1x64x64 INT8 spectrogram input, applies 32 filters of 3x3 with stride 1 and SAME padding. When running this layer using CMSIS-NN, the system crashes with an SRAM out-of-memory (OOM) error.
 question: Why can the first 64x64x32 INT8 convolution OOM an STM32F4 despite weights staying in flash?
 details:
-  realistic_solution: The OOM comes from the layer's peak SRAM working set, not from the weights in flash. SRAM must hold the input activation, the much larger 64x64x32 output activation, and whatever CMSIS-NN workspace or im2col buffer the selected convolution kernel requires, along with the arena, stack, and runtime state. The output alone is 128 KiB, so even a small 3x3 weight tensor can trigger OOM if activation buffers and workspace are allocated simultaneously and push the peak working set past the 256 KB SRAM budget.
+  realistic_solution: The OOM comes from the layer's peak SRAM working set, not from the weights in flash. SAME padding with stride 1 preserves the 64x64 spatial size, so the first layer produces a 64x64x32 output activation. SRAM must hold the input activation, that much larger output activation, and whatever CMSIS-NN workspace or im2col buffer the selected convolution kernel requires, along with the arena, stack, and runtime state. The output alone is 128 KiB, and input plus output already consume 132 KiB, leaving at most 124 KiB of the 256 KiB SRAM for workspace and all other runtime memory.
   common_mistake: |
     **The Pitfall:** Only comparing the static model size against Flash or SRAM limits.
     **The Rationale:** Candidates ignore the dynamic memory allocations required during inference, such as the intermediate working buffers needed for convolution operations.
@@ -24,8 +24,10 @@ details:
     - Weights: 32 * 3 * 3 * 1 byte = 288 bytes, stored in Flash and not the SRAM driver.
 
     **Calculations:**
+    - SAME padding and stride 1 preserve the 64x64 spatial size, so the output is 64x64x32.
     - Minimum live activation storage if input and output are both resident: 4 KiB + 128 KiB = 132 KiB.
-    - CMSIS-NN may require additional workspace depending on the chosen kernel, tensor layout, and buffering strategy. Some implementations use a compact partial im2col buffer; less optimized paths or arena planners may reserve larger temporary buffers.
+    - Remaining nominal SRAM before any other runtime memory: 256 KiB - 132 KiB = 124 KiB.
+    - CMSIS-NN workspace is kernel-dependent and can be nontrivial even for 3x3 convolutions; im2col-style buffers, tensor arena metadata, stack, and runtime state all consume the remaining headroom.
     - Peak SRAM = input activation + output activation + workspace + tensor arena overhead + stack/RTOS/runtime memory. This can exceed 256 KB even though the convolution weights are tiny and remain in Flash.
 
     **Conclusion & Interpretation:**

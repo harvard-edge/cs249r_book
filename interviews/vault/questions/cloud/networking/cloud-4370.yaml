@@ -11,8 +11,8 @@ title: Mapping TP PP and EP onto a TPU v5e Torus
 scenario: Training a 1T MoE model requires 2,048 TPU v5e chips using 3D model parallelism (TP=8, PP=16, EP=16). Each dimension requires distinct collective communication patterns. The ICI topology is a 3D torus (16×16×8).
 question: How would you map TP=8, PP=16, and EP=16 for the 1T MoE model onto a 16×16×8 TPU torus, and how does it compare to H100?
 details:
-  realistic_solution: Map TP=8 to the 8-chip torus axis so the latency-sensitive tensor-parallel collectives stay on the shortest dimension. Map PP=16 to one 16-chip axis because pipeline sends are mostly nearest-neighbor point-to-point traffic. Map EP=16 to the remaining 16-chip axis so expert all-to-all traffic is contained within a single torus dimension instead of crossing all three dimensions. For a representative hidden=16384, sequence=2048 activation, the per-boundary payload is 2048 * 16384 * 2 bytes = 67.1 MB. A TP=8 ring AllReduce moves 2*(7/8)*67.1 = 117.4 MB per participating chip per layer, or about 15.0 GB if this occurs across 128 layers. At an assumed 200 GB/s TPU ICI link bandwidth, that aggregate TP communication is about 75 ms. H100 NVLink can make TP faster inside an 8-GPU node, but PP/EP traffic that crosses nodes falls to InfiniBand-class bandwidth and topology placement becomes critical. The defensible conclusion is not a blanket 4x H100 slowdown; TPU v5e is attractive
-    when all three parallel dimensions fit cleanly on ICI, while H100 is strong for intra-node TP and must minimize cross-node PP/EP traffic.
+  realistic_solution: Map TP=8 to the 8-chip torus axis so the latency-sensitive tensor-parallel collectives stay on the shortest dimension. Map PP=16 to one 16-chip axis because pipeline sends are mostly nearest-neighbor point-to-point traffic. Map EP=16 to the remaining 16-chip axis so expert all-to-all traffic is contained within a single torus dimension instead of crossing all three dimensions. For a representative hidden=16384, sequence=2048 activation, the per-boundary payload is 2048 * 16384 * 2 bytes = 67.1 MB. A TP=8 ring AllReduce moves 2*(7/8)*67.1 = 117.4 MB per participating chip per layer, or about 15.0 GB if this occurs across 128 layers. At an assumed 200 GB/s TPU ICI link bandwidth, that aggregate TP communication is a rough 75 ms no-overlap upper bound for this TP component, not a complete step-time estimate; PP/EP traffic and compute overlap are omitted. H100 NVLink can make TP faster inside an 8-GPU node, but PP/EP traffic that crosses nodes falls to InfiniBand-class
+    bandwidth and topology placement becomes critical. The defensible conclusion is not a blanket 4x H100 slowdown; TPU v5e is attractive when all three parallel dimensions fit cleanly on ICI, while H100 is strong for intra-node TP and must minimize cross-node PP/EP traffic.
   common_mistake: |
     **The Pitfall:** Mapping tensor parallelism to a long, high-latency torus dimension.
     **The Rationale:** Engineers assume all dimensions are equal and arbitrarily assign parallelism strategies to torus axes.
@@ -26,7 +26,7 @@ details:
     **Calculations:**
     - One activation boundary: 2048 * 16384 * 2 = 67.1 MB.
     - TP=8 ring AllReduce per layer: 2 * (8-1) / 8 * 67.1 MB = 117.4 MB per chip.
-    - Across 128 layers: 117.4 MB * 128 = 15.0 GB per chip. At 200 GB/s, time is about 75 ms.
+    - Across 128 layers: 117.4 MB * 128 = 15.0 GB per chip. At 200 GB/s, time is about 75 ms as a no-overlap upper bound for this TP component.
     - PP point-to-point per boundary: 67.1 MB / 200 GB/s = 0.34 ms on TPU ICI; over a 50 GB/s cross-node link, the same payload is 1.34 ms.
     - EP all-to-all should be mapped to the other 16-chip axis; its volume depends on token routing and top-k load balance, so the prompt supports topology guidance rather than an exact step-time ratio.
 

@@ -9,7 +9,7 @@ bloom_level: create
 phase: both
 title: The Gradient Checkpointing Boundary
 scenario: We need to train a 70B model on 8x 80 GB GPUs. The team enabled ZeRO-3 and claims it'll fit.
-question: With ZeRO-3 on 8x 80GB GPUs, what is the actual per-GPU memory budget for training a 70B model, and where does it break?
+question: With ZeRO-3 on 8x80GB GPUs, where does memory break when training a 70B model?
 details:
   realistic_solution: 'With ZeRO-3, parameters, gradients, and optimizer states are partitioned across the 8 GPUs, so the sharded model state is much smaller than a full local copy but still large. Under a common mixed-precision Adam budget, the 70B model needs about 16 bytes of training state per parameter globally, or roughly 140 GB per GPU after sharding. ZeRO-3 can reduce peak residency by gathering and releasing parameter shards layer by layer, but activations, temporary communication buffers, fragmentation, and CUDA workspace are not solved by optimizer sharding. The break point is usually activations and transient buffers: the run may fit only with activation checkpointing, small micro-batches, CPU/NVMe offload, or more GPUs.'
   common_mistake: |
@@ -22,14 +22,16 @@ details:
     - GPUs: 8, each with 80 GB.
     - Mixed-precision Adam training-state budget: FP16/BF16 parameter copy (2 bytes), gradient (2 bytes), FP32 master weight (4 bytes), and two FP32 Adam moments (8 bytes) = 16 bytes/parameter globally.
     - ZeRO-3 shards parameters, gradients, and optimizer state across data-parallel GPUs, with layer-wise gathers creating temporary peaks.
+    - No CPU/NVMe offload is assumed for the baseline budget.
     - Assume activation checkpointing and micro-batch choices determine whether activation memory is about 10-20 GB or 50+ GB per GPU.
     **Calculations:**
     - Global model-state memory: 70B * 16 bytes = 1,120 GB.
-    - Evenly sharded ZeRO-3 state: 1,120 GB / 8 = 140 GB per GPU before residency optimizations or offload.
-    - Because 140 GB exceeds an 80 GB device, a naive fully resident sharded-state budget does not fit.
-    - Practical ZeRO-3 implementations reduce peak resident parameters by all-gathering layer shards as needed, but they still need activation memory and transient buffers.
-    - Example peak with residency/offload reducing resident model state to 45 GB: 45 GB model state + 15 GB checkpointed activations + 10 GB buffers = 70 GB, which fits narrowly.
-    - Example without checkpointing: 45 GB model state + 50 GB activations + 10 GB buffers = 105 GB, which OOMs.
+    - Evenly sharded ZeRO-3 training state: 1,120 GB / 8 = 140 GB per GPU if all sharded state must remain in GPU memory.
+    - Baseline GPU capacity: 80 GB, leaving a 60 GB shortfall before activations, temporary all-gather buffers, CUDA workspace, and fragmentation.
+    - Therefore an 8-GPU no-offload budget cannot be proven to fit from ZeRO-3 sharding alone.
+    - With explicit CPU/NVMe offload or aggressive release policies, the peak resident model state can be lower than 140 GB, but that is a separate implementation assumption.
+    - If a tuned/offloaded run holds 45 GB of resident model state, then 45 GB model state + 15 GB checkpointed activations + 10 GB buffers = 70 GB fits narrowly.
+    - The same resident-state assumption without checkpointing gives 45 GB + 50 GB activations + 10 GB buffers = 105 GB, which OOMs.
 
     **Conclusion & Interpretation:**
     - **Result: Activation and Buffer Boundary.** ZeRO-3 helps with model state, but the publishable budget must include activations and transient buffers. On 8x80 GB, fitting a 70B training job depends on checkpointing, micro-batch size, offload, and implementation details; optimizer sharding alone is not enough to prove it fits.

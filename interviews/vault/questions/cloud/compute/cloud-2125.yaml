@@ -12,7 +12,7 @@ scenario: You are building an ML system that must include discrete decision step
 question: How would you train through discrete decisions like hard MoE routing end-to-end, and what systems cost does your approach add?
 details:
   realistic_solution: 'Three approaches with increasing systems complexity: (1) Straight-Through Estimator (STE): use discrete forward, continuous backward (pass gradients through argmax as if it were identity). Cost: zero additional compute. Limitation: biased gradient estimates, can cause training instability. (2) Gumbel-Softmax relaxation: replace discrete sampling with a continuous approximation using Gumbel noise + temperature-controlled softmax. Forward: sample from Gumbel-Softmax (differentiable). Cost: one extra softmax per discrete decision + Gumbel noise generation. Memory: stores the full probability distribution (E-dimensional for E experts) per token for backward. For MoE with 64 experts and 2048 tokens: 64 * 2048 * 4 bytes = 0.5 MB per layer (negligible). But temperature annealing adds a hyperparameter and can cause mode collapse. (3) REINFORCE / policy gradient: treat the discrete operation as a stochastic node. Gradient = reward * log_prob_gradient. Cost: requires multiple
-    forward passes for variance reduction (baseline computation). Memory: must store log probabilities and rewards. Systems cost: 2-5x forward passes for acceptable variance, making training 2-5x slower. In practice, MoE routers use top-k with STE or auxiliary load-balancing losses that operate on the continuous logits before the discrete argmax, avoiding the gradient problem entirely while adding only a small loss computation.'
+    forward passes for variance reduction (baseline computation). Memory: must store log probabilities and rewards. Systems cost: workload-dependent and often multiple forward samples or rollouts for acceptable variance; a 2-5x forward-work multiplier is an illustrative range, not a fixed bound. In practice, MoE routers use top-k with STE or auxiliary load-balancing losses that operate on the continuous logits before the discrete argmax, avoiding the gradient problem entirely while adding only a small loss computation.'
   common_mistake: |
     **The Pitfall:** Suggesting to simply 'make everything continuous'.
     **The Rationale:** Engineers default to standard differentiable layers to avoid backprop issues.
@@ -23,7 +23,7 @@ details:
     - Let the token hidden size be H; a dense router projection to expert logits costs about 2 * H * 64 FLOPs per token.
 
     **Calculations:**
-    - Router linear projection cost for the batch: 4096 tokens * 2 * H * 64 FLOPs. For H=4096, this is about 2.1B FLOPs, still small next to the transformer block compute.
+    - Router linear projection cost for the batch: 4096 tokens * 2 * H * 64 FLOPs. As an illustrative example, H=4096 gives about 2.1B FLOPs, still small next to the transformer block compute.
     - Top-k selection, softmax/normalization, and auxiliary load-balancing losses add O(64) work per token; those are not the dominant router cost.
     - Straight-Through Estimator (STE): Adds 0 FLOPs but biases gradients.
     - Gumbel-Softmax: Adds 64 random samples plus softmax-like exp/log work per token and stores 64 probabilities/token for backward, still small relative to the full model forward pass.

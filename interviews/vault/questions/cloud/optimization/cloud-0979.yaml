@@ -11,7 +11,7 @@ title: Evaluating Gradient Bucketing for Overlap
 scenario: You are optimizing the distributed training of a 30B parameter LLM across 64 GPUs using PyTorch FSDP. Profiling reveals that GPU SMs stall frequently during the backward pass waiting for gradient reductions, and network utilization is bursty. The measured effective per-GPU communication bandwidth for gradient reductions is 400 GB/s, and each backward block has about 1.0 ms of compute that can potentially hide communication.
 question: Which gradient bucket size and CUDA stream configuration should you use for FSDP on 64 GPUs to maximize communication-computation overlap?
 details:
-  realistic_solution: The bucket size should be tuned against the measured per-layer compute/communication ratio, not treated as a universal constant. With the stated 400 GB/s effective per-GPU bandwidth and 1.0 ms of hideable compute per backward block, a 100 MB bucket takes about 0.25 ms and can fit under the compute window, while a 1 GB bucket takes about 2.5 ms and would expose roughly 1.5 ms if it starts after the 1.0 ms compute window. Use a dedicated communication stream and start reductions as soon as buckets are ready, but sweep medium bucket sizes such as 25-100 MB under profiler validation.
+  realistic_solution: The bucket size should be tuned against the measured per-layer compute/communication ratio, not treated as a universal constant. With decimal units for the stated bandwidth, a 100 MB bucket at 400 GB/s takes about 0.25 ms and can fit under the 1.0 ms compute window, while a 1 GB bucket takes about 2.5 ms and would expose roughly 1.5 ms if it starts after the compute window. Use the default compute stream for backward kernels plus a dedicated high-priority communication stream for FSDP reductions; record an event when a bucket becomes ready, make the comm stream wait on that event, launch the reduce-scatter/all-reduce immediately, and make later consumers wait only when they need the reduced shard. Sweep medium bucket sizes such as 25-100 MB under profiler validation.
   common_mistake: |
     **The Pitfall:** Assuming that the largest possible bucket size (e.g., 1GB) is always optimal.
     **The Rationale:** Candidates think it maximizes network bandwidth utilization per transfer, forgetting it delays the start of communication.
@@ -20,11 +20,12 @@ details:
     **Assumptions & Constraints:**
     - Backward Compute Time: 1.0 ms per block.
     - Effective gradient-reduction bandwidth: 400 GB/s per GPU for this measured setup.
+    - Use decimal units for consistency: 1 GB = 1000 MB.
     - Assume the bucket's transfer starts after its producing block and can overlap with the next 1.0 ms compute window.
 
     **Calculations:**
-    - Network Transfer Time (100MB): 100 MB / 400 GB/s = 0.25 ms.
-    - Network Transfer Time (1GB): 1000 MB / 400 GB/s = 2.5 ms.
+    - Network Transfer Time (100MB): 100 MB / 400,000 MB/s = 0.00025s = 0.25 ms.
+    - Network Transfer Time (1GB): 1000 MB / 400,000 MB/s = 0.0025s = 2.5 ms.
     - Exposed stall for 100MB bucket: max(0, 0.25 ms - 1.0 ms) = 0 ms.
     - Exposed stall for 1GB bucket: max(0, 2.5 ms - 1.0 ms) = 1.5 ms.
 

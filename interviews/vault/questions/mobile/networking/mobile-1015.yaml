@@ -12,9 +12,9 @@ scenario: A mobile camera app on A17 Pro (68 GB/s) runs YOLOv8-n (3.2M INT8, 4.2
 question: What memory bandwidth components explain the 15GB/s camera pipeline load, and which optimizations reduce it below 8GB/s?
 details:
   realistic_solution: |
-    The model weights and camera frame are too small to explain 15GB/s by themselves. Camera ISP traffic for 1080p YUV420 at 30fps is 1920×1080×1.5×30 = 93MB/s = 0.09GB/s. YOLO-n weights add 3.2MB×30 = 0.096GB/s and segmentation weights add 2.5MB×30 = 0.075GB/s, so direct frame plus weight traffic is only about 0.26GB/s. The measured 15GB/s must therefore be dominated by activation tensors, intermediate feature maps, texture conversions, and avoidable copies between camera, GPU, and NPU buffers.
+    The model weights and camera frame are too small to explain 15GB/s by themselves. Treat the 3.2M INT8 and 2.5M INT8 model sizes as parameter footprints, about 3.2MB and 2.5MB. Even a pessimistic estimate that rereads each full footprint once per frame adds only 3.2MB×30 = 0.096GB/s and 2.5MB×30 = 0.075GB/s. Camera ISP traffic for 1080p YUV420 at 30fps is 1920×1080×1.5×30 = 93MB/s = 0.09GB/s, so direct frame plus pessimistic weight traffic is only about 0.26GB/s. The measured 15GB/s must therefore be dominated by activation tensors, intermediate feature maps, texture conversions, and avoidable copies between camera, GPU, and NPU buffers.
 
-    Use a measured breakdown such as 5.0GB/s activation traffic and 9.7GB/s copy/format-conversion overhead, plus 0.26GB/s direct frame/weight traffic. Reducing the model input from 640 to 320 cuts 2D activation traffic by 4x, from 5.0GB/s to 1.25GB/s. Zero-copy camera/NPU buffers and fused preprocessing remove the 9.7GB/s copy overhead. The optimized total is 0.09 + 0.17 + 1.25 = 1.51GB/s, well below the 8GB/s target while preserving 30fps.
+    Use the 15GB/s measurement to build an illustrative decomposition: about 5.0GB/s activation traffic, about 9.7GB/s copy/format-conversion overhead inferred as the residual, and 0.26GB/s direct frame/weight traffic. Reducing the model input from 640 to 320 cuts 2D activation traffic by 4x, from 5.0GB/s to 1.25GB/s. Zero-copy camera/NPU buffers and fused preprocessing remove the inferred 9.7GB/s copy overhead. The optimized total is 0.09 + 0.17 + 1.25 = 1.51GB/s, well below the 8GB/s target while preserving 30fps.
   common_mistake: |
     **The Pitfall:** Trying to quantize the models further.
     **The Rationale:** Candidates ignore that the models are already INT8 and fail to check if camera buffer copies and large activation tensors are the actual bandwidth hogs.
@@ -22,9 +22,10 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - ISP Bandwidth (1080p 30fps YUV420): 1920 * 1080 * 1.5 bytes * 30 = 0.09 GB/s.
-    - Model Weights (INT8 30fps): (3.2MB + 2.5MB) * 30 = 0.17 GB/s.
+    - Model parameter footprints: 3.2M INT8 ≈ 3.2MB and 2.5M INT8 ≈ 2.5MB.
+    - Pessimistic per-frame weight traffic: (3.2MB + 2.5MB) * 30 = 171MB/s = 0.171 GB/s.
     - Activation traffic estimate: 5.0 GB/s.
-    - Copy/format-conversion overhead inferred from the measurement.
+    - Copy/format-conversion overhead is inferred as the residual from the 15GB/s measurement, not directly derived from model size.
     - Measured Memory Bandwidth: 15 GB/s.
 
     **Calculations:**

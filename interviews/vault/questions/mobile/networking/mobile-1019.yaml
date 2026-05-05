@@ -11,26 +11,27 @@ title: 'Network Bandwidth Bottlenecks: Specify QoS Framework for Multi-Model Mob
 scenario: An Android device runs up to 5 simultaneous ML models with different priorities. A QoS framework is needed with defined priority tiers, bandwidth allocation, preemption policy, and degraded-mode fallback to handle dynamic contention.
 question: How would you specify a complete QoS framework to manage 77 GB/s bandwidth across 5 simultaneous ML models?
 details:
-  realistic_solution: 'Define five explicit classes because the device can run five models at once: P0 safety/perception reserves 10 GB/s and is never preempted; P1 interactive LLM reserves 62 GB/s while decoding; P2 camera/vision reserves 3 GB/s; P3 always-on ASR reserves 0.5 GB/s; P4 background personalization/update jobs are capped at 1.5 GB/s and are fully preemptible. This sums to 77 GB/s in LLM-active mode. In normal mode, unused P1 bandwidth can be borrowed by P4. Overflow policy: if measured demand exceeds 77 GB/s, reclaim borrowed bandwidth first, then pause P4, then degrade P2 frame rate or resolution, while P0 and the minimum P1 reservation remain protected. In degraded mode, the LLM can shorten context or switch to a smaller model before violating its TPOT SLA.'
+  realistic_solution: 'Define five priority classes for possible simultaneous workloads, not a promise that all five can always run at peak demand. P0 safety/perception gets a protected 10 GB/s reserve and is never preempted; P1 interactive LLM may reserve up to 62 GB/s only while decoding; P2 camera/vision reserves 3 GB/s; P3 always-on ASR reserves 0.5 GB/s; P4 background personalization/update jobs are capped at 1.5 GB/s and are fully preemptible. These reservations sum to the 77 GB/s ceiling in LLM-active mode, so any unused reservation can be borrowed but must be revocable. Overflow policy: reclaim borrowed bandwidth first, pause P4, degrade P2 frame rate or resolution, and then shorten LLM context or switch to a smaller model before violating P0 or the minimum P1 SLA.'
   common_mistake: |
     **The Pitfall:** Defining abstract QoS priorities (High/Medium/Low) without hard byte-level bandwidth limits or sum-total overflow handling.
     **The Rationale:** Assuming standard Linux process schedulers effectively govern memory bus access, which they do not.
-    **The Consequence:** Safety-critical tasks (P1) are starved by massive background batch processing, leading to catastrophic system failure.
+    **The Consequence:** Safety-critical tasks (P0) are starved by massive background batch processing, leading to catastrophic system failure.
   napkin_math: |
     **Assumptions & Constraints:**
     - System Bandwidth Limit: 77 GB/s.
-    - Five model classes: P0 safety/perception, P1 LLM, P2 camera/vision, P3 ASR, P4 background.
-    - Simplified bandwidth-bound approximation: a 1.5 GB LLM weight stream per output token.
+    - Five priority classes may be active, but reservations are admission-control budgets rather than proof that every model can run at peak simultaneously.
+    - Simplified P1 approximation: if the LLM cannot keep all weights resident, a 1.5GB INT4 active stream per output token is the worst-case traffic budget.
     - Target P1 LLM Decode: <25 ms Time-Per-Output-Token (TPOT).
 
     **Calculations:**
-    - Required LLM bandwidth for 25ms TPOT: 1.5GB / 0.025s = 60 GB/s.
+    - Worst-case LLM bandwidth for 25ms TPOT under the active-stream approximation: 1.5GB / 0.025s = 60 GB/s.
     - Active-mode reservations: P0 10 + P1 62 + P2 3 + P3 0.5 + P4 1.5 = 77 GB/s.
     - P1 TPOT at 62 GB/s: 1.5GB / 62GB/s = 0.02419s = 24.19 ms.
     - If P4 borrowed 12 GB/s during idle mode, reclaiming it before LLM decode prevents oversubscription.
+    - If measured LLM traffic is lower due to residency, tiling, or smaller active layers, the unused P1 reservation becomes revocable slack rather than a fixed capacity claim.
 
     **Conclusion & Interpretation:**
-    - **Result: 24.19 ms in a simplified bandwidth-bound model.** The five-tier policy fits the 77 GB/s ceiling, protects safety and interactive work, and defines degraded modes for background and vision tasks before the LLM SLA is missed.
+    - **Result: 24.19 ms in a simplified worst-case LLM traffic model.** The five-tier policy is an admission-control framework: it protects safety and interactive work, allows borrowing only when revocable, and defines degraded modes for background and vision tasks before protected SLAs are missed.
 status: published
 provenance: imported
 requires_explanation: true

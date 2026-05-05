@@ -11,7 +11,7 @@ title: The SRAM Bank Collision
 scenario: You have a Cortex-M7 running at 400 MHz. Core memory is split into SRAM1 and SRAM2. Your DMA controller streams 1080p camera data into a buffer in SRAM1. To maximize cache locality, you place your ML model's `tensor_arena` directly adjacent to the camera buffer, also in SRAM1. When the camera is active, your ML inference time slows down by 25%. The DMA uses zero CPU cycles.
 question: Why does camera DMA into SRAM1 slow Cortex-M7 inference by 25% even though DMA uses zero CPU cycles?
 details:
-  realistic_solution: 'Both the DMA and CPU access SRAM1 through the same AXI bus port. Even though DMA uses zero CPU cycles, it competes for bus bandwidth. Every time DMA writes a camera byte, the CPU''s pending SRAM read is stalled by the bus arbiter. With continuous DMA streaming, the CPU effectively loses 10-25% of its memory access cycles to arbitration delays. Fix: place tensor_arena in SRAM2 (or DTCM) and camera DMA buffer in SRAM1. The STM32H7 has separate bus ports for each SRAM bank — splitting masters across banks eliminates contention, restoring the CPU to full speed.'
+  realistic_solution: 'Both the DMA and CPU access SRAM1 through the same memory path. Even though DMA uses zero CPU cycles, it still competes for bus bandwidth. Every time DMA writes a camera byte, the CPU''s pending SRAM read can be stalled by arbitration. With continuous DMA streaming, the CPU can effectively lose 10-25% of its memory access cycles. Fix: place tensor_arena in a different suitable memory region, such as SRAM2, DTCM, or another bank with an independent access path on the specific STM32H7 variant, and keep the camera DMA buffer in a DMA-visible SRAM region. Splitting traffic across banks/ports can reduce or remove contention depending on the exact memory map and DMA reachability.'
   common_mistake: |
     **The Pitfall:** Believing "zero CPU cycles" means DMA cannot slow inference.
     **The Rationale:** Candidates account only for instruction execution and ignore that the DMA engine and CPU are independent bus masters contending for the same SRAM1 port.
@@ -20,7 +20,7 @@ details:
     **Assumptions & Constraints:**
     - DMA consumes the SRAM1 bus for about 10% of cycles while streaming.
     - The ML inner loop is memory-sensitive and frequently reads activations/weights from the tensor arena in SRAM1.
-    - Shared medium: Single AXI bus port to SRAM1.
+    - Shared medium: the CPU and DMA contend for the SRAM1 access path in this placement.
 
     **Calculations:**
     - If the CPU needed SRAM1 on every cycle, a 10% DMA bus share would impose about a 10% lower-bound stall.
@@ -28,7 +28,7 @@ details:
     - The measured 25% slowdown is therefore consistent with bank/port contention, but not with DMA "using CPU cycles."
 
     **Conclusion & Interpretation:**
-    - **Result: Bank/port contention (Memory Bandwidth-Bound)**. The CPU and DMA compete for the same SRAM1 access path; splitting the tensor arena and DMA buffer across different SRAM banks resolves the slowdown.
+    - **Result: Bank/port contention (Memory Bandwidth-Bound)**. The CPU and DMA compete for the same SRAM1 access path; moving the tensor arena and DMA buffer to independently served, DMA-compatible regions can reduce or eliminate the slowdown on the specific STM32H7 memory map.
 status: published
 provenance: imported
 requires_explanation: false

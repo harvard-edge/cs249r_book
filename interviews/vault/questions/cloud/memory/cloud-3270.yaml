@@ -18,17 +18,18 @@ details:
     **The Consequence:** Scaling sequence length quadratically increases the KV-cache, leading to severe fragmentation and instant OOM errors without paged attention.
   napkin_math: |
     **Assumptions & Constraints:**
-    - KV-cache per token, per layer: 2 (K,V) * 32 heads * 128 dim * 2 bytes = 16 KB.
+    - KV-cache per token, per layer: 2 (K,V) * 32 heads * 128 dim * 2 bytes = 16 KiB.
     - 32 layers total.
-    - FP16 weights and runtime buffers must be reserved before KV allocation; use 60 GB as an example KV budget after those reservations.
+    - 80 GB A100 HBM; reserve about 20 GB for loaded FP16 weights, CUDA/runtime buffers, fragmentation slack, and decode workspace.
 
     **Calculations:**
-    - Total KV-cache size per token across all 32 layers = 512 KB/token.
-    - For a single 32,768-token sequence: 512 KB/token * 32,768 tokens ≈ 16.7 GB.
-    - With a 60 GB KV budget: 60 GB / 16.7 GB per full-length sequence ≈ 3 full 32k sequences before allocator slack.
+    - Available KV budget: 80 GB - 20 GB reserved = 60 GB.
+    - Total KV-cache size per token across all 32 layers = 512 KiB/token.
+    - For a single 32,768-token sequence: 512 KiB/token * 32,768 tokens = 16 GiB, about 17.18 GB decimal.
+    - With a 60 GB KV budget: 60 GB / 17.18 GB per full-length sequence ≈ 3.5, so admit at most 3 full 32k sequences and reserve headroom for decode growth and fragmentation.
 
     **Conclusion & Interpretation:**
-    - **Result: about 3 full 32k sequences with a 60 GB KV budget**. The OOM risk comes from KV-cache growth and fragmentation, so paged attention plus admission-controlled continuous batching is the primary mitigation.
+    - **Result: about 3 full 32k sequences after reserving 20 GB of the 80 GB board for non-KV memory.** The OOM risk comes from KV-cache growth and fragmentation, so paged attention plus admission-controlled continuous batching is the primary mitigation.
 status: published
 provenance: imported
 requires_explanation: false

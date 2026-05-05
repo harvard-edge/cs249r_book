@@ -11,7 +11,7 @@ title: Compute-Bound Prefill Estimate for a 70B Model on One H100
 scenario: A colleague claims that a 70B model can prefill a 512-token prompt in 37 ms on a single H100 GPU. You need to verify this estimate using a compute-bound calculation.
 question: Can a 70B model prefill a 512-token prompt in 37 ms on an H100, and what is the correct compute-based estimate?
 details:
-  realistic_solution: '70B model prefill at seq=512: 2x512x70B FLOPs / 989 TFLOPS ≈ 72ms. 37ms would require either 2x higher TFLOPS or half the parameters.'
+  realistic_solution: A lower-bound model for prefill is the dense matmul cost, about 2 * params * tokens = 2 * 70B * 512 = 71.7 TFLOPs. Attention adds sequence-dependent work. Using a LLaMA-style approximation with 80 layers, hidden size 8192, and about 512-token context gives roughly another 0.7 TFLOPs for QK and AV attention, so the total is about 72.4 TFLOPs before kernels, memory traffic, and launch overhead. At the H100 FP16 peak of 989 TFLOPS, the theoretical lower bound is about 73ms. A 37ms claim would need roughly 2 PFLOP/s effective throughput or a substantially smaller model; treat the estimate as an approximate lower bound, not an exact latency prediction.
   common_mistake: |
     **The Pitfall:** Overestimating the prefill speed or misapplying the FLOPs formula.
     **The Rationale:** Candidates often fail to account for both the forward and backward passes correctly, or use effective TFLOPS improperly for prefill estimates.
@@ -22,11 +22,12 @@ details:
     - Hardware: 1x H100 (989 TFLOPS FP16 peak compute).
 
     **Calculations:**
-    - Prefill FLOPs per token = 2 * 70 * 10^9 = 140 GFLOPs.
-    - Total FLOPs for 512 tokens = 140 GFLOPs * 512 = 71.68 TFLOPs.
-    - Compute-bound time = 71.68 TFLOPs / 989 TFLOPS = 0.07247 seconds (72.5ms).
+    - Dense parameter matmul lower bound: 2 * 70B params * 512 tokens = 71.68 TFLOPs.
+    - Attention term approximation: 2(QK and AV) * 80 layers * 512^2 tokens * 8192 hidden * 2 FLOPs/MAC = ~0.69 TFLOPs.
+    - Approximate prefill compute = 71.68 + 0.69 = 72.37 TFLOPs before kernel inefficiency, memory traffic, and launch overhead.
+    - Compute-bound lower-bound time = 72.37 TFLOPs / 989 TFLOPS = 0.0732 seconds (~73ms).
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound Contradiction.** The absolute theoretical limit is ~72.5ms; claiming 37ms is physically impossible without half the parameters or double the TFLOPS.
+    - **Result: Compute-Bound Contradiction.** Even the optimistic compute lower bound is ~73ms, so a 37ms claim is not supported without roughly 2x higher effective throughput, a smaller model, or a different assumption set.
 status: published
 provenance: imported

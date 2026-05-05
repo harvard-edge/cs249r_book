@@ -12,7 +12,7 @@ scenario: Google's Tensor G3 must run a conversational LLM within a 3W continuou
 question: What LLM architecture fits under the 3W power, 500ms TTFT, and 50ms/token decode constraints on the Tensor G3?
 details:
   realistic_solution: |
-    A release-quality answer should not claim that any arbitrary 5B INT4 model will hit >80% MMLU-Mini. The latency-feasible design is a compact, distilled 4B-class INT4 model, about 28-32 layers with GQA (for example 8 KV heads), FP16/BF16 attention logits, and INT8 or FP16 KV cache depending on quality. TTFT for a 512-token prompt is dominated by prefill matmuls: roughly 2 * params * prompt_tokens plus an attention term. For 4B params, that is about 4.1T matmul FLOPs plus overhead, which fits a 500ms budget only if effective sustained throughput is near 10 TOPS; this must be profiled. Decode is memory-sensitive: 4B INT4 weights occupy about 2.0GB, and a 512-token GQA KV read is only tens of MB. If batch=1 decode has little weight reuse across generated tokens, the effective memory payload can approach about 2GB/token; at 51.2GB/s that gives an order-of-magnitude 40ms lower bound before kernel overhead, leaving limited room under 50ms/token. Power is plausible if the TPU/NPU subsystem draws 2W and LPDDR/CPU stay under the remaining 1W through bandwidth capping. If the >80% MMLU-Mini target cannot be reached by a 4B distilled model, the correct conclusion is that the product needs cloud fallback, a smaller benchmark target, or speculative/RAG assistance; a plain 5B estimate with 72-78% accuracy does not satisfy the question.
+    The latency-feasible design is a compact, distilled 4B-class INT4 model, about 28-32 layers with GQA (for example 8 KV heads), FP16/BF16 attention logits, and INT8 or FP16 KV cache depending on quality. TTFT for a 512-token prompt is dominated by prefill matmuls: roughly 2 * params * prompt_tokens plus an attention term. For 4B params, that is about 4.1T matmul operations plus overhead, which fits a 500ms budget only if effective sustained throughput is near 10 TOPS; this must be profiled. Decode is memory-sensitive: 4B INT4 weights occupy about 2.0GB, and a 512-token GQA KV read is only tens of MB. If batch=1 decode has little weight reuse across generated tokens, each token may stream a large fraction of the 2.0GB weight payload; at 51.2GB/s the weight-read lower bound is about 39ms before KV reads and kernel overhead, leaving limited room under 50ms/token. Power is plausible if the TPU/NPU subsystem draws 2W and LPDDR/CPU stay under the remaining 1W through bandwidth capping. If the >80% MMLU-Mini target cannot be reached by this profiled 4B distilled model, the correct conclusion is that the product needs cloud fallback, a smaller benchmark target, or speculative/RAG assistance.
   common_mistake: |
     **The Pitfall:** Maximizing model size for accuracy without verifying TTFT and decode speed limits.
     **The Rationale:** Designers optimize for the compute capacity but ignore that at high memory bandwidths, large models hit memory-bandwidth walls.
@@ -28,11 +28,11 @@ details:
     - 500ms TTFT requires roughly 4.1T / 0.5s = 8.2 TOPS before overhead; with overhead, require about 9-10 sustained TOPS.
     - Decode resident weight footprint: 4B * 0.5 bytes = 2.0 GB.
     - Effective decode payload assumption: batch=1 decode has limited cross-token weight reuse, so each token may touch a large fraction of resident weights plus tens of MB of GQA KV.
-    - Bandwidth lower bound: ~2.05 GB effective payload / 51.2 GB/s ≈ 40 ms/token, leaving ~10 ms for kernels/scheduling before violating 50 ms.
+    - Weight-read lower bound: 2.0 GB / 51.2 GB/s ≈ 39 ms/token before KV reads and kernel overhead, leaving limited room under 50 ms.
     - Power check: 2W TPU/NPU + <=1W CPU/LPDDR budget requires bandwidth throttling and thermal profiling; do not assume max bandwidth continuously.
 
     **Conclusion & Interpretation:**
-    - **Result: 4B-class distilled INT4 model, not an unconstrained 5B model.** It can fit the latency and power budgets if profiling confirms sustained TOPS/bandwidth, and it must be specifically trained/distilled to clear the >80% MMLU-Mini target.
+    - **Result: 4B-class distilled INT4 model.** It can fit the latency and power budgets if profiling confirms sustained TOPS/bandwidth, and it must be specifically trained or distilled to clear the >80% MMLU-Mini target.
 status: published
 provenance: imported
 requires_explanation: true

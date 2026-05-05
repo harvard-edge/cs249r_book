@@ -12,7 +12,7 @@ scenario: You deploy a keyword spotting CNN on the nRF5340 (128 MHz, 256 KB SRAM
 question: What are the latency and power trade-offs between XIP and DMA double-buffering for weights on the nRF5340?
 details:
   realistic_solution: |
-    XIP saves SRAM and avoids explicit copies, but every cache miss or uncached weight fetch can add flash wait-state latency and extend active time. DMA double-buffering spends 32 KB of SRAM and explicit transfer energy to move weight tiles, but it can hide much of the flash latency when the next tile is transferred while the CPU computes on the current tile. The better choice depends on whether the model has enough compute per tile and enough SRAM for the double buffer; DMA is preferable when overlap is effective, while XIP may be acceptable for small or infrequently touched weights.
+    XIP saves SRAM and avoids explicit copies, but every cache miss or uncached weight fetch can add flash wait-state latency and extend active time. The 120 KB activation set plus 200 KB of weights already totals 320 KB, exceeding 256 KB SRAM before stack, tensor arena, DMA descriptors, or runtime buffers, so pure SRAM residency is impossible. DMA double-buffering spends 32 KB of SRAM and explicit transfer energy to move weight tiles, but it can hide much of the flash latency when the next tile is transferred while the CPU computes on the current tile. The better choice depends on whether the model has enough compute per tile and enough SRAM for the double buffer; DMA is preferable when overlap is effective, while XIP may be acceptable for small or infrequently touched weights.
   common_mistake: |
     **The Pitfall:** Assuming Execute-in-Place (XIP) from Flash is a zero-cost memory extension.
     **The Rationale:** Candidates evaluate static memory capacity but forget the high wait-state penalty of reading Flash memory at 128 MHz.
@@ -21,19 +21,23 @@ details:
     **Assumptions & Constraints:**
     - App core: 128 MHz; Current: ~5 mA
     - Weights: 200 KB (204,800 bytes)
+    - Activations: 120 KB, so activations plus weights require 320 KB before runtime buffers.
     - XIP miss/wait penalty model: about 3 extra cycles per weight byte fetched from flash.
     - DMA buffer: 32 KB, so 200 KB requires ceil(200 / 32) = 7 tile transfers.
     - Example DMA bandwidth from flash to SRAM: 16 MB/s.
+    - Supply voltage for active-energy estimate: 3 V.
 
     **Calculations:**
+    - SRAM residency check: 120 KB activations + 200 KB weights = 320 KB > 256 KB, so neither full SRAM residency nor naive full-weight paging fits.
     - XIP extra cycles = 204,800 bytes * 3 cycles/byte = 614,400 cycles.
     - XIP latency addition = 614,400 / 128,000,000 = 4.8 ms.
-    - Extra charge while active = 4.8 ms * 5 mA = 24 uC per inference.
+    - Extra charge while active = 4.8 ms * 5 mA = 24 µC per inference.
+    - Extra active energy = 24 µC * 3 V = 72 µJ per inference from the modeled wait-state time.
     - DMA transfer time for all weights = 204,800 bytes / 16 MB/s = 12.8 ms if serialized.
     - With double-buffering, exposed DMA cost is max(0, transfer time per next tile - compute time on current tile) summed across tiles, not automatically 12.8 ms and not automatically zero.
 
     **Conclusion & Interpretation:**
-    - **Result: latency/energy trade-off.** XIP may add about 4.8 ms and 24 uC from flash wait states under these assumptions. DMA double-buffering can reduce that exposed wait time only when tile compute covers the flash transfers, but it costs 32 KB of SRAM plus DMA transfer energy and must be budgeted explicitly.
+    - **Result: latency/energy trade-off under a hard SRAM limit.** XIP may add about 4.8 ms, 24 µC, and 72 µJ from flash wait states under these assumptions. DMA double-buffering can reduce that exposed wait time only when tile compute covers the flash transfers, but it costs 32 KB of scarce SRAM plus DMA transfer energy and must be budgeted explicitly.
 status: published
 provenance: imported
 requires_explanation: false

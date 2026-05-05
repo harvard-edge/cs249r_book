@@ -9,30 +9,30 @@ bloom_level: evaluate
 phase: inference
 title: Multi-Tenant Operator Scheduling on Qualcomm Cloud AI 100
 scenario: You are tasked with designing the inference execution engine for a multi-tenant on-premise deployment utilizing the Qualcomm Cloud AI 100 accelerator. The system must schedule concurrent execution of multiple transformer-based models within the power envelope while maximizing the INT8 compute capacity. You must architect a scheduling system that handles operator fusion, memory reuse across tenants, and execution order optimization to minimize memory thrashing and ensure high throughput.
-question: How would you schedule multiple transformer models on Cloud AI 100 to maximize 400 INT8 TOPS without LPDDR4x memory thrashing?
+question: How would you schedule multiple transformer models on Cloud AI 100 to improve INT8 TOPS utilization without memory thrashing?
 details:
-  realistic_solution: 'The scheduler should use admission control before execution: admit only model sets whose weights, KV cache, runtime reserve, and peak activation buffers fit in the 32 GB LPDDR4x budget. Compile each tenant with operator fusion and planned layer ordering so its peak intermediate buffer is capped, then run the admitted tenants with per-model queues and short time slices rather than launching all ready work at once. If a model would exceed its activation budget, queue it or lower its batch size instead of allowing LPDDR4x spill and thrash.'
+  realistic_solution: |
+    Use a compiler-aware scheduler rather than simple tenant admission control. Compile each transformer into fused blocks such as QKV projection, attention, MLP, bias, and activation sequences so intermediate tensors are consumed while resident instead of repeatedly materialized. At runtime, schedule layer blocks in waves across tenants: keep enough ready work to fill the accelerator, but avoid running blocks whose peak live activations overlap unnecessarily. Reuse a shared workspace pool, prefer static shapes or bounded microbatches, and order execution to finish a tenant's memory-heavy block before starting another memory-heavy block. This improves useful INT8 TOPS by reducing memory stalls and keeping compute tiles fed.
   common_mistake: |
     **The Pitfall:** Designing a static scheduling approach tailored for a single model instead of multi-tenant environments.
     **The Rationale:** Candidates overlook the necessity of dynamic memory pooling and the severe impact of unfused operators on LPDDR4x bandwidth.
     **The Consequence:** Massive memory thrashing causes the 32 GB limit to be exceeded, collapsing system throughput.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Concurrent Models: 4.
-    - Static Memory per Model: 5 GB INT8 weights + 1 GB KV Cache (6 GB total).
-    - LPDDR4x limit: 32 GB.
-    - Runtime reserve for OS, DMA queues, and fragmentation: 4 GB.
-    - Unfused intermediate block: 3 GB. Fused intermediate block: 1 GB.
+    - Concurrent models: 4.
+    - Let A represent one transformer's peak intermediate activation workspace for a block.
+    - Unfused execution materializes about 3A of intermediates for QKV, attention, and MLP substeps.
+    - Fused execution keeps the block's peak workspace near A by consuming intermediates in place.
+    - TOPS utilization falls when memory traffic and workspace pressure stall compute.
 
     **Calculations:**
-    - Static footprint for 4 models: 4 * 6 GB = 24 GB.
-    - Memory left after static footprint: 32 GB - 24 GB = 8 GB.
-    - Safe dynamic-buffer budget after reserve: 8 GB - 4 GB = 4 GB.
-    - Unfused active concurrency: floor(4 GB / 3 GB) = 1 model.
-    - Fused active concurrency: floor(4 GB / 1 GB) = 4 models.
+    - If all 4 tenants enter an unfused memory-heavy block together, peak transient workspace is about 4 * 3A = 12A.
+    - If the same blocks are fused, peak transient workspace is about 4 * A = 4A.
+    - Fusion therefore cuts transient workspace and materialized memory traffic by about 12A / 4A = 3x for that block.
+    - Execution-order control can further stagger memory-heavy blocks so compute-heavy blocks from other tenants run while one tenant uses the shared workspace.
 
     **Conclusion & Interpretation:**
-    - **Result: Operator fusion enables 4 active tenants (Memory Footprint-Bound).** TOPS utilization improves only after the scheduler proves the fused working set fits inside the 4 GB dynamic-buffer budget.
+    - **Result: fusion-aware scheduling is Memory-Bandwidth-Bound.** The scheduler maximizes useful INT8 TOPS by fusing operators, reusing workspace, and ordering tenant blocks to avoid overlapping peak activation pressure.
 status: published
 provenance: imported
 requires_explanation: true

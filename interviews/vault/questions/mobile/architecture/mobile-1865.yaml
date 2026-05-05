@@ -11,27 +11,28 @@ title: 'RLHF-Lite: Implicit Feedback Collection for Mobile Fine-Tuning'
 scenario: A mobile keyboard app collects implicit user feedback (accept/reject/edit of autocomplete suggestions) to fine-tune a local LoRA adapter.
 question: How would you design a lightweight on-device RLHF pipeline that runs without a dedicated reward model?
 details:
-  realistic_solution: 'Lightweight RLHF without dedicated RM: (1) Reward signal design: accepted suggestion = +1, edited suggestion = partial reward based on edit distance (1 - editdist/len), rejected = -1, ignored after 3s = 0 (neutral). (2) Implicit reward calibration: normalize rewards per session to account for user behavior variance. Use z-score normalization per user. (3) Algorithm: use DPO-lite. When user accepts suggestion A over having previously rejected suggestion B on a similar prompt, form a preference pair. Train LoRA updates only when the phone is idle, charging, and thermally cool; cap each job by time and battery budget. (4) Privacy: all training data and adapter weights stay on device. Opt-in federated aggregation can improve the global model without uploading raw keystrokes. (5) Computational budget: treat 50-pair updates on a 1B model as a background maintenance task that may take tens of seconds once backward passes, memory bandwidth, and mobile accelerator utilization
-    are included.'
+  realistic_solution: Lightweight RLHF without a dedicated reward model should convert implicit events into training data with clear semantics. Log the prompt, shown suggestion, user action, final committed text, latency, and context features. Treat accepted-as-is text as a positive example, edited text as a positive target if the edit is close enough to the suggestion, rejected suggestions as weak negatives, and ignored suggestions as missing or neutral unless the UI can distinguish seen-but-rejected from unseen. For pairwise training, create a preference pair only when the same or very similar prompt has both a committed/accepted completion and a rejected alternative; otherwise use weighted supervised LoRA updates on the committed text rather than calling it DPO. Normalize acceptance/edit scores only within the local user/session before thresholding or weighting examples, and never mix per-user statistics into a global label without aggregation safeguards. Train small, interruptible LoRA
+    jobs only while idle, charging, and thermally cool; keep raw keystrokes and adapters on device, and use opt-in federated aggregation only with privacy controls.
   common_mistake: |
     **The Pitfall:** Treating implicit signals as equivalent to explicit preference labels without correction for selection bias.
     **The Rationale:** Candidates fail to account for the fact that users who accept suggestions may do so out of laziness rather than quality preference.
     **The Consequence:** The acceptance signal conflates brevity, relevance, and convenience, leading to a biased and ultimately degraded model.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: 1B params, Sequence Length: 128 tokens.
-    - Peak compute limit: 10 TOPS, but training utilization is well below peak and may fall back for unsupported backward ops.
-    - DPO Update Batch: 50 preference pairs (100 forward passes).
-    - LoRA update requires forward and backward work plus optimizer and memory traffic.
+    - Implicit signals are noisy: accept/edit/reject/ignore are not automatically explicit reward labels.
+    - DPO-style training requires a chosen completion and a rejected completion for the same or very similar prompt.
+    - Single accepted or edited events can still support weighted supervised LoRA training on the final committed text.
+    - Per-user calibration must stay local or be aggregated with privacy controls to avoid leaking behavior statistics.
 
     **Calculations:**
-    - Each preference pair evaluates chosen and rejected responses, so 50 pairs implies about 100 sequence evaluations before backward overhead.
-    - A 1B-parameter transformer forward at 128 tokens is already a large lower-bound workload; DPO-style LoRA training then adds backward passes through adapter paths, activation traffic, optimizer updates, and possible fallback kernels.
-    - Because mobile training utilization is workload-specific and far below peak TOPS, the defensible estimate is an order-of-magnitude budget: seconds to tens of seconds for a small 50-pair background job, not a precise peak-TOPS runtime.
-    - Adapter size should be estimated from the exact LoRA target modules and rank, not from the number of days of updates.
+    - Accepted suggestion with no edit: one positive completion with high weight.
+    - Edited suggestion: use final committed text as the positive target; weight can decrease as edit distance grows.
+    - Rejected suggestion: weak negative only if the user saw it and then typed or chose a better completion for the same context.
+    - Valid preference pair count is bounded by matched contexts, not total events; 1,000 feedback events may yield far fewer pairwise examples.
+    - A DPO-style LoRA batch with 50 valid pairs requires chosen and rejected sequences, so about 100 sequence evaluations plus backward/optimizer work. Non-paired events should use weighted SFT instead.
 
     **Conclusion & Interpretation:**
-    - **Result: Background-only compute budget.** DPO-lite can be feasible on device only if updates are small, interruptible, thermally gated, and scheduled while charging; the design should not promise seamless foreground updates from peak TOPS arithmetic.
+    - **Result: match the algorithm to the signal.** Use DPO-style updates only for real matched preference pairs; use weighted supervised LoRA for single committed completions, with local calibration, privacy controls, and background-only training.
 status: published
 provenance: imported
 requires_explanation: false

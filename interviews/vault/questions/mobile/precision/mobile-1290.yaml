@@ -8,7 +8,7 @@ competency_area: precision
 bloom_level: evaluate
 phase: training
 title: Evaluating Mixed-Precision ViT on Snapdragon 8 Gen 3
-scenario: Your team is deploying a 1B parameter Vision Transformer for real-time video processing. You must choose between pure FP16, pure INT8, and a mixed-precision approach (INT8 for linear layers, FP16 for softmax and layer normalization) to achieve 30 FPS.
+scenario: Your team is deploying a 1B parameter Vision Transformer for real-time video processing. You must choose between pure FP16, pure INT8, and a mixed-precision approach (INT8 for linear layers, FP16 for softmax and layer normalization) to achieve 30 FPS on a mobile SoC where compiler support may place some transformer operators on the GPU or CPU instead of the NPU.
 question: Which precision strategy ensures a 1B parameter ViT achieves 30 FPS on a Snapdragon 8 Gen 3 Hexagon NPU?
 details:
   realistic_solution: The mixed-precision approach is optimal. Heavy matrix multiplications (QKV projections, FFNs) must be quantized to INT8 to leverage the NPU tensor capacity and halve memory bandwidth pressure. However, precision-sensitive operations like Softmax, LayerNorm, and attention scores must strictly remain in FP16 to prevent catastrophic accuracy degradation. This perfectly leverages the heterogeneous SoC architecture without bottlenecking the system bus.
@@ -20,15 +20,16 @@ details:
     **Assumptions & Constraints:**
     - Target framerate: 30 FPS.
     - Model weights: 1B parameters = 2.0 GB in FP16 or 1.0 GB in INT8.
-    - Effective workload estimate: 1 TOP-equivalent per frame, counted on the same operation basis for each precision mode.
-    - About 90% of operations are linear layers; about 10% are precision-sensitive softmax, attention scaling, and normalization.
-    - Hardware limits: LPDDR5X bandwidth ~64 GB/s, NPU INT8 capacity 45 TOPS, FP16 capacity ~22.5 TOPS-equivalent.
+    - Transformer inference roughly costs 2 MACs per parameter per frame for linear layers when each weight is used once.
+    - About 90% of MACs are linear projections/MLPs; about 10% are precision-sensitive softmax, attention scaling, and normalization.
+    - Hardware limits are effective budgets after delegate fallbacks, not guaranteed peak specs: INT8 tensor capacity ~45 TOPS, FP16 capacity ~22.5 TOPS-equivalent, LPDDR5X bandwidth ~64 GB/s.
 
     **Calculations:**
-    - Total compute needed: 1 TOP/frame * 30 FPS = 30 TOPS-equivalent.
-    - Pure FP16: needs ~30 TOPS-equivalent and, under a pessimistic full-weight streaming estimate, 2.0 GB/frame * 30 FPS = 60 GB/s. This is close to the memory limit and above the assumed FP16 compute capacity.
-    - Pure INT8: needs ~30 INT8 TOPS and ~1.0 GB/frame * 30 FPS = 30 GB/s, which fits the rough compute and bandwidth budgets, but quantizing softmax and layer normalization is accuracy-risky.
-    - Mixed Precision: INT8 handles ~27 TOPS and ~30 GB/s of weight traffic for the linear layers; FP16 handles only ~3 TOPS-equivalent for sensitive operations, within the FP16 budget.
+    - Linear-layer MACs per frame: 1B parameters * 2 MACs/parameter * 90% = ~1.8 GMAC/frame.
+    - At 30 FPS, linear layers require ~54 GMAC/s, or ~0.108 TOPS if 1 MAC is counted as 2 ops.
+    - FP16 weight footprint is ~2.0 GB and INT8 weight footprint is ~1.0 GB; actual bandwidth depends on cache tiling and reuse, so weight size is a residency and traffic-pressure estimate rather than GB/frame streaming.
+    - Mixed Precision keeps the large linear tensors in INT8, while leaving the smaller but numerically sensitive softmax, attention score, and normalization path in FP16.
+    - Pure INT8 may meet compute and footprint targets but risks accuracy loss in sensitive operators; pure FP16 doubles the dominant weight footprint and activation traffic without improving those operators enough to justify the cost.
 
     **Conclusion & Interpretation:**
     - **Result: Balanced mixed-precision path.** The rough model does not prove a single bottleneck, but it shows why INT8 linear layers plus FP16 sensitive operations is the defensible choice for bandwidth, compute, and accuracy.

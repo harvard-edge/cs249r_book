@@ -11,7 +11,7 @@ title: Optimizing Real-Time ML Inference Latency on Google TPU v5e with Queueing
 scenario: You are designing an online inference service for a critical real-time ML model. Your target average inference latency is 50ms, with a 99th percentile latency not exceeding 150ms. Incoming requests arrive at a peak rate of 10,000 queries per second (QPS). Each inference on a single TPU v5e takes approximately 20ms under optimal load. Due to the high arrival rate and the fixed service time per TPU, you observe a significant increase in queueing delays as traffic approaches capacity.
 question: How many TPU v5e devices and what queueing strategy would you use to serve 10,000 QPS with 50 ms average latency and 150 ms P99?
 details:
-  realistic_solution: Start from capacity, then add latency headroom. A 20 ms service time is 50 QPS per TPU, so 10,000 QPS needs 200 TPUs at 100% utilization. The average-latency budget leaves about 30 ms for queueing, and the P99 budget leaves about 130 ms for queueing. Keeping utilization around 70% gives about 286 TPUs, or 86 devices of headroom above the 200-Erlang offered load, which is a conservative many-server staffing point until trace-based M/M/c or simulation results justify going higher. Use least-outstanding-requests or power-of-two-choices load balancing, short per-TPU queues with deadline admission, and autoscaling on queue age, mean latency, and P99 burn rate. Requests that cannot start with enough time left in the 150 ms budget should be shed or routed elsewhere rather than sitting in FIFO.
+  realistic_solution: Start from capacity, then add latency headroom. A 20 ms service time is 50 QPS per TPU, so 10,000 QPS needs 200 TPUs at 100% utilization. The average-latency budget leaves about 30 ms for queueing, and the P99 budget leaves about 130 ms for queueing. Keeping utilization around 70% gives about 286 TPUs, a conservative many-server staffing point where burst absorption and service-time variance have room before queues grow nonlinearly. Use deadline-aware least-outstanding-requests or power-of-two-choices load balancing, short per-TPU queues, and admission control tied to remaining latency budget. Requests that cannot start with enough time left in the 150 ms budget should be shed or routed elsewhere rather than sitting in FIFO.
   common_mistake: |
     **The Pitfall:** Ignoring queueing delays and static provisioning based only on single-device inference time.
     **The Rationale:** Candidates calculate theoretical minimums and assume 100% utilization is safe, ignoring traffic bursts.
@@ -29,8 +29,8 @@ details:
     - Headroom sizing: c >= 10,000 / (50 * 0.70) = 285.7, so provision 286 TPUs.
     - At 286 TPUs, aggregate service capacity = 286 * 50 = 14,300 QPS.
     - Average utilization at peak = 10,000 / 14,300 = 0.70.
-    - Offered load is arrival rate * service time = 10,000 * 0.020 = 200 Erlangs, so 286 TPUs provide 86 spare servers, about 6.1 * sqrt(200) above the mean load.
-    - That many-server headroom is intended to keep mean queueing well below the 30 ms average budget; validate the exact mean and P99 with an M/M/c calculation or trace simulation.
+    - Offered load is arrival rate * service time = 10,000 * 0.020 = 200 Erlangs; provisioning 286 servers means the offered load is 70% of service capacity instead of driving the many-server system near saturation.
+    - This headroom is a utilization target, not a closed-form P99 proof. Validate mean and P99 queueing delay with an M/M/c model or trace simulation using measured service-time variance.
     - Queueing strategy: cap queue age to the latency budget left after service, about 150 ms - 20 ms = 130 ms, with a tighter operational alert well before that.
 
     **Conclusion & Interpretation:**

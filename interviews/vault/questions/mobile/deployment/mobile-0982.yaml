@@ -8,10 +8,11 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: TFLite Mobile NPU CPU Fallback and Graph Fragmentation
-scenario: A TFLite model (EfficientNet-Lite0, 4.7M params, 390M MACs) converts to a mobile NPU. Initial deployment shows 45ms latency vs. 8ms target. Profile shows 60% of ops run on the NPU and 40% on CPU due to unsupported ops.
+scenario: A TFLite model (EfficientNet-Lite0, 4.7M params, 390M MACs) converts to a mobile NPU. Initial deployment shows 45ms latency vs. 8ms target. Profile shows 60% of ops run on the NPU and 40% on CPU due to unsupported ops, with 10ms in NPU subgraphs, 22ms in CPU fallback kernels, and 13ms in delegate-boundary copies and scheduling.
 question: Why does an EfficientNet-Lite0 TFLite model converted through the SDK show 45 ms latency instead of the 8 ms target?
 details:
-  realistic_solution: The latency gap is primarily caused by unsupported operators fragmenting the graph and forcing 40% of execution onto CPU kernels. The CPU work is slower than the NPU path, and each boundary between delegated and non-delegated subgraphs adds scheduling and activation-copy overhead. The fix is to inspect the delegate partitioning report, replace or fold unsupported ops, and use quantization/operator choices that let the NPU execute larger fused subgraphs. Full NPU coverage is not automatically required, but the current 40% fallback is large enough that the 8ms target is unlikely without reducing fallback and transfer overhead.
+  realistic_solution: |
+    The latency gap is primarily caused by unsupported operators fragmenting the graph and forcing 40% of execution onto CPU kernels. The measured profile already accounts for the gap: 10ms NPU work plus 22ms CPU fallback plus 13ms delegate-boundary copies and scheduling equals the observed 45ms. The fix is to inspect the delegate partitioning report, replace or fold unsupported ops, and use quantization/operator choices that let the NPU execute larger fused subgraphs. Full NPU coverage is not automatically required, but the current fallback and boundary overhead are large enough that the 8ms target is unlikely without reducing unsupported ops and transfers.
   common_mistake: |
     **The Pitfall:** Adding more DSP acceleration without identifying specific unsupported ops.
     **The Rationale:** Candidates assume performance can be fixed by throwing more hardware at it rather than looking at CPU fallback caused by operations like Swish.
@@ -20,15 +21,17 @@ details:
     **Assumptions & Constraints:**
     - Total model MACs: 390M.
     - CPU fallback: 40% of operations.
-    - Effective mobile CPU throughput for these fallback kernels: ~10 GMAC/s.
-    - Boundary copies and delegate scheduling add extra latency beyond raw compute.
+    - Measured NPU subgraph time: 10ms.
+    - Measured CPU fallback time: 22ms.
+    - Measured boundary copy and delegate scheduling overhead: 13ms.
 
     **Calculations:**
     - Fallback MACs: 390M * 0.40 = 156M MACs.
-    - Approximate CPU fallback compute time: 156M MACs / 10 GMAC/s = 0.0156 seconds (15.6ms).
-    - 15.6ms is already above the 8ms target before NPU subgraphs, activation transfers, and runtime scheduling are added.
+    - End-to-end measured latency: 10ms NPU + 22ms CPU fallback + 13ms boundary/scheduling = 45ms.
+    - Even eliminating all boundary overhead would leave 10ms + 22ms = 32ms, still above the 8ms target.
+    - To reach 8ms, the model needs larger delegated NPU subgraphs and much lower CPU fallback, not just a faster conversion command.
 
     **Conclusion & Interpretation:**
-    - **Result: CPU fallback alone can consume ~16ms under the stated throughput assumption.** The observed 45ms is therefore plausibly explained by a fragmented graph with slow fallback kernels and transfer overhead, so the practical fix is to remove unsupported ops, improve fusion, and verify delegate coverage.
+    - **Result: Fragmentation-bound deployment.** The observed 45ms is directly explained by measured CPU fallback and delegate-boundary overhead, so the practical fix is to remove unsupported ops, improve fusion, and verify delegate coverage.
 status: published
 provenance: imported

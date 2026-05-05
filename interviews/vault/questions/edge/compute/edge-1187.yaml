@@ -9,39 +9,40 @@ bloom_level: apply
 phase: both
 title: 'Edge Transformer Cost Realization: FLOPs per Token for Small Transformers'
 scenario: A team is deploying Phi-3-Mini (3.8B params, 32 layers, hidden=2048, FFN=8192, heads=32) for batch=1 decode on a Jetson Orin. The sequence length is 512.
-question: What are the exact decode FLOPs per token for Phi-3-Mini, how do they compare to the 2N approximation, and is the Jetson Orin compute- or bandwidth-bound?
+question: Using the stated Phi-3-Mini layer shape, what are decode FLOPs per token versus 2N, and is Orin compute- or bandwidth-bound?
 details:
   realistic_solution: |
-    The dense per-token decode FLOPs are about 3.36G for this simplified Phi-3-Mini shape:
+    For the stated layer shape, the dense per-token decode FLOPs are about 3.36G:
     1. QKV Projections: 3 * (2 * 1 * 2048^2) = 25.17M FLOPs
     2. Attention (Q*K and Scores*V for seq=512): 2 * (2 * 32 * 512 * 64) = 4.19M FLOPs
     3. Output Projection: 2 * 1 * 2048^2 = 8.39M FLOPs
     4. FFN: 2 * (2 * 1 * 2048 * 8192) = 67.11M FLOPs
-    Total per layer: ~104.86M FLOPs. For 32 layers: ~3.36G FLOPs.
-    The 2N approximation gives 2 * 3.8B = 7.6G FLOPs, so it is 7.6 / 3.36 = 2.26x higher than this explicit layer-level count. Compute time at 275 TOPS is only 3.36G / 275T = 0.012 ms. Separately, moving an INT8 3.8GB weight set from LPDDR at 102.4 GB/s would take 37.1 ms, so batch=1 decode is dominated by weight/KV memory movement rather than arithmetic throughput.
+    Total per layer: ~104.86M FLOPs. For 32 layers: ~3.36G FLOPs/token. The 2N approximation gives 2 * 3.8B = 7.6G FLOPs/token, so it is 7.6 / 3.36 = 2.26x higher than this explicit count from the stated dimensions. Compute time at 275 TOPS is only 3.36G / 275T = 0.012 ms. Separately, touching a 3.8GB INT8 weight set from LPDDR at 102.4 GB/s would take 37.1 ms before KV-cache reads and kernel overheads, so batch=1 decode is dominated by memory movement rather than arithmetic throughput.
   common_mistake: |
     **The Pitfall:** Using the 2N approximation for decode FLOPs and assuming the system is compute-bound.
     **The Rationale:** Candidates often memorize 2N from training/prefill calculations but forget that decode is fundamentally a memory-bound operation where batch size is 1 and weights must be fully loaded for a single token.
     **The Consequence:** Proposing compute optimizations (like sparsity) that will not improve latency, while ignoring memory bandwidth bottlenecks.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Architecture: 32 layers, hidden=2048, FFN=8192, heads=32. Sequence=512.
+    - Architecture from the prompt: 32 layers, hidden=2048, FFN=8192, heads=32, head_dim=64. Sequence=512.
     - Compute: 275 TOPS INT8.
     - Bandwidth: 102.4 GB/s.
+    - Count one generated token at batch=1; attention scales with the existing 512-token KV context.
 
     **Calculations:**
     - QKV Projections: 3 * (2 * 2048^2) = 25.17M FLOPs.
     - Attention: 2 * (2 * 32 * 512 * 64) = 4.19M FLOPs.
     - Output Projection: 2 * 2048^2 = 8.39M FLOPs.
     - FFN: 2 * (2 * 2048 * 8192) = 67.11M FLOPs.
-    - Total exact decode compute: 32 * 104.86M = 3.36G FLOPs/token.
+    - Per-layer total: 25.17M + 4.19M + 8.39M + 67.11M = 104.86M FLOPs.
+    - Decode compute from stated layer shape: 32 * 104.86M = 3.36G FLOPs/token.
     - 2N approximation: 2 * 3.8B params = 7.6G FLOPs/token.
     - Approximation ratio: 7.6G / 3.36G = 2.26x.
     - Compute time: 3.36G FLOPs / 275 TOPS = 0.012 ms.
-    - Separate weight-streaming check: 3.8 GB INT8 weights / 102.4 GB/s = 37.1 ms.
+    - Separate weight-streaming lower bound: 3.8 GB INT8 weights / 102.4 GB/s = 37.1 ms before KV-cache and kernel overheads.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.36G exact decode FLOPs/token; 2N is a 2.26x overestimate.** The arithmetic time is tiny compared with the 37.1ms LPDDR weight-streaming bound, so batch=1 decode is bandwidth-bound.
+    - **Result: 3.36G decode FLOPs/token from the stated shape; 2N is 2.26x higher.** The arithmetic time is tiny compared with the 37.1ms LPDDR weight-touch bound, and KV-cache reads add more memory traffic, so batch=1 decode is bandwidth-bound.
 status: published
 provenance: imported
 requires_explanation: false

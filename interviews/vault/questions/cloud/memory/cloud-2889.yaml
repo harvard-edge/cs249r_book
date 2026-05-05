@@ -21,14 +21,17 @@ details:
     **The Consequence:** Setting a rigid memory boundary that causes jobs to randomly OOM during training spikes.
   napkin_math: |
     **Assumptions & Constraints:**
-    - H100 80 GB has about 80 GB decimal, or about 74.5 GiB, of HBM before framework/runtime reservations.
-    - Reserve at least 10% HBM for fragmentation, CUDA context, communication buckets, and fused-kernel workspaces.
-    - Example 7B job after sharding leaves 45 GiB available for activations.
-    - Example 70B job after sharding leaves 28 GiB available for activations.
+    - Use decimal GB consistently because GPU SKUs are sold as 80 GB HBM.
+    - Reserve at least 10% of HBM for fragmentation, CUDA context, communication buckets, and fused-kernel workspaces.
+    - Each job must provide stored layer count, bytes per stored activation layer, active segment workspace, and non-activation memory after sharding.
+
     **Calculations:**
-    - 7B estimate: 8 stored layers * 640 MiB/layer * 1.25 safety = 6400 MiB = 6.25 GiB. Admit because 6.25 GiB < 45 GiB.
-    - 70B estimate: 10 stored layers * 1280 MiB/layer * 1.25 safety = 16000 MiB = 15.6 GiB. Admit only if weights, optimizer, gradients, and communication buffers leave at least 15.6 GiB activation headroom on the chosen GPU SKU.
-    - If the same 70B job lands on a smaller-memory SKU or runs with larger B or S, the scheduler recomputes the budget and can require smaller micro-batches, more checkpointing, stronger sharding, or a different placement.
+    - Target GPU budget: 80 GB * 0.90 = 72 GB usable after scheduler reserve.
+    - Remaining activation headroom per GPU: 72 GB - weights - optimizer_state - gradients - communication_buckets - runtime_buffers.
+    - Requested activation budget: (stored_layers * bytes_per_stored_layer + active_segment_workspace + non_recomputed_intermediates) * safety_factor.
+    - Admit the job only if requested activation budget <= remaining activation headroom.
+    - If the inequality fails, require smaller micro-batches, shorter sequence length, more checkpointing, stronger sharding, FlashAttention/fused kernels, or a different placement.
+
     **Conclusion & Interpretation:**
     - **Result: Scheduler-Enforced Activation Reservation**. The policy admits jobs based on remaining per-GPU HBM after all non-activation allocations, not on a fixed per-process fraction or a claim that the examples always fit.
 status: published

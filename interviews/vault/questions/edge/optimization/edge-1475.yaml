@@ -11,23 +11,26 @@ title: Multi-Model Compilation Strategy for NVIDIA Jetson Orin
 scenario: You are designing the inference compilation pipeline for an autonomous robot running on an NVIDIA Jetson Orin. The system must concurrently execute a CNN-based object detector, a Transformer-based planner, and a sensor fusion model within a strict 60W TDP budget.
 question: How would you map the detector, planner, and fusion graphs across Jetson Orin's GPU and DLAs within the 60W and 32 GB limits?
 details:
-  realistic_solution: The optimal design leverages a compiler like TensorRT to partition the execution graph ahead-of-time based on hardware capabilities. The standard convolution layers of the object detector should be explicitly pinned to the DLAs for power-efficient INT8 execution. Meanwhile, the Transformer's attention mechanisms and any custom operators are assigned to the Ampere GPU. This hardware-aware compilation strategy ensures the 60W TDP is respected by offloading sustained workloads to the DLA, while utilizing unified memory to eliminate host-to-device transfer latency.
+  realistic_solution: The optimal design uses TensorRT to partition each graph ahead of time based on supported operators, precision, and power behavior. Pin DLA-supported INT8 convolutional detector subgraphs to the Orin DLAs for sustained power-efficient execution, keep the Transformer's attention, dynamic shapes, and custom operators on the Ampere GPU, and place the sensor-fusion graph where profiling shows the least contention. Shared LPDDR on Jetson reduces discrete PCIe copies, but it does not eliminate synchronization, cache, or CPU/GPU/DLA movement costs; the design should use explicit graph partitioning, zero-copy or shared buffers where supported, and fixed scheduling budgets to stay inside 60W and 32 GB.
   common_mistake: |
     **The Pitfall:** Compiling all models to run exclusively on the Ampere GPU.
     **The Rationale:** Candidates default to the GPU for all workloads, ignoring the specialized, highly power-efficient DLAs available on the Orin SoC.
     **The Consequence:** This approach spikes power consumption beyond the 60W TDP and causes contention, whereas offloading standard CNN convolutions to the DLA would free up the GPU and lower power draw.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Target platform: Jetson AGX Orin-class 60W mode with GPU plus two DLAs and 32 GB shared LPDDR.
-       - Vendor peak: up to roughly 275 sparse INT8 TOPS, but only supported INT8/DLA operators can use that peak.
-       - Estimated model demand: detector 55 effective TOPS, fusion 45 effective TOPS, planner/transformer 60 effective TOPS.
-       - Sustained utilization target after graph partitioning: about 65% of peak, or roughly 175 effective TOPS.
-    2. **Calculations:**
-       - Total demand: 55 + 45 + 60 = 160 effective TOPS.
-       - Sustained compute margin: 175 - 160 = 15 effective TOPS, so the schedule is tight but feasible if DLA-supported CNN blocks are offloaded.
-       - Memory footprint check: 10 GB weights + 8 GB peak activations + 4 GB runtime/camera buffers = 22 GB, leaving about 10 GB headroom inside 32 GB.
-    3. **Conclusion & Interpretation:**
-       - **Result: Utilization-Bound.** The mapping should reserve DLAs for supported INT8 convolution subgraphs and keep transformer/custom layers on the GPU; fusion is still useful, but the main constraint is keeping accelerators busy within the 60W/32 GB envelope.
+    **Assumptions & Constraints:**
+    - Target platform: Jetson AGX Orin-class 60W mode with an Ampere GPU, two DLAs, and 32 GB shared LPDDR.
+    - Only DLA-supported INT8 convolutional subgraphs should be pinned to DLA; unsupported layers fall back to GPU.
+    - Estimated sustained model demand: detector 55 TOPS-equivalent, fusion 45 TOPS-equivalent, planner/transformer 60 TOPS-equivalent.
+    - Practical sustained capacity is lower than advertised peak and must be validated under the 60W power mode.
+
+    **Calculations:**
+    - Total estimated demand = 55 + 45 + 60 = 160 TOPS-equivalent of useful work.
+    - If the detector's 55 TOPS-equivalent convolutional work is moved to DLA, the GPU-side demand drops from 160 to 105 TOPS-equivalent.
+    - Memory footprint check: 10 GB weights + 8 GB peak activations + 4 GB runtime/camera buffers = 22 GB, leaving about 10 GB headroom inside 32 GB.
+    - The remaining risk is not host-to-device copy elimination; it is DLA/GPU synchronization and unsupported-operator fallback.
+
+    **Conclusion & Interpretation:**
+    - **Result: Partitioning-Bound.** Reserve DLAs for supported INT8 convolution subgraphs, keep transformer/custom layers on the GPU, and use explicit shared-buffer scheduling so power and memory stay within the 60W/32 GB envelope.
 status: published
 provenance: imported
 requires_explanation: true

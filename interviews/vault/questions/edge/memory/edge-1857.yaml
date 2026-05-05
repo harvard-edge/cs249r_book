@@ -11,7 +11,8 @@ title: Memory Hierarchy Tradeoffs for LLM Deployment on an Edge Accelerator
 scenario: You are tasked with deploying a large language model (LLM) quantized to INT8 on an edge inference accelerator. The device offers 400 TOPS INT8 peak compute, 32 GB LPDDR4x memory, about 34 GB/s memory bandwidth, and a strict 75W power budget. The LLM's parameter count is substantial, exceeding the capacity of typical on-chip caches and fast memories.
 question: How do LPDDR4x capacity, bandwidth, latency, and the 75W power limit constrain real INT8 throughput for this large LLM?
 details:
-  realistic_solution: Start with a workload-specific memory model, not peak TOPS divided by bandwidth. A 32B INT8 model would need about 32 GB for weights alone, leaving no practical room in a 32 GB device for KV-cache, activations, runtime buffers, or OS/driver reservations. Even a smaller model that touches 8 GB of weights per generated token has an ideal LPDDR4x transfer floor of roughly 235 ms at 34 GB/s before KV-cache traffic, compute, kernel overhead, and power throttling. Fusion, tiling, smaller batches, shorter context windows, and weight/KV-cache quantization help, but real throughput is constrained jointly by capacity, bandwidth, latency, and the 75W sustained power envelope rather than by the 400 TOPS peak alone.
+  realistic_solution: |
+    Start with a workload-specific memory model, not peak TOPS alone. A 32B INT8 model would need about 32 GB for weights alone, leaving no practical room in a 32 GB device for KV-cache, activations, runtime buffers, or OS/driver reservations. The 400 TOPS peak also requires very high operational intensity: with 34 GB/s of LPDDR4x bandwidth, the workload would need roughly 11,800 INT8 ops per byte fetched to stay compute-bound. Autoregressive LLM inference often falls below that without strong weight reuse, batching, tiling, and cache locality, while KV-cache traffic grows with context. Fusion, smaller batches, shorter context windows, and weight/KV-cache quantization help, but real throughput is constrained jointly by capacity, bandwidth reuse, memory latency, and the 75W sustained power envelope.
   common_mistake: |
     **The Pitfall:** Overemphasizing peak compute (TOPS) while ignoring memory bandwidth.
     **The Rationale:** Candidates often assume memory access is infinitely fast or ignore the power cost of memory transfers, focusing purely on theoretical INT8 throughput.
@@ -20,16 +21,16 @@ details:
     **Assumptions & Constraints:**
     - Compute capacity: 400 TOPS INT8 peak.
     - LPDDR4x bandwidth: 34 GB/s peak.
-    - Example INT8 LLM working set touched per generated token: 8 GB of resident weights plus KV-cache reads/writes.
     - Capacity: 32 GB total for weights, KV-cache, activations, runtime buffers, and OS/driver reservations.
 
     **Calculations:**
-    - Weight-streaming floor = 8 GB / 34 GB/s = 0.235 s = 235 ms per token before KV-cache and kernel overhead.
     - A 32B-parameter INT8 model is about 32 GB for weights alone, so a 32 GB memory limit cannot hold it plus KV-cache, activations, runtime buffers, and OS/driver reservations.
+    - Operational intensity needed to reach peak compute = 400e12 ops/s / 34e9 bytes/s = about 11,765 ops/byte.
+    - If the decode workload cannot reuse fetched weights and KV blocks enough to approach that intensity, LPDDR4x bandwidth rather than 400 TOPS sets throughput.
     - The 75W envelope limits sustained memory and compute clocks, so measured bandwidth and TOPS may be below peak during continuous generation.
 
     **Conclusion & Interpretation:**
-    - **Result: workload memory-bound unless data reuse is high and the model comfortably fits.** Capacity limits model/context size, bandwidth sets a per-token latency floor, latency hurts small-batch generation, and the 75W limit caps sustained throughput.
+    - **Result: workload memory-bound unless data reuse is high and the model comfortably fits.** Capacity limits model/context size, bandwidth and reuse determine the achievable token rate, latency hurts small-batch generation, and the 75W limit caps sustained throughput.
 status: published
 provenance: imported
 requires_explanation: false

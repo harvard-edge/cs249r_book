@@ -13,15 +13,15 @@ question: How would you apply queueing theory to analyze performance, determine 
 details:
   realistic_solution: |
     The solution involves several steps:
-    1.  **Characterize Arrival and Service Rates:** Monitor the request arrival rate (λ) and the GPU's service rate (μ) for your LLM inference. Understand their distributions, not just averages (e.g., using P90, P99 for arrival rates).
-    2.  **Apply Little's Law (L = λW):** Use Little's Law to relate average number of requests in the system (L), average arrival rate (λ), and average time a request spends in the system (W). This helps in understanding the current system's state.
-    3.  **Queueing Model Selection:** For initial analysis, an M/M/1 or M/M/c (for 'c' A100s) queueing model can provide a basic understanding of expected waiting times and queue lengths, especially for average cases. For more complex scenarios, consider M/G/1 or simulation.
+    1.  **Characterize Arrival and Service Rates:** Monitor the request arrival rate (λ) and the GPU's service rate (μ) for your LLM inference. Understand their distributions, not just averages.
+    2.  **Set the Tail Budget:** Subtract measured P99 service time and non-GPU overhead from the 200 ms P99 target to get the queueing budget.
+    3.  **Model or Simulate Tails:** Use M/M/1 or M/M/c only as a first-pass tail check; for production, replay traces or simulate with the measured service-time distribution.
     4.  **Capacity Planning & Queue Depth Sizing:**
-        *   Determine the maximum sustainable arrival rate based on the available A100 service capacity, but keep utilization below the measured tail-latency knee.
-        *   Using the P99 latency target (200ms) and the GPU's average service time (1/μ), calculate the maximum allowable waiting time in the queue.
-        *   Size queue depth from the latency budget: queue_depth_per_gpu ≈ floor(λ_per_gpu * Wq_budget), where Wq_budget is the remaining P99 budget after service time and non-GPU overhead. This is the largest queue that can wait without violating the deadline, not the queue that maximizes throughput.
-        *   If traffic exceeds that queue depth, either add A100 capacity, route to a less loaded worker, or shed/defer requests. A deeper FIFO queue reduces drops but converts bursts into P99 violations.
-        *   Consider implementing adaptive batching and dynamic queue management strategies to optimize GPU utilization while respecting latency constraints.
+        *   Choose a per-GPU arrival cap whose modeled or simulated P99 wait fits the queueing budget.
+        *   Compute required A100 count as ceil(peak_arrival_rate / safe_per_gpu_arrival_rate).
+        *   Size queue depth from the deadline budget: queue_depth_per_gpu ≈ floor(safe_per_gpu_arrival_rate * Wq_budget). This is a deadline admission cap, not a throughput target.
+        *   If traffic exceeds that queue depth, add A100 capacity, route to a less loaded worker, or shed/defer requests. A deeper FIFO queue reduces drops but converts bursts into P99 violations.
+        *   Use adaptive batching only when the batch wait still fits the remaining deadline.
     5.  **Monitoring and Feedback Loop:** Continuously monitor actual arrival rates, service times, queue lengths, and end-to-end latencies. Use this data to refine queueing parameters and validate capacity plans.
   common_mistake: |
     **The Pitfall:** Focusing only on average service time and targeting near 100% hardware utilization.
@@ -36,13 +36,15 @@ details:
 
     **Calculations:**
     - P99 queueing budget = 200 ms - 20 ms service - 20 ms overhead = 160 ms.
-    - At 40 RPS per A100, utilization ρ = 40/50 = 80%.
-    - M/M/1 mean queue wait check: Wq_mean = ρ / (μ * (1 - ρ)) = 0.8 / (50 * 0.2) = 80 ms, which leaves little room for P99.
-    - At 48 RPS per A100, Wq_mean = 0.96 / (50 * 0.04) = 480 ms, so P99 will violate 200 ms.
-    - Queue-depth cap at 40 RPS from the P99 wait budget: floor(40 * 0.160) = 6 waiting requests per GPU, with a lower cap if measured P99 service time exceeds 20 ms.
+    - P99 queueing budget = 200 ms - 20 ms service - 20 ms overhead = 160 ms.
+    - For a first-pass M/M/1 tail check, P(Wq > t) = ρ * exp(-(μ - λ) * t), where ρ = λ / μ.
+    - At λ = 25 RPS per A100, ρ = 0.50 and P(Wq > 160 ms) = 0.50 * exp(-25 * 0.160) ≈ 0.009, just under 1%.
+    - At λ = 40 RPS per A100, ρ = 0.80 and P(Wq > 160 ms) = 0.80 * exp(-10 * 0.160) ≈ 0.162, so P99 will violate 200 ms.
+    - Safe first-pass capacity is therefore about 25 RPS per A100, and required GPUs = ceil(peak_RPS / 25).
+    - Queue-depth cap from the deadline budget: floor(25 * 0.160) = 4 waiting requests per GPU, with a lower cap if measured P99 service time exceeds 20 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: keep per-GPU utilization below the high-queueing regime and cap FIFO depth around the latency budget, about 6 waiting requests at 40 RPS in this example.**
+    - **Result: use about 25 RPS per A100 as a first-pass safe cap, provision ceil(peak_RPS / 25) GPUs, and cap the per-GPU queue around 4 waiting requests before routing or shedding.** Validate the exact cap with measured traces.
 status: published
 provenance: imported
 requires_explanation: false

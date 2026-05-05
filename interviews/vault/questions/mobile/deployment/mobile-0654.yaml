@@ -12,7 +12,7 @@ scenario: You are the tech lead for an AI Co-Pilot in an EV. The goal is a low-l
 question: What are the three main pillars of your technical plan to bridge this gap, how do they interact, and what are the expected quantitative gains from each?
 details:
   realistic_solution: |
-    Use three interacting pillars that solve memory first, then latency. Pillar 1: distill the 7B model into an automotive 1B-1.5B assistant with retrieval/templates for vehicle-specific facts; this cuts FP16 weights from 14 GB to about 2-3 GB before quantization and removes the impossible raw-7B memory target. Pillar 2: apply mixed quantization and runtime memory controls: INT4 weight-only quantization for most linear layers, INT8/FP16 for sensitive activations, GQA or MQA, capped context, and paged/quantized KV cache. This brings weights to roughly 0.5-0.75 GB and keeps the active footprint under 2 GB with KV cache and runtime buffers. Pillar 3: optimize serving for TTFT with prompt prefill caching, fused kernels, a small draft model for speculative decoding, and deadline-aware cancellation. Distillation makes the model fit, quantization and KV controls keep it resident, and serving optimizations reduce TTFT; speculative decoding is useful only after the memory architecture is viable.
+    Use three interacting pillars that solve memory first, then latency. Pillar 1: distill the 7B model into an automotive 1B-1.5B assistant with retrieval/templates for vehicle-specific facts; this cuts FP16 weights from 14 GB to about 2-3 GB before quantization and removes the impossible raw-7B memory target. Pillar 2: apply mixed quantization and runtime memory controls: INT4 weight-only quantization for most linear layers, INT8/FP16 for sensitive activations, GQA or MQA, capped context, and paged/quantized KV cache. This cuts deployed weights to roughly 0.5-0.75 GB and leaves about 1.25-1.5 GB for KV cache, activations, runtime buffers, and fragmentation inside the 2 GB process budget. Pillar 3: optimize serving for TTFT with prompt prefill caching, fused kernels, a small draft model for speculative decoding, and deadline-aware cancellation. Distillation makes the model plausible, quantization and KV controls make it resident, and serving optimizations attack TTFT; their exact latency gain must be measured on the target SoC.
   common_mistake: |
     **The Pitfall:** Listing disconnected, individual optimization techniques.
     **The Rationale:** Candidates suggest point solutions like "we'll use INT8" without grasping that a 7B model fundamentally cannot run on 2GB RAM.
@@ -28,11 +28,13 @@ details:
     - Quantized Size (INT4): 7B params * 0.5 bytes = 3.5 GB.
     - Distilled FP16 size: 1.2B * 2 bytes = 2.4 GB.
     - Distilled INT4 weight size: 1.2B * 0.5 bytes = 0.6 GB.
-    - KV cache, activations, runtime buffers, and fragmentation allowance: about 0.9-1.1 GB with capped context and GQA.
-    - Total active footprint: 0.6 GB + 1.0 GB = about 1.6 GB, leaving roughly 0.4 GB headroom.
-    - TTFT target: if cached prefill and fused kernels reduce prefill to about 120 ms and draft/speculative decode adds the first accepted token in 40-60 ms, TTFT is about 160-180 ms.
+    - Pillar 1, distillation gain: FP16 weights drop from 14 GB to 2.4 GB, a 5.8x reduction before quantization.
+    - Pillar 2, quantization gain on the distilled model: 2.4 GB FP16 to 0.6 GB INT4 weights, a further 4x weight reduction.
+    - Runtime allowance after distilled INT4 weights: 2.0 GB budget - 0.6 GB weights = 1.4 GB for KV cache, activations, runtime buffers, and fragmentation.
+    - With capped context and GQA/MQA, the design target is to keep those non-weight buffers below 1.4 GB; the exact split must be profiled because the scenario does not specify context length or KV geometry.
+    - Pillar 3, TTFT gain: fused kernels, cached static prompts, and speculative decoding are latency optimizations to close the remaining gap to sub-200ms, but any 160-180ms TTFT number is an illustrative target, not derivable from the provided constraints alone.
 
     **Conclusion & Interpretation:**
-    - **Result:** INT4 on the raw 7B still breaches the 2GB limit. The deployable plan is distillation to about 1.2B parameters, mixed quantization plus KV-cache controls to fit around 1.6GB, and serving optimizations to keep TTFT below 200ms.
+    - **Result:** INT4 on the raw 7B still breaches the 2GB limit. The deployable plan is distillation to about 1.2B parameters, mixed quantization plus KV-cache controls that leave 1.4GB for non-weight memory, and measured serving optimizations to reach the sub-200ms TTFT SLA.
 status: published
 provenance: imported

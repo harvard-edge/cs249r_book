@@ -11,8 +11,8 @@ title: Staged Speculation for Ultra-Long Generation
 scenario: 'You are generating a 10K-token response (long-form report) from a 405B model on 8x H100. At 80ms/token autoregressive, this takes 800 seconds. With K=5 speculation (alpha=0.78), it takes ~270 seconds. Design a staged speculation system that adapts strategy as the generation progresses through three phases: (1) low-entropy opening, (2) high-entropy body, (3) formulaic conclusion.'
 question: How should speculation be staged across a 10K-token 405B generation, and why does tree speculation help most in the body?
 details:
-  realistic_solution: 'Use a staged policy, but do not use the same linear K everywhere. Track rolling acceptance rate, target entropy, and rejection streaks to choose the mode. Opening tokens 1-500 are predictable, so use linear speculation with K=12 and alpha≈0.90: E=(1-0.90^13)/0.10=7.46 tokens, round time=12x3+80=116ms, rate=64.3 tok/s, time=7.8s. Body tokens 500-8500 dominate the run and have lower alpha≈0.72; when rolling linear acceptance drops below about 0.75 or rejections cluster after topic shifts, switch to tree speculation rather than just increasing K. A 12-draft-token tree that returns about 4.5 accepted tokens costs 12x3+80=116ms, rate=38.8 tok/s, time=206.2s. Conclusion tokens 8500-10000 are formulaic; when acceptance recovers above about 0.82 and entropy falls, return to linear speculation with K=10 and alpha≈0.85: E=(1-0.85^11)/0.15=5.55, round time=110ms, rate=50.5 tok/s, time=29.7s. Total staged time is about 243.7s. Tree speculation helps most in the body because low-entropy
-    openings and conclusions already accept long linear runs, while the body has more branching uncertainty; exploring several likely continuations raises useful accepted work per verification round.'
+  realistic_solution: 'Use a staged policy, but do not use the same linear K everywhere. Track rolling acceptance rate, target entropy, and rejection streaks to choose the mode. For linear speculation, assume K draft tokens plus the target-model token can be emitted per verification round, and alpha is the probability that each next drafted token remains on the accepted path. Opening tokens 1-500 are predictable, so use linear speculation with K=12 and alpha≈0.90: E[tokens/round]=sum_{i=0}^{12} alpha^i=(1-0.90^13)/0.10=7.46, round time=12x3+80=116ms, rate=64.3 tok/s, time=7.8s. Body tokens 500-8500 dominate the run and have lower alpha; switch to tree speculation when rolling linear acceptance falls below about 0.75 or rejections cluster after topic shifts. Under the stated 12-draft-token budget, a tree that returns about 4.5 useful tokens per verification round has the same 116ms round cost, rate=38.8 tok/s, time=206.2s. Conclusion tokens 8500-10000 are formulaic; when acceptance recovers
+    above about 0.82 and entropy falls, return to linear speculation with K=10 and alpha≈0.85: E=5.55, round time=110ms, rate=50.5 tok/s, time=29.7s. Total staged time is about 244s under these assumptions. Tree speculation helps most in the body because low-entropy openings and conclusions already accept long linear runs, while the body has more branching uncertainty; exploring several likely continuations raises useful accepted work per verification round.'
   common_mistake: |
     **The Pitfall:** Using a single speculation strategy for the entire 10K generation.
     **The Rationale:** The acceptance rate and optimal K vary dramatically across the generation.
@@ -26,9 +26,10 @@ details:
     - Switch modes using rolling acceptance rate, target entropy, and rejection streaks.
 
     **Calculations:**
-    - Opening: E=(1-0.90^13)/0.10=7.46. Round=116ms. Rate=64.3 tok/s. Time=500/64.3=7.8s.
-    - Body tree: E≈4.5. Round=(12*3)+80=116ms. Rate=38.8 tok/s. Time=8000/38.8=206.2s.
-    - Conclusion: E=(1-0.85^11)/0.15=5.55. Round=110ms. Rate=50.5 tok/s. Time=1500/50.5=29.7s.
+    - Linear model: with K drafted tokens, expected emitted tokens per round is sum_{i=0}^K alpha^i. The i=0 term is the target-model token produced by the verification pass.
+    - Opening: E=sum_{i=0}^{12} 0.90^i=(1-0.90^13)/0.10=7.46. Round=116ms. Rate=7.46/0.116=64.3 tok/s. Time=500/64.3=7.8s.
+    - Body tree: assume the 12-draft-token tree yields about 4.5 useful tokens per verification round after branch pruning. Round=(12*3)+80=116ms. Rate=4.5/0.116=38.8 tok/s. Time=8000/38.8=206.2s.
+    - Conclusion: E=sum_{i=0}^{10} 0.85^i=(1-0.85^11)/0.15=5.55. Round=110ms. Rate=5.55/0.110=50.5 tok/s. Time=1500/50.5=29.7s.
     - Total staged time = 7.8 + 206.2 + 29.7 = 243.7s.
     - Policy transition: use linear speculation while acceptance is high and stable; switch to tree speculation when entropy rises or linear acceptance falls; switch back when acceptance recovers.
 

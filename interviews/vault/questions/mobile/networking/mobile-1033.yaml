@@ -14,7 +14,7 @@ details:
   realistic_solution: |
     Define peak as the bandwidth needed to produce the worst-case decode token at a 50ms/token service target, and sustained as total modeled LPDDR5X traffic divided by the 60-second conversation. The 3B INT4 weights are about 1.5GB. Each turn adds 200 prompt tokens and 100 output tokens, so the decode context grows from about 200 tokens at the first response to about 3000 tokens at the end.
 
-    Use a resident-weights model: the 1.5GB INT4 weights are kept in LPDDR and are streamed by each generated decode token, while prefill is modeled mainly as one weight pass per turn plus KV writes. With 200 prompt tokens per turn, prefill traffic is about 1.5GB + 200 * 524KB = 1.605GB per turn, or 16.05GB over 10 turns. For decode, the average active context over 1000 response tokens is about 1600 tokens, so average per-token traffic is 1.5GB weight read + 1600 * 524KB KV read = 2.34GB/token. Total modeled decode traffic is about 2338GB, and sustained bandwidth is (2338 + 16.05) / 60 = 39.2GB/s. Peak occurs near the final token: 1.5GB + 3000 * 524KB = 3.07GB/token; at 50ms/token that requires 61.4GB/s, below the 77GB/s bus but with limited headroom.
+    Use a clearly labeled resident-in-LPDDR model: weights are not copied once per turn, but the decode kernels stream about 1.5GB of INT4 weights from LPDDR for each generated token. Assume the full-layer KV cache contributes about 524KB of read traffic per context token per decode step. With 200 prompt tokens per turn, prefill traffic is approximated as one weight stream plus KV writes: 1.5GB + 200 * 524KB = 1.605GB per turn, or 16.05GB over 10 turns. For decode, the average active context over the 1000 response tokens is ((200 + 249.5) + (2900 + 49.5)) / 2 ≈ 1600 tokens, so average per-token traffic is 1.5GB weight read + 1600 * 524KB KV read = 2.34GB/token. Total modeled decode traffic is about 2338GB, and sustained bandwidth is (2338 + 16.05) / 60 = 39.2GB/s. Peak occurs near the final token: 1.5GB + 3000 * 524KB = 3.07GB/token; at 50ms/token that requires 61.4GB/s, below the 77GB/s bus but with limited headroom.
   common_mistake: |
     **The Pitfall:** Computing only weight bandwidth.
     **The Rationale:** Candidates calculate the bandwidth needed to load the weights but ignore KV-cache growth, forgetting that the cache accumulates across turns.
@@ -22,11 +22,14 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 3B params (INT4, 1.5 GB).
-    - KV Cache: 524 KB/token.
+    - Decode model: weights stay resident in LPDDR but are streamed by each generated token.
+    - KV Cache read traffic approximation: 524 KB per context token per decode step.
     - Turns: 10 (200 tokens prefill, 100 tokens decode each).
 
     **Calculations:**
-    - Decode context ranges from ~200 to ~3000 tokens; average over the 1000 decode tokens is ~1600 tokens.
+    - Turn 1 average decode context: 200 prompt tokens + 49.5 generated-token average = 249.5 tokens.
+    - Turn 10 average decode context: 10*200 prompt tokens + 9*100 prior response tokens + 49.5 generated-token average = 2949.5 tokens.
+    - Average over the 1000 decode tokens: (249.5 + 2949.5) / 2 = 1599.5 ≈ 1600 tokens.
     - Average decode read per token under resident weights streamed by each decode step: 1.5 GB weights + (1600 * 524 KB) KV = 2.34 GB.
     - Total decode data: 1000 tokens * 2.34 GB = 2,338 GB.
     - Total prefill data: 10 turns * (1.5 GB + 200 * 524 KB) = 16.05 GB.
@@ -34,7 +37,7 @@ details:
     - Peak bandwidth requirement at max context: 1.5 GB + (3000 * 524 KB) = 3.07 GB/token. At a 50ms/token target, 3.07 GB / 0.05s = 61.4 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: 39.2 GB/s sustained and 61.4 GB/s peak at 50ms/token.** The workload fits under a 77 GB/s LPDDR5X peak in this model, but decode near the end of the conversation has little bandwidth headroom once runtime overhead and other apps are included.
+    - **Result: about 39.2 GB/s sustained and 61.4 GB/s peak at 50ms/token under this explicit streaming model.** The workload fits under a 77 GB/s LPDDR5X peak in the model, but the exact number depends on kernel reuse, KV layout, and other app traffic.
 status: published
 provenance: imported
 requires_explanation: false
