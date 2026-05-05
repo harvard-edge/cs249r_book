@@ -7,29 +7,31 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: evaluate
 phase: both
-title: Evaluating Dense Scaling Bottlenecks in Recommendation Systems
+title: CTR MLP Low-Rank Factorization Memory Bandwidth Trade-off
 scenario: You are architecting the CTR (Click-Through Rate) prediction model for a cloud-based ad exchange. The baseline model uses three dense feed-forward layers of dimensions D_in=16384, D_hidden=32768, and D_out=16384. The model is experiencing severe memory bandwidth bottlenecks during serving on standard inference GPUs. An engineer proposes replacing the dense MLP layers with low-rank factorizations (rank r=256) to reduce latency.
-question: "Should you replace the dense CTR MLP layers with rank-256 low-rank factorizations, and what are the bandwidth and capacity trade-offs?"
+question: Should you replace the dense CTR MLP layers with rank-256 low-rank factorizations, and what are the bandwidth and capacity trade-offs?
 details:
-  realistic_solution: 'Approve the low-rank factorization to relieve the memory bandwidth bottleneck, but mandate empirical validation of the offline CTR metrics. The dense scaling causes a quadratic memory footprint cost. By factoring the large weight matrices, the parameter count drops massively, converting a memory-bound operation into a highly efficient one, though at the risk of losing representational capacity.'
+  realistic_solution: Do not approve the rank-256 replacement on bandwidth math alone. Low-rank factorization can sharply reduce weight reads for the 16384x32768 and 32768x16384 matrices, but it also adds an intermediate activation and a second matmul per replaced layer and may reduce model capacity. Treat it as a candidate optimization gated by offline CTR quality, calibration, and end-to-end serving latency measurements.
   common_mistake: |
     **The Pitfall:** Evaluating solely on parameter reduction without checking model capacity or memory bandwidth savings.
     **The Rationale:** Engineers often use low-rank factorization for training efficiency without analyzing inference bandwidth.
     **The Consequence:** Implementing complex low-rank factorizations without guaranteeing they actually solve the serving bottleneck.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Dense dimensions: 16384 x 32768. Low rank r=256.
+    - Dense MLP has two large matrices: 16384 x 32768 and 32768 x 16384.
+    - The middle 32768 x 32768 layer is also considered for the same rank-256 replacement.
     - Memory bandwidth = 600 GB/s.
     - FP16 precision (2 bytes/param).
 
     **Calculations:**
-    - Dense weights = 16384 * 32768 = 536.87M parameters (~1.07 GB).
-    - Dense Memory read time = 1.07 GB / 600 GB/s = ~1.78 ms per layer.
-    - Low-rank weights = (16384 * 256) + (32768 * 256) = 4,194,304 + 8,388,608 = 12,582,912 parameters (~25.17 MB).
-    - Low-rank read time = 0.02517 GB / 600 GB/s = ~0.042 ms.
+    - Dense parameters: (16384 * 32768) + (32768 * 32768) + (32768 * 16384) = 2.15B params ≈ 4.29 GB of FP16 weights.
+    - Dense weight-read lower bound: 4.29 GB / 600 GB/s ≈ 7.16 ms.
+    - Rank-256 parameters: (16384 + 32768) * 256 + (32768 + 32768) * 256 + (32768 + 16384) * 256 = 41.94M params ≈ 83.9 MB.
+    - Low-rank weight-read lower bound: 0.0839 GB / 600 GB/s ≈ 0.14 ms before accounting for extra matmul launches and intermediate activation traffic.
+    - Each replaced layer becomes two matmuls, so compute scheduling, activation reads/writes, and model-quality loss must be measured rather than inferred from weight bytes alone.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory bandwidth requirement is reduced by ~97.6% (Memory-Bound)**. Factorization successfully mitigates the memory bottleneck.
+    - **Result: Conditional Memory Optimization.** Rank-256 factorization cuts the weight-read lower bound by roughly 98%, but approval depends on preserving CTR quality and improving measured end-to-end latency after the added compute and activation overhead.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,22 +11,25 @@ title: LLM Concurrency and KV Cache Thrashing
 scenario: You are mapping the efficiency frontier (throughput vs. latency) for a Llama-3 70B model served on an 8x80GB H100 node. To maximize throughput and lower cost-per-token, the infrastructure team increases the max concurrent requests from 64 to 256. They expect a sub-linear latency increase while moving along the Pareto curve. Instead, p99 Time-To-First-Token (TTFT) spikes from 0.8s to over 12s, and total system throughput decreases by 20% compared to the 64-request baseline.
 question: Why did raising max concurrency from 64 to 256 spike p99 TTFT and reduce throughput on the 8xH100 70B service?
 details:
-  realistic_solution: 'The regression is caused by KV cache thrashing. At 256 concurrent requests, the required KV cache exceeds the available GPU HBM. Instead of crashing, modern inference engines (like vLLM) preempt active decode requests, swapping their KV caches to CPU RAM to make room. The solution is to strictly profile memory usage and cap max concurrency below the HBM threshold, keeping the system on the true efficiency frontier without falling into swapping degradation.'
+  realistic_solution: The regression is caused by KV cache pressure and request preemption. At 256 concurrent 8K requests, the KV cache alone is about 640 GiB for Llama-3 70B with grouped-query attention, before model weights, allocator overhead, and runtime workspace. That exceeds the usable HBM on an 8x80GB node, so the inference engine must preempt requests or spill KV blocks to host memory. The solution is to profile the full memory budget and cap max concurrency below the HBM threshold, keeping the service on the efficiency frontier without falling into swapping degradation.
   common_mistake: |
     **The Pitfall:** Assuming the performance drop is due to an Out-Of-Memory (OOM) crash or hitting pure compute FLOP limits.
     **The Rationale:** Candidates fail to identify the hidden penalties of memory paging, request preemption, and PCIe bottlenecking in modern inference engines (like vLLM).
     **The Consequence:** Pushing the system into severe swapping degradation rather than operating safely on the efficiency frontier.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Llama-3 70B, 8x80GB H100 (640GB total), 256 requests, 8K context, PCIe max 64GB/s
+    - Llama-3 70B, 80 layers, 8 KV heads, 128-dim heads, FP16/BF16 KV cache.
+    - 8x80GB H100 gives 640GB nominal HBM before weights, runtime workspace, and fragmentation.
+    - 256 concurrent requests at 8K context each.
 
     **Calculations:**
-    - KV Cache per token = 2 bytes * 2 * 80 layers * 8 heads * 128 dim = 320 KB
-    - 256 reqs * 8K = 2M tokens
-    - KV memory = 2M * 320 KB = ~640 GB. Model weights = 140 GB. Total = 780 GB
+    - KV cache per token = 2 bytes * 2 (K,V) * 80 layers * 8 KV heads * 128 dim = 327,680 bytes = 320 KiB.
+    - Total cached tokens = 256 * 8,192 = 2,097,152 tokens.
+    - KV memory = 2,097,152 * 320 KiB = 640 GiB (~687 GB decimal).
+    - Model weights are roughly 130-140 GiB in FP16/BF16, so total HBM demand is roughly 770-780 GiB before runtime overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 780 GB (PCIe-Bandwidth-Bound)**. Exceeding the 640GB HBM limit forces KV swapping over the 64GB/s PCIe bus, thrashing throughput.
+    - **Result: HBM capacity exceeded by the 256-request setting.** The service becomes KV-cache-capacity-bound; any host-memory spill or request preemption can then add PCIe traffic and scheduler churn, causing TTFT spikes and lower throughput.
 status: published
 provenance: imported
 requires_explanation: false

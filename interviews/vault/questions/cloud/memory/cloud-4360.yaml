@@ -8,17 +8,17 @@ competency_area: memory
 bloom_level: create
 phase: both
 title: 'MI300X 192GB vs H100 80GB: Multi-Model Serving Density'
-scenario: A serving team needs to host 8 concurrent model replicas of a 13B LLM (FP16 weights) alongside KV cache for 512 concurrent requests at sequence length 10. Each KV cache entry requires 2 × num_layers × num_heads × head_dim × sequence_length × 2 bytes.
-question: Can a single 192GB or 80GB accelerator host 8 concurrent 13B FP16 replicas plus KV cache for 512 requests, and what is the replica density advantage?
+scenario: A serving team needs to host 8 concurrent model replicas of a 13B LLM (FP16 weights) alongside KV cache for 512 total concurrent requests, evenly balanced across replicas, at sequence length 10. Each KV cache entry requires 2 × num_layers × num_heads × head_dim × sequence_length × 2 bytes.
+question: Can a single 192GB or 80GB accelerator host 8 replicas with 512 total requests, and what is the density advantage?
 details:
-  realistic_solution: 'No: 8 concurrent replicas do not fit on either single accelerator. Weight memory per 13B model (FP16) is 13B * 2 bytes = 26GB, so 8 replicas require 208GB for weights before KV cache or runtime overhead. For per-card density, assume a typical 13B geometry of 40 layers, 40 heads, and 128 head dimension. The stated KV formula gives about 8.2MB per request at sequence length 10, or about 4.2GB for 512 requests. With about 2GB overhead, one active replica needs roughly 32.2GB. MI300X (192GB) fits floor(192/32.2) = 5 replicas; H100 (80GB) fits floor(80/32.2) = 2 replicas. The density advantage is 2.5x, but neither card satisfies the 8-replica single-accelerator requirement.'
+  realistic_solution: 'No: 8 concurrent replicas do not fit on either single accelerator. Weight memory per 13B model (FP16) is 13B * 2 bytes = 26GB, so 8 replicas require 208GB for weights before KV cache or runtime overhead. For the stated 512 total requests, each of 8 replicas handles 64 requests. Using a typical 13B geometry of 40 layers, 40 heads, and 128 head dimension, the KV formula gives about 8.2MB per request at sequence length 10, so total cluster KV is about 4.2GB and per-replica KV is about 0.52GB. The requested 8-replica single-card placement therefore needs about 208GB + 4.2GB + runtime overhead, exceeding both 192GB and 80GB. For per-card density under the same even-load assumption, one active replica needs roughly 26GB + 0.52GB KV + 2GB overhead = 28.5GB. MI300X (192GB) fits floor(192/28.5) = 6 replicas; H100 (80GB) fits floor(80/28.5) = 2 replicas. The density advantage is 3x, but neither card satisfies the 8-replica single-accelerator requirement.'
   common_mistake: |
     **The Pitfall:** Calculating only weight memory and ignoring KV cache memory.
     **The Rationale:** Engineers assume models are purely static artifacts.
     **The Consequence:** Severe underprovisioning of memory for multi-request serving, causing Out-Of-Memory errors during traffic spikes.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 13B model (FP16), 512 KV cache requests, sequence length 10.
+    - 13B model (FP16), 512 total KV cache requests evenly split across 8 replicas, sequence length 10.
     - Typical 13B shape: 40 layers, 40 heads, 128 head dimension.
     - Accelerator memory: 192GB vs 80GB.
 
@@ -26,12 +26,14 @@ details:
     - Weights = 13B * 2 bytes = 26GB.
     - Eight replicas need weights alone: 8 * 26GB = 208GB, which exceeds 192GB and 80GB.
     - KV per request = 2 * 40 * 40 * 128 * 10 * 2 bytes = 8,192,000 bytes, about 8.2MB.
-    - KV for 512 requests = 512 * 8.2MB = about 4.2GB.
-    - Total per replica = 26GB + 4.2GB (KV) + 2GB overhead = 32.2GB.
-    - 192GB card = floor(192/32.2) = 5 replicas. 80GB card = floor(80/32.2) = 2 replicas.
+    - Total KV for 512 requests = 512 * 8.2MB = about 4.2GB.
+    - Per-replica KV for 64 requests = 64 * 8.2MB = about 0.52GB.
+    - Requested 8-replica placement = 208GB weights + 4.2GB total KV + runtime overhead, so it exceeds both cards.
+    - Per active replica under this load = 26GB + 0.52GB (KV) + 2GB overhead = about 28.5GB.
+    - 192GB card = floor(192/28.5) = 6 replicas. 80GB card = floor(80/28.5) = 2 replicas.
 
     **Conclusion & Interpretation:**
-    - **Result: 8 Replicas Do Not Fit (Memory-Bound).** The 192GB card still has a 2.5x per-card density advantage over the 80GB card, but the requested 8-replica placement requires more than one accelerator.
+    - **Result: 8 Replicas Do Not Fit (Memory-Bound).** Under the same total-request assumption, the 192GB card has a 3x per-card density advantage over the 80GB card, but the requested 8-replica placement requires more than one accelerator.
 status: published
 provenance: imported
 requires_explanation: false

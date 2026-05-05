@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: training
 title: Evaluating Preemption Overheads in Elastic LLM Training
 scenario: 'You are training a 70B parameter LLM on a spot fleet of 64 nodes. The provider has a 5% hourly node preemption rate. You must choose between two elastic frameworks: Framework A (Global Restart) triggers a rollback to the last checkpoint upon node loss, taking 3 minutes to resume. Framework B (Dynamic Elasticity) resizes data parallel groups in 15 seconds using in-memory state but incurs an 8% persistent memory overhead.'
-question: "Assuming a 15-minute checkpoint interval for Framework A, which framework maximizes goodput over a 14-day run, and why?"
+question: Assuming a 15-minute checkpoint interval for Framework A, which framework maximizes goodput over a 14-day run, and why?
 details:
-  realistic_solution: 'Framework B (Dynamic Elasticity) drastically maximizes goodput. At a 5% hourly preemption rate on 64 nodes, you suffer ~3.2 node failures per hour. Framework A loses over 33 minutes every hour to restart overhead and discarded work, crushing goodput to 44%. Framework B''s in-memory redundancy resolves failures in seconds, yielding 98.6% uptime. Even after factoring in a 10% TFLOPS penalty from the 8% memory overhead, Framework B delivers exactly double the effective goodput.'
+  realistic_solution: Framework B (Dynamic Elasticity) maximizes goodput. At a 5% hourly preemption rate on 64 nodes, the fleet sees about 3.2 node failures per hour. Framework A loses 3 minutes of restart time plus an expected 7.5 minutes of discarded work per failure with a 15-minute checkpoint interval, so it spends about 33.6 minutes per hour not making forward progress. Framework B resolves each failure in about 15 seconds; even after applying a 10% TFLOPS penalty associated with the 8% memory overhead, it delivers about 88.7% effective goodput versus 44.0% for Framework A, roughly a 2x improvement over the 14-day run.
   common_mistake: |
     **The Pitfall:** Over-indexing on the 8% memory overhead of Framework B.
     **The Rationale:** ML engineers are highly trained to guard GPU memory, assuming that any memory overhead necessitates smaller batch sizes and destroys compute throughput.
@@ -29,8 +29,11 @@ details:
        - Framework B downtime per hour: 3.2 * 0.25m = 0.8 minutes.
        - Framework B uptime: (60 - 0.8) / 60 = 98.6%.
        - Framework B effective goodput: 98.6% * 0.90 (compute penalty) = 88.7%.
+       - 14-day run = 336 hours, so Framework A effective work = 336h * 44.0% = 147.8 good hours.
+       - Framework B effective work = 336h * 88.7% = 298.0 good hours.
+       - Ratio = 298.0 / 147.8 = ~2.02x. The duration cancels for normalized goodput, but the full-run totals show the same comparison.
     3. **Conclusion & Interpretation:**
-       - **Result: Framework B (88.7% vs 44.0% Goodput).** The spot cluster is strictly **Fault-Recovery-Bound**. The in-memory redundancy easily pays for its overhead by preventing catastrophic rollback cascades.
+       - **Result: Framework B (88.7% vs 44.0% Goodput, ~2.02x over 14 days).** The spot cluster is **Fault-Recovery-Bound**. Dynamic elasticity's short recovery time and in-memory state overhead pay for themselves by avoiding repeated checkpoint rollback.
 status: published
 provenance: imported
 requires_explanation: false

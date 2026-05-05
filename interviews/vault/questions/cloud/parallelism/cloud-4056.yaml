@@ -8,16 +8,16 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: Gradient Clipping Interaction with AllReduce
-scenario: 'Global gradient norm clipping requires computing the total gradient norm across all GPUs before clipping. This means an extra AllReduce of a single scalar (the local gradient norm) before the main gradient AllReduce.'
+scenario: Global gradient norm clipping requires computing the total gradient norm across all GPUs before clipping. This means an extra AllReduce of a single scalar (the local gradient norm) before the main gradient AllReduce.
 question: What overhead does the scalar norm AllReduce add for global gradient clipping on 256 MI300X GPUs, and can it be overlapped?
 details:
   realistic_solution: |
     Scalar AllReduce: D = 4 bytes (FP32 norm squared). Using recursive halving-doubling (optimal for small messages): T = 2 * log2(256) * 5μs = 2 * 8 * 5μs = 80μs. This is fast in absolute terms but it sits on the critical path: compute_backward -> compute_local_norm -> scalar_AllReduce -> clip_gradients -> gradient_AllReduce. The scalar AllReduce cannot overlap with gradient AllReduce because clipping requires the global norm first. Optimization: (1) Compute local norms per-bucket as gradients become available (during backward pass). (2) Start scalar AllReduce for the global norm while the last layers are still computing backward. (3) Pipeline: local_norm_bucket_1 is ready before backward completes. AllReduce scalar for bucket_1, clip bucket_1, start gradient AllReduce for bucket_1 — all while bucket_2 is still being computed. This converts the sequential dependency into a pipelined flow. Per-bucket overhead: 80μs scalar AllReduce + 5μs clip computation = 85μs. With 32 buckets and pipelining: only one 85μs delay on the critical path (the last bucket), not 32 sequential delays.
   common_mistake: |
     **The Pitfall:** Ignoring the scalar AllReduce overhead because "it is just one number."
-    
+
     **The Rationale:** Candidates assume small data sizes transfer instantly, forgetting that per-step latency and synchronization barriers prevent the gradient AllReduce from starting.
-    
+
     **The Consequence:** Significant dead time on the GPUs during every training step, compounding to a major loss in overall training efficiency.
   napkin_math: |
     **Assumptions & Constraints:**
