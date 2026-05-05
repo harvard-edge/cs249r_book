@@ -64,6 +64,12 @@ vault promote <id> | --all-drafts                 # drafts → published with pr
 Local dev:
 
 ```bash
+vault build --local                               # YAML → vault.db AND mirror corpus.json into staffml/public/data/
+                                                  #   so `cd interviews/staffml && npm run dev` renders local edits
+                                                  #   instead of fetching the production worker. Also writes the
+                                                  #   legacy src/data/corpus.json for build tooling. The StaffML
+                                                  #   predev hook calls this automatically; see
+                                                  #   interviews/staffml/README.md for the full dev workflow.
 vault api --db <path>.db --port 8002              # mirror Worker endpoint surface from local vault.db
 vault serve                                       # Datasette over vault.db (127.0.0.1 only)
 ```
