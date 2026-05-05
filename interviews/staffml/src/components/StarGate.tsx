@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Github, Star, CheckCircle2, ExternalLink, X } from "lucide-react";
+import { Star, CheckCircle2, ExternalLink, X } from "lucide-react";
+import { GithubIcon } from "@/components/GithubIcon";
 import { getStarUrl, markVerified, fetchStarCount } from "@/lib/star-gate";
 
 export default function StarGate({ onVerified }: { onVerified: () => void }) {
@@ -100,7 +101,7 @@ export default function StarGate({ onVerified }: { onVerified: () => void }) {
           onClick={handleStar}
           className="flex items-center justify-center gap-2 w-full py-3 bg-accentBlue text-white font-bold rounded-lg text-sm hover:opacity-90 transition-opacity mb-2"
         >
-          <Github className="w-4 h-4" />
+          <GithubIcon className="w-4 h-4" />
           Star on GitHub
           <ExternalLink className="w-3 h-3 opacity-70" />
         </button>
