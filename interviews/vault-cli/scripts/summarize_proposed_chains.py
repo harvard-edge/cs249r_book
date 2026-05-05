@@ -13,10 +13,7 @@ from collections import Counter
 from pathlib import Path
 
 VAULT_DIR = Path(__file__).resolve().parents[2] / "vault"
-# AI-pipeline staging lives under _pipeline/ (gitignored).
-# See interviews/CLAUDE.md.
-PIPELINE_DIR = VAULT_DIR / "_pipeline"
-DEFAULT = PIPELINE_DIR / "chains.proposed.json"
+DEFAULT = VAULT_DIR / "chains.proposed.json"
 LEVEL_RANK = {"L1": 1, "L2": 2, "L3": 3, "L4": 4, "L5": 5, "L6+": 6}
 
 
@@ -52,9 +49,9 @@ def main() -> int:
             deltas[levels[i+1] - levels[i]] += 1
 
     print("\nstart-level distribution:")
-    for lvl in ("L1", "L2", "L3", "L4", "L5", "L6+"):
-        if lvl in starts:
-            print(f"  {lvl}: {starts[lvl]}")
+    for level in ("L1", "L2", "L3", "L4", "L5", "L6+"):
+        if level in starts:
+            print(f"  {level}: {starts[level]}")
 
     print("\nconsecutive-member level Δ:")
     for d, c in sorted(deltas.items()):

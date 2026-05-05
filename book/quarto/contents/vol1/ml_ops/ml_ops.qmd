@@ -65,13 +65,13 @@ The operational discipline of MLOps exists to close this observability gap, tran
 
 :::
 
-Machine Learning Operations (MLOps)\index{MLOps!emergence} is the engineering discipline that *makes these invisible failures visible*. It synthesizes monitoring, automation, and governance into production architectures that detect degradation, trigger retraining, and maintain system health throughout a model's operational lifetime. Where traditional DevOps assumes deterministic software (same code, same inputs, same outputs), MLOps addresses systems whose correctness depends on training data distributions, learned parameters, and environmental conditions that shift continuously.
+Machine Learning Operations (MLOps)\index{MLOps!emergence} is the engineering discipline that *makes these invisible failures visible*. It synthesizes monitoring, automation, and governance into production architectures that detect degradation, trigger retraining, and maintain system health throughout a model's operational lifetime. Where traditional DevOps [@patrick_debois] assumes deterministic software (same code, same inputs, same outputs), MLOps addresses systems whose correctness depends on training data distributions, learned parameters, and environmental conditions that shift continuously.
 
 A concrete example illustrates *why* this discipline is necessary. Consider deploying a demand prediction system for a ridesharing service. Benchmark results (@sec-benchmarking) show 94 percent accuracy, 15 ms P99 latency, and strong performance across test segments. The team deploys. Week one: excellent. Week four: accuracy has dropped to 88 percent, but the infrastructure metrics show nothing wrong. Week eight: a product manager notices driver dispatch is inefficient; investigation reveals the model has not adapted to a competitor's new promotion that shifted user behavior. The model needed retraining six weeks ago, but no system was watching for this degradation. MLOps provides the framework to detect such drift, trigger retraining, and validate new models before users experience the impact.
 
 The operational mismatch connects directly to the book's analytical foundations. If benchmarking provides the *sensors* for our system, MLOps is the complete *control system*. It closes the *verification gap*\index{Verification Gap!MLOps closure} (the recognition that ML testing is statistical, not deterministic, formalized in @sec-twelve-quantitative-invariants-0dd2) by continuously recalibrating against a changing world. MLOps operationalizes the *degradation equation*\index{Degradation Equation!operational implementation} (formalized in @sec-twelve-quantitative-invariants-0dd2): accuracy decay is not a failure of the code, but an inevitable consequence of the distributional divergence between the world we trained on and the world we serve. It also formalizes interfaces and responsibilities across traditionally isolated domains (data science, machine learning engineering, and systems operations [@amershi2019software]) through continuous retraining, A/B evaluation, graduated rollout, and standardized artifact tracking that makes every deployed model reproducible and auditable.
 
-This chapter focuses on what we term *single-model operations*: the practices required to deploy, monitor, and maintain one ML system in production. This operational unit requires a dedicated term. We define the *ML node*, a complete system comprising data pipelines, feature computation, model training, serving infrastructure, and monitoring for a single machine learning application. Platform operations at larger scale (managing hundreds of models, cross-model dependencies, multi-region coordination, and organization-wide ML platform engineering) constitute advanced topics that build on these single-model foundations.
+This chapter focuses on what we term *single-model operations*: the practices required to deploy, monitor, and maintain one ML system in production. This operational unit requires a dedicated term. We define the *ML node\index{ML Node!definition}*, a complete system comprising data pipelines, feature computation, model training, serving infrastructure, and monitoring for a single machine learning application. Platform operations at larger scale (managing hundreds of models, cross-model dependencies, multi-region coordination, and organization-wide ML platform engineering) constitute advanced topics that build on these single-model foundations.
 
 The chapter proceeds in five stages. First, we formally define MLOps as an engineering discipline and examine the technical debt patterns that accumulate in ML systems, the hidden complexity that makes production ML far more expensive to maintain than to build. Second, we develop the development infrastructure that supports reproducible ML workflows: feature stores that ensure training-serving consistency, CI/CD pipelines adapted for non-deterministic systems, and experiment tracking that manages the combinatorial explosion of hyperparameters, data versions, and code changes. Third, we turn to production operations (monitoring, drift detection, deployment strategies, and incident response) that keep models healthy over their operational lifetime. Fourth, we present a system design and maturity framework that helps organizations assess where they stand and what infrastructure investments will yield the highest returns. Fifth, case studies ground these practices in real-world scenarios that reveal how theoretical principles translate into operational decisions.
 
@@ -85,7 +85,7 @@ Operationalizing machine learning requires coordinating three distinct system bo
 
 **Model-Infrastructure Interface**\index{Model-Infrastructure Interface!environment parity}: The transition from trained weights to scalable service. The challenge is **environment parity**\index{Environment Parity!production deployment}: a model working in a notebook may fail in production due to version mismatches. Model registries and containerization (@sec-ml-operations-model-deployment-serving-63f2) package models with their operational context.
 
-**Production-Monitoring Interface**\index{Production-Monitoring Interface!feedback loop}: The feedback loop enabling self-correction. Because ML systems fail silently through drift rather than crashes, monitoring must provide statistical telemetry\index{Telemetry!ML system observability} back to training. This interface determines **retraining cadence**\index{Retraining Cadence!drift-triggered decisions}: when has the world changed enough to require a new model?
+**Production-Monitoring Interface**\index{Production-Monitoring Interface!feedback loop}: The feedback loop enabling self-correction. Because ML systems fail silently through drift rather than crashes, monitoring must provide statistical telemetry\index{Telemetry!ML system observability} back to training. This interface determines **retraining cadence**\index{Retraining!cadence, drift-triggered decisions}: when has the world changed enough to require a new model?
 
 The infrastructure components, production operations, and maturity frameworks that follow address these three interfaces systematically.
 
@@ -97,7 +97,7 @@ The telemetry[^fn-telemetry-mlops] flowing through these interfaces provides the
 
 ## Principles and Foundations {#sec-ml-operations-mlops-3ea3}
 
-\index{MLOps!DevOps comparison}MLOps builds on DevOps\index{DevOps!MLOps extension} but addresses the specific demands of ML system development and deployment. DevOps succeeded for traditional software by assuming deterministic behavior: the same code with the same inputs produces the same outputs. Machine learning systems violate this assumption because they depend on training data distributions, learned parameters, and environmental conditions that shift over time.
+\index{MLOps!DevOps comparison}MLOps builds on DevOps\index{DevOps!MLOps extension} but addresses the specific demands of ML system development and deployment. DevOps succeeded for traditional software by assuming deterministic behavior: the same code with the same inputs produces the same outputs [@collberg2016repeatability]. Machine learning systems violate this assumption because they depend on training data distributions, learned parameters, and environmental conditions that shift over time.
 
 DevOps integrates and delivers deterministic software. MLOps must manage non-deterministic, data-dependent workflows spanning data acquisition, preprocessing, model training, evaluation, deployment, and continuous monitoring through an iterative cycle connecting design, model development, and operations. Trace the infinity-loop structure in @fig-mlops-diagram to see how these phases feed back into one another continuously. The following definition captures this discipline's scope:
 
@@ -142,7 +142,7 @@ $\bullet$ Monitoring \& Triggering};
 
 ::: {.callout-definition title="MLOps"}
 
-***Machine Learning Operations (MLOps)***\index{MLOps!definition} is the engineering discipline that closes the feedback loop between model behavior and data reality by automating retraining, validation, and deployment in response to measurable production drift.
+***Machine Learning Operations (MLOps)***\index{MLOps!definition} is the engineering discipline that closes the feedback loop between model behavior and data reality by automating retraining, validation, and deployment in response to measurable production drift. [@kreuzberger2023machine]
 
 1.  **Significance (Quantitative):** The cost of *not* closing this loop is measurable. A recommendation model deployed without drift monitoring loses roughly 10–20 percent absolute accuracy within six months as distribution shift accumulates; at $D(P_t \| P_0) > 0.1$ (Jensen-Shannon divergence), observed accuracy drop exceeds five percent in production systems. Automated retraining pipelines reduce mean time to recovery (MTTR) from days to under one hour by triggering retraining when monitored feature statistics cross a threshold, rather than waiting for user complaints.
 2.  **Distinction (Durable):** Unlike **DevOps** (which monitors system availability: uptime, error rates, latency, and succeeds as long as the service responds), MLOps must monitor *predictive correctness*, which can silently degrade to zero while every infrastructure health check stays green.
@@ -158,7 +158,7 @@ The retail company example illustrates a pattern: without systematic operational
 
 #### Principle 1: Reproducibility {#sec-ml-operations-principle-1-reproducibility-d408}
 
-\index{Reproducibility!versioning principle}\index{Artifact Versioning!reproducibility requirement}Every artifact[^fn-artifact-reproducibility] that influences model behavior must be versioned and traceable. This principle extends beyond code versioning to encompass data, configurations, and environments. @eq-model-reproducibility expresses this dependency formally:
+\index{Reproducibility!versioning principle}\index{Artifact!versioning, reproducibility requirement}Every artifact[^fn-artifact-reproducibility] that influences model behavior must be versioned and traceable. This principle extends beyond code versioning to encompass data, configurations, and environments. @eq-model-reproducibility expresses this dependency formally:
 
 [^fn-artifact-reproducibility]: **Artifact**: A model's weights are the deterministic output of a function whose inputs (code, data, configuration) cannot be reverse-engineered from the resulting parameters. Consequently, versioning only the code is a critical failure mode, as a single-byte change in the input data can silently alter millions of parameters in the final model. Without versioning all four artifact classes (code, data, config, and environment), true reproducibility is impossible. \index{Artifact!reproducibility}
 
@@ -244,7 +244,7 @@ For a system serving `{python} SkewEconomics.queries_daily_str` queries daily wi
 
 #### Principle 4: Observable degradation {#sec-ml-operations-principle-4-observable-degradation-87a9}
 
-ML systems must make silent failures\index{Silent Failures!gradual degradation} visible through continuous measurement. Model performance degrades along a continuum rather than failing discretely, requiring the detection mechanisms and response strategies summarized in @tbl-degradation-types:
+ML systems must make silent failures\index{Silent Failure!gradual degradation} visible through continuous measurement. Model performance degrades along a continuum rather than failing discretely, requiring the detection mechanisms and response strategies summarized in @tbl-degradation-types:
 
 | **Degradation Type**     | **Detection Mechanism** | **Response Strategy**    |
 |:-------------------------|:------------------------|:-------------------------|
@@ -337,9 +337,9 @@ The evolution from DevOps to MLOps reflects a core truth: machine learning syste
 
 ## Technical Debt {#sec-ml-operations-technical-debt-system-complexity-2762}
 
-\index{Technical Debt!ML system complexity}The silent failure modes established earlier manifest concretely as technical debt [@sculley2015hidden]: data changes, model interactions, and evolving requirements cause gradual degradation that compounds over time. Unlike code bugs that trigger stack traces, these failures accumulate invisibly across multiple system components, demanding engineering approaches designed specifically for probabilistic systems. Originally proposed in software engineering in the 1990s[^fn-tech-debt-ml], the technical debt metaphor compares shortcuts in implementation to financial debt, trading short-term velocity for ongoing interest payments in maintenance, refactoring, and systemic risk. In ML, this debt extends beyond code to include "hidden" costs unique to statistical modeling and data dependencies. Systematic evaluation rubrics, such as the ML Test Score [@breck2020ml], provide frameworks for quantifying this debt and assessing production readiness across data, model, and infrastructure components.
+\index{Technical Debt!ML system complexity}The silent failure modes established earlier manifest concretely as technical debt [@sculley2015hidden]: data changes, model interactions, and evolving requirements cause gradual degradation that compounds over time. Unlike code bugs that trigger stack traces, these failures accumulate invisibly across multiple system components, demanding engineering approaches designed specifically for probabilistic systems. Originally proposed in software engineering in the 1990s[^fn-tech-debt-ml], the technical debt metaphor compares shortcuts in implementation to financial debt, trading short-term velocity for ongoing interest payments in maintenance, refactoring, and systemic risk. In ML, this debt extends beyond code to include "hidden" costs unique to statistical modeling and data dependencies. Systematic evaluation rubrics, such as the ML Test Score [@breck2017ml], provide frameworks for quantifying this debt and assessing production readiness across data, model, and infrastructure components.
 
-[^fn-tech-debt-ml]: **Technical Debt**: Coined by Ward Cunningham at OOPSLA 1992, using financial debt as the metaphor -- shipping expedient code is like borrowing money, and every minute spent on not-quite-right code accrues interest. In ML, the debt compounds silently through data and model dependencies that conventional unit tests and code reviews cannot detect: a perfect pipeline degrades not because code changed but because the world did. The ML Test Score rubric [@breck2020ml] makes this debt explicit, where a system scoring below 0.8 on its 1.0 scale carries high-interest debt and is not production-ready. \index{Technical Debt!ML compounding}
+[^fn-tech-debt-ml]: **Technical Debt**: Coined by Ward Cunningham at OOPSLA 1992, using financial debt as the metaphor -- shipping expedient code is like borrowing money, and every minute spent on not-quite-right code accrues interest. In ML, the debt compounds silently through data and model dependencies that conventional unit tests and code reviews cannot detect: a perfect pipeline degrades not because code changed but because the world did. The ML Test Score rubric [@breck2017ml] makes this debt explicit, where a system scoring below 0.8 on its 1.0 scale carries high-interest debt and is not production-ready. \index{Technical Debt!ML compounding}
 
 In the ML context, this concept takes on a specific meaning:
 
@@ -624,7 +624,7 @@ The underlying mechanism is that when model A's outputs influence model B's trai
 
 \index{Interface Dependencies!ML system challenges}Boundary erosion and correction cascades share a root cause: ML systems develop dependencies that bypass explicit interfaces. Traditional software dependencies are visible (import statements, API calls, configuration files) and can be analyzed by tools. ML dependencies hide in data. When model A's predictions become features for model B, the dependency exists only in the data pipeline, invisible to code analysis. When a dashboard consumes model outputs to drive business decisions, no interface contract governs the relationship.
 
-Two critical patterns illustrate these challenges. *Undeclared consumers*\index{Undeclared Consumers!hidden model dependencies} arise when model outputs serve downstream components without formal tracking or interface contracts. When models evolve, these hidden dependencies break silently. A credit scoring model's outputs might feed an eligibility engine that influences future applicant pools and training data, creating untracked feedback loops that bias model behavior over time. *Data dependency debt*\index{Data Dependency Debt!unstable inputs} compounds this problem as ML pipelines accumulate unstable and underutilized data dependencies that become difficult to trace or validate. Feature engineering scripts, data joins, and labeling conventions lack the dependency analysis tools available in traditional software development. When data sources change structure or distribution, downstream models fail unexpectedly.
+Two critical patterns illustrate these challenges. *Undeclared consumers*\index{Undeclared Consumers!hidden model dependencies} arise when model outputs serve downstream components without formal tracking or interface contracts. When models evolve, these hidden dependencies break silently. A credit scoring model's outputs might feed an eligibility engine that influences future applicant pools and training data, creating untracked feedback loops that bias model behavior over time. *Data dependency debt*\index{Technical Debt!data dependency debt, unstable inputs} compounds this problem as ML pipelines accumulate unstable and underutilized data dependencies that become difficult to trace or validate. Feature engineering scripts, data joins, and labeling conventions lack the dependency analysis tools available in traditional software development. When data sources change structure or distribution, downstream models fail unexpectedly.
 
 Mitigating these interface challenges requires systematic approaches: strict access controls for model outputs, formal interface contracts with documented schemas, data versioning and lineage tracking systems, and continuous monitoring of prediction usage patterns. The MLOps infrastructure patterns presented in subsequent sections provide concrete implementations of these solutions.
 
@@ -634,7 +634,7 @@ The preceding patterns describe debt from poor design. Even well-designed ML sys
 
 *Feedback loops*\index{Feedback Loop!self-reinforcing bias} represent the most subtle evolution challenge: models influence their own future behavior through the data they generate. Recommendation systems exemplify this dynamic: suggested items shape user clicks, which become training data, potentially creating self-reinforcing biases. These loops undermine data independence assumptions and can mask performance degradation for months.
 
-*Pipeline and configuration debt*\index{Pipeline Debt!workflow fragmentation}\index{Configuration Debt!parameter sprawl} accumulates as ML workflows evolve into "pipeline jungles" of ad hoc scripts and fragmented configurations. Without modular interfaces, teams build duplicate pipelines rather than refactor brittle ones, leading to inconsistent processing and growing maintenance burden. Compounding this, rapid prototyping encourages embedding business logic in training code and undocumented configuration changes. While these early-stage shortcuts are necessary for innovation, they become liabilities as systems scale across teams.
+*Pipeline and configuration debt*\index{Pipeline!debt, workflow fragmentation}\index{Configuration Debt!parameter sprawl} accumulates as ML workflows evolve into "pipeline jungles" of ad hoc scripts and fragmented configurations. Without modular interfaces, teams build duplicate pipelines rather than refactor brittle ones, leading to inconsistent processing and growing maintenance burden. Compounding this, rapid prototyping encourages embedding business logic in training code and undocumented configuration changes. While these early-stage shortcuts are necessary for innovation, they become liabilities as systems scale across teams.
 
 Managing evolution requires architectural discipline: cohort-based monitoring for loop detection, modular pipeline design with workflow orchestration tools, and treating configuration as a first-class system component with versioning and validation.
 
@@ -644,11 +644,11 @@ Data dependencies and system evolution create debt through implicit coupling. ML
 
 *Glue code*\index{Glue Code!integration overhead} dominates ML codebases: systems often require substantial integration code to connect general-purpose ML packages to specific data pipelines and serving systems, with the glue constituting up to 95 percent of the codebase while the actual ML code represents only five percent. This glue creates tight coupling between package APIs and the surrounding system, meaning that when packages update their interfaces, all glue code must be rewritten. Mitigation requires wrapping ML packages in stable internal APIs and treating external dependencies as substitutable components.
 
-*Dead experimental codepaths*\index{Dead Code!experimental ML paths} accumulate as ML development involves extensive experimentation, leaving behind conditional branches for abandoned approaches. Unlike traditional dead code that can be detected statically, experimental ML codepaths often remain "live" because they are controlled by configuration flags rather than compile-time conditions. Over time, these paths increase testing burden and create confusion about which code actually runs in production. Regular code audits with explicit deprecation timelines and feature flag hygiene help manage this debt.
+*Dead experimental codepaths*\index{Technical Debt!dead code, experimental ML paths} accumulate as ML development involves extensive experimentation, leaving behind conditional branches for abandoned approaches. Unlike traditional dead code that can be detected statically, experimental ML codepaths often remain "live" because they are controlled by configuration flags rather than compile-time conditions. Over time, these paths increase testing burden and create confusion about which code actually runs in production. Regular code audits with explicit deprecation timelines and feature flag hygiene help manage this debt.
 
-*Abstraction debt*\index{Abstraction Debt!missing ML interfaces} arises because traditional software engineering relies on well-defined abstractions like functions, classes, and modules, but ML systems lack mature abstractions for key concepts: What is the right interface for a "feature"? How should "model behavior" be encapsulated? This absence forces teams to reinvent abstractions or, worse, avoid abstraction entirely. The ML community has begun addressing this through emerging patterns like feature stores (abstracting feature computation), model registries (abstracting model versioning), and prediction services (abstracting inference). Adopting these emerging standards reduces per-project abstraction debt.
+*Abstraction debt*\index{Technical Debt!abstraction debt, missing ML interfaces} arises because traditional software engineering relies on well-defined abstractions like functions, classes, and modules, but ML systems lack mature abstractions for key concepts: What is the right interface for a "feature"? How should "model behavior" be encapsulated? This absence forces teams to reinvent abstractions or, worse, avoid abstraction entirely. The ML community has begun addressing this through emerging patterns like feature stores (abstracting feature computation), model registries (abstracting model versioning), and prediction services (abstracting inference). Adopting these emerging standards reduces per-project abstraction debt.
 
-Beyond these patterns, Sculley et al. identify warning signs, or *common smells*, that indicate accumulating debt: the *Plain-Old-Data Type Smell* (using generic types like strings and floats instead of semantic types that encode meaning and constraints), the *Multiple-Language Smell* (systems spanning Python, SQL, C++, and shell scripts with inconsistent conventions), and the *Prototype Smell* ("temporary" research code that becomes permanent infrastructure without refactoring). Effective organizations track these smells in code reviews and allocate explicit time for debt reduction, treating technical debt paydown as a first-class engineering activity rather than an afterthought.
+Beyond these patterns, @sculley2015hidden identify warning signs, or *common smells*, that indicate accumulating debt: the *Plain-Old-Data Type Smell* (using generic types like strings and floats instead of semantic types that encode meaning and constraints), the *Multiple-Language Smell* (systems spanning Python, SQL, C++, and shell scripts with inconsistent conventions), and the *Prototype Smell* ("temporary" research code that becomes permanent infrastructure without refactoring). Effective organizations track these smells in code reviews and allocate explicit time for debt reduction, treating technical debt paydown as a first-class engineering activity rather than an afterthought.
 
 ### Technical debt in practice {#sec-ml-operations-realworld-technical-debt-examples-8480}
 
@@ -771,11 +771,11 @@ Three principles organize the infrastructure that addresses these root causes: *
 
 {{< margin-video "https://www.youtube.com/watch?v=gz-44N3MMOA&list=PLkDaE6sCZn6GMoA0wbpJLi3t34Gd8l0aK&index=33" "Data Pipelines" "MIT 6.S191" >}}
 
-The first requirement is data consistency: every artifact influencing model behavior, from raw datasets to engineered features, must be versioned and reproducible. Without versioning, teams cannot trace which data produced which model, making debugging and rollback impossible. Dataset versioning tools such as DVC (Data Version Control)\index{DVC (Data Version Control)!dataset versioning}\index{Data Versioning!DVC tool} [@dvc] enable teams to version large datasets alongside code repositories managed by Git [@git], while cloud-based object storage systems such as [Amazon S3](https://aws.amazon.com/s3/) and [Google Cloud Storage](https://cloud.google.com/storage) provide the durable, access-controlled backend for both raw and processed artifacts. @sec-ml-operations-versioning-lineage-b1cf examines implementation details including Git integration, metadata tracking, and lineage preservation. At the feature level, the **feature store**\index{Feature Store!Uber Michelangelo origin}, a concept pioneered by Uber's Michelangelo platform team in 2017, enforces consistency by computing features once and serving them identically to both training and serving pipelines. The team coined the term after realizing that feature engineering was duplicated across hundreds of ML models, and their solution became the template that inspired Feast, Tecton, and dozens of other platforms. @sec-ml-operations-feature-stores-c01c details implementation patterns for training-serving consistency.
+The first requirement is data consistency: every artifact influencing model behavior, from raw datasets to engineered features, must be versioned and reproducible. Without versioning, teams cannot trace which data produced which model, making debugging and rollback impossible. Dataset versioning tools such as DVC (Data Version Control)\index{DVC!dataset versioning}\index{Data Versioning!DVC tool} [@dvc] enable teams to version large datasets alongside code repositories managed by Git [@git], while cloud-based object storage systems such as [Amazon S3](https://aws.amazon.com/s3/) and [Google Cloud Storage](https://cloud.google.com/storage) provide the durable, access-controlled backend for both raw and processed artifacts. @sec-ml-operations-versioning-lineage-b1cf examines implementation details including Git integration, metadata tracking, and lineage preservation. At the feature level, the **feature store**\index{Feature Store!Uber Michelangelo origin}, a concept pioneered by Uber's Michelangelo platform team in 2017, enforces consistency by computing features once and serving them identically to both training and serving pipelines. The team coined the term after realizing that feature engineering was duplicated across hundreds of ML models, and their solution became the template that inspired Feast\index{Feast!feature retrieval}, Tecton, and dozens of other platforms. @sec-ml-operations-feature-stores-c01c details implementation patterns for training-serving consistency.
 
 Consistency alone is insufficient if the underlying data is stale. Data freshness ensures that models train and serve on current data rather than outdated snapshots. Automated data pipelines\index{Data Pipeline!automated workflows} maintain freshness by continuously transforming raw data into analysis-ready formats through structured stages: ingestion, schema validation, deduplication, transformation, and loading. Orchestration tools including Apache Airflow\index{Workflow Orchestration!pipeline automation} [@apache_airflow], Prefect [@prefect], and dbt [@dbt] define and manage these workflows. When managed as code, pipelines support versioning, modularity, and integration with CI/CD systems, so that data flows remain synchronized with evolving model requirements.
 
-The third pillar, data quality, governs whether the data reaching models is accurate, complete, and consistently labeled. In supervised learning pipelines, labeling quality directly determines model ceilings. Labeling tools such as Label Studio [@label_studio] support scalable, team-based annotation with integrated audit trails and version histories, capabilities that become essential when labeling conventions evolve over time or require refinement across multiple project iterations.
+The third pillar, data quality, governs whether the data reaching models is accurate, complete, and consistently labeled. In supervised learning pipelines, labeling quality directly determines model ceilings. Labeling tools such as Label Studio\index{Label Studio!data quality} [@label_studio] support scalable, team-based annotation with integrated audit trails and version histories, capabilities that become essential when labeling conventions evolve over time or require refinement across multiple project iterations.
 
 To illustrate how these three principles reinforce each other in practice, consider a predictive maintenance application in an industrial setting. A continuous stream of sensor data is ingested and joined with historical maintenance logs through a scheduled pipeline managed in Airflow (*freshness*). The resulting features, including rolling averages and statistical aggregates, are stored in a feature store for both retraining and low-latency inference (*consistency*). The entire pipeline is versioned, monitored, and integrated with the model registry (*quality*), enabling full traceability from data to deployed model predictions. Data management, organized around these three principles, establishes the operational backbone for model reproducibility, auditability, and sustained deployment at scale.
 
@@ -863,7 +863,7 @@ As the Consistency Imperative quantified (@sec-ml-operations-principle-3-consist
 
 ##### Skew detection in CI/CD {#sec-ml-operations-skew-detection-cicd-e361}
 
-Automated pipelines should validate feature consistency before deployment. @lst-ops-validate-skew shows a function that compares training and serving feature distributions using the Kolmogorov-Smirnov test, rejecting deployment when any feature diverges beyond a threshold.
+Automated pipelines should validate feature consistency before deployment. @lst-ops-validate-skew shows a function that compares training and serving feature distributions using the Kolmogorov-Smirnov test\index{Kolmogorov-Smirnov Test!feature distribution}, rejecting deployment when any feature diverges beyond a threshold.
 
 ::: {#lst-ops-validate-skew lst-cap="**Feature Skew Validation**: This function compares training and serving feature distributions using the Kolmogorov-Smirnov test, rejecting deployment when any feature diverges beyond a configurable threshold."}
 
@@ -902,7 +902,7 @@ By elevating versioning and lineage to first-class citizens in the system design
 
 ### Continuous pipelines and automation {#sec-ml-operations-continuous-pipelines-automation-27a4}
 
-Feature stores and versioning systems address data consistency statically: they ensure that features are computed correctly at a point in time. Automation enables these systems to evolve continuously, synchronizing data preprocessing, training, evaluation, and release into integrated workflows that respond to new data, shifting objectives, and operational constraints.
+Feature stores and versioning systems address data consistency statically: they ensure that features are computed correctly at a point in time. Automation enables these systems to evolve continuously, synchronizing data preprocessing, training, evaluation, and release into integrated workflows that respond to new data, shifting objectives, and operational constraints. [@orr2021managing]
 
 #### CI/CD pipelines {#sec-ml-operations-cicd-pipelines-a9de}
 
@@ -1127,7 +1127,7 @@ Box4/.style={Box, fill=RedL,draw=RedLine},
 
 To illustrate these concepts in practice, consider an image classification model under active development. When a data scientist commits changes to a GitHub [@github] repository, a Jenkins pipeline is triggered. The pipeline fetches the latest data, performs preprocessing, and initiates model training. Experiments are tracked using MLflow [@mlflow_website] which logs metrics and stores model artifacts. After passing automated evaluation tests, the model is containerized and deployed to a staging environment using Kubernetes [@kubernetes]. If the model meets validation criteria in staging, the pipeline orchestrates controlled deployment strategies such as canary testing (detailed in @sec-ml-operations-model-validation-a891), gradually routing production traffic to the new model while monitoring key metrics for anomalies. In case of performance regressions, the system can automatically revert to a previous model version.
 
-CI/CD pipelines play a central role in enabling scalable, repeatable, and safe ML deployment. In mature MLOps environments, CI/CD is not optional but foundational, transforming ad hoc experimentation into structured, operationally sound development. Google's *TFX (TensorFlow Extended)* platform exemplifies how these CI/CD principles scale to production.
+CI/CD pipelines play a central role in enabling scalable, repeatable, and safe ML deployment. In mature MLOps environments, CI/CD is not optional but foundational, transforming ad hoc experimentation into structured, operationally sound development. Google's *TFX (TensorFlow Extended\index{TensorFlow Extended!production pipelines})* platform exemplifies how these CI/CD principles scale to production.
 
 ::: {.callout-lighthouse title="Google TFX Production ML Pipelines"}
 
@@ -1169,7 +1169,7 @@ Reproducibility presents the first challenge. Notebook cells can be executed out
 
 Testing difficulties compound this challenge. Traditional unit testing frameworks do not integrate naturally with notebook structure. Cell-level testing is possible but rarely practiced, leaving notebooks less tested than equivalent Python modules.
 
-Several mitigation strategies address these operational concerns. Papermill enables parameterization and programmatic execution of notebooks, treating them as configurable pipeline stages. The nbconvert tool converts validated notebooks to Python scripts for production execution. Cell execution order enforcement tools execute all cells top-to-bottom, rejecting out-of-order dependencies.
+Several mitigation strategies address these operational concerns. Papermill\index{Papermill!notebook parameterization} enables parameterization and programmatic execution of notebooks, treating them as configurable pipeline stages. The nbconvert tool converts validated notebooks to Python scripts for production execution. Cell execution order enforcement tools execute all cells top-to-bottom, rejecting out-of-order dependencies.
 
 The recommended practice is to use notebooks for exploration and rapid iteration, then refactor validated logic into tested Python modules for production pipelines. The overhead of refactoring pays off in maintainability and reliability. Failing to robustify these pipelines can lead to silent failures with massive economic consequences. The following analysis quantifies *the cost of silent failures*.
 
@@ -1251,11 +1251,11 @@ class SilentFailureCost:
 
 :::
 
-Beyond reproducibility, automation enhances model training by reducing manual effort and standardizing critical steps. MLOps workflows incorporate techniques such as hyperparameter tuning\index{Hyperparameter Tuning!automated optimization} [@hyperparameter_tuning_website], neural architecture search\index{Neural Architecture Search!automated design} [@neural_architecture_search_paper], and automatic feature selection\index{Feature Selection!automation} [@scikit_learn_feature_selection] to explore the design space efficiently. These tasks are orchestrated using CI/CD pipelines, which automate data preprocessing, model training, evaluation, registration, and deployment. For instance, a Jenkins pipeline triggers a retraining job when new labeled data becomes available. The resulting model is evaluated against baseline metrics, and if performance thresholds are met, it is deployed automatically.
+Beyond reproducibility, automation enhances model training by reducing manual effort and standardizing critical steps. MLOps workflows incorporate techniques such as hyperparameter tuning\index{Hyperparameter!tuning, automated optimization} [@hyperparameter_tuning_website; @li2017hyperband], neural architecture search\index{Neural Architecture Search!automated design} [@neural_architecture_search_paper], and automatic feature selection\index{Feature Selection!automation} [@scikit_learn_feature_selection] to explore the design space efficiently. These tasks are orchestrated using CI/CD pipelines, which automate data preprocessing, model training, evaluation, registration, and deployment. For instance, a Jenkins pipeline triggers a retraining job when new labeled data becomes available. The resulting model is evaluated against baseline metrics, and if performance thresholds are met, it is deployed automatically.
 
-The increasing availability of cloud-based infrastructure has expanded the reach of model training. This connects to the workflow orchestration patterns explored in @sec-ml-workflow, which provide the foundation for managing complex, multi-stage training processes across distributed systems. Cloud providers offer managed services that provision high-performance computing resources, including GPU and Tensor Processing Unit (TPU) accelerators, on demand[^fn-cloud-training-economics]. Depending on the platform, teams construct their own training workflows or rely on fully managed services such as Vertex AI Fine Tuning [@vertex_ai_fine_tuning], which support automated adaptation of foundation models to new tasks. Hardware availability, regional access restrictions, and cost constraints remain important considerations when designing cloud-based training systems.
+The increasing availability of cloud-based infrastructure has expanded the reach of model training [@gartner2024cloud]. This connects to the workflow orchestration patterns explored in @sec-ml-workflow, which provide the foundation for managing complex, multi-stage training processes across distributed systems. Cloud providers offer managed services that provision high-performance computing resources, including GPU and Tensor Processing Unit (TPU) accelerators, on demand[^fn-cloud-training-economics]. Depending on the platform, teams construct their own training workflows or rely on fully managed services such as Vertex AI Fine Tuning [@vertex_ai_fine_tuning], which support automated adaptation of foundation models to new tasks. Hardware availability, regional access restrictions, and cost constraints remain important considerations when designing cloud-based training systems. [@oecd_ai_2021]
 
-[^fn-cloud-training-economics]: **Cloud ML Training Economics**: Training GPT-3 was estimated to cost at least \$4.6 million in V100 GPU-hours, with actual costs likely higher due to distributed training overhead. Fine-tuning typically costs \$100--\$10,000. Organizations report 60--90 percent cost savings through spot instances and preemptible VMs, but these savings introduce a trade-off: preemptible instances can be reclaimed mid-training, requiring checkpoint-and-resume infrastructure that adds engineering complexity to the retraining pipeline. \index{Cloud Training!economics}
+[^fn-cloud-training-economics]: **Cloud ML Training Economics**: Training GPT-3 was estimated to cost at least \$4.6 million in V100 GPU-hours, with actual costs likely higher due to distributed training overhead. Fine-tuning typically costs \$100--\$10,000. Organizations report 60--90 percent cost savings through spot instances and preemptible VMs, but these savings introduce a trade-off: preemptible instances can be reclaimed mid-training, requiring checkpoint-and-resume infrastructure that adds engineering complexity to the retraining pipeline. \index{Training!cloud, economics}
 
 To illustrate these integrated practices, consider a data scientist developing a neural network for image classification using a PyTorch notebook. The fastai [@fastai] library is used to simplify model construction and training. The notebook trains the model on a labeled dataset, computes performance metrics, and tunes model configuration parameters. Once validated, the training script is version-controlled and incorporated into a retraining pipeline that is periodically triggered based on data updates or model performance monitoring.
 
@@ -1263,7 +1263,7 @@ Through standardized workflows, versioned environments, and automated orchestrat
 
 ##### Retraining decision framework {#sec-ml-operations-retraining-decision-framework-e33d}
 
-Automated training pipelines raise a critical question: *how often* should they run? Deciding when to retrain a model\index{Continuous Training!retraining decision framework}\index{Retraining!scheduled vs. triggered} requires balancing accuracy maintenance against computational costs. Three common strategies exist, each with distinct trade-offs. @tbl-retraining-schedules provides typical schedules across domains, from daily retraining for rapidly shifting ad click prediction to quarterly updates for stable medical imaging applications:
+Automated training pipelines raise a critical question: *how often* should they run? Deciding when to retrain a model\index{Training!continuous, retraining decision framework}\index{Retraining!scheduled vs. triggered} requires balancing accuracy maintenance against computational costs. Three common strategies exist, each with distinct trade-offs. @tbl-retraining-schedules provides typical schedules across domains, from daily retraining for rapidly shifting ad click prediction to quarterly updates for stable medical imaging applications:
 
 | **Domain**              | **Typical Schedule** | **Rationale**                       |
 |:------------------------|:---------------------|:------------------------------------|
@@ -1315,7 +1315,7 @@ The choice among these strategies depends on domain characteristics: scheduled r
 
 ##### Quantitative retraining economics {#sec-ml-operations-quantitative-retraining-economics-1579}
 
-The decision to retrain a model\index{Retraining Economics!cost-benefit optimization} is not a matter of intuition but an engineering optimization that balances the cost of **System Entropy**[^fn-entropy-model-decay] (accuracy decay) against the cost of **Infrastructure** (retraining expense). We can think of model accuracy as a decaying quantity, analogous to radioactive decay, with a measurable rate of decline. In production, a model behaves like a radioactive isotope: it has a measurable **Half-Life**[^fn-half-life-model] after which its predictive value becomes toxic to the business.
+The decision to retrain a model\index{Retraining!economics, cost-benefit optimization} is not a matter of intuition but an engineering optimization that balances the cost of **System Entropy**\index{System Entropy!accuracy decay}[^fn-entropy-model-decay] (accuracy decay) against the cost of **Infrastructure** (retraining expense). We can think of model accuracy as a decaying quantity, analogous to radioactive decay, with a measurable rate of decline. In production, a model behaves like a radioactive isotope: it has a measurable **Half-Life**[^fn-half-life-model] after which its predictive value becomes toxic to the business.
 
 [^fn-entropy-model-decay]: **System Entropy**: The decay rate $\lambda$ varies by orders of magnitude across domains. Fast-moving domains (social media recommendations, financial fraud) exhibit half-lives of days to weeks; slower domains (medical imaging, industrial inspection) decay over months to years. This range determines the minimum infrastructure investment: a model with a three-day half-life requires continuous training infrastructure, not a scheduled batch job, while a model with a six-month half-life can retrain weekly at a fraction of the cost.
 
@@ -1556,7 +1556,7 @@ node[below left=0.2 and 0]{Time};
 
 :::
 
-Beyond static evaluation, MLOps encourages controlled deployment strategies\index{Controlled Deployment!risk mitigation} that simulate production conditions while minimizing risk. One widely adopted method is [canary testing](https://martinfowler.com/bliki/CanaryRelease.html)\index{Canary Testing!gradual rollout}, in which a new model is deployed to a small fraction of users or queries. During this limited rollout, live performance metrics are monitored to assess system stability and user impact. For instance, an e-commerce platform deploys a new recommendation model to five percent of web traffic and observes metrics such as click-through rate, latency, and prediction accuracy. Only after the model demonstrates consistent and reliable performance is it promoted to full production.
+Beyond static evaluation, MLOps encourages controlled deployment strategies\index{Deployment!controlled, risk mitigation} that simulate production conditions while minimizing risk. One widely adopted method is [canary testing](https://martinfowler.com/bliki/CanaryRelease.html)\index{Canary!testing, gradual rollout} [@martin_fowler_canary], in which a new model is deployed to a small fraction of users or queries. During this limited rollout, live performance metrics are monitored to assess system stability and user impact. For instance, an e-commerce platform deploys a new recommendation model to five percent of web traffic and observes metrics such as click-through rate, latency, and prediction accuracy. Only after the model demonstrates consistent and reliable performance is it promoted to full production.
 
 Cloud-based ML platforms further support model evaluation by enabling experiment logging, request replay, and synthetic test case generation. These capabilities allow teams to evaluate different models under identical conditions, facilitating comparisons and root-cause analysis. Tools such as [Weights and Biases](https://wandb.ai/) automate aspects of this process by capturing training artifacts, recording hyperparameter configurations, and visualizing performance metrics across experiments. These tools integrate directly into training and deployment pipelines, improving transparency and traceability.
 
@@ -1586,7 +1586,7 @@ Consider a fraud detection model that achieves 99.2 percent precision in the dev
 
 [^fn-containerization-ml-deploy]: **Containerization for ML Deployment**: Docker (2013) packages code with dependencies into portable units; Kubernetes (2014) orchestrates those units across clusters. For ML systems, containerization solves the $\text{Environment}_v$ term in @eq-model-reproducibility: a model that works in development but fails in production due to a library version mismatch is not a code bug but an environment parity failure. Containers make the environment a versioned, deployable artifact. \index{Containerization!environment parity}
 
-Production deployment requires frameworks that handle model packaging, versioning, and integration with serving infrastructure. Tools like MLflow and model registries manage these deployment artifacts, while serving-specific frameworks (detailed in @sec-model-serving) handle the runtime optimization and scaling requirements.
+Production deployment requires frameworks that handle model packaging, versioning, and integration with serving infrastructure. Tools like MLflow and model registries manage these deployment artifacts [@chen2020developments], while serving-specific frameworks (detailed in @sec-model-serving) handle the runtime optimization and scaling requirements.
 
 Before full-scale rollout, teams deploy updated models to staging or QA environments[^fn-staging-validation-ops] to rigorously test performance.
 
@@ -1610,13 +1610,13 @@ Techniques such as shadow deployments[^fn-shadow-deploy-ml]\index{Shadow Deploym
 
 [^fn-canary-deploy-ml]: **Canary Deployment** (after the 19th-century practice of lowering caged canaries into coal mines to detect toxic gas before it harmed miners): Routes 1--5 percent of live traffic to a candidate model, using it as a sentinel for production health. The ML-specific challenge is that a "failure" is statistical degradation, not a deterministic crash: detecting a two percent accuracy difference with 95 percent confidence requires thousands of inferences, creating a tension between decision speed and statistical power that determines minimum canary duration. \index{Canary Deployment!statistical validation}
 
-When canary deployments reveal problems at partial traffic levels (issues appearing at 30 percent traffic but not at five percent), teams need systematic debugging strategies\index{Debugging!canary deployment issues}. Effective diagnosis requires correlating multiple signals: performance metrics from @sec-benchmarking, data distribution analysis to detect drift, and feature importance shifts that might explain degradation. Teams maintain debug toolkits including A/B test analysis frameworks, feature attribution tools, and data slice analyzers that identify which subpopulations are experiencing degraded performance.
+When canary deployments reveal problems at partial traffic levels (issues appearing at 30 percent traffic but not at five percent), teams need systematic debugging strategies. Effective diagnosis requires correlating multiple signals: performance metrics from @sec-benchmarking, data distribution analysis to detect drift, and feature importance shifts that might explain degradation. Teams maintain debug toolkits including A/B test analysis frameworks, feature attribution tools, and data slice analyzers that identify which subpopulations are experiencing degraded performance.
 
 Integration with CI/CD pipelines further automates the deployment and rollback process, enabling efficient iteration cycles.
 
 ##### Rollback strategies and safety mechanisms {#sec-ml-operations-rollback-strategies-safety-mechanisms-7707}
 
-Rollback\index{Rollback Strategies!safety mechanisms}[^fn-rollback-ml-deploy] capability is the safety net that enables confident deployment. Without reliable rollback, teams become deployment-averse and slow their iteration velocity. Effective rollback requires planning for three distinct scenarios:
+Rollback\index{Rollback!strategies, safety mechanisms}[^fn-rollback-ml-deploy] capability is the safety net that enables confident deployment. Without reliable rollback, teams become deployment-averse and slow their iteration velocity. Effective rollback requires planning for three distinct scenarios:
 
 [^fn-rollback-ml-deploy]: **Rollback (from database transaction management)**: This "undo" action for deployments is complicated in ML by model-dependent state (for example, cached embeddings) which is often incompatible between model versions. The risk of this state-version mismatch (which can cause hours of downtime vs. seconds for a stateless service) is the direct cause of the deployment aversion and slow iteration velocity mentioned. \index{Rollback!model state management}
 
@@ -1674,7 +1674,7 @@ where $\delta$ is the minimum detectable effect, $\sigma$ is outcome standard de
 
 A/B testing ML models introduces challenges absent from traditional software experiments:
 
-- **Delayed feedback**\index{Delayed Feedback!A/B testing challenges}: Conversion events may occur days after prediction. A recommendation shown Monday might drive a purchase Friday. Tests must account for this attribution window.
+- **Delayed feedback**\index{A/B Testing!delayed feedback, A/B testing challenges}: Conversion events may occur days after prediction. A recommendation shown Monday might drive a purchase Friday. Tests must account for this attribution window.
 - **Novelty effects**\index{Novelty Effects!A/B testing bias}: New models may show inflated initial performance as users engage with fresh recommendations. Include "burn-in" periods before measuring.
 - **Interference effects**: In recommendation and ranking systems, showing item A to user one affects availability for user 2. This violates the independence assumption underlying standard A/B analysis. Advanced treatments cover techniques for handling interference at platform scale.
 - **Segment heterogeneity**: Overall neutral results may mask strong positive effects for some users and negative effects for others. Always analyze by key segments.
@@ -1695,7 +1695,7 @@ A/B testing ML models introduces challenges absent from traditional software exp
 ###### Practical guidelines {.unnumbered}
 
 - **Pre-register hypotheses**: Document expected effects before running tests to avoid p-hacking.
-- **Use sequential testing**: Methods like CUPED\index{CUPED!variance reduction} (Controlled-experiment Using Pre-Experiment Data) reduce variance and enable faster decisions.
+- **Use sequential testing**: Methods like CUPED (Controlled-experiment Using Pre-Experiment Data) reduce variance and enable faster decisions.
 - **Archive all experiments**: Failed experiments provide valuable information for future model development.
 - **Automate analysis pipelines**: Manual analysis introduces errors and delays decisions.
 
@@ -1721,14 +1721,14 @@ A PyTorch model that achieves top accuracy on a benchmark may serve predictions 
 
 \index{Model Optimization!framework comparison}@tbl-model-optimization-frameworks summarizes the major model optimization tools and their characteristics:
 
-| **Framework**    | **Source Formats**              | **Target Hardware**           | **Key Optimizations**                                   |
-|:-----------------|:--------------------------------|:------------------------------|:--------------------------------------------------------|
-| **ONNX Runtime** | PyTorch, TF, Keras, scikit      | CPU, GPU, NPU                 | Graph optimization, operator fusion, quantization       |
-| **TensorRT**     | ONNX, TF, PyTorch               | NVIDIA GPU only               | Kernel auto-tuning, precision calibration, layer fusion |
-| **OpenVINO**     | ONNX, TF, PyTorch, Caffe, MXNet | Intel CPU, GPU, VPU, FPGA     | Model compression, async execution, caching             |
-| **TF-TRT**       | TensorFlow                      | NVIDIA GPU                    | TensorRT integration within TensorFlow graph            |
-| **Core ML**      | ONNX, TF, PyTorch               | Apple Neural Engine, GPU, CPU | Unified format for Apple devices, on-device inference   |
-| **TFLite**       | TensorFlow, Keras               | Mobile CPU, GPU, Edge TPU     | Quantization, delegate support, model compression       |
+| **Framework**                                   | **Source Formats**              | **Target Hardware**           | **Key Optimizations**                                   |
+|:------------------------------------------------|:--------------------------------|:------------------------------|:--------------------------------------------------------|
+| **ONNX Runtime**                                | PyTorch, TF, Keras, scikit      | CPU, GPU, NPU                 | Graph optimization, operator fusion, quantization       |
+| **TensorRT**\index{TensorRT!model optimization} | ONNX, TF, PyTorch               | NVIDIA GPU only               | Kernel auto-tuning, precision calibration, layer fusion |
+| **OpenVINO**\index{OpenVINO!model optimization} | ONNX, TF, PyTorch, Caffe, MXNet | Intel CPU, GPU, VPU, FPGA     | Model compression, async execution, caching             |
+| **TF-TRT**                                      | TensorFlow                      | NVIDIA GPU                    | TensorRT integration within TensorFlow graph            |
+| **Core ML**                                     | ONNX, TF, PyTorch               | Apple Neural Engine, GPU, CPU | Unified format for Apple devices, on-device inference   |
+| **TFLite**                                      | TensorFlow, Keras               | Mobile CPU, GPU, Edge TPU     | Quantization, delegate support, model compression       |
 
 : **Model Optimization Frameworks.** Different optimization tools target different deployment scenarios. TensorRT provides maximum performance on NVIDIA GPUs but locks deployments into that hardware. ONNX Runtime offers broader compatibility across hardware targets. OpenVINO optimizes for Intel hardware ecosystems. {#tbl-model-optimization-frameworks}
 
@@ -1761,7 +1761,7 @@ An optimized model sitting on disk generates zero value. It needs runtime infras
 
 Production-grade serving frameworks such as TensorFlow Serving [@tensorflow_serving], NVIDIA Triton Inference Server [@nvidia_triton], and KServe [@kserve] provide standardized mechanisms for deploying, versioning, and scaling models. From an operational perspective, the key decision is which framework best fits the deployment context: TensorFlow Serving for TensorFlow-native workflows, Triton for multi-framework GPU serving, and KServe for Kubernetes-native environments requiring scale-to-zero.
 
-Regardless of which serving paradigm is used (online, offline, or near-online, as detailed in @sec-model-serving-spectrum-serving-architectures-8966)\index{Online Serving!real-time inference}\index{Offline Serving!batch inference}\index{Near-Online Serving!hybrid latency}, a critical operational insight is that model inference time is often a minority of end-to-end latency\index{Service Level Agreement (SLA)!ML systems}\index{Service Level Objective (SLO)!latency and error rates}. Decomposing *the latency budget* reveals where operational bottlenecks actually lie.
+Regardless of which serving paradigm is used (online, offline, or near-online, as detailed in @sec-model-serving-spectrum-serving-architectures-8966)\index{Serving!online, real-time inference}\index{Serving!offline, batch inference}\index{Serving!near-online, hybrid latency}, a critical operational insight is that model inference time is often a minority of end-to-end latency\index{Service Level Agreement!ML systems}\index{Service Level Objective!latency and error rates}. Decomposing *the latency budget* reveals where operational bottlenecks actually lie.
 
 \index{Latency Budget!end-to-end analysis}
 ```{python}
@@ -1815,14 +1815,14 @@ class LatencyBudget:
 
 **The Problem**: A model achieves 15 ms inference time on an A100 GPU, yet end-to-end P99 latency is 180 ms. Where does the time go?
 
-| **Component**              | **Typical %** | **P99 Contribution** | **Optimization Lever**                       |
-|:---------------------------|--------------:|---------------------:|:---------------------------------------------|
-| **Network RTT**            | 10–25 percent |             15–45 ms | Edge deployment, connection pooling          |
-| **Feature retrieval**      | 15–35 percent |             25–65 ms | Feature caching, precomputation              |
-| **Request parsing**        |   3–8 percent |              5–15 ms | Binary protocols (gRPC), schema optimization |
-| **Model inference**        | 25–45 percent |             45–80 ms | Quantization, batching, model distillation   |
-| **Post-processing**        |  5–12 percent |             10–20 ms | Async processing, result caching             |
-| **Response serialization** |   3–8 percent |              5–15 ms | Efficient formats (Protobuf, MessagePack)    |
+| **Component**                                     | **Typical %** | **P99 Contribution** | **Optimization Lever**                       |
+|:--------------------------------------------------|--------------:|---------------------:|:---------------------------------------------|
+| **Network RTT**\index{Network RTT!latency budget} | 10–25 percent |             15–45 ms | Edge deployment, connection pooling          |
+| **Feature retrieval**                             | 15–35 percent |             25–65 ms | Feature caching, precomputation              |
+| **Request parsing**                               |   3–8 percent |              5–15 ms | Binary protocols (gRPC), schema optimization |
+| **Model inference**                               | 25–45 percent |             45–80 ms | Quantization, batching, model distillation   |
+| **Post-processing**                               |  5–12 percent |             10–20 ms | Async processing, result caching             |
+| **Response serialization**                        |   3–8 percent |              5–15 ms | Efficient formats (Protobuf, MessagePack)    |
 
 **The Engineering Insight**: Model optimization alone often captures less than 50 percent of the latency opportunity. A model that runs 2$\times$ faster provides only 1.3$\times$ end-to-end improvement if inference is 45 percent of total latency.
 
@@ -1834,12 +1834,12 @@ Systems thinking demands end-to-end analysis. Apply the **D·A·M taxonomy** to 
 
 Dave Patterson's principle applies: "Measure everything, optimize the bottleneck."
 
-**Worked Example**: Given a P99 SLO of `{python} LatencyBudget.slo_p99_str`ms, allocate the budget:
+**Worked Example**: Given a P99 SLO of `{python} LatencyBudget.slo_p99_str` ms, allocate the budget:
 
-- Network: `{python} LatencyBudget.network_str`ms (use regional deployment)
-- Feature fetch: `{python} LatencyBudget.feature_fetch_str`ms (require feature store P99 < `{python} LatencyBudget.feature_fetch_str`ms)
-- Inference: `{python} LatencyBudget.inference_str`ms (sets model complexity ceiling)
-- Post-processing: `{python} LatencyBudget.post_proc_str`ms (allows light business logic)
+- Network: `{python} LatencyBudget.network_str` ms (use regional deployment)
+- Feature fetch: `{python} LatencyBudget.feature_fetch_str` ms (require feature store P99 < `{python} LatencyBudget.feature_fetch_str` ms)
+- Inference: `{python} LatencyBudget.inference_str` ms (sets model complexity ceiling)
+- Post-processing: `{python} LatencyBudget.post_proc_str` ms (allows light business logic)
 
 If feature retrieval exceeds its budget, no amount of model optimization will achieve the SLO.
 
@@ -1847,14 +1847,14 @@ If feature retrieval exceeds its budget, no amount of model optimization will ac
 
 Beyond the latency budget, operationalizing serving requires selecting the right combination of infrastructure techniques. @tbl-serving-techniques summarizes the key strategies and representative systems that have been developed for ML-as-a-service infrastructure.
 
-| **Technique**                                                                     | **Description**                                                     | **Example System**               |
-|:----------------------------------------------------------------------------------|:--------------------------------------------------------------------|:---------------------------------|
-| **Request Scheduling & Batching**\index{Request Batching!throughput optimization} | Groups inference requests to improve throughput and reduce overhead | Clipper [@crankshaw2017clipper]  |
-| **Instance Selection & Routing**                                                  | Dynamically assigns requests to model variants based on constraints | INFaaS [@romero2021infaas]       |
-| **Load Balancing**\index{Load Balancing!ML serving}                               | Distributes traffic across replicas to prevent bottlenecks          | MArk [@zhang2019mark]            |
-| **Autoscaling**                                                                   | Adjusts model instances to match workload demands                   | INFaaS, MArk                     |
-| **Model Orchestration**                                                           | Coordinates execution across model components or pipelines          | AlpaServe [@li2023alpaserve]     |
-| **Execution Time Prediction**                                                     | Forecasts latency to optimize request scheduling                    | Clockwork [@gujarati2020serving] |
+| **Technique**                                                                      | **Description**                                                     | **Example System**               |
+|:-----------------------------------------------------------------------------------|:--------------------------------------------------------------------|:---------------------------------|
+| **Request Scheduling & Batching**\index{Batching!request, throughput optimization} | Groups inference requests to improve throughput and reduce overhead | Clipper [@crankshaw2017clipper]  |
+| **Instance Selection & Routing**                                                   | Dynamically assigns requests to model variants based on constraints | INFaaS [@romero2021infaas]       |
+| **Load Balancing**\index{Load Balancing!ML serving}                                | Distributes traffic across replicas to prevent bottlenecks          | MArk [@zhang2019mark]            |
+| **Autoscaling**                                                                    | Adjusts model instances to match workload demands                   | INFaaS, MArk                     |
+| **Model Orchestration**                                                            | Coordinates execution across model components or pipelines          | AlpaServe [@li2023alpaserve]     |
+| **Execution Time Prediction**                                                      | Forecasts latency to optimize request scheduling                    | Clockwork [@gujarati2020serving] |
 
 : **Serving System Techniques.** Scalable ML-as-a-service infrastructure relies on techniques like request scheduling and instance selection to optimize resource utilization and reduce latency under high load. For the underlying queuing theory and batching strategies, see @sec-model-serving. {#tbl-serving-techniques}
 
@@ -1866,13 +1866,13 @@ Consider a smoke detector with an ML model for distinguishing cooking smoke from
 
 Edge AI\index{Edge AI!deployment patterns} represents this shift: machine learning inference occurs at or near the data source rather than in centralized cloud infrastructure [@reddi2020mlperf]. A rapidly growing proportion of ML inference by query count now occurs at the edge, making edge deployment patterns essential knowledge for MLOps practitioners. The shift introduces three interrelated categories of operational challenges: resource constraints, deployment hierarchy, and update mechanisms.
 
-Resource constraints dominate edge deployment decisions. Edge devices require the aggressive model optimization techniques established in @sec-model-compression (quantization, pruning, knowledge distillation) to meet memory footprints that are often sub-megabyte in microcontroller-class deployments. Power budgets span four orders of magnitude, from milliwatts for IoT sensors to tens of watts in automotive systems, demanding power-aware inference scheduling and thermal management. Safety-critical applications impose deterministic timing targets (milliseconds for collision avoidance, tens of milliseconds for interactive robotics) requiring worst-case execution time (WCET) analysis under adverse conditions including thermal throttling and memory contention.
+Resource constraints dominate edge deployment decisions. Edge devices require the aggressive model optimization techniques established in @sec-model-compression (quantization, pruning, knowledge distillation) to meet memory footprints that are often sub-megabyte in microcontroller-class deployments. Power budgets span four orders of magnitude, from milliwatts for IoT sensors to tens of watts in automotive systems, demanding power-aware inference scheduling and thermal management. Safety-critical applications impose deterministic timing targets (milliseconds for collision avoidance, tens of milliseconds for interactive robotics) requiring worst-case execution time\index{Worst-Case Execution Time!edge AI} (WCET) analysis under adverse conditions including thermal throttling and memory contention.
 
 These constraints shape a natural *deployment hierarchy* across three tiers. Sensor-level processing handles immediate data filtering and feature extraction on microcontroller-class devices consuming 1–100&nbsp;mW. Edge gateway processing performs intermediate inference on application processors with 1–10&nbsp;W power budgets. Cloud coordination manages model distribution, aggregated learning, and complex reasoning requiring GPU-class resources. This hierarchy enables system-wide optimization: computationally expensive operations migrate upward while latency-critical decisions remain local. Two deployment contexts deserve specific attention. TinyML\index{TinyML!operational constraints} targets microcontroller-based inference with memory under one&nbsp;MB and milliwatt power consumption, requiring specialized engines (TensorFlow Lite Micro, CMSIS-NN) that eliminate dynamic memory allocation. Model architectures must be co-designed with hardware constraints, favoring depthwise convolutions and pruned models achieving 90 percent+ sparsity. Mobile AI extends edge deployment to smartphones with moderate compute, using NPUs and GPU compute shaders to achieve 5–50&nbsp;ms latency under 500&nbsp;mW, with sophisticated power management balancing performance against battery life.
 
-Updates and monitoring complete the edge operational picture. Over-the-air model updates\index{Over-the-Air (OTA) Updates!model distribution} enable maintenance for physically inaccessible systems. OTA pipelines must implement secure model distribution with cryptographic signatures and rollback mechanisms, using differential compression to transmit only parameter changes rather than complete model artifacts. Update scheduling must account for device connectivity patterns, power availability, and operational criticality.
+Updates and monitoring complete the edge operational picture. Over-the-air model updates\index{Over-the-Air Updates!model distribution} enable maintenance for physically inaccessible systems. OTA pipelines must implement secure model distribution with cryptographic signatures and rollback mechanisms, using differential compression to transmit only parameter changes rather than complete model artifacts. Update scheduling must account for device connectivity patterns, power availability, and operational criticality.
 
-Monitoring requires adaptation to resource-constrained environments: lightweight telemetry systems capture essential metrics (inference latency, power consumption, accuracy indicators) while minimizing overhead. Health monitoring tracks device-level conditions (thermal status, battery levels, connectivity quality) to predict maintenance needs. Edge-cloud coordination patterns enable adaptive offloading between tiers based on current load, network conditions, and latency requirements. Feature caching at edge gateways reduces redundant computation, while federated learning enables edge devices to contribute to model improvement without transmitting raw data.
+Monitoring requires adaptation to resource-constrained environments: lightweight telemetry systems capture essential metrics (inference latency, power consumption, accuracy indicators) while minimizing overhead. Health monitoring tracks device-level conditions (thermal status, battery levels, connectivity quality) to predict maintenance needs. Edge-cloud coordination patterns enable adaptive offloading between tiers based on current load, network conditions, and latency requirements. Feature caching at edge gateways reduces redundant computation, while federated learning\index{Federated Learning!edge deployment} enables edge devices to contribute to model improvement without transmitting raw data.
 
 Graceful degradation is the defining operational pattern for edge AI. When resources become constrained, systems must maintain essential functionality by reducing model complexity, inference frequency, or feature completeness. This design philosophy must be built in from the start, not bolted on as an afterthought.
 
@@ -1886,13 +1886,13 @@ Deployment and serving get models into production. Keeping them healthy requires
 
 A model that works in staging but fails in production because someone manually provisioned a different GPU type. A training job that crashes because a colleague's experiment consumed all available memory. An inference service that cannot scale because its resource quotas were set via a Slack message six months ago. These failures share a root cause: infrastructure managed through manual processes rather than code.
 
-Scalable, resilient infrastructure\index{Infrastructure as Code (IaC)!ML systems} is foundational for operationalizing ML systems, and Infrastructure as Code (IaC) is the practice that makes it reliable. IaC treats infrastructure configuration as software (version-controlled, reviewed, tested, and automatically executed) rather than manually configured through graphical interfaces or command-line tools. This approach brings software engineering discipline to resource management: changes are tracked, configurations can be tested before deployment, and environments can be reliably reproduced.
+Scalable, resilient infrastructure\index{Infrastructure as Code!ML systems} is foundational for operationalizing ML systems, and Infrastructure as Code (IaC) is the practice that makes it reliable. IaC treats infrastructure configuration as software (version-controlled, reviewed, tested, and automatically executed) rather than manually configured through graphical interfaces or command-line tools. This approach brings software engineering discipline to resource management: changes are tracked, configurations can be tested before deployment, and environments can be reliably reproduced.
 
 Tools such as Terraform [@terraform], AWS CloudFormation [@aws_cloudformation], and Ansible [@ansible] support this paradigm by enabling teams to version infrastructure definitions alongside application code. In MLOps settings, Terraform is widely used to provision and manage resources across public cloud platforms such as AWS [@aws], Google Cloud Platform [@google_cloud], and Microsoft Azure [@azure].
 
 Infrastructure management spans the full ML lifecycle. During training, IaC scripts allocate compute instances with GPU or TPU accelerators, configure distributed storage, and deploy container clusters. Because infrastructure definitions are stored as code, they can be audited, reused, and integrated into CI/CD pipelines ensuring consistency across environments.
 
-Containerization\index{Containerization!ML deployment} enables ML workload portability. Tools like [Docker](https://www.docker.com/) encapsulate models and their dependencies into isolated units, while orchestration systems such as [Kubernetes](https://kubernetes.io/)\index{Kubernetes!ML orchestration} manage containerized workloads across clusters, enabling rapid deployment, resource allocation, and scaling.
+Containerization\index{Containerization!ML deployment} enables ML workload portability. Tools like [Docker](https://www.docker.com/) [@docker] encapsulate models and their dependencies into isolated units, while orchestration systems such as [Kubernetes](https://kubernetes.io/)\index{Kubernetes!ML orchestration} manage containerized workloads across clusters, enabling rapid deployment, resource allocation, and scaling.
 
 To handle changes in workload intensity, including spikes during hyperparameter tuning and surges in prediction traffic, teams rely on cloud elasticity and autoscaling\index{Autoscaling!ML workloads}[^fn-autoscaling-ml-workloads]. Cloud platforms support on-demand provisioning and horizontal scaling of infrastructure resources. [Autoscaling mechanisms](https://aws.amazon.com/autoscaling/) automatically adjust compute capacity based on usage metrics, enabling teams to optimize for both performance and cost-efficiency.
 
@@ -1938,8 +1938,8 @@ GPU utilization metrics can mislead operators. A GPU reporting 90 percent utiliz
 Utilization targets vary by workload characteristics, reflecting the different latency tolerances and cost sensitivities of each operational mode:
 
 - **Batch training**: Target >80 percent GPU utilization. Lower utilization indicates data pipeline bottlenecks or suboptimal batch sizes. Monitor `gpu_util`, `memory_bandwidth_util`, and `data_load_time`.
-- **Online inference**: Target 50–70 percent GPU utilization at P50 load. Reserve headroom (30–50 percent) for traffic spikes. Higher sustained utilization risks latency SLA violations during bursts.
-- **Batch inference**: Target >85 percent utilization. Unlike online serving, batch jobs can tolerate queuing delays, enabling maximum hardware efficiency.
+- **Online inference**\index{Online Inference!definition}: Target 50–70 percent GPU utilization at P50 load. Reserve headroom (30–50 percent) for traffic spikes. Higher sustained utilization risks latency SLA violations during bursts.
+- **Batch inference**\index{Batch Inference!definition}: Target >85 percent utilization. Unlike online serving, batch jobs can tolerate queuing delays, enabling maximum hardware efficiency.
 
 ##### Memory hierarchy effects {.unnumbered}
 
@@ -1967,7 +1967,7 @@ $$\text{Cost per 1K inferences} = \frac{\text{Hourly GPU cost} \times 1000}{\tex
 #| label: cost-per-inference-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ COST-PER-INFERENCE CALCULATION
+# │ COST-PER-INFERENCE\index{Cost-per-Inference!calculation} CALCULATION
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: "Cost-Per-Inference Tracking" section - translates hardware
 # │          utilization metrics into business-relevant cost metrics.
@@ -2004,11 +2004,11 @@ For a \$`{python} CostPerInference.hourly_gpu_cost_str`/hour A100 instance proce
 
 #### Model and infrastructure monitoring {#sec-ml-operations-model-infrastructure-monitoring-3988}
 
-Infrastructure management provisions resources; monitoring\index{Model Monitoring!performance tracking}\index{Model Monitoring!drift detection} observes their behavior. This distinction matters because the verification gap means ML systems cannot be proven correct through unit tests—they can only be bounded statistically. Monitoring implements Principle 4: Observable Degradation (@sec-ml-operations-foundational-principles-44e6), transforming this theoretical limitation into operational practice. Without continuous monitoring, and the deeper observability\index{Observability!system state inference}[^fn-observability-ml] it enables, a deployed model is a black box slowly drifting toward irrelevance.
+Infrastructure management provisions resources; monitoring\index{Model Monitoring!performance tracking}\index{Model Monitoring!drift detection} observes their behavior. This distinction matters because the verification gap means ML systems cannot be proven correct through unit tests—they can only be bounded statistically. Monitoring implements Principle 4: Observable Degradation (@sec-ml-operations-foundational-principles-44e6), transforming this theoretical limitation into operational practice. Without continuous monitoring, and the deeper observability\index{Observability!system state inference}[^fn-observability-ml] it enables, a deployed model is a black box\index{Black Box!definition} slowly drifting toward irrelevance.
 
 [^fn-observability-ml]: **Observability** (from control theory, Rudolf Kalman, 1960): Measures how well a system's internal states can be inferred from its external outputs. In MLOps, monitoring answers "is the system broken?" (high error rate) while observability answers "*why* is it broken?" by enabling inference of internal state (feature distributions, prediction confidence, neuron activations) from outputs alone. Without observability, a drifting model produces the same diagnostic signal as a healthy one: green dashboards and satisfied SLOs. \index{Observability!control theory origin}
 
-Effective monitoring spans both model behavior and infrastructure performance. On the model side, teams track metrics such as accuracy, precision, recall, and the confusion matrix [@scikit_learn_confusion_matrix] using live or sampled predictions to detect whether performance remains stable or begins to drift. A critical constraint is *the drift detection delay*, which determines how quickly statistical monitoring can confirm that degradation has occurred. The speed of detection depends on traffic volume, as the following calculation demonstrates.
+Effective monitoring spans both model behavior and infrastructure performance. On the model side, teams track metrics such as accuracy, precision, recall, and the confusion matrix [@scikit_learn_confusion_matrix] using live or sampled predictions to detect whether performance remains stable or begins to drift. A critical constraint is *the drift detection delay\index{Drift Detection Delay!statistical monitoring}*, which determines how quickly statistical monitoring can confirm that degradation has occurred. The speed of detection depends on traffic volume, as the following calculation demonstrates.
 
 ```{python}
 #| label: drift-detection-delay-calc
@@ -2069,7 +2069,7 @@ class DriftDetectionDelay:
 2.  **Detection Latency**: `{python} DriftDetectionDelay.samples_needed_str` samples / `{python} DriftDetectionDelay.qps_high_str` QPS = **`{python} DriftDetectionDelay.seconds_needed_high_str` seconds** ≈ **`{python} DriftDetectionDelay.minutes_needed_high_str` minutes**.
 3.  **Low Traffic Case**: If the model only processes **`{python} DriftDetectionDelay.requests_per_day_low_str` requests per day**, detecting the same `{python} DriftDetectionDelay.drop_pct_str` percent drift takes **`{python} DriftDetectionDelay.days_needed_low_str` days**.
 
-**The Systems Conclusion**: The "Sample Rate" of monitoring is physically limited by traffic volume. For low-traffic, high-stakes models (like medical diagnosis), drift detection can take *days or weeks*, leaving the system in a long-term "Silent Failure" state. This is why high-stakes systems must supplement statistical monitoring with proactive **Model Audits**.
+**The Systems Conclusion**: The "Sample Rate" of monitoring is physically limited by traffic volume. For low-traffic, high-stakes models (like medical diagnosis), drift detection can take *days or weeks*, leaving the system in a long-term "Silent Failure" state. This is why high-stakes systems must supplement statistical monitoring with proactive **Model Audits**\index{Model Audit!high-stakes systems}.
 
 :::
 
@@ -2077,7 +2077,7 @@ Production ML systems face two distinct forms of model drift[^fn-drift-types-ops
 
 [^fn-drift-types-ops]: **Drift Detection Lag**: Feature drift (covariate shift on $P(X)$) is detectable immediately from input distributions -- no labels needed. Concept drift ($P(Y|X)$ changing) is invisible until ground truth arrives, which in high-stakes domains (medical diagnosis, fraud detection, legal decisions) can take days, weeks, or months. This asymmetry means the most dangerous drift is also the slowest to detect, requiring proxy metrics (prediction confidence distributions, output entropy) as imperfect early warning systems that trade false alarm rate for detection speed. \index{Drift!operational distinction}
 
-[^fn-covid-concept-drift]: **COVID-19 ML Impact**: COVID-era behavior changes provide a canonical example of abrupt concept drift: demand patterns and user behavior shifted faster than any retraining pipeline could respond. Many recommendation and pricing systems required emergency manual intervention because their scheduled retraining cadences assumed gradual drift, not discontinuous distribution shifts, exposing a gap in cost-aware automation planning. \index{COVID-19!concept drift}
+[^fn-covid-concept-drift]: **COVID-19 ML Impact**: COVID-era behavior changes provide a canonical example of abrupt concept drift: demand patterns and user behavior shifted faster than any retraining pipeline could respond. Many recommendation and pricing systems required emergency manual intervention because their scheduled retraining cadences assumed gradual drift, not discontinuous distribution shifts, exposing a gap in cost-aware automation planning.
 
 [^fn-drift-covariate-shift]: **Covariate Shift**: Shimodaira's importance weighting correction (2000) assumes the support of the training distribution covers the deployment distribution -- that every deployment input *could* have appeared in training, just with different probability. When deployment contains genuinely out-of-distribution inputs (new product categories, new demographics, adversarial inputs), the correction fails entirely and the model produces confidently wrong outputs with no warning signal, making support coverage the hidden assumption that determines whether drift correction or full retraining is required. \index{Drift!covariate shift}
 
@@ -2088,12 +2088,12 @@ Both forms of drift motivate a formal definition:
 ***Data Drift***\index{Data Drift!definition} is the specific subtype of **Distribution Shift** (see @sec-responsible-engineering-silent-failure-modes-e219) in which the input distribution $P(X)$ changes while the decision boundary $P(Y|X)$ remains stable. The sibling concept is **Concept Drift**, in which $P(Y|X)$ itself shifts.
 
 1.  **Significance (Quantitative):** It represents a violation of the **i.i.d. Assumption** (Independent and Identically Distributed), causing accuracy to erode monotonically with the **Distributional Divergence** ($D(P_t \| P_0)$), empirically modeled as $\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot D(P_t \| P_0)$ with $\lambda$ fit per deployment. Because $P(Y|X)$ is unchanged, retraining on fresh $P(X)$ data fully recovers performance, unlike Concept Drift, where the label relationship must also be re-learned.
-2.  **Distinction (Durable):** Unlike **Model Decay** (which implies internal failure, where the algorithm or code degraded), Data Drift is an **External Force** (market shifts, sensor aging, user behavior change) that invalidates the model's learned mapping without any engineering error.
+2.  **Distinction (Durable):** Unlike **Model Decay**\index{Model Decay!definition} (which implies internal failure, where the algorithm or code degraded), Data Drift is an **External Force** (market shifts, sensor aging, user behavior change) that invalidates the model's learned mapping without any engineering error.
 3.  **Common Pitfall:** A frequent misconception is that drift is detectable by monitoring model outputs. By the time output drift is visible, the system has often already been serving degraded predictions for weeks. Monitoring **Input Feature Statistics** ($D(P_t \| P_0)$ via PSI or KL divergence) provides earlier warning because input shift precedes output shift by the length of the ground-truth feedback loop.
 
 :::
 
-Because of drift, a deployed model behaves less like software (which does not break unless changed) and more like *inventory* (which decays over time). This is the Statistical Drift Invariant at work: the degradation equation ($\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot D(P_t \| P_0)$) predicts that accuracy erodes in proportion to the distributional divergence $D(P_t \| P_0)$, regardless of code quality. Every monitoring strategy in this chapter exists to detect this divergence before it compounds into business impact.
+Because of drift, a deployed model behaves less like software (which does not break unless changed) and more like *inventory* (which decays over time). This is the Statistical Drift Invariant\index{Statistical Drift Invariant!definition} at work: the degradation equation ($\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot D(P_t \| P_0)$) predicts that accuracy erodes in proportion to the distributional divergence $D(P_t \| P_0)$, regardless of code quality. Every monitoring strategy in this chapter exists to detect this divergence before it compounds into business impact.
 
 The "Rotting Asset" plot (@fig-rotting-asset-curve) puts this entropy into perspective by contrasting two maintenance strategies. The orange sawtooth pattern represents scheduled retraining: accuracy decays to a threshold, retraining restores it to baseline, and the cycle repeats. This approach is simple but wasteful: it retrains on a fixed schedule regardless of whether degradation has actually occurred. The green line represents trigger-based retraining: accuracy is continuously monitored, and retraining fires only when drift detection signals that the threshold has been crossed. The decay rate and intervals are illustrative, but the qualitative behavior is robust.
 
@@ -2102,7 +2102,7 @@ The "Rotting Asset" plot (@fig-rotting-asset-curve) puts this entropy into persp
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ THE ROTTING ASSET CURVE (FIGURE)
+# │ THE ROTTING ASSET CURVE\index{Rotting Asset Curve!accuracy decay} (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Figure showing accuracy decay over 365 days with two maintenance
 # │          strategies: scheduled (orange sawtooth) vs. triggered (green).
@@ -2188,10 +2188,10 @@ Infrastructure-level monitoring tracks indicators such as CPU and GPU utilizatio
 
 ::: {.callout-perspective title="iron law in Production Monitoring"}
 
-These utilization patterns map directly to the iron law of ML Systems (@sec-introduction-iron-law-ml-systems-c32a). Monitoring reveals which term dominates:
+These utilization patterns map directly to the iron law of ML Systems\index{Iron Law of ML Systems!production monitoring} (@sec-introduction-iron-law-ml-systems-c32a). Monitoring reveals which term dominates:
 
-- **Compute-bound** (high GPU util, low memory BW util): Limited by $O/(R_{\text{peak}} \cdot \eta)$. Optimize kernels, use Tensor Cores, or upgrade hardware.
-- **Memory-bound** (moderate GPU util, high memory BW util): Limited by $D_{\text{vol}}/BW$. Optimize with quantization, pruning, or batching.
+- **Compute-bound** (high GPU util, low memory BW util): Limited by $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$. Optimize kernels, use Tensor Cores, or upgrade hardware.
+- **Memory-bound** (moderate GPU util, high memory BW util): Limited by $D_{\text{vol}}/\text{BW}$. Optimize with quantization, pruning, or batching.
 - **I/O-bound** (low GPU util, low memory BW util): Limited by data pipeline latency. Fix the DataLoader, not the model.
 
 The iron law doubles as a *diagnostic framework* for production systems. When latency SLAs are violated, the monitoring dashboard indicates which term to investigate.
@@ -2232,7 +2232,7 @@ Netflix's monitoring system illustrates these alerting principles at extreme sca
 **The Solution**: Netflix developed a multi-layer monitoring approach:
 
 1. **Statistical Process Control**\index{Statistical Process Control!anomaly detection}: Treats model metrics as time series, applying control charts to detect anomalous deviation patterns rather than fixed thresholds
-2. **Cohort-Based Monitoring**\index{Cohort-Based Monitoring!subpopulation tracking}: Segments performance by user tenure, device type, and region to catch localized degradation masked by global averages
+2. **Cohort-Based Monitoring**\index{Monitoring!cohort-based, subpopulation tracking}: Segments performance by user tenure, device type, and region to catch localized degradation masked by global averages
 3. **Counterfactual Evaluation**\index{Counterfactual Evaluation!holdout groups}: Maintains holdout groups to continuously measure model lift against baseline, detecting when models stop adding value
 
 **Key Innovation**: "Interleaving" experiments\index{Interleaving Experiments!Netflix methodology} run new and old models simultaneously on the same users, using preference ranking to detect subtle quality differences undetectable through aggregate metrics.
@@ -2249,7 +2249,7 @@ Netflix's monitoring system illustrates these alerting principles at extreme sca
 
 ##### Input data validation {#sec-ml-operations-input-data-validation-8471}
 
-Schema\index{Schema Validation!structural data checks}[^fn-schema-validation-ml] validation catches structural problems before they reach the model. @lst-ops-schema-validation demonstrates common validation rules using Great Expectations, including column existence checks, type enforcement, null detection, and statistical bounds.
+Schema\index{Schema Validation!structural data checks}[^fn-schema-validation-ml] validation catches structural problems before they reach the model. @lst-ops-schema-validation demonstrates common validation rules using Great Expectations\index{Great Expectations!schema validation}, including column existence checks, type enforcement, null detection, and statistical bounds.
 
 [^fn-schema-validation-ml]: **Schema Validation**: The rules in @lst-ops-schema-validation prevent silent data contract violations, such as a feature column changing from an integer to a float or a new category appearing that was absent during training. Without this input-level guardrail, downstream model monitoring cannot distinguish a data quality error from a true performance regression, masking the root cause. A single schema mismatch in a critical feature can invalidate over 90 percent of a prediction batch. \index{Schema Validation!data quality}
 
@@ -2278,15 +2278,15 @@ expect_column_mean_to_be_between(
 
 Schema validation catches structural corruption (missing columns, wrong types, null values) but cannot detect the subtler failure mode where data arrives in the correct format but from a shifted distribution. A feature representing user age might pass every schema check while its mean silently migrates from 32 to 45 over three months as a marketing campaign attracts an older demographic. This distributional shift degrades model predictions long before any structural anomaly appears. Statistical distance measures quantify this divergence by comparing current feature distributions against training baselines. @tbl-feature-distribution-thresholds specifies alert thresholds for three common metrics, with PSI suited for categorical features and KS statistics for continuous distributions:
 
-| **Metric**                           | **Alert Threshold** | **Use Case**                     |
-|:-------------------------------------|--------------------:|:---------------------------------|
-| **Population Stability Index (PSI)** |           PSI > 0.2 | Categorical and binned features  |
-| **Kolmogorov-Smirnov statistic**     |            KS > 0.1 | Continuous feature distributions |
-| **Jensen-Shannon divergence**        |            JS > 0.1 | Probability distributions        |
+| **Metric**                                                                        | **Alert Threshold** | **Use Case**                     |
+|:----------------------------------------------------------------------------------|--------------------:|:---------------------------------|
+| **Population Stability Index (PSI)**\index{PSI!drift detection}                   |           PSI > 0.2 | Categorical and binned features  |
+| **Kolmogorov-Smirnov statistic**                                                  |            KS > 0.1 | Continuous feature distributions |
+| **Jensen-Shannon divergence**\index{Jensen-Shannon Divergence!distribution shift} |            JS > 0.1 | Probability distributions        |
 
 : **Feature Distribution Thresholds.** Starting points for drift detection, calibrated in practice to each feature's sensitivity and business impact. PSI values above 0.2 indicate significant distribution shift, while KS statistics exceeding 0.1 suggest statistically significant divergence from training distributions. Higher thresholds reduce alert fatigue but risk missing gradual drift. {#tbl-feature-distribution-thresholds}
 
-\index{Population Stability Index (PSI)!drift quantification}Understanding *why* we use these thresholds requires looking at the math. The Population Stability Index (PSI)[^fn-psi-origin] quantifies distributional shift by comparing expected (training) vs. actual (serving) frequencies across bins (for the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring, see @sec-data-foundations-measuring-drift-divergence-a6dd). @eq-psi formalizes this:
+\index{Population Stability Index!drift quantification}Understanding *why* we use these thresholds requires looking at the math. The Population Stability Index (PSI)[^fn-psi-origin] quantifies distributional shift by comparing expected (training) vs. actual (serving) frequencies across bins (for the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring, see @sec-data-foundations-measuring-drift-divergence-a6dd). @eq-psi formalizes this:
 
 [^fn-psi-origin]: **Population Stability Index (PSI)** (from credit risk scoring, coined by Lewis in 1994): Banking regulators needed to detect when a loan applicant population had shifted enough to invalidate the scorecard. The standard thresholds date from this era: below 0.1 indicates no significant shift, 0.1--0.2 warrants investigation, and above 0.2 triggers model review. ML operations adopted PSI because it is symmetric (unlike KL divergence), works on binned data for both categorical and continuous features, and provides interpretable thresholds calibrated through decades of production use in finance. \index{PSI!credit risk origin}
 
@@ -2490,7 +2490,7 @@ The dominant cost driver in monitoring infrastructure is metric cardinality: hig
 
 Justify monitoring investments against incident costs using @eq-monitoring-roi:
 
-$$\text{Monitoring ROI} = \frac{\text{Incidents Prevented} \times \text{Avg Incident Cost}}{\text{Annual Monitoring Cost}}$$ {#eq-monitoring-roi}
+$$\text{Monitoring ROI\index{Monitoring ROI!calculation}} = \frac{\text{Incidents Prevented} \times \text{Avg Incident Cost}}{\text{Annual Monitoring Cost}}$$ {#eq-monitoring-roi}
 
 ```{python}
 #| label: monitoring-roi-calc
@@ -2539,7 +2539,7 @@ The monitoring systems themselves require resilience planning to prevent operati
 
 Some organizations implement cross-monitoring where separate infrastructure monitors the monitoring systems themselves, ensuring that observation failures trigger immediate alerts through alternative channels such as PagerDuty or direct notifications. This defense-in-depth approach prevents the catastrophic scenario where both models and their monitoring systems fail simultaneously without detection. Multi-region and distributed ML deployments introduce additional monitoring coordination challenges, including consensus-based alerting, cross-region metric aggregation, and distributed circuit breakers\index{Circuit Breaker Pattern!cascade failure prevention}[^fn-circuit-breaker-ml-ops] that automatically prevent cascade failures by routing traffic away from failing services when error rates exceed thresholds.
 
-[^fn-circuit-breaker-ml-ops]: **Circuit Breaker Pattern** (after the electrical safety device): Automatic failure detection that "opens" when error rates exceed thresholds (typically 50 percent over 10 seconds), routing traffic away from failing services. In ML systems, the pattern requires a critical adaptation: prediction accuracy degradation demands different thresholds than service availability failures, because a model returning plausible but incorrect predictions triggers no error signal, leaving the circuit breaker blind to the most dangerous failure mode. \index{Circuit Breaker!ML adaptation}
+[^fn-circuit-breaker-ml-ops]: **Circuit Breaker Pattern** (after the electrical safety device): Automatic failure detection that "opens" when error rates exceed thresholds (typically 50 percent over 10 seconds), routing traffic away from failing services. In ML systems, the pattern requires a critical adaptation: prediction accuracy degradation demands different thresholds than service availability failures, because a model returning plausible but incorrect predictions triggers no error signal, leaving the circuit breaker blind to the most dangerous failure mode. \index{Circuit Breaker Pattern!circuit breaker, ML adaptation}
 
 ### Incident response and operational practices {#sec-ml-operations-incident-response-operational-practices-6891}
 
@@ -2570,7 +2570,7 @@ For P0 and P1 incidents, postmortem documentation\index{Postmortem Documentation
 
 ##### The debugging decision tree {#sec-ml-operations-debugging-decision-tree-5080}
 
-\index{Debugging Decision Tree!systematic diagnosis}When model performance degrades, work through these diagnostic questions in order. For a systematic diagnostic matrix that maps symptoms to D·A·M (Data · Algorithm · Machine) axes, see @tbl-dam-troubleshooting in @sec-dam-taxonomy.
+\index{Debugging!debugging decision tree, systematic diagnosis}When model performance degrades, work through these diagnostic questions in order. For a systematic diagnostic matrix that maps symptoms to D·A·M (Data · Algorithm · Machine) axes, see @tbl-dam-troubleshooting in @sec-dam-taxonomy.
 
 1. **Is it the data?** Check for upstream data pipeline failures, schema changes, missing values, or distribution shifts. Most production ML issues (60–80 percent) originate in data.
 
@@ -2598,7 +2598,7 @@ For P0 and P1 incidents, postmortem documentation\index{Postmortem Documentation
 
 ##### Feature attribution for debugging {#sec-ml-operations-feature-attribution-debugging-f4ab}
 
-\index{Feature Attribution!debugging techniques}When slice analysis identifies a problematic segment, feature attribution techniques help identify *which* features drive incorrect predictions. @lst-ops-shap-debugging demonstrates a workflow that uses SHAP values to analyze mispredictions within a specific slice.
+\index{Feature Attribution!debugging techniques}When slice analysis identifies a problematic segment, feature attribution techniques help identify *which* features drive incorrect predictions. @lst-ops-shap-debugging demonstrates a workflow that uses SHAP values\index{SHAP Values!model debugging} to analyze mispredictions within a specific slice.
 
 ::: {#lst-ops-shap-debugging lst-cap="**SHAP-Based Debugging Workflow**: This code filters mispredicted examples from a problematic slice (tablet users), computes SHAP values to explain model decisions, and generates a summary plot revealing which features contribute most to the errors."}
 
@@ -2691,7 +2691,7 @@ Technical monitoring capabilities alone do not ensure operational success. The m
 
 ### Governance and team coordination {#sec-ml-operations-model-governance-team-coordination-d86f}
 
-\index{Model Governance!proactive policies}On-call practices address operational emergencies, but production ML also requires proactive governance\index{Model Governance!transparency and compliance} and cross-functional collaboration\index{Cross-Functional Collaboration!ML teams}. Governance encompasses the policies and practices ensuring that ML models operate transparently, fairly, and in compliance with ethical and regulatory standards. Without it, deployed models may produce biased or opaque decisions, creating legal, reputational, and societal risks. Governance focuses on three core objectives: transparency\index{Transparency!governance objective} (interpretable, auditable models), fairness\index{Fairness!governance objective} (equitable treatment across user groups), and compliance\index{Compliance!governance objective} (alignment with legal and organizational policies). The specific interpretability methods, fairness metrics, and bias detection techniques that operationalize these objectives are examined in @sec-responsible-engineering; MLOps provides the infrastructure to enforce these checks continuously throughout the deployment lifecycle.
+\index{Model Governance!proactive policies}On-call practices address operational emergencies, but production ML also requires proactive governance\index{Model Governance!transparency and compliance} and cross-functional collaboration. Governance encompasses the policies and practices ensuring that ML models operate transparently, fairly, and in compliance with ethical and regulatory standards. Without it, deployed models may produce biased or opaque decisions, creating legal, reputational, and societal risks. Governance focuses on three core objectives: transparency\index{Transparency!governance objective} (interpretable, auditable models), fairness\index{Fairness!governance objective} (equitable treatment across user groups), and compliance\index{Governance!compliance, governance objective} (alignment with legal and organizational policies). The specific interpretability methods, fairness metrics, and bias detection techniques that operationalize these objectives are examined in @sec-responsible-engineering; MLOps provides the infrastructure to enforce these checks continuously throughout the deployment lifecycle.
 
 What makes ML governance uniquely challenging is its lifecycle scope. Unlike traditional software compliance, which can be verified at release time, ML governance must span development, deployment, and operation. During development, teams must document model assumptions and training data provenance. At deployment, pre-release audits evaluate fairness and robustness. Post-deployment, the monitoring systems discussed in the previous section must track not only performance degradation but also fairness drift, where concept drift disproportionately affects specific user subgroups. Governance policies encoded into automated pipelines ensure that these checks are applied consistently rather than relying on ad hoc human review.
 
@@ -2709,7 +2709,7 @@ Governance establishes policies, but cross-functional collaboration implements t
 
 : **ML Team Roles Matrix.** Clear role boundaries prevent gaps and overlaps. Data Scientists focus on model quality while ML Engineers handle productionization. Data Engineers own data pipelines while Platform Engineers own MLOps tooling. SREs ensure overall system reliability. {#tbl-ml-roles-matrix}
 
-Clear role definitions matter most at handoff points\index{Notebook to Production!handoff challenges}, where work transitions between specialists. The most failure-prone handoff occurs between Data Scientists and ML Engineers: a model that performs well in a Jupyter notebook may fail in production due to undocumented preprocessing steps, hardcoded file paths, or environment dependencies. Similarly, the handoff from ML Engineers to SREs\index{Production Readiness Review!handoff criteria} requires verified monitoring dashboards, configured alerting rules, documented runbooks, and tested rollback procedures. Data Engineers hand off to the broader ML team through feature contracts\index{Feature Contracts!schema specification}, formal specifications of schema, freshness SLOs, and quality guarantees that prevent silent pipeline changes from surfacing as mysterious model degradation weeks later. Organizations mitigate these handoff risks through standardized model interfaces, required documentation, and reproducibility requirements that must be verified before each transition.
+Clear role definitions matter most at handoff points\index{Notebook to Production!handoff challenges}, where work transitions between specialists. The most failure-prone handoff occurs between Data Scientists and ML Engineers: a model that performs well in a Jupyter notebook may fail in production due to undocumented preprocessing steps, hardcoded file paths, or environment dependencies. Similarly, the handoff from ML Engineers to SREs [@beyer2016sre]\index{Production Readiness Review!handoff criteria} requires verified monitoring dashboards, configured alerting rules, documented runbooks, and tested rollback procedures. Data Engineers hand off to the broader ML team through feature contracts\index{Feature Contracts!schema specification}, formal specifications of schema, freshness SLOs, and quality guarantees that prevent silent pipeline changes from surfacing as mysterious model degradation weeks later. Organizations mitigate these handoff risks through standardized model interfaces, required documentation, and reproducibility requirements that must be verified before each transition.
 
 Effective MLOps extends beyond internal team coordination, however, to encompass the broader communication challenges that arise when technical teams interface with business stakeholders.
 
@@ -2865,7 +2865,7 @@ Before examining system design and maturity frameworks, @tbl-technical-debt-summ
 
 \index{Technical Debt!assessment rubric}@tbl-technical-debt-summary consolidates the debt patterns examined throughout this chapter. Awareness alone is insufficient; teams need a systematic rubric that transforms subjective "is this system ready?" conversations into quantifiable evaluations.
 
-The ML Test Score\index{ML Test Score!production readiness} [@breck2020ml] provides a systematic rubric for evaluating production readiness across four categories. Organizations score each test (0 = not implemented, 0.5 = partially implemented, 1 = fully automated), with total scores indicating maturity: 0–5 (ad hoc), 5–10 (developing), 10–15 (mature), 15+ (production-grade). @tbl-ml-test-score summarizes the key tests practitioners should implement:
+The ML Test Score\index{ML Test Score!production readiness} [@breck2017ml] provides a systematic rubric for evaluating production readiness across four categories. Organizations score each test (0 = not implemented, 0.5 = partially implemented, 1 = fully automated), with total scores indicating maturity: 0–5 (ad hoc), 5–10 (developing), 10–15 (mature), 15+ (production-grade). @tbl-ml-test-score summarizes the key tests practitioners should implement:
 
 | **Category**             | **Test**                                                   | **Implementation Example**                       |
 |:-------------------------|:-----------------------------------------------------------|:-------------------------------------------------|
@@ -2886,7 +2886,7 @@ The ML Test Score\index{ML Test Score!production readiness} [@breck2020ml] provi
 |                          | Training and serving features are not skewed               | Training-serving skew detection                  |
 |                          | Model staleness triggers retraining                        | Automated retraining pipelines                   |
 
-: **ML Test Score Checklist.** A practical rubric for assessing ML system production readiness. Each test scores 0 (not implemented), 0.5 (partially implemented), or one (fully automated). Systems scoring below five require significant investment before production deployment; scores above ten indicate mature operational practices. Based on @breck2020ml. {#tbl-ml-test-score}
+: **ML Test Score Checklist.** A practical rubric for assessing ML system production readiness. Each test scores 0 (not implemented), 0.5 (partially implemented), or one (fully automated). Systems scoring below five require significant investment before production deployment; scores above ten indicate mature operational practices. Based on @breck2017ml. {#tbl-ml-test-score}
 
 - **0–5**: High-risk deployment. Critical gaps in reproducibility, monitoring, or validation. Expect frequent incidents and difficulty debugging production issues.
 - **5–10**: Developing practices. Basic automation exists but gaps remain. Suitable for low-stakes internal applications with active engineering support.
@@ -2909,7 +2909,7 @@ A startup deploys its first ML model with a Jupyter notebook, a cron job, and a 
 
 \index{Maturity Levels!evolutionary stages}Operational maturity describes capabilities; maturity levels describe stages of evolution. Although operational maturity exists on a continuum, distinguishing broad stages helps illustrate how ML systems evolve from research prototypes to production-grade infrastructure.
 
-At the lowest level, ML workflows are ad hoc\index{Ad Hoc MLOps!manual workflows}: experiments run manually, models train on local machines, and deployment involves hand-crafted scripts. As maturity increases, workflows become structured: teams adopt version control, automated training pipelines, and centralized model storage. At the highest levels, systems are fully integrated with infrastructure-as-code, continuous delivery pipelines, and automated monitoring that support large-scale deployment and rapid experimentation.
+At the lowest level, ML workflows are ad hoc: experiments run manually, models train on local machines, and deployment involves hand-crafted scripts. As maturity increases, workflows become structured: teams adopt version control, automated training pipelines, and centralized model storage. At the highest levels, systems are fully integrated with infrastructure-as-code, continuous delivery pipelines, and automated monitoring that support large-scale deployment and rapid experimentation.
 
 @tbl-maturity-levels captures this progression, offering a system-level framework for analyzing ML operational practices that emphasizes architectural cohesion and lifecycle integration over tool selection, guiding the design of scalable and maintainable learning systems.
 
@@ -3014,11 +3014,11 @@ scale=1, every node/.append style={transform shape}]
 
 ### Design patterns and anti-patterns {#sec-ml-operations-design-patterns-antipatterns-82ad}
 
-The most sophisticated infrastructure fails without the organizational patterns to operate it effectively\index{MLOps Anti-Patterns!organizational failures}. A feature store cannot prevent training-serving skew if no one owns the feature definitions; automated monitoring cannot catch drift if alerts route to the wrong team. As ML systems grow in complexity, organizational patterns must evolve to match.
+The most sophisticated infrastructure fails without the organizational patterns to operate it effectively\index{MLOps!anti-patterns, organizational failures}. A feature store cannot prevent training-serving skew if no one owns the feature definitions; automated monitoring cannot catch drift if alerts route to the wrong team. As ML systems grow in complexity, organizational patterns must evolve to match.
 
 In mature environments, organizational design emphasizes clear ownership and interface discipline. Platform teams may take responsibility for shared infrastructure and CI/CD pipelines while domain teams focus on model development and business alignment. Interfaces between teams (feature definitions, data schemas, and deployment targets) are well-defined and versioned.
 
-One effective pattern is a centralized MLOps team\index{Centralized MLOps Team!organizational pattern} providing shared services to multiple model development groups. Such structures promote consistency and reduce duplicated effort. Alternatively, some organizations adopt a federated model\index{Federated MLOps!embedded engineers}, embedding MLOps engineers within product teams while maintaining a central architectural function for system-wide integration.
+One effective pattern is a centralized MLOps team\index{MLOps!centralized mlops team, organizational pattern} providing shared services to multiple model development groups. Such structures promote consistency and reduce duplicated effort. Alternatively, some organizations adopt a federated model\index{MLOps!federated, embedded engineers}, embedding MLOps engineers within product teams while maintaining a central architectural function for system-wide integration.
 
 Anti-patterns emerge when responsibilities are fragmented. The tool-first approach\index{Tool-First Anti-Pattern!fragmented responsibilities} (adopting infrastructure tools without first defining processes and roles) results in fragile pipelines and unclear handoffs. Siloed experimentation, where data scientists operate in isolation from production engineers, leads to models that are difficult to deploy or retrain effectively.
 
@@ -3030,7 +3030,7 @@ Circuit breaker patterns must account for model-specific failure modes, where pr
 
 [^fn-bulkhead-ml-isolation]: **Bulkhead Pattern**: Inspired by the watertight compartments in a ship's hull, this pattern partitions system resources to contain failures within isolated zones. For isolating experimental models, a bulkhead dedicates a fixed compute and memory budget (often 10–20 percent of total capacity) to the new version. This resource partition ensures that a catastrophic failure in the experiment, such as a memory leak, cannot exhaust all available resources and cause a system-wide production outage.
 
-[^fn-byzantine-ml]: **Byzantine Fault Tolerance**: In ML systems, the classic Byzantine failure model shifts from arbitrary node failures to "semantic failures," where models produce plausible but incorrect predictions that pass health checks. Unlike a system crash, these semantic failures do not trigger availability-focused circuit breakers, silently corrupting application outcomes. Mitigating this risk with ensemble-based voting requires at least a $3\times$ increase in computational overhead to guard against a single faulty model, echoing the classic $3f+1$ node requirement. \index{Byzantine Fault!ML plausible failures}
+[^fn-byzantine-ml]: **Byzantine Fault Tolerance**: In ML systems, the classic Byzantine failure model shifts from arbitrary node failures to "semantic failures," where models produce plausible but incorrect predictions that pass health checks. Unlike a system crash, these semantic failures do not trigger availability-focused circuit breakers, silently corrupting application outcomes. Mitigating this risk with ensemble-based voting requires at least a $3\times$ increase in computational overhead to guard against a single faulty model, echoing the classic $3f+1$ node requirement. \index{Byzantine Fault Tolerance!byzantine fault, ML plausible failures}
 
 Traditional consensus algorithms focus on agreement among correct nodes, but ML systems require consensus about model correctness when ground truth may be delayed or unavailable. These reliability patterns form the theoretical foundation distinguishing robust MLOps implementations from fragile ones.
 
@@ -3103,7 +3103,6 @@ class SingleModelROI:
     incident_cost_str = f"{incident_cost // 1000:.0f}K"
     hours_saved_monthly_str = f"{hours_saved_monthly}"
     hourly_cost_str = f"{hourly_cost}"
-    mlops_investment_str = f"${mlops_investment // 1000:.0f}K"
     incident_savings_k = f"{incident_savings // 1000:.0f}"
     time_savings_k = f"{time_savings // 1000:.0f}"
     mlops_investment_k = f"{mlops_investment // 1000:.0f}"
@@ -3128,7 +3127,7 @@ The preceding technical infrastructure and economic framework provide the founda
 
 ## Case Studies {#sec-ml-operations-case-studies-641d}
 
-A sleep-tracking ring with 16 KB of RAM and a blood-pressure monitor governed by FDA regulations both run ML models in production, yet their operational constraints share almost nothing in common. The principles, patterns, and infrastructure examined throughout this chapter converge differently depending on the deployment context. We examine two cases: the Oura Ring, where pipeline debt and configuration management challenge resource-constrained edge environments, and ClinAIOps, where feedback loops and governance requirements drive specialized healthcare operations. The following *principle mapping guide* structures the comparison.
+A sleep-tracking ring with 16 KB of RAM and a blood-pressure monitor governed by FDA regulations both run ML models in production [@fda2021artificial], yet their operational constraints share almost nothing in common. The principles, patterns, and infrastructure examined throughout this chapter converge differently depending on the deployment context. We examine two cases: the Oura Ring, where pipeline debt and configuration management challenge resource-constrained edge environments, and ClinAIOps, where feedback loops and governance requirements drive specialized healthcare operations. The following *principle mapping guide* structures the comparison.
 
 ::: {.callout-example title="Principle Mapping Guide"}
 
@@ -3164,7 +3163,7 @@ To overcome performance limitations, the Oura team constructed a diverse dataset
 
 The study yielded 440 nights of data and over 3,400 hours of time-synchronized recordings, capturing physiological diversity and variability in environmental and behavioral factors critical for generalizing across a real-world user base.
 
-The team implemented automated data pipelines for ingestion, cleaning, and preprocessing. Using the Edge Impulse platform[^fn-edge-impulse-ops], they consolidated raw inputs from multiple sources, resolved temporal misalignments, and structured data for downstream development. These workflows address **data dependency debt** patterns by implementing robust versioning and lineage tracking, avoiding unstable dependencies that commonly plague embedded ML systems.
+The team implemented automated data pipelines for ingestion, cleaning, and preprocessing. Using the Edge Impulse platform[^fn-edge-impulse-ops], they consolidated raw inputs from multiple sources, resolved temporal misalignments, and structured data for downstream development [@janapa2023edge]. These workflows address **data dependency debt** patterns by implementing robust versioning and lineage tracking, avoiding unstable dependencies that commonly plague embedded ML systems.
 
 [^fn-edge-impulse-ops]: **Edge Impulse**: The platform counters data dependency debt by managing the entire data lifecycle, from ingestion to preprocessing, as a single, versionable asset. This mechanism prevents the silent pipeline failures common in fragmented toolchains, where an unversioned data change can corrupt a model deployed to a physical device. By enforcing integrated versioning and lineage tracking, the platform ensures reproducible builds across more than 80 distinct hardware targets. \index{Edge Impulse!embedded MLOps}
 
@@ -3400,7 +3399,7 @@ For example, in diabetes management, a clinician may use AI-summarized data to g
 
 ##### Data infrastructure {#sec-ml-operations-data-infrastructure-b481}
 
-Wrist-worn devices with photoplethysmography (PPG)\index{Photoplethysmography (PPG)!wearable sensing}[^fn-ppg-signal-quality] and ECG sensors provide noninvasive blood pressure estimates [@zhang2017highly], augmented by accelerometer data for activity context and self-reported medication adherence logs. This multimodal data stream, integrated with electronic health records, forms the foundation for personalized AI recommendations.
+Wrist-worn devices with photoplethysmography (PPG)\index{Photoplethysmography!wearable sensing}[^fn-ppg-signal-quality] and ECG sensors provide noninvasive blood pressure estimates [@zhang2017highly], augmented by accelerometer data for activity context and self-reported medication adherence logs. This multimodal data stream, integrated with electronic health records, forms the foundation for personalized AI recommendations.
 
 [^fn-ppg-signal-quality]: **Photoplethysmography (PPG)**: Optical technique detecting blood volume changes by measuring light absorption variations through green LEDs. For ML operations, PPG introduces a data quality challenge absent in controlled environments: motion artifacts from wrist movement corrupt the signal, creating a data drift pattern where the same physiological state produces different input distributions depending on user activity. Models must either filter corrupted windows before inference or learn to be robust to motion noise, and monitoring must distinguish genuine physiological changes from artifact-induced distribution shift. \index{PPG!data quality challenge}
 

@@ -24,6 +24,7 @@ right place.
 | Author or fix a StaffML interview question | **StaffML** | [`interviews/CONTRIBUTING.md`](interviews/CONTRIBUTING.md) |
 | Improve teaching materials, syllabi, or rubrics | **Instructors** | [`instructors/README.md`](instructors/README.md) |
 | Update slides for a chapter | **Slides** | [`slides/README.md`](slides/README.md) |
+| Change the unified landing site, newsletter wiring, or games | **Site** | [`site/README.md`](site/README.md) |
 
 Not sure which one applies? Open a
 [Discussion](https://github.com/harvard-edge/cs249r_book/discussions) and we'll
@@ -63,7 +64,8 @@ README. Each links to the canonical doc rather than restating it.
   At a glance: `book/` for the textbook, `tinytorch/` for the framework,
   `labs/` for browser labs, `kits/` for hardware recipes, `mlsysim/` for
   the simulator, `instructors/` for teaching materials, `slides/` for
-  per-chapter decks, `interviews/` for StaffML.
+  per-chapter decks, `interviews/` for StaffML, `site/` for the unified
+  landing and newsletter.
 
 ## Universal policies (apply to every project)
 
@@ -87,7 +89,7 @@ Branch names should reference the issue number when one exists
 ### 2. Set up pre-commit hooks (one time per clone)
 
 This repo runs ~60 pre-commit checks (BibTeX validation, figure-div syntax,
-markdown link checks, EPUB hygiene, vault corpus-guard, and more) defined in
+markdown link checks, EPUB hygiene, vault schema drift, and more) defined in
 `.pre-commit-config.yaml`. They catch issues that would otherwise burn
 maintainer review cycles. Install them once per fresh clone:
 
@@ -96,7 +98,12 @@ pip install pre-commit
 pre-commit install
 ```
 
-This is enough to contribute to **any** sub-project. Some projects also have
+This is enough to contribute to **any** sub-project. The default hook set is
+**only** the root `.pre-commit-config.yaml`. TinyTorch additionally ships
+`tinytorch/.pre-commit-config.yaml` (markdown collapse, CLI doc checks); run it
+when you need those checks:
+`cd tinytorch && pre-commit run --config .pre-commit-config.yaml --all-files`.
+Some projects also have
 their own setup step that installs project-specific tooling (and may wire up
 pre-commit for you as a convenience):
 

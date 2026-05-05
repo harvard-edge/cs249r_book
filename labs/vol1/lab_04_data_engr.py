@@ -686,7 +686,7 @@ data is cheaper than moving data to compute.
 
         _error_pct = partC_error_rate.value
         _stages = partC_stages.value
-        _amp_factor = 1.4  # from chapter
+        _amp_factor = 1.5  # from chapter
 
         _errors_by_stage = []
         for _s in range(_stages + 1):

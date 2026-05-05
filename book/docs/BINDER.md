@@ -116,6 +116,23 @@ Use Binder-native checks instead of direct script calls:
 - `./binder validate inline-refs`
 - `./binder validate all`
 
+#### Bibliography consistency (`.bib` + pre-commit)
+
+Committed `.bib` files go through **pre-commit** in this order:
+
+1. **`bib-apply-mechanical`** — `book/tools/bib_apply_mechanical_fixes.py` (safe §5 field fixes; only **changed** `.bib` in the commit; exits **1** if it rewrote a file so you re-stage)
+2. **`bibtex-tidy`** — layout
+3. **`./book/binder check bib --scope hygiene`** — same as `book/tools/bib_lint.py` **errors** (see `book/tools/bib_lint_baseline.json` for grandfathering; warnings do not block)
+
+To run the same pipeline **by hand** on the whole tree (e.g. before a big merge), from the **repository root**:
+
+```bash
+./book/binder bib normalize              # all git-tracked *.bib
+./book/binder bib normalize --vol1        # only under book/quarto/contents/vol1
+```
+
+This runs, in order: `book/tools/bib_apply_mechanical_fixes.py` (safe §5 field fixes) → `pre-commit run bibtex-tidy --all-files` (until it passes) → `python3 book/tools/bib_lint.py --all --check`. Optional metadata refresh from Crossref is separate: **`./book/binder bib update`**.
+
 Machine-readable output is available for editor/CI integration:
 
 ```bash

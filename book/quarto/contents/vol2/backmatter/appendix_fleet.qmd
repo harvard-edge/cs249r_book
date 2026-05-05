@@ -131,10 +131,6 @@ class FleetFoundations:
     # Pre-computed formatted strings
     mfu_low = int(MFU_TRAINING_LOW * 100)
     mfu_high = int(MFU_TRAINING_HIGH * 100)
-    oh_pipeline_pct = int(oh_pipeline * 100)
-    oh_checkpoint_pct = int(oh_checkpoint * 100)
-    oh_failure_pct = int(oh_failure * 100)
-    oh_maintenance_pct = int(oh_maintenance * 100)
 
     # Interconnect scalars (for tables/prose)
     nvlink_h100_bw = int(nvlink_h100_qty.m_as(GB/second))
@@ -147,7 +143,6 @@ class FleetFoundations:
     ib_hdr_lat = IB_HDR_LATENCY_US
     roce_lat = ROCE_LATENCY_US
     tcp_lat = TCP_LATENCY_US
-    ib_to_tcp_lat = int(TCP_LATENCY_US/IB_NDR_LATENCY_US)
 
     # Checkpoint sizes (GB or TB for display)
     ckpt_7b_gb = calc_checkpoint_size(7e9, 16).m_as(GB)
@@ -168,7 +163,6 @@ class FleetFoundations:
 
     # Accelerator table (scalars for fmt)
     h100_flops = int(H100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second))
-    h100_bw_tbs = fmt(H100_MEM_BW.m_as(TB/second), precision=2, commas=False)
     h100_cap = int(H100_MEM_CAPACITY.m_as(GiB))
     h100_tdp = int(H100_TDP.m_as(watt))
     b200_flops = int(B200_FLOPS_FP16_TENSOR.m_as(TFLOPs/second))
@@ -176,7 +170,6 @@ class FleetFoundations:
     b200_cap = int(B200_MEM_CAPACITY.m_as(GiB))
     b200_tdp = int(B200_TDP.m_as(watt))
     tpuv5_flops = int(TPUV5P_FLOPS_BF16.m_as(TFLOPs/second))
-    tpuv5_bw_tbs = fmt(TPUV5P_MEM_BW.m_as(TB/second), precision=2, commas=False)
     tpuv5_cap = int(TPUV5P_MEM_CAPACITY.m_as(GiB))
     tpuv6_flops = int(TPUV6_FLOPS_BF16.m_as(TFLOPs/second))
     tpuv6_bw_tbs = fmt(TPUV6_MEM_BW.m_as(TB/second), precision=2, commas=False)
@@ -246,11 +239,11 @@ Training workloads are synchronous and bandwidth-hungry like HPC, but long-runni
 
 The following provides a compact reference for the key foundational ideas that reappear throughout the distributed systems chapters.
 
-- **The iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
+- **The iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
 - **Roofline Model**: Distinguishes compute-bound from memory-bound workloads using arithmetic intensity. At fleet scale, a third ceiling appears: **network-bound** workloads whose performance is limited by inter-node bandwidth.
 - **Amdahl's Law**: Caps strong-scaling speedup at $1/s$. At fleet scale, the "serial fraction" includes not just sequential code but also synchronization barriers, collective communication, and pipeline bubbles.
 - **Training memory rule**: 16 bytes per parameter for mixed-precision Adaptive Moment Estimation (Adam) training. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
-- **Little's Law** ($L = \lambda W$): Sizes inference infrastructure. At fleet scale, it determines how many serving replicas are needed behind a load balancer.
+- **Little's Law** ($N_{\text{req}} = \lambda T_{\text{lat}}$): Sizes inference infrastructure. At fleet scale, it determines how many serving replicas are needed behind a load balancer.
 
 The transition from single-machine to fleet-scale reasoning requires extending these models with new dimensions: network topology, failure probability, and coordination overhead. The numbers in the next section provide the quantitative foundation for that extension.
 
@@ -421,14 +414,14 @@ Raw peak FLOPS are a necessary but misleading metric for fleet capacity planning
 
 Model FLOPS Utilization (MFU) measures what fraction of peak FLOPS a training workload actually achieves. Well-optimized large-model training on current hardware achieves `{python} FF.mfu_low`--`{python} FF.mfu_high` percent MFU. The gap comes from memory stalls, kernel launch overhead, pipeline bubbles, and suboptimal operator fusion. MFU below `{python} FF.mfu_low` percent signals optimization opportunities; MFU above `{python} FF.mfu_high` percent indicates excellent hardware utilization.
 
-Scaling efficiency ($\eta$) measures how much useful computation survives as you add more accelerators. @tbl-fleet-scaling-efficiency shows the empirical ranges for well-optimized distributed training.
+Scaling efficiency ($\eta_{\text{hw}}$) measures how much useful computation survives as you add more accelerators. @tbl-fleet-scaling-efficiency shows the empirical ranges for well-optimized distributed training.
 
-| **Cluster Size** | **Scaling Efficiency ($\eta$)** | **Implication**                                       |
-|:-----------------|:--------------------------------|:------------------------------------------------------|
-| **32 GPUs**      | ~`{python} FF.eff_32`%          | Near-linear scaling; communication is negligible      |
-| **256 GPUs**     | ~`{python} FF.eff_256`%         | Communication starts to erode throughput              |
-| **1,024 GPUs**   | ~`{python} FF.eff_1024`%        | Significant overhead; optimization critical           |
-| **8,192 GPUs**   | ~`{python} FF.eff_8192`%        | Fleet-scale regime; 65 percent of compute is overhead |
+| **Cluster Size** | **Scaling Efficiency ($\eta_{\text{hw}}$)** | **Implication**                                       |
+|:-----------------|:--------------------------------------------|:------------------------------------------------------|
+| **32 GPUs**      | ~`{python} FF.eff_32`%                      | Near-linear scaling; communication is negligible      |
+| **256 GPUs**     | ~`{python} FF.eff_256`%                     | Communication starts to erode throughput              |
+| **1,024 GPUs**   | ~`{python} FF.eff_1024`%                    | Significant overhead; optimization critical           |
+| **8,192 GPUs**   | ~`{python} FF.eff_8192`%                    | Fleet-scale regime; 65 percent of compute is overhead |
 
 : **Scaling Efficiency by Cluster Size**: Efficiency degrades roughly as the logarithm of cluster size. These ranges assume well-optimized data parallelism with gradient compression. Poorly optimized systems can lose 2--3$\times$ more. {#tbl-fleet-scaling-efficiency}
 

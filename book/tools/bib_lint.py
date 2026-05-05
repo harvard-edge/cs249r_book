@@ -2,7 +2,7 @@
 """BibTeX linter, validator, and formatter for the MLSysBook project.
 
 Enforces the canonical schema and formatting rules documented in
-`.claude/rules/book-prose-merged.md` §5 Bibliography Hygiene.
+`.claude/rules/book-prose.md` §5 Bibliography Hygiene.
 
 Usage:
     python3 book/tools/bib_lint.py <file.bib> [--check|--fix|--report]
@@ -20,8 +20,10 @@ What it does:
     1. Parses .bib files with a proper state machine (brace counting +
        quote tracking). Handles nested braces in titles correctly.
     2. Validates each entry against §5 schema: required fields per
-       entry type, canonical field order, quoting style, author list
-       rules, journal spell-out, publisher canonical forms, etc.
+       entry type, author list rules, journal spell-out, publisher
+       canonical forms, title trailing period / all-caps paste, title
+       Title-Case heuristics, short `booktitle` without `(ACRONYM)`,
+       @article + volume (non-preprint), pages `p.`/`pp.` prefix, etc.
     3. Auto-fixes safely-fixable violations: field reordering,
        indentation, quote style, trailing commas, en-dash in pages.
     4. Reports unfixable violations (missing required fields,
@@ -47,7 +49,8 @@ Integration points:
       no regex, no brace-counting bugs.
 
 Canonical rule source:
-    .claude/rules/book-prose-merged.md §5 "Bibliography Hygiene"
+    `.claude/rules/book-prose.md` §5 "Bibliography Hygiene" (see also
+    `book-prose-merged.md` if present).
 """
 from __future__ import annotations
 
@@ -168,7 +171,7 @@ FORBIDDEN_FIELDS: set[str] = {
     "organization",  # replaced with publisher per §5
 }
 
-# Common abbreviated-journal patterns that must be spelled out
+# Common abbreviated-journal patterns that must be spelled out (§5 table + extras)
 JOURNAL_ABBREV_PATTERNS: list[tuple[str, str]] = [
     (r"\bJ\. Mach\. Learn\. Res\.", "Journal of Machine Learning Research"),
     (r"\bCommun\. ACM\b", "Communications of the ACM"),
@@ -178,6 +181,15 @@ JOURNAL_ABBREV_PATTERNS: list[tuple[str, str]] = [
     (r"\bNeural Comput\.", "Neural Computation"),
     (r"\bProc\. IEEE\b", "Proceedings of the IEEE"),
     (r"\bACM Comput\. Surv\.", "ACM Computing Surveys"),
+    (r"\bJ\. ACM\b", "Journal of the ACM"),
+    (r"\bIEEE Trans\. Comput\.", "IEEE Transactions on Computers"),
+    (r"\bIEEE/ACM Trans\. Netw\.", "IEEE/ACM Transactions on Networking"),
+    (r"\bACM SIGOPS Oper\. Syst\. Rev\.", "ACM SIGOPS Operating Systems Review"),
+    (r"\bComput\. Surv\.\b", "ACM Computing Surveys"),
+    (r"\bArtif\. Intell\.\b", "Artificial Intelligence"),
+    (r"\bJ\. Stat\. Mech\.", "Journal of Statistical Mechanics"),
+    (r"\bPhys\. Rev\. Lett\.", "Physical Review Letters"),
+    (r"\bPhys\. Rev\. [A-Z]\b", "Physical Review (series)"),
 ]
 
 # Canonical publishers (warn if not in this set — may be OK but flag for review)
@@ -192,6 +204,8 @@ CANONICAL_PUBLISHERS: set[str] = {
     "The MIT Press", "Dartmouth College", "Microsoft Research",
     "Carnegie Mellon University", "University of Toronto", "Stanford University",
     "Google Research", "Uber Engineering Blog", "VentureBeat",
+    "IEEE Computer Society", "ISCA", "Sage Publications", "Routledge", "USENIX",
+    "SAGE Publications", "PLOS", "PLOS ONE", "Frontiers Media S.A.",
 }
 
 
@@ -444,6 +458,50 @@ def _split_at_top_level_commas(body: str) -> list[str]:
     return parts
 
 
+# ─── §5 heuristics (see `.claude/rules/book-prose.md` Bibliography Hygiene) ──
+
+
+def _arxiv_or_preprint_journal(value: str) -> bool:
+    """True if `journal` clearly denotes a preprint / non-volume venue."""
+    v = value.lower()
+    if "arxiv" in v:
+        return True
+    if "biorxiv" in v or "medrxiv" in v:
+        return True
+    if "ssrn" in v:
+        return True
+    if "preprint" in v and "arxiv" in v:
+        return True
+    return False
+
+
+def _bib_field_appears_all_caps(value: str, min_letters: int = 18) -> bool:
+    """Heuristic: pasted / publisher metadata in ALL CAPS (§5 sentence / mixed case)."""
+    if not value or "$" in value:
+        return False
+    upper = sum(1 for c in value if c.isalpha() and c.isupper())
+    lower = sum(1 for c in value if c.isalpha() and c.islower())
+    total = upper + lower
+    if total < min_letters:
+        return False
+    return (upper / total) >= 0.88 and lower == 0
+
+
+# Title case function words: when capitalized after a word ending in a lowercase
+# letter, §5 sentence case usually lowercases them ("learning and X" not
+# "learning And X") — nudge only, not a hard error (proper-noun lines exist).
+_MID_TITLE_FUNC_WORDS = re.compile(
+    r"(?<=[a-z0-9)\]\'\"\}])\s+"
+    r"(The|And|Or|For|Of|In|On|At|To|As|By|From|Into|Over|With|"
+    r"About|An|But|Nor|So|Yet|Vs\.?|Via)\b",
+)
+
+
+def _title_suspect_titlecase_function_word(value: str) -> bool:
+    """True if a common function word looks title-cased mid-title (§5 sentence case)."""
+    return _MID_TITLE_FUNC_WORDS.search(value) is not None
+
+
 # ─── Validator ───────────────────────────────────────────────────────────────
 
 def validate_entry(entry: Entry) -> list[Violation]:
@@ -558,6 +616,81 @@ def validate_entry(entry: Entry) -> list[Violation]:
                 f"doi `{d.value}` includes URL prefix; "
                 f"§5 requires bare DOI (no https://doi.org/)",
                 fixable=True,
+            ))
+
+    # Rule 8a — title: no trailing period (§5 Field content rules → `title`)
+    tit = entry.get("title")
+    if tit and tit.value.rstrip().endswith("."):
+        tail = tit.value.rstrip()
+        if not tail.endswith("..."):
+            v.append(Violation(
+                entry.key, entry.start_line, "warning",
+                "title-trailing-period",
+                "title ends with `.`; §5 prefers no trailing period on titles",
+            ))
+
+    if tit and _bib_field_appears_all_caps(tit.value):
+        v.append(Violation(
+            entry.key, entry.start_line, "warning",
+            "title-appears-all-caps",
+            "title is almost entirely uppercase; §5 uses sentence case with `{...}` "
+            "to protect acronyms — consider fixing pasted metadata",
+        ))
+
+    if tit and _title_suspect_titlecase_function_word(tit.value):
+        v.append(Violation(
+            entry.key, entry.start_line, "info",
+            "title-suspect-titlecase-function",
+            "title may be in Title Case: §5 prefers sentence case; verify "
+            "capitalized The/And/... mid-title (ignore if intentional name)",
+        ))
+
+    bt0 = entry.get("booktitle")
+    if entry.entry_type in ("inproceedings", "incollection") and bt0:
+        if _bib_field_appears_all_caps(bt0.value, min_letters=14):
+            v.append(Violation(
+                entry.key, entry.start_line, "warning",
+                "booktitle-appears-all-caps",
+                "booktitle is almost entirely uppercase; expand to full proceedings "
+                "name per §5 (or fix pasted metadata)",
+            ))
+        btv = bt0.value
+        if "(" not in btv and len(btv) >= 6:
+            s = btv.replace("{", " ").replace("}", " ")
+            s = re.sub(r"[\s,]+", " ", s).strip()
+            wds = s.split() if s else []
+            if len(wds) <= 3 and all(len(x) >= 2 and re.match(r"^[A-Za-z-]+$", x) for x in wds):
+                v.append(Violation(
+                    entry.key, entry.start_line, "info",
+                    "booktitle-suspect-acronym-only",
+                    "booktitle is very short and has no `(...)`; §5 wants full name "
+                    "plus (ACRONYM) when applicable — verify (workshops can differ)",
+                ))
+
+    # (booktitle year vs official proceedings strings: §5 says omit year, but
+    # DBLP/IEEE export strings often include it — not linted; fix editorially when
+    # touching an entry.)
+
+    # Rule 8b — @article should carry `volume` when not a preprint journal (§5 table)
+    if entry.entry_type == "article" and not entry.has("volume"):
+        jf = entry.get("journal")
+        jv = jf.value if jf else ""
+        if jv and not _arxiv_or_preprint_journal(jv):
+            v.append(Violation(
+                entry.key, entry.start_line, "warning",
+                "article-missing-volume",
+                "@article missing `volume`; §5 lists volume as required for journal "
+                "articles (omit only for genuine preprint-style `journal` values)",
+            ))
+
+    # Rule 8c — pages: no p./pp. prefix (§5 → `pages`)
+    if pg and pg.value:
+        pval = pg.value.strip()
+        if re.match(r"^(?:pp?\.)\s*", pval, re.IGNORECASE):
+            v.append(Violation(
+                entry.key, entry.start_line, "warning",
+                "pages-has-prefix",
+                "pages should be bare range like `123--145`; §5 says omit `p.` / `pp.`",
             ))
 
     # Rule 8 (field order) is intentionally not enforced by bib_lint.

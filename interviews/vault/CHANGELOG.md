@@ -216,7 +216,10 @@ silently dropped everything else.
 
 ### Retired tooling
 
-Archived to `scripts/_archive/` (preserved for forensic reference):
+These one-off scripts originally lived under `vault/scripts/archive/` and
+`vault-cli/scripts/archive/` after migration. **Those directories are no longer
+in the tree** (retrieve earlier revisions from git if you need the files for
+comparison):
 
 - `vault-cli/scripts/split_corpus.py` — the pre-v1.0 exporter, source of
   the defects this migration corrects.

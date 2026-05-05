@@ -50,10 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 VAULT_DIR = REPO_ROOT / "interviews" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
 EMBEDDINGS_PATH = VAULT_DIR / "embeddings.npz"
-# AI-pipeline scorecard lives under _pipeline/ (gitignored).
-# See interviews/CLAUDE.md.
-PIPELINE_DIR = VAULT_DIR / "_pipeline"
-DEFAULT_OUTPUT = PIPELINE_DIR / "draft-validation-scorecard.json"
+DEFAULT_OUTPUT = VAULT_DIR / "draft-validation-scorecard.json"
 
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 ORIGINALITY_THRESHOLD = 0.92  # cosine; >= this is "too duplicative"
@@ -119,58 +116,6 @@ def gate_schema(draft: dict[str, Any]) -> tuple[bool, str]:
         return False, str(e)[:300]
 
 
-# ─── Gate 1.5: format compliance ──────────────────────────────────────────
-
-
-# Markers required by the StaffML question conventions (see ARCHITECTURE.md
-# §3.6.1). common_mistake follows Pitfall / Rationale / Consequence;
-# napkin_math follows Assumptions / Calculations / Conclusion. Cheap
-# regex check — no Gemini call needed; runs on every draft.
-COMMON_MISTAKE_MARKERS = (
-    "**The Pitfall:**",
-    "**The Rationale:**",
-    "**The Consequence:**",
-)
-NAPKIN_MATH_MARKERS = (
-    "**Assumptions",   # "Assumptions & Constraints:" — match prefix only
-    "**Calculations:**",
-    "**Conclusion",    # "Conclusion:" or "Conclusion & Interpretation:"
-)
-
-
-def gate_format_compliance(draft: dict[str, Any]) -> tuple[bool, str, dict]:
-    """Verify the prose-block conventions our schema doesn't enforce.
-
-    Cheap, deterministic, no LLM call. Detects drafts that look fine to
-    Pydantic but skip one of the structured-block markers — usually a
-    one-line edit to fix.
-    """
-    details = draft.get("details") or {}
-    issues: list[str] = []
-
-    cm = (details.get("common_mistake") or "").strip()
-    if cm:
-        missing = [m for m in COMMON_MISTAKE_MARKERS if m not in cm]
-        if missing:
-            issues.append(f"common_mistake missing {missing!r}")
-    # common_mistake is optional in the schema; only flag if present-and-malformed.
-
-    nm = (details.get("napkin_math") or "").strip()
-    if nm:
-        missing = [m for m in NAPKIN_MATH_MARKERS if m not in nm]
-        if missing:
-            issues.append(f"napkin_math missing {missing!r}")
-    # napkin_math is optional; only flag if present-and-malformed.
-
-    detail = {
-        "common_mistake_present": bool(cm),
-        "napkin_math_present": bool(nm),
-    }
-    if issues:
-        return False, "; ".join(issues), detail
-    return True, "", detail
-
-
 # ─── Gate 2: originality (cosine vs neighbours) ───────────────────────────
 
 
@@ -213,7 +158,6 @@ def gate_originality(
     state = _load_embedding_model_and_corpus()
     model = state["model"]
     vectors = state["vectors"]
-    state["qids"]
     qid_to_row = state["qid_to_row"]
 
     # Embed the draft (concat title + scenario + question — what the v1
@@ -305,23 +249,6 @@ matches that level's typical cognitive demand.
 Bloom mapping: L1=remember, L2=understand, L3=apply, L4=analyze,
 L5=evaluate, L6+=create.
 
-REJECT (verdict=no) on any of these failure modes:
-  - "Level inflation": the level field claims L3+ (apply / analyze /
-    evaluate / create) but the question is actually a recall or simple
-    multiplication problem. A common pattern: L3 stamped on a
-    word-problem where every input is given upfront and the candidate
-    only multiplies. That's L1 or L2, not L3.
-  - "Verb mismatch": the question's actual verb (calculate, identify,
-    explain, decompose, evaluate, design) is more than one Bloom step
-    away from the level field's expected verb.
-  - "No real judgement required": L4 (analyze) and above must require
-    decomposition, root-cause reasoning, or a trade-off decision. If
-    the candidate is mechanical computation with all inputs provided,
-    it's not L4.
-
-ACCEPT (verdict=yes) when the question's cognitive operation matches
-the exemplars' typical demand at this level.
-
 EXEMPLARS at level={target_level}:
 {json.dumps([question_payload(q) for q in exemplars], indent=2)}
 
@@ -329,7 +256,7 @@ CANDIDATE:
 {_judge_block(draft)}
 
 Return STRICT JSON with no prose or fences:
-{{"verdict": "yes" | "no", "rationale": "<one sentence pointing to the SPECIFIC failure mode if no>"}}
+{{"verdict": "yes" | "no", "rationale": "<one sentence>"}}
 """
     resp = call_gemini_judge(prompt)
     if resp is None:
@@ -341,53 +268,18 @@ Return STRICT JSON with no prose or fences:
 
 
 def gate_coherence(draft: dict) -> tuple[bool, str, dict]:
-    prompt = f"""You are doing physical-realism + coherence review on an ML
-systems interview question. REJECT (verdict=no) on any of these failure
-modes — these are the patterns that previous coherence judges have let
-through and that the 2026-05-02 audit caught:
-
-  1. PHYSICAL ABSURDITY: numbers in the scenario violate real-world
-     hardware/software bounds. Examples that should be REJECTED:
-       - Mobile/edge NPU wake-up time > ~50ms (real NPUs wake in
-         single-digit ms; 0.5s wake-up is fiction)
-       - Power figures inconsistent with the device class (e.g., 50W
-         for a "smartphone NPU"; 0.05W for a "datacenter accelerator")
-       - Latency or throughput figures off by >5× from realistic for
-         the named hardware (MobileNetV2 on Coral USB TPU at 80ms is
-         high; 10-20ms is typical)
-       - Memory or model-size claims that don't fit the device's
-         capacity envelope
-       - Duty-cycling patterns that defeat the use-case (a dashcam
-         that idles 75% of the time misses accidents)
-
-  2. VENDOR-NAME FABRICATION: hardware, accelerators, frameworks, or
-     benchmarks named in the scenario that don't actually exist or are
-     misattributed. (E.g., "Coral Edge TPU XL" — there's no XL variant.)
-     If unsure, treat ambiguous-but-plausible as ok; only flag clearly
-     invented names.
-
-  3. SCENARIO/QUESTION/SOLUTION MISMATCH:
-       - Question doesn't logically follow from the scenario
-       - realistic_solution doesn't actually answer the question (e.g.,
-         restates the question, gives generic advice, or answers a
-         related-but-different question)
-       - Numbers contradict across the three fields
-
-  4. ARITHMETIC ERRORS in napkin_math: the calculations don't add up,
-     unit conversions are wrong, or the conclusion doesn't follow from
-     the calculations.
-
-ACCEPT (verdict=yes) only when scenario, question, solution, and any
-napkin math are mutually consistent AND the scenario is physically
-realistic for the named hardware AND no vendor names are fabricated.
+    prompt = f"""Judge whether the scenario, question, and realistic_solution
+are MUTUALLY CONSISTENT. Specifically:
+  - Does the question logically follow from the scenario?
+  - Does the realistic_solution actually answer the question (not adjacent)?
+  - Are the numbers / system parameters internally consistent across all
+    three fields (no contradictions)?
 
 CANDIDATE:
 {_judge_block(draft)}
 
 Return STRICT JSON with no prose or fences:
-{{"verdict": "yes" | "no",
-  "failure_mode": "physical_absurdity" | "vendor_fabrication" | "mismatch" | "arithmetic" | "none",
-  "rationale": "<one sentence pointing to the SPECIFIC issue if no>"}}
+{{"verdict": "yes" | "no", "rationale": "<one sentence>"}}
 """
     resp = call_gemini_judge(prompt)
     if resp is None:
@@ -470,14 +362,6 @@ def evaluate_draft(
         rec["verdict"] = "fail"
         return rec  # downstream gates assume a structurally valid YAML
 
-    # Gate 1.5 — format compliance (Pitfall/Rationale/Consequence;
-    # Assumptions/Calculations/Conclusion). Cheap, no Gemini call.
-    ok, why, detail = gate_format_compliance(draft)
-    rec["format_compliance"] = "pass" if ok else "fail"
-    rec["format_compliance_detail"] = detail
-    if not ok:
-        rec["format_compliance_reason"] = why
-
     # Gate 2 — originality
     if args.no_originality:
         rec["originality"] = "skipped"
@@ -518,7 +402,6 @@ def evaluate_draft(
 
     # Final verdict: pass iff every non-skipped gate is pass.
     gate_results = [
-        rec.get("format_compliance"),
         rec.get("originality"),
         rec.get("level_fit"),
         rec.get("coherence"),

@@ -152,6 +152,7 @@ class ValidateCommand:
         ],
         "bib": [
             ("hygiene", "_run_bib_hygiene"),
+            ("key-content", "_run_bib_key_content"),
         ],
         "footnotes": [
             ("placement", "_run_footnote_placement"),
@@ -1020,19 +1021,33 @@ class ValidateCommand:
 
         Shapes we flag (prose, not code fences; inline backticks scrubbed first):
 
-        - `… et al. <opt-words> ( … YEAR … ) [@key]`  — manual + bracket; the
-          *opt-words* allowance ("at Stanford", "in their paper", etc.)
-          catches the pattern that the original adjacency-only regex missed.
-        - `Surname & Surname ( … ) [@key]`            — two-author manual + bracket.
-        - `… et al. <opt-words> ( … YEAR … )` with **no** `[@…]` or narrative
-          `@<bibkey>` anywhere on the line — bare attribution.
+        Manual + bracket (citeproc duplicate):
+        - `… et al. <opt-words> ( … YEAR … ) [@key]`  — *et al.* + paren + bracket.
+        - `Surname & Surname ( … ) [@key]`            — two-author + bracket.
+
+        Bare attribution (no [@key] or narrative @bibkey on the line):
+        - `… et al. <opt-words> ( … YEAR … )`         — classic *et al.* + paren-year.
+        - `… et al.` with no paren-year on line       — e.g. "Sambasivan et al. found
+          that…" — author + year claim with nothing for the reader to look up.
+        - `Surname and Surname ( … YEAR … )`          — e.g. "Frankle and Carbin
+          (MIT, 2019)".
+        - `Surname, Surname, and Surname ( … YEAR … )` — e.g. "Hinton, Vinyals,
+          and Dean (Google, 2015)".
+        - `(Surname and Surname, YEAR)`               — e.g. "(Ioffe and Szegedy,
+          2015)".
+
+        These six bare patterns share a fix: replace the manual attribution with
+        narrative `@key` (which renders as "Author et al. (YEAR)") or `[@key]`
+        as a fact anchor. If no bib entry exists, restructure to drop the date
+        and author rather than leaving an unverifiable claim.
 
         We do **not** flag acronyms in parentheses that are not *author* lines, e.g.
         "DARTS (Differentiable …) [@liu2019darts]": that has no *et al.* and no
-        *Word & Word* before the paren. The bare-attribution branch additionally
-        requires a 4-digit publication year (19xx/20xx) inside the parenthetical,
-        so "(5--10)% improvement" or "(in production)" do not trigger it. Fenced
-        code and inline backtick docs of anti-patterns are skipped.
+        *Word & Word* before the paren. The bare-attribution branches that involve
+        a paren require a 4-digit publication year (19xx/20xx) inside the
+        parenthetical, so "(5--10)% improvement" or "(in production)" do not
+        trigger it. Fenced code and inline backtick docs of anti-patterns are
+        skipped.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -1050,6 +1065,52 @@ class ValidateCommand:
             r"\b[A-Z][a-z][a-zA-Z'-]*\s+&\s+[A-Z][a-z][a-zA-Z'-]*\s*"
             r"\([^)\n]{0,500}\)\s*,?\s*\[@"
         )
+        # "Hennessy and Patterson [@Patterson2021]" — two surnames + and + bracket
+        # cite, with no paren-year between. Distinct from `two_surname_and_paren`
+        # (which requires a paren-year and is a *bare* attribution) and from
+        # `two_surname_amp_bracket` (which uses & and requires a paren). Citeproc
+        # renders [@key] as "(Author and Author YEAR)" — duplicates the prose.
+        two_surname_and_bracket = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+\s*,?\s*\[@"
+        )
+        # "(Sweeney, 2002) [@sweeney2002k]" — single-author parenthetical year
+        # immediately before a bracket cite. Citeproc renders [@key] as
+        # "(Author YEAR)" so the (Surname, YEAR) prose duplicates it.
+        single_paren_author_year_bracket = re.compile(
+            r"\(\s*[A-Z][a-z][a-zA-Z'-]+,\s*(?:19|20)\d{2}\s*\)\s*,?\s*\[@"
+        )
+        # "**Optimal Brain Damage (LeCun, 1989)** [@cite]:" — footnote bold head
+        # whose parenthetical already names (Author, YEAR) or (YEAR), followed
+        # immediately by [@cite]. Per the book's footnote convention (Dartmouth
+        # Conference, AlexNet, HIPAA, EU AI Act, A11 Bionic, Optimal Brain
+        # Damage, etc.), the bold head IS the attribution — adding a bracket
+        # cite right after produces "(YEAR) (Author YEAR)" in the rendered output.
+        bold_head_year_bracket = re.compile(
+            r"\*\*[^*\n]*\([^)\n]*\b(?:19|20)\d{2}\b[^)\n]*\)\*\*\s*\[@"
+        )
+        # "[^fn-X]: **Term** [@cite]: ..." — footnote bold head followed
+        # immediately by a [@cite], even when the head has no parenthetical
+        # year. citeproc still inserts "(Author YEAR)" right where you put
+        # [@cite], producing rendered output like "**Federated Learning**
+        # (Li et al. 2020): A distributed training paradigm…" — the cite
+        # reads as part of the term name. Place the cite inside the body
+        # sentence at a specific factual claim instead.
+        footnote_head_then_bracket = re.compile(
+            r"^\[\^fn-[a-z0-9-]+\]:\s*\*\*[^*\n]+\*\*\s*\[@",
+            re.M,
+        )
+        # "text.[@cite]" — period BEFORE the cite. Convention is the
+        # opposite: the cite is part of the sentence, so it goes before the
+        # terminal punctuation: "text [@cite]." Pandoc renders the wrong
+        # order with the period jammed against the citation visually.
+        period_before_bracket = re.compile(r"\S\.\[@[A-Za-z]")
+        # "word[@cite]" — no space before the cite. A parenthetical citation
+        # always takes a leading space in body prose. Excludes footnote
+        # markers and reference labels.
+        no_space_before_bracket = re.compile(r"[a-zA-Z]\[@(?!sec-|fig-|tbl-|eq-|lst-|exr-|exm-|thm-|cor-|cnj-|def-|prp-|rem-|prf-|alg-)[A-Za-z]")
+        # "[@a, @b]" — comma-separated multi-cite. Pandoc's citation syntax
+        # requires semicolons: "[@a; @b]".
+        comma_multicite = re.compile(r"\[@[A-Za-z][\w:.-]+,\s*@[A-Za-z]")
         # "et al. <opt-words> ( … YEAR … )" — bare attribution.
         # Requires a 4-digit publication year inside the paren so we don't
         # flag unrelated parentheticals.
@@ -1057,6 +1118,38 @@ class ValidateCommand:
             r"et al\.[^.\n\[(]{0,100}"
             r"\(\s*[^)\n]{0,60}\b(?:19|20)\d{2}\b[^)\n]{0,60}\)",
             re.IGNORECASE,
+        )
+        # "… et al." anywhere on a line, with no paren-year nearby.
+        # Catches "Sambasivan et al. found that…" — the author makes an
+        # attribution claim but provides no citation for the reader to verify.
+        # The line-level no-cite suppression below ensures we only flag prose
+        # that genuinely lacks a [@key] or narrative @bibkey.
+        et_al_loose = re.compile(r"\bet\s+al\.", re.IGNORECASE)
+        # "Surname and Surname (… YEAR …)" — two-author parenthetical year.
+        # Catches "Frankle and Carbin (MIT, 2019)". Requires both surnames to
+        # start with a capital letter and be followed by lowercase, so common
+        # phrases like "this and that" / "Apple and Microsoft (2024 deal)"
+        # have a lower hit rate. We also require a 4-digit year inside the
+        # paren to avoid matching bare phrases like "Cohen and Welling".
+        two_surname_and_paren = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+\s*"
+            r"\(\s*[^)\n]{0,80}\b(?:19|20)\d{2}\b[^)\n]{0,80}\)"
+        )
+        # "Surname, Surname, and Surname (… YEAR …)" — three-author.
+        # Catches "Hinton, Vinyals, and Dean (Google, 2015)". Optional Oxford
+        # comma (`,?`) before "and". Same paren-year requirement as above.
+        three_surname_paren = re.compile(
+            r"\b[A-Z][a-z][a-zA-Z'-]+,\s+[A-Z][a-z][a-zA-Z'-]+,?\s+and\s+"
+            r"[A-Z][a-z][a-zA-Z'-]+\s*"
+            r"\(\s*[^)\n]{0,80}\b(?:19|20)\d{2}\b[^)\n]{0,80}\)"
+        )
+        # "(Surname and Surname, YEAR)" — fully parenthesized two-author cite.
+        # Catches "(Ioffe and Szegedy, 2015)". Tighter than the two-surname
+        # form above because both surnames AND the year live inside one
+        # parenthesis with a comma separator — almost always an author cite.
+        paren_two_authors = re.compile(
+            r"\(\s*[A-Z][a-z][a-zA-Z'-]+\s+and\s+[A-Z][a-z][a-zA-Z'-]+,\s*"
+            r"(?:19|20)\d{2}\s*\)"
         )
         # Cite detectors used to suppress the bare branch when the line
         # already has a real citation. Excludes Quarto cross-ref prefixes
@@ -1116,6 +1209,194 @@ class ValidateCommand:
                 context=context,
             )
 
+        def issue_etal_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_etal_no_cite",
+                message=(
+                    "Used *Author et al.* in prose with no citation on the line. "
+                    "Either add narrative @key (renders as 'Author et al. (YEAR)') "
+                    "or [@key] as a fact anchor, or rewrite to drop the named "
+                    "attribution when no bib entry exists."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_two_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_two_author_attribution",
+                message=(
+                    "Hand-typed *Surname and Surname (YEAR)* with no bibliography "
+                    "citation on this line. Use narrative @key (renders as "
+                    "'Surname and Surname (YEAR)') or [@key] as a fact anchor, "
+                    "not the manual paren-year form."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_three_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_three_author_attribution",
+                message=(
+                    "Hand-typed *Surname, Surname, and Surname (YEAR)* with no "
+                    "bibliography citation on this line. Replace with narrative "
+                    "@key (citeproc renders the names from the bib entry) or "
+                    "[@key] as a fact anchor."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_paren_authors_no_cite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="bare_paren_author_attribution",
+                message=(
+                    "Hand-typed *(Surname and Surname, YEAR)* parenthetical "
+                    "with no bibliography citation on this line. Replace with "
+                    "[@key] — citeproc renders it the same way and links to "
+                    "the bib entry."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_two_surname_and_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *Surname and Surname* before a bracket cite — "
+                    "citeproc already prints both authors from [@key]. Use "
+                    "narrative @key (renders as 'Surname and Surname (YEAR)') "
+                    "or [@key] alone, not both."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_single_paren_year_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Hand-typed *(Surname, YEAR)* before a bracket cite — "
+                    "citeproc renders [@key] as '(Author YEAR)' immediately "
+                    "after, duplicating the prose. Use [@key] alone."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_bold_head_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Footnote bold head **Term (Author, YEAR)** is followed by "
+                    "a bracket cite [@key]; citeproc renders '(Author YEAR)' "
+                    "right after, duplicating the head's parenthetical. Per "
+                    "book convention (Dartmouth Conference, AlexNet, HIPAA, "
+                    "EU AI Act, etc.), the bold head IS the attribution — drop "
+                    "the cite, or place it later in the body attached to a "
+                    "specific factual claim."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_footnote_head_then_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="manual_bracket_citation",
+                message=(
+                    "Footnote bold head **Term** followed immediately by "
+                    "[@cite] — citeproc inserts '(Author YEAR)' right after "
+                    "the term name, making the cite read as part of the term "
+                    "rather than attribution for the body. Place the cite "
+                    "inside the body sentence at a specific factual claim "
+                    "(e.g., '...without centralizing the raw information "
+                    "[@key].')."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_period_before_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Period BEFORE the citation. Convention is "
+                    "\"text [@cite].\" not \"text.[@cite]\" — the citation "
+                    "is part of the sentence and goes before terminal "
+                    "punctuation."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_no_space_before_bracket(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Citation glued to the preceding word. Always insert a "
+                    "space: \"word [@cite]\" not \"word[@cite]\"."
+                ),
+                severity="error",
+                context=context,
+            )
+
+        def issue_comma_multicite(
+            f: Path, line_num: int, context: str
+        ) -> ValidationIssue:
+            return ValidationIssue(
+                file=self._relative_file(f),
+                line=line_num,
+                code="cite_placement",
+                message=(
+                    "Comma-separated multi-cite [@a, @b]. Pandoc's citation "
+                    "syntax requires semicolons: [@a; @b]."
+                ),
+                severity="error",
+                context=context,
+            )
+
         for file in files:
             lines = self._read_text(file).splitlines()
             in_code = False
@@ -1137,6 +1418,41 @@ class ValidateCommand:
                         max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
                     ].strip()
                     issues.append(issue_ampersand(file, idx, context))
+                for m in two_surname_and_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_two_surname_and_bracket(file, idx, context))
+                for m in single_paren_author_year_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_single_paren_year_bracket(file, idx, context))
+                for m in bold_head_year_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_bold_head_bracket(file, idx, context))
+                if footnote_head_then_bracket.match(scrubbed):
+                    context = scrubbed[: min(len(scrubbed), 80)]
+                    issues.append(issue_footnote_head_then_bracket(file, idx, context))
+                for m in period_before_bracket.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_period_before_bracket(file, idx, context))
+                for m in no_space_before_bracket.finditer(scrubbed):
+                    # Skip footnote markers like text[^fn-...] which look similar but
+                    # the regex requires "[@" so footnote markers (which use "[^") don't match.
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_no_space_before_bracket(file, idx, context))
+                for m in comma_multicite.finditer(scrubbed):
+                    context = scrubbed[
+                        max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                    ].strip()
+                    issues.append(issue_comma_multicite(file, idx, context))
                 # Bare attribution: only flag when the line carries no real
                 # citation. A bracket cite anywhere or a narrative @bibkey
                 # (i.e., @ followed by a non-cross-ref word) suppresses this.
@@ -1144,12 +1460,45 @@ class ValidateCommand:
                     bracket_cite.search(scrubbed)
                     or narrative_cite.search(scrubbed)
                 )
-                if not line_has_cite:
+                # Skip lines that look like code-comment annotations rather
+                # than body prose. Two signals: a leading `#` followed by
+                # ALL-CAPS content (e.g. "# VERIFIED DATA"), or any
+                # `arXiv:NNNN.NNNNN` token on the line. These appear inside
+                # `{python}` cells whose opening fence is mis-detected when
+                # the file has unbalanced fences elsewhere.
+                looks_like_code_comment = (
+                    bool(re.match(r"^\s*#\s+[A-Z]{3,}", line))
+                    or "arXiv:" in scrubbed
+                )
+                if not line_has_cite and not looks_like_code_comment:
                     for m in et_al_bare.finditer(scrubbed):
                         context = scrubbed[
                             max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
                         ].strip()
                         issues.append(issue_bare_attribution(file, idx, context))
+                    # If et_al_bare did not fire but et al. appears anywhere
+                    # on the line, the author claim still lacks a citation.
+                    if not et_al_bare.search(scrubbed):
+                        for m in et_al_loose.finditer(scrubbed):
+                            context = scrubbed[
+                                max(0, m.start() - 30) : min(len(scrubbed), m.end() + 40)
+                            ].strip()
+                            issues.append(issue_etal_no_cite(file, idx, context))
+                    for m in two_surname_and_paren.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_two_authors_no_cite(file, idx, context))
+                    for m in three_surname_paren.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 5) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_three_authors_no_cite(file, idx, context))
+                    for m in paren_two_authors.finditer(scrubbed):
+                        context = scrubbed[
+                            max(0, m.start() - 10) : min(len(scrubbed), m.end() + 24)
+                        ].strip()
+                        issues.append(issue_paren_authors_no_cite(file, idx, context))
 
         return ValidationRunResult(
             name="manual-bracket",
@@ -5277,6 +5626,231 @@ class ValidateCommand:
         return ValidationRunResult(
             name="bib-hygiene", description="bib-hygiene (§5)",
             files_checked=len(bib_files), issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_key_content(self, root: Path) -> ValidationRunResult:
+        """Verify bib key surname/year tokens match the entry's actual
+        author and year fields.
+
+        The bib **key** is a contract: `surname[firstauthor]year[topicword]`.
+        When the key drifts from the entry body, citing the key in prose
+        renders text that contradicts the key. No existing check catches
+        this — `citations` confirms the key resolves to *some* entry,
+        `bib-hygiene` confirms required fields are present, but neither
+        compares the key prefix against the entry's content.
+
+        Real failure observed (May 2026): vol2 had
+
+            @article{shewhart1931economic,
+              author = {Carroll, Alison R. and Johnson, David P.},
+              year = {2020},
+              title = {Know It When You See It: ...},
+              ...
+            }
+
+        Citing [@shewhart1931economic] rendered as "(Carroll and Johnson,
+        2020)" — silently misleading.
+
+        Heuristics to reduce false positives:
+
+        - Only check keys that follow the canonical surname-year convention
+          (`^[a-z]+\\d{4}`). Keys like `the_pile`, `deepbench_github`, or
+          `flexpoint_2017` (which use a separator) are intentional non-author
+          identifiers and skipped.
+        - Surname check passes if the key prefix is a prefix of *any* author's
+          surname, not just the first. Tolerates legitimate re-keys like
+          `harlap2018pipedream` where Harlap is the second author.
+        - Skip entries whose first author looks corporate / institutional
+          (Google, DeepMind, Intel, etc.).
+        - Surname comparison folds diacritics and strips non-alpha so
+          `hebert2018multicalibration` matches `H{\'e}bert-Johnson`.
+        """
+        import unicodedata
+
+        def fold(s: str) -> str:
+            norm = unicodedata.normalize("NFKD", s.lower())
+            return "".join(c for c in norm if not unicodedata.combining(c))
+
+        # Single-token names that almost always indicate a corporate /
+        # institutional author rather than a person. When one of these
+        # appears as a "surname" in the first or second position of the
+        # author field, the entry is skipped — the bib key uses a topic
+        # rather than a personal surname.
+        CORPORATE_AUTHOR_TOKENS = {
+            "google", "deepmind", "microsoft", "openai", "anthropic", "meta",
+            "facebook", "amazon", "aws", "nvidia", "intel", "apple", "ibm",
+            "huggingface", "kaggle", "baidu", "alibaba", "tencent", "samsung",
+            "qualcomm", "arm", "tesla", "siemens", "epoch", "stability",
+            "mistral", "cohere", "deepseek", "moonshot", "perplexity",
+            "cerebras", "graphcore", "groq", "sambanova", "mlcommons",
+            "discord", "github", "gitlab", "wikipedia", "stackoverflow",
+            "openreview", "arxiv", "papers", "pytorch", "tensorflow", "jax",
+            "onnx", "kubernetes", "docker",
+            "corporation", "inc", "ltd", "llc", "research", "team", "labs",
+            "foundation", "consortium", "association", "council", "committee",
+            "group", "network", "alliance", "initiative", "project", "society",
+            "european", "national", "international", "world", "united",
+            "systems", "contributors", "developers", "authors", "community",
+            "staff", "editors", "board", "office", "department", "ministry",
+            "agency", "bureau", "commission", "service", "services",
+        }
+
+        def author_list_surnames(author_field: str) -> List[str]:
+            if not author_field:
+                return []
+            # Strip common LaTeX accent commands so `H\'ebert` → `Hebert`.
+            a = re.sub(r"\\['\"`^~]\{?(\w)\}?", r"\1", author_field)
+            a = a.strip().strip("{}").strip()
+            authors = re.split(r"\s+and\s+", a)
+            surnames: List[str] = []
+            for raw in authors:
+                ent = raw.strip().strip("{}").strip()
+                if not ent:
+                    continue
+                if "," in ent:
+                    surname = ent.split(",", 1)[0].strip().strip("{}").strip()
+                else:
+                    parts = ent.split()
+                    surname = parts[-1] if parts else ""
+                if surname:
+                    surnames.append(surname)
+            for s in surnames[:2]:
+                if fold(s) in CORPORATE_AUTHOR_TOKENS:
+                    return []
+            return surnames
+
+        t0 = time.time()
+        bib_files = sorted(root.rglob("*.bib"))
+        issues: List[ValidationIssue] = []
+
+        entry_header_re = re.compile(r"^@(\w+)\s*\{\s*([\w:_-]+)\s*,", re.M)
+        # Surname-year canonical key: lowercase letters then 4-digit year.
+        convention_re = re.compile(r"^([a-z]+)(\d{4})")
+        # Tolerates one level of nested braces in field values.
+        field_re = re.compile(
+            r"\b(\w+)\s*=\s*"
+            r"(?:\{((?:[^{}]|\{[^{}]*\})*)\}|\"([^\"]*)\")",
+            re.S,
+        )
+
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = str(bib_path.relative_to(root))
+            except ValueError:
+                rel = str(bib_path)
+
+            for hm in entry_header_re.finditer(text):
+                entry_type = hm.group(1).lower()
+                key = hm.group(2)
+                line_no = text[:hm.start()].count("\n") + 1
+
+                # Walk balanced braces from the entry's opening { to its
+                # matching }. Skips escaped braces inside field values.
+                open_brace = text.find("{", hm.start())
+                if open_brace < 0:
+                    continue
+                depth = 0
+                i = open_brace
+                n = len(text)
+                while i < n:
+                    ch = text[i]
+                    if ch == "\\" and i + 1 < n:
+                        i += 2
+                        continue
+                    if ch == "{":
+                        depth += 1
+                    elif ch == "}":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    i += 1
+                body = text[open_brace + 1 : i]
+
+                cm = convention_re.match(key.lower())
+                if not cm:
+                    continue
+                key_surname = cm.group(1)
+                key_year = cm.group(2)
+
+                fields: Dict[str, str] = {}
+                for fm in field_re.finditer(body):
+                    name = fm.group(1).lower()
+                    value = fm.group(2) if fm.group(2) is not None else fm.group(3)
+                    fields[name] = (value or "").strip()
+
+                author = fields.get("author", "")
+                year_field = fields.get("year", "")
+
+                surnames = author_list_surnames(author)
+
+                if surnames:
+                    # Bidirectional prefix match: tolerates both
+                    # `boroumandasplos2018` (key longer than surname,
+                    # appended venue) AND `hebert2018multicalibration`
+                    # (key shorter, only catches the prefix of a hyphenated
+                    # surname). One direction must match for it to count.
+                    matched = False
+                    for s in surnames:
+                        sa = re.sub(r"[^a-z]", "", fold(s))
+                        if sa.startswith(key_surname) or key_surname.startswith(sa):
+                            matched = True
+                            break
+                    if not matched:
+                        first = surnames[0]
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=line_no,
+                            code="bib_key_surname_mismatch",
+                            message=(
+                                f"@{entry_type}{{{key}}} — key surname "
+                                f"'{key_surname}' matches no author in this "
+                                f"entry (first author: '{first}'). Citing the "
+                                f"key in prose renders content that contradicts "
+                                f"the key. Either rename the key to match an "
+                                f"actual author, or replace the entry body to "
+                                f"match the work the key names."
+                            ),
+                            severity="warning",
+                            context="",
+                        ))
+
+                if year_field and year_field != key_year:
+                    # Tolerate a one-year gap: papers commonly key from
+                    # the arXiv preprint year (e.g. 2021) but record the
+                    # conference proceedings year (e.g. 2022) in the year
+                    # field. Both attributions are correct; the gap is
+                    # convention drift, not corruption. Larger gaps almost
+                    # always indicate real key/content mismatch.
+                    try:
+                        gap = abs(int(year_field) - int(key_year))
+                    except ValueError:
+                        gap = 99  # unparsable year → flag
+                    if gap > 1:
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=line_no,
+                            code="bib_key_year_mismatch",
+                            message=(
+                                f"@{entry_type}{{{key}}} — key year {key_year} "
+                                f"does not match year field {year_field} "
+                                f"(gap of {gap} years). The key suggests a "
+                                f"different work than the entry actually "
+                                f"describes."
+                            ),
+                            severity="error",
+                            context="",
+                        ))
+
+        return ValidationRunResult(
+            name="bib-key-content",
+            description="Bib key prefix must match author surname + year (§5)",
+            files_checked=len(bib_files),
+            issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
