@@ -8,92 +8,31 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: The Token Budget Economics
-scenario: Your company is choosing between H100, A100, and TPU v5e for serving a 70B parameter LLM. The
-  CFO wants a cost-per-million-tokens comparison across these accelerators at realistic batch sizes. Walk
-  me through the napkin math and tell me which hardware wins — and when.
-question: Which accelerator has the best cost per million tokens for serving a 70B LLM at realistic batch
-  sizes, and when does that change?
+scenario: Your company is choosing between H100, A100, and TPU v5e for serving a 70B parameter LLM. The CFO wants a cost-per-million-tokens comparison across these accelerators at realistic batch sizes. Walk me through the napkin math and tell me which hardware wins — and when.
+question: Which accelerator has the best cost per million tokens for serving a 70B LLM at realistic batch sizes, and when does that change?
 details:
-  realistic_solution: 'LLM decode is memory-bandwidth bound: each token requires loading all model weights
-    from HBM once. The metric that matters is $/GB/s of memory bandwidth, not $/TFLOP. At small batch
-    sizes, the accelerator with the best bandwidth-per-dollar wins. At large batch sizes, the workload
-    shifts compute-bound and FLOPS/$ matters more. In this scenario, H100 wins across the board: it has
-    a better bandwidth-to-cost ratio for latency-sensitive low-batch workloads, and a better FLOPS-to-cost
-    ratio for compute-bound high-batch workloads.'
-  common_mistake: '**The Pitfall:** "Pick the GPU with the highest FLOPS — H100 always wins." Raw FLOPS
-    is irrelevant for decode-phase serving, which is memory-bandwidth bound. The cheapest $/token depends
-    on batch size, model size, and whether you''re prefill-bound or decode-bound.
-
+  realistic_solution: |
+    The answer changes with batch size and with the exact cloud SKU. For low-batch decode, cost per token is dominated by HBM bandwidth, weight precision, tensor-parallel overhead, and whether the model plus KV cache fits without excessive sharding. H100 is usually strongest for latency-sensitive 70B serving because two 80 GB GPUs can hold FP16 weights with room for KV cache and provide high bandwidth. A100 can be cheaper per hour but slower, so it may win only when latency targets are loose and utilization is high. TPU v5e should be evaluated as a configured slice, not as arbitrary single chips; it can be cost-effective for high-throughput batched workloads but has more sharding and software constraints for 70B decode. At high batch sizes or long prefills, the bottleneck shifts toward compute and interconnect efficiency, so FLOPS/$ and achieved MFU matter more than raw HBM bandwidth.
+  common_mistake: |
+    **The Pitfall:** "Pick the GPU with the highest FLOPS — H100 always wins." Raw FLOPS is irrelevant for decode-phase serving, which is memory-bandwidth bound. The cheapest $/token depends on batch size, model size, and whether you're prefill-bound or decode-bound.
     **The Rationale:** Raw FLOPS is irrelevant for decode-phase serving.
-
-    **The Consequence:** Incorrect hardware cost comparisons.'
-  napkin_math: '**Assumptions & Constraints:**
-
-    Implicit assumptions.
+    **The Consequence:** Incorrect hardware cost comparisons.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 70B FP16 weights = ~140 GB before KV cache.
+    - Compare configured serving replicas, not isolated chips.
+    - Example on-demand costs: 2x H100 80GB at ~$7/hr, 2x A100 80GB at ~$4.40/hr, and a TPU v5e slice sized to fit the model at roughly comparable memory with higher sharding overhead.
+    - Low-batch decode is approximated by effective HBM bandwidth; high-batch prefill/decode is approximated by achieved FLOPS.
 
     **Calculations:**
-
-    70B model in FP16 = 140 GB weights. Each decode token loads all weights from HBM once.
-
-
-    **H100 (80 GB HBM3):**
-
-    Model requires TP=2 minimum (140 GB > 80 GB). 70 GB/GPU.
-
-    Bandwidth per GPU = 3.35 TB/s. Per-token decode = 70 GB / 3.35 TB/s = 20.9 ms/token.
-
-    With NVLink AllReduce overhead (~0.02 ms): total ≈ 20.9 ms/token → ~47.8 tokens/s.
-
-    Cost ≈ 2 × $3.50/hr = $7.00/hr.
-
-    Tokens/hr = 47.8 × 3600 = 172,080.
-
-    Cost per 1M tokens = $7.00 / 172,080 × 10^6 = **$40.68/M tokens**.
-
-
-    **A100 (80 GB HBM2e):**
-
-    Also requires TP=2. 70 GB/GPU.
-
-    Bandwidth per GPU = 2.0 TB/s. Per-token decode = 70 GB / 2.0 TB/s = 35.0 ms/token.
-
-    With NVLink overhead: ~35 ms/token → ~28.6 tokens/s.
-
-    Cost ≈ 2 × $2.20/hr = $4.40/hr.
-
-    Tokens/hr = 28.6 × 3600 = 102,857.
-
-    Cost per 1M tokens = $4.40 / 102,857 × 10^6 = **$42.78/M tokens**.
-
-
-    **TPU v5e (16 GB HBM per chip):**
-
-    Model requires TP across 140 GB / 16 GB = 9 chips minimum.
-
-    Per-chip HBM bandwidth = 819 GB/s. Per-chip weight shard = 140/9 ≈ 15.6 GB.
-
-    Decode = 15.6 GB / 819 GB/s = 19.0 ms/token → ~52.6 tokens/s (limited by slowest chip + ICI overhead).
-
-    Cost ≈ 9 × $1.20/hr = $10.80/hr.
-
-    Tokens/hr = 52.6 × 3600 = 189,360.
-
-    Cost per 1M tokens = $10.80 / 189,360 × 10^6 = **$57.03/M tokens** (at batch=1).
-
-
-    **At large batch sizes (B=64, compute-bound regime):**
-
-    H100 (2 GPUs): 2 × 989 = 1,978 TFLOPS FP16. FLOPs/token = 2 × 70B = 140 GFLOPs.
-
-    Tokens/s = 1,978×10^12 / 140×10^9 × (MFU ~0.5) = 7,064 tokens/s.
-
-    Cost = $7.00/hr / (7,064 × 3600) × 10^6 = **$0.28/M tokens**.
-
-    TPU v5e (9 chips):  [...truncated]
+    - Low-batch H100 TP=2: 70 GB/GPU / 3.35 TB/s = ~21 ms/token before overhead, about 48 tok/s. Cost ~= $7/hr / (48 * 3600) * 1M = ~$41/M output tokens.
+    - Low-batch A100 TP=2: 70 GB/GPU / 2.0 TB/s = ~35 ms/token before overhead, about 29 tok/s. Cost ~= $4.40/hr / (29 * 3600) * 1M = ~$42/M output tokens.
+    - In practice, TP communication, KV-cache reads, and lower achieved bandwidth can move either result by tens of percent, so this is a tie unless latency favors H100.
+    - TPU v5e needs a multi-chip slice to fit 140 GB plus KV cache. More shards reduce memory per chip but add collectives; it should be benchmarked as a full slice and is not automatically cheaper for low-batch decode.
+    - At larger batches, weight reads are amortized and arithmetic intensity rises. The crossover occurs when additional batch no longer increases bandwidth traffic linearly and achieved FLOPS, interconnect, and scheduler efficiency dominate.
 
     **Conclusion & Interpretation:**
-
-    Calculations show the result.'
+    - **Result: Regime-Dependent.** H100 is the safest low-latency choice; A100 can be close or cheaper when latency is loose and utilization is high; TPU v5e is plausible for high-throughput batched serving only after validating the full slice. The winner changes near the bandwidth-to-compute crossover, so the interview answer must state batch size, precision, context/KV budget, and utilization assumptions.
 status: published
 provenance: imported
 requires_explanation: false

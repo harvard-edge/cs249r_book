@@ -11,7 +11,7 @@ title: Operator Scheduling Architecture on Cloud AI 100
 scenario: Design the operator scheduling architecture for deploying a multi-modal perception pipeline on an on-premise Qualcomm Cloud AI 100 inference accelerator. The pipeline consists of several concurrent models that share the same accelerator.
 question: How would you statically schedule concurrent models on Cloud AI 100 to saturate 400 TOPS while reusing memory within 32 GB?
 details:
-  realistic_solution: 'Design an ahead-of-time (AOT) static scheduler using liveness analysis to aggressively reuse memory buffers for intermediate activations. Evaluate the tradeoff between vertical layer fusion (to reduce memory trips) and horizontal parallel execution (to increase utilization), concluding that a predefined memory pool with static offset assignments is essential for deterministic inference.'
+  realistic_solution: Design an ahead-of-time (AOT) static scheduler that packs operators from the concurrent models into deterministic time slots, using liveness analysis to assign fixed offsets in a shared activation arena. Fuse producer-consumer chains where memory traffic dominates, but interleave independent operators from different models when one model cannot fill the accelerator by itself. Use double-buffered input/output staging, preplanned DMA windows, and per-model deadlines so the scheduler keeps the Cloud AI 100 fed near its 400 TOPS INT8 peak without exceeding the 32 GB memory budget.
   common_mistake: |
     **The Pitfall:** Proposing dynamic scheduling approaches typical of cloud GPUs.
     **The Rationale:** Candidates fail to realize that dynamic scheduling introduces unacceptable runtime overhead on a 75W edge accelerator, and that memory bandwidth will bottleneck before compute.
@@ -22,13 +22,17 @@ details:
        - Available memory: 32 GB.
        - Unoptimized peak intermediate activation memory: 15 GB.
        - Operator fusion reduces intermediate writes by ~40%.
+       - Combined scheduled INT8 work: 300 TOPS effective average demand during the real-time window.
+       - Target utilization: at least 75% of 400 TOPS.
     2. **Calculations:**
        - Total weight allocation = 3 * 4 GB = 12 GB.
        - Remaining memory for activations = 32 GB - 12 GB = 20 GB.
        - Optimized peak activation footprint = 15 GB * (1 - 0.4) = 9 GB.
        - Total memory required = 12 GB + 9 GB = 21 GB.
+       - Scheduled compute utilization = 300 TOPS / 400 TOPS = 75%.
+       - Memory headroom = 32 GB - 21 GB = 11 GB for runtime metadata, staging buffers, and safety margin.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound**. The peak activation footprint shrinks to 9 GB, ensuring the memory budget is respected and the system remains compute-bound rather than memory-bandwidth bottlenecked.
+       - **Result: 75% Scheduled Utilization With Memory Fit**. Static buffer reuse makes the workload fit in 21 GB, and horizontal interleaving is what drives utilization toward the 400 TOPS target. The memory calculation proves capacity fit; bandwidth and operator mix still need profiling before claiming the system is fully compute-bound.
 status: published
 provenance: imported
 requires_explanation: true

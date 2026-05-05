@@ -7,11 +7,11 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: evaluate
 phase: both
-title: Cloud Rlhf Infrastructure L5 0
+title: RLHF VRAM Budgeting for PPO Versus DPO on a 70B Model
 scenario: You are setting up infrastructure for RLHF on a 70B model.
 question: For 70B RLHF, which setup should you choose among colocated PPO, separate generation/training clusters, and DPO, and why?
 details:
-  realistic_solution: 'DPO only needs policy + reference. Half the memory, simpler orchestration, no reward model training needed. Trade-off: DPO may be slightly less effective than PPO for complex preferences, but it is 50% cheaper and much simpler to implement.'
+  realistic_solution: Colocated PPO keeps policy, critic, reference, and reward models in the same serving/training footprint. Counting model state before sharding, policy and critic each need training state while reference and reward are frozen, for about 2,520 GB total. Separate generation and training clusters do not eliminate that total model-state budget, but they let the frozen reference/reward rollout capacity and the policy/critic training capacity scale independently, which usually improves utilization and isolation. DPO needs only a trainable policy and frozen reference, about 1,260 GB before sharding, and avoids the critic and reward-model serving path. Choose DPO when its objective is acceptable; choose separate PPO clusters when PPO is required for quality or online preference optimization; avoid colocated PPO unless operational simplicity matters more than utilization.
   common_mistake: |
     **The Pitfall:** Defaulting to PPO-based RLHF without considering DPO alternatives.
     **The Rationale:** Teams follow the original PPO paradigm because it's well-known, assuming it's strictly necessary for alignment.
@@ -19,18 +19,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model size: 70B parameters.
-    - PPO requires 4 models (Policy, Reference, Reward, Critic).
-    - DPO requires 2 models (Policy, Reference).
-    - State memory footprint relies on standard Adam FP32/FP16 mixed precision states (~16 bytes per param for training, 2 bytes for frozen).
+    - PPO colocated footprint counts 4 models: trainable Policy and Critic, frozen Reference and Reward.
+    - Separate PPO clusters split rollout and training capacity but still need the same model families.
+    - DPO footprint counts 2 models: trainable Policy and frozen Reference.
+    - Model-state memory before sharding: ~16 bytes/param for trainable Adam-style state, 2 bytes/param for frozen FP16 weights.
 
     **Calculations:**
-    - PPO Memory (Colocated): 70B * (16 [Policy train] + 16 [Critic train] + 2 [Ref frozen] + 2 [Reward frozen]) bytes = 70B * 36 = 2,520 GB.
-    - PPO Hardware: 2,520 GB / 80 GB = 31.5 -> ~32 A100s.
-    - DPO Memory: 70B * (16 [Policy train] + 2 [Ref frozen]) bytes = 70B * 18 = 1,260 GB.
-    - DPO Hardware: 1,260 GB / 80 GB = 15.75 -> ~16 A100s.
+    - PPO colocated model state: 70B * (16 [Policy train] + 16 [Critic train] + 2 [Ref frozen] + 2 [Reward frozen]) bytes = 70B * 36 = 2,520 GB.
+    - PPO separate clusters: training cluster holds Policy + Critic = 70B * 32 = 2,240 GB; rollout/eval cluster holds Reference + Reward = 70B * 4 = 280 GB.
+    - DPO model state: 70B * (16 [Policy train] + 2 [Ref frozen]) bytes = 70B * 18 = 1,260 GB.
+    - Raw 80GB-GPU equivalents before activation/KV overhead: PPO colocated 2,520/80 = 31.5; DPO 1,260/80 = 15.75.
 
     **Conclusion & Interpretation:**
-    - **Result: 50% memory saved (Memory-Bound Bottleneck)**. DPO cuts memory overhead by 50%, shifting from a 32-GPU to a 16-GPU cluster.
+    - **Result: Memory and Orchestration Tradeoff**. DPO cuts the raw model-state footprint by 50% versus colocated PPO, but final GPU counts require sharding plus activation, KV-cache, optimizer, and throughput headroom.
 status: published
 provenance: imported
 requires_explanation: false

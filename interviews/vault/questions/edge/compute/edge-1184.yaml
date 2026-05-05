@@ -7,11 +7,14 @@ topic: tco-cost-modeling
 competency_area: compute
 bloom_level: evaluate
 phase: both
-title: 'Edge Transformer Cost Optimization: Optimize Edge Transformer via Pruning'
+title: 'BERT-base Pruning on Jetson Orin: TCO and Throughput'
 scenario: A BERT-base model (110M params, INT8, 110MB) on Jetson Orin DLA achieves 8ms latency per inference. Propose structured pruning to 55M params (50% reduction). You are deploying on 100 Jetson Orins handling 50 inferences/second per device.
 question: Is a $30K project to prune BERT-base from 110M to 55M parameters on 100 Jetson Orins justified, and what gains result?
 details:
-  realistic_solution: 'DLA ridge: 55 FLOPs/byte. BERT-base INT8 AI: ~80 FLOPs/byte (compute bound). After 50% pruning: 55M params, 55MB model. FLOPs: ~50% = half. AI unchanged (~80 FLOPs/byte). Still compute bound. Time: 8ms * 0.5 = 4ms. Throughput per DLA: 1/0.004=250/s. Improvement: 50% latency reduction, 100% throughput improvement. Memory savings: 110→55MB. Energy: 2x more efficient. Engineering cost $30K: 100 Jetsons running 50 inf/s. Annual inference: 100*50*8760*3600=1.577B inferences. Time savings: 4ms/inference. Energy per inference: DLA at 5W*4ms=0.02J saved (vs 0.04J). Annual energy: 100*5W*8760*$0.10/1000=$4,380/yr. Current. Savings: 50%=$2,190/yr. Hardware savings: none (same Jetsons). Engineering payback: $30K/$2,190/yr=13.7 years — not justified on energy alone. Justified only if higher throughput enables removing some Jetson units.'
+  realistic_solution: |
+    If profiling confirms the BERT-base INT8 workload is compute-bound and structured pruning maps cleanly to faster kernels, pruning from 110M to 55M parameters can plausibly cut model memory from 110MB to 55MB and reduce ideal inference latency from 8ms to about 4ms. That raises per-device service capacity from 1 / 0.008 = 125 inf/s to 1 / 0.004 = 250 inf/s, while the stated deployment load is only 50 inf/s per device. The gain is therefore latency/headroom, not automatic hardware savings.
+
+    Energy savings do not justify a $30K project by themselves. Annual inference volume is 100 devices * 50 inf/s * 31,536,000 s/year = 157.68B inferences/year. If the DLA active component is 5W, saving 4ms per inference saves 0.02J/inference, or 876 kWh/year = $87.60/year at $0.10/kWh. The always-on fleet power bill is 100 * 60W * 8,760h / 1000 * $0.10 = $5,256/year, but pruning does not remove that base platform power if the same 100 Jetsons remain deployed. Payback on energy alone is about $30,000 / $87.60 = 343 years, so the project is not justified unless the latency headroom has product value or the deployment plan explicitly allows consolidation/removing devices.
   common_mistake: |
     **The Pitfall:** Assuming 50% parameter reduction yields 50% latency reduction universally.
     **The Rationale:** Candidates forget that for compute-bound workloads, latency reduction may be limited by kernel launch overhead or Arithmetic Intensity.
@@ -19,20 +22,24 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Fleet: 100 Jetsons handling 50 inferences/sec each. Total Demand = 5,000 inf/s.
-    - Current Throughput: 125 inf/s per device.
+    - Current service time: 8ms/inference = 125 inf/s capacity per device.
+    - Pruned service time, if compute-bound and kernels benefit: 4ms/inference = 250 inf/s capacity per device.
     - Pruning Cost: $30K engineering effort.
+    - DLA active power component for inference-energy estimate: 5W.
+    - Electricity: $0.10/kWh.
 
     **Calculations:**
-    - Pruned Throughput: 250 inf/s per device (4ms latency vs 8ms).
-    - Energy Savings: 50% power cut yields $2,190/yr.
-    - Payback on Energy Alone: $30K / $2,190/yr = 13.7 years.
-    - Fleet Reduction Strategy: 20 Jetsons can handle 5,000 inf/s. Keep 40 for redundancy.
-    - Freed Hardware (60 units): 60 x $499 = $29,940.
-    - Power Savings (60 off): 60 x $52.6/yr = $3,156/yr.
-    - New Payback: $30K / ($29,940 + $3,156) = 0.91 years.
+    - Current per-device utilization by service capacity: 50 / 125 = 40%.
+    - Pruned per-device utilization by service capacity: 50 / 250 = 20%.
+    - Annual inference volume: 100 * 50 * 8760 * 3600 = 157.68B inferences/year.
+    - Per-inference active energy saved: 5W * (8ms - 4ms) = 0.02J.
+    - Annual active energy saved: 157.68B * 0.02J = 3.1536e9J = 876 kWh.
+    - Annual energy-dollar savings: 876 kWh * $0.10/kWh = $87.60/year.
+    - Always-on fleet power cost for context: 100 * 60W * 8760h * $0.10/kWh / 1000 = $5,256/year.
+    - Energy-only payback: $30,000 / $87.60/year = 342.5 years.
 
     **Conclusion & Interpretation:**
-    - **Result: Cost-Effective via Fleet Reduction (Throughput-Bound).** Pruning is justified not by per-device energy savings, but by increasing throughput enough to retire 60% of the hardware fleet.
+    - **Result: Not justified on energy TCO alone.** Pruning may deliver 50% latency reduction, 2x service capacity, and 55MB memory savings per device, but the deployment already has enough per-device throughput and the stated prompt does not support monetizing retired hardware.
 status: published
 provenance: imported
 requires_explanation: false

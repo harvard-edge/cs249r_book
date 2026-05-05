@@ -8,55 +8,30 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: The Futile Pruning
-scenario: You are leading the optimization of a real-time perception model for a delivery robot, targeting
-  a Jetson AGX Orin with a strict 33ms latency budget. To meet this deadline, your team applies 80% unstructured
-  weight pruning to the model's main convolutional layers, expecting a nearly 5x speedup in those layers.
-  However, in hardware tests, the end-to-end latency improves by only 15%. Your junior engineer, seeing
-  the model is still too slow, proposes increasing the pruning to 95% sparsity.
-question: Why did the massive reduction in FLOPs yield such a disappointing latency improvement, and why
-  is the proposal to 'just prune more' likely to fail?
+scenario: You are leading the optimization of a real-time perception model for a delivery robot, targeting a Jetson AGX Orin with a strict 33ms latency budget. To meet this deadline, your team applies 80% unstructured weight pruning to the model's main convolutional layers, expecting a nearly 5x speedup in those layers. However, in hardware tests, the end-to-end latency improves by only 15%. Your junior engineer, seeing the model is still too slow, proposes increasing the pruning to 95% sparsity.
+question: Why did the massive reduction in FLOPs yield such a disappointing latency improvement, and why is the proposal to 'just prune more' likely to fail?
 details:
-  realistic_solution: The initial pruning strategy failed because it addressed the wrong bottleneck. On
-    hardware like the Jetson Orin, many convolutional layers are memory-bandwidth-bound, not compute-bound.
-    Unstructured pruning reduces the number of computations, but it doesn't change the amount of data
-    that must be read from slow LPDDR5 memory. The hardware's memory subsystem still has to load the entire
-    (or mostly entire) weight tensor, and the performance is dominated by this memory access time, not
-    the compute time. The irregular, sparse memory access patterns can also lead to cache misses and inefficient
-    use of the memory bus, negating the theoretical FLOP reduction.
-  common_mistake: '**The Pitfall:** Focusing solely on algorithmic complexity (FLOPs) and assuming it
-    translates linearly to performance.
-
+  realistic_solution: The initial pruning strategy failed because it addressed the wrong bottleneck. On hardware like the Jetson Orin, many convolutional layers are memory-bandwidth-bound, not compute-bound. Unstructured pruning reduces the number of computations, but it doesn't change the amount of data that must be read from slow LPDDR5 memory. The hardware's memory subsystem still has to load the entire (or mostly entire) weight tensor, and the performance is dominated by this memory access time, not the compute time. The irregular, sparse memory access patterns can also lead to cache misses and inefficient use of the memory bus, negating the theoretical FLOP reduction.
+  common_mistake: |
+    **The Pitfall:** Focusing solely on algorithmic complexity (FLOPs) and assuming it translates linearly to performance.
     **The Rationale:** Engineers might assume that if a model is slow, it must be compute-bound.
-
-    **The Consequence:** Proposing ''just prune more'' which fails to improve latency because the system
-    is entirely memory-bound, not compute-bound.'
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Baseline latency: 4ms memory load + 1ms compute = 5ms total.
-
+    **The Consequence:** Proposing 'just prune more' which fails to improve latency because the system is entirely memory-bound, not compute-bound.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Observed end-to-end improvement after 80% unstructured pruning: 15%.
     - Pruning strategy: 80% unstructured weight pruning.
-
-    - LPDDR5 bandwidth: 204.8 GB/s.
-
+    - Unstructured sparsity does not reduce dense tensor reads unless the runtime and hardware exploit compressed sparse formats efficiently.
 
     **Calculations:**
-
-    - Pruned theoretical compute: 1ms * 0.2 = 0.2ms.
-
-    - Pruned memory load: Unstructured sparsity does not reduce tensor size without specialized compression,
-    so memory load remains 4ms.
-
-    - New total latency: 4ms (memory) + 0.2ms (compute) = 4.2ms.
-
-    - Speedup: 5ms / 4.2ms = ~1.19x (or 16% latency reduction).
-
+    - Normalize baseline latency to 1.0.
+    - Let C be the compute-sensitive fraction and M be the memory/overhead fraction, with M + C = 1.0.
+    - 80% pruning leaves 20% of the compute work, so new latency = M + 0.2C.
+    - Observed new latency = 0.85, so 0.85 = (1 - C) + 0.2C = 1 - 0.8C.
+    - C = (1 - 0.85) / 0.8 = 0.1875, so only ~19% of end-to-end latency was compute-sensitive.
+    - M = 1 - 0.1875 = 0.8125, so ~81% was memory movement, launch overhead, preprocessing, or other non-pruned work.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 4.2ms latency (Memory-Bandwidth Bound)**. A massive 80% compute drop yields only a 16%
-    real-world speedup because the convolutional layers remain memory-bound.
-
-    '
+    - **Result: ~19% Compute-Sensitive.** The observed 15% improvement implies pruning affected only a small fraction of end-to-end latency. Pushing sparsity to 95% cannot fix the remaining ~81% unless the team changes the memory layout, uses structured sparsity supported by the hardware, fuses operators, or reduces actual tensor traffic.
 status: published
 provenance: imported
 requires_explanation: false

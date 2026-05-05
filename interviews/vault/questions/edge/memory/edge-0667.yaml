@@ -11,7 +11,7 @@ title: The Inference Memory Leak
 scenario: Your TI TDA4VM-based dashcam runs a lane detection model 24/7. Memory usage starts at 1.8 GB after boot. After 3 days of continuous operation, memory usage reaches 7.2 GB and the OOM killer terminates the inference process. The model is loaded once at startup and never reloaded. The input pipeline processes frames in a fixed-size ring buffer.
 question: Where is the 5.4 GB leak coming from over 3 days of continuous inference?
 details:
-  realistic_solution: 'Multiple subtle sources compound over 3 days: (1) **TensorRT engine cache** — the TDA4VM''s TIDL runtime caches optimized execution plans. Each unique input shape triggers a new cache entry. If the camera occasionally delivers frames at slightly different resolutions (e.g., during USB bandwidth negotiation or ISP reconfiguration), each unique resolution creates a new cached plan. At ~2 MB per plan, 100 unique resolutions over 3 days = 200 MB. (2) **Python garbage collection fragmentation** — if using Python (common with TFLite/ONNX), the CPython allocator requests memory from the OS in 256 KB arenas but never returns them. Small temporary allocations (bounding box lists, confidence arrays) fragment these arenas. After millions of inferences: 3 days × 86400s × 30 FPS = 7.8M inferences. Even 100 bytes of fragmentation per inference = 780 MB. (3) **DMA buffer leak** — the V4L2 camera driver allocates DMA buffers for each frame. If the application doesn''t properly release buffers back to the driver (e.g., missing `VIDIOC_QBUF` call on an error path), each leaked buffer is 1920×1080×2 (NV12) = 4.1 MB. One leak per hour = 72 buffers = 295 MB over 3 days. (4) **Syslog file descriptors** — if the inference process opens log files without closing them (or appends to an in-memory log), file descriptor table and kernel buffer cache grow.'
+  realistic_solution: 'The leak is almost certainly in the video and application infrastructure around the fixed model, not in a TensorRT-style engine cache. On a TI TDA4VM system, the likely root cause is V4L2/DMA buffer lifetime handling: if an error path, timeout, or dropped-frame branch fails to return a captured buffer to the driver, each leaked 1080p NV12 DMA buffer is about 3 MB. A leak of roughly 24 buffers per hour for 72 hours accounts for about 5.4 GB. Smaller contributors can include user-space allocator fragmentation and unbounded logging, but the clear scenario-consistent answer is leaked camera/DMA buffers or retained frame objects despite the fixed-size intended ring buffer.'
   common_mistake: |
     **The Pitfall:** Blaming the ML model itself and suggesting switching frameworks to fix the memory leak.
     **The Rationale:** Candidates assume the neural network execution is leaking memory, ignoring that the model weights and activations are static across inferences.
@@ -23,18 +23,18 @@ details:
     - Total leak: 5.4 GB.
 
     **Calculations:**
-    - Python fragmentation: 7.78M inferences * ~500 bytes/inf = ~3.89 GB.
-    - V4L2 DMA leak: 1 leak/hr * 72 hours * 4.1 MB (1080p NV12) = ~295 MB.
-    - TensorRT Engine cache: 100 unique input shapes * 2 MB = ~200 MB.
-    - Total identified: 3.89 GB + 295 MB + 200 MB = ~4.38 GB (matches order of magnitude).
+    - 1080p NV12 frame buffer: 1920 * 1080 * 1.5 bytes = ~3.1 MB.
+    - Leak needed: 5.4 GB / 72 hours = ~75 MB/hour.
+    - DMA buffers leaked per hour: 75 MB/hour / 3.1 MB = ~24 buffers/hour.
+    - At 30 FPS, that is one unreleased buffer about every 4,500 frames, so a rare error path can explain the growth.
 
     **Conclusion & Interpretation:**
-    - **Result: Infrastructure-Bound Leak (Memory-Capacity Bound)**. Moving the inference loop to C++, fixing DMA buffer releases, and forcing static input resolutions eliminates the vast majority of the 5.4 GB leak.
+    - **Result: Infrastructure-Bound Leak (Memory-Capacity Bound)**. Audit V4L2 `QBUF`/`DQBUF` pairing, DMA buffer references, dropped-frame paths, and retained frame objects; the loaded TIDL model and fixed ring size should remain stable.
   options:
-  - 'The model has a memory leak — switch to a different framework.. The model itself is stateless between inferences.'
-  - 'The bottleneck is PCIe transfer between CPU and GPU; using zero-copy memory will eliminate this overhead entirely.'
-  - 'Multiple subtle sources compound over 3 days: (1) TensorRT engine cache — the TDA4VM''s TIDL runtime caches optimized execution plans. Each unique input shape triggers a new cache entry.'
-  - 'Converting the model to a different framework''s format (e.g., ONNX to TFLite) will automatically optimize it for the target hardware.'
+    - The model has a memory leak — switch to a different framework.. The model itself is stateless between inferences.
+    - The bottleneck is PCIe transfer between CPU and GPU; using zero-copy memory will eliminate this overhead entirely.
+    - A rare V4L2/DMA buffer release bug or retained frame reference leaks camera buffers over days, even though the model is loaded once and the intended ring buffer is fixed-size.
+    - Converting the model to a different framework's format (e.g., ONNX to TFLite) will automatically optimize it for the target hardware.
   correct_index: 2
 status: published
 provenance: imported

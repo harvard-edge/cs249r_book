@@ -8,52 +8,35 @@ competency_area: compute
 bloom_level: create
 phase: inference
 title: Specify Transformer Architecture for Sub-1mW Inference on MCU
-scenario: You must specify a transformer architecture for continuous gesture recognition on a microcontroller
-  in low-power mode with a 0.5mW active power budget and 10μA/MHz dynamic power. The task requires processing
-  16-token sequences of 16-channel IMU features at 10 Hz.
-question: How would you specify the number of layers, heads, embedding dimension, FFN ratio, and quantization
-  precision to fit the 0.5mW power budget with >90% accuracy?
+scenario: You must specify a transformer architecture for continuous gesture recognition on a microcontroller in low-power mode with a 0.5mW active power budget and 10μA/MHz dynamic power. The task requires processing 16-token sequences of 16-channel IMU features at 10 Hz.
+question: How would you specify a transformer (layers, heads, embedding dim, FFN ratio, quantization) that stays under a 0.5mW active power budget while giving a plausible path to >90% validation accuracy?
 details:
-  realistic_solution: 'Determine the maximum frequency allowable by the power budget: 0.5mW / 3.3V = ~0.15mA.
-    At 10µA/MHz, max frequency is 15-16 MHz. At 16MHz, a Cortex-M4 achieves ~32 MFLOP/s. With a 10Hz inference
-    rate (100ms budget), the max FLOPs per inference is 3.2M FLOPs. A 4-layer, 2-head, 32-dim, FFN 2x
-    model in INT8 requires roughly 1.044M FLOPs, fitting well within the 3.2M budget while providing sufficient
-    capacity for >90% accuracy on HCI gesture tasks.'
-  common_mistake: '**The Pitfall:** Starting with a large architecture and attempting to prune down.
-
-    **The Rationale:** Candidates approach the problem from an accuracy-first mindset rather than a power-budget-first
-    derivation.
-
-    **The Consequence:** The resulting model invariably exceeds the strict physical power constraints
-    of the MCU.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: 'Start from the power limit rather than the desired model size. The 0.5mW budget at 3.3V allows 151.5µA, so the clock should be capped at about 15MHz, not 16MHz. A defensible candidate architecture is 4 transformer layers, 2 heads, 32 embedding dimensions, FFN ratio 2x, and INT8 weights/activations with per-channel weight quantization. For 16 tokens, this costs about 0.60M INT8 MACs per inference, well below the roughly 3.0M MAC budget available at 10Hz if the M4 sustains 2 INT8 MACs/cycle. The >90% accuracy target should be treated as a validation requirement: train from a larger teacher or FP32 baseline, tune the 32-dim/4-layer capacity against the gesture validation set, and increase only within the remaining MAC budget if validation falls short.'
+  common_mistake: |
+    **The Pitfall:** Starting with a large architecture and attempting to prune down.
+    **The Rationale:** Candidates approach the problem from an accuracy-first mindset rather than a power-budget-first derivation.
+    **The Consequence:** The resulting model invariably exceeds the strict physical power constraints of the MCU.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Power constraint: 0.5mW @ 3.3V.
-
     - Dynamic power: 10µA/MHz.
-
     - Inference rate: 10 Hz (0.1s budget).
 
-
     **Calculations:**
-
-    - Max Current = 0.5mW / 3.3V = 151µA.
-
-    - Max Frequency = 151µA / 10µA/MHz = 15.1 MHz (use 16 MHz).
-
-    - FLOPs budget: Cortex-M4 at 16MHz -> ~32 MFLOP/s * 0.1s = 3.2M FLOPs max.
-
-    - Per-layer FLOPs: Attention=32K; QKV=98K; FFN (2x)=131K -> Total ~261K FLOPs.
-
-    - 4 layers -> 4 * 261K = 1.044M FLOPs.
-
+    - Max current = 0.5mW / 3.3V = 151.5µA.
+    - Max frequency = 151.5µA / 10µA/MHz = 15.15 MHz; cap the design at 15 MHz.
+    - INT8 MAC budget at 2 MACs/cycle and 10 Hz: 15.15M cycles/s * 2 * 0.1s = 3.03M MACs/inference.
+    - Per layer for sequence length 16 and d=32:
+      - QKV projections: 3 * 16 * 32 * 32 = 49,152 MACs.
+      - Output projection: 16 * 32 * 32 = 16,384 MACs.
+      - Attention scores and value mixing: 2 * 16 * 16 * 32 = 16,384 MACs.
+      - FFN with ratio 2: 2 * 16 * 32 * 64 = 65,536 MACs.
+      - Per-layer total = 147,456 MACs.
+    - 4 layers = 589,824 MACs; input projection from 16 IMU channels adds 16 * 16 * 32 = 8,192 MACs.
+    - Total transformer compute is about 0.60M MACs plus a small classifier head.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 1.044M FLOPs (Power-Bound)**. 4 layers with INT8 quantization fits within the 3.2M FLOPs
-    power budget.'
+    - **Result: ~0.60M MACs (Power-Safe)**. The 4-layer, 2-head, d=32, FFN-2x INT8 design uses about 20% of the 3.03M MAC budget, leaving margin for runtime overhead and accuracy-driven tuning.
 status: published
 provenance: imported
 requires_explanation: true

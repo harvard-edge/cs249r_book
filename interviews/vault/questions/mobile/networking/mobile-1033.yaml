@@ -11,7 +11,10 @@ title: 'Mobile TCO Realization: Size Peak Bandwidth for Mobile LLM App'
 scenario: Calculate the peak and sustained LPDDR5X bandwidth consumption for a Snapdragon 8 Gen 3 running a 3B INT4 LLM assistant during a 60-second conversation. The conversation has 10 turns, each with a 200-token prompt prefill and a 100-token response decode.
 question: For Snapdragon 8 Gen 3 at 77 GB/s, what are peak and sustained bandwidth for a 3B INT4 LLM over 10 turns?
 details:
-  realistic_solution: 'Per turn: Prefill (200 tokens): FLOPs-bound. Write new KV: 200 * 524KB = 104.9MB. Total prefill BW: 1.5GB + 0.105GB = 1.605GB. Decode (100 tokens): per-token BW = (1.5GB + running_context * 524KB). At mid-conversation (turn 5, 50 tokens in): context = ~1500 tokens. KV read: 1500 * 524KB = 786MB. Decode BW/token: 1.5 + 0.786 = 2.286GB. Total decode across all 10 turns (1000 tokens): 1000 * 2.286GB = 2286GB. Total 10 turns: ~(10 * 1.605GB prefill) + 2286GB = 2302GB moved in 60s = ~38.3GB/s sustained average. Peak: during decode at turn 10 (3000 ctx tokens): 1.5 + 1.57 = 3.07GB. To hit 50ms, requires 61.4GB/s. However, at max memory contention it saturates the 77GB/s bus.'
+  realistic_solution: |
+    Define peak as the bandwidth needed to produce the worst-case decode token at a 50ms/token service target, and sustained as total modeled LPDDR5X traffic divided by the 60-second conversation. The 3B INT4 weights are about 1.5GB. Each turn adds 200 prompt tokens and 100 output tokens, so the decode context grows from about 200 tokens at the first response to about 3000 tokens at the end.
+
+    Prefill traffic per turn is approximated as one weight sweep plus KV writes: 1.5GB + (200 * 524KB) = 1.605GB, or 16.05GB over 10 turns. Decode traffic per token is 1.5GB plus the running KV read. Across the 1000 response tokens, average decode context is about 1600 tokens, so average decode traffic is 1.5GB + (1600 * 524KB) = 2.34GB/token. Total decode traffic is about 2338GB. Sustained bandwidth is therefore (2338 + 16.05) / 60 = 39.2GB/s. Peak occurs near the final token: 1.5GB + (3000 * 524KB) = 3.07GB/token; at 50ms/token that requires 61.4GB/s, below the 77GB/s bus but with limited headroom.
   common_mistake: |
     **The Pitfall:** Computing only weight bandwidth.
     **The Rationale:** Candidates calculate the bandwidth needed to load the weights but ignore KV-cache growth, forgetting that the cache accumulates across turns.
@@ -23,14 +26,15 @@ details:
     - Turns: 10 (200 tokens prefill, 100 tokens decode each).
 
     **Calculations:**
-    - Average decode read per token: 1.5 GB (weights) + (~1500 avg tokens * 524 KB) = 2.28 GB.
-    - Total decode data: 1000 tokens * 2.28 GB = 2,280 GB.
-    - Total prefill data: 10 turns * 1.6 GB = 16 GB.
-    - Sustained Bandwidth: (2,280 GB + 16 GB) / 60 seconds = 38.26 GB/s.
-    - Peak Bandwidth (Turn 10 decode at 3000 context): 1.5 GB + (3000 * 524 KB) = 3.07 GB/token. At 50ms/token target = 61.4 GB/s requirement.
+    - Decode context ranges from ~200 to ~3000 tokens; average over the 1000 decode tokens is ~1600 tokens.
+    - Average decode read per token: 1.5 GB (weights) + (1600 * 524 KB) = 2.34 GB.
+    - Total decode data: 1000 tokens * 2.34 GB = 2,338 GB.
+    - Total prefill data: 10 turns * (1.5 GB + 200 * 524 KB) = 16.05 GB.
+    - Sustained bandwidth: (2,338 GB + 16.05 GB) / 60 seconds = 39.2 GB/s.
+    - Peak bandwidth requirement at max context: 1.5 GB + (3000 * 524 KB) = 3.07 GB/token. At a 50ms/token target, 3.07 GB / 0.05s = 61.4 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: 38.3 GB/s Sustained**. The accumulation of the KV cache creates massive bandwidth demands during decode, saturating the bus and driving up sustained memory power.
+    - **Result: 39.2 GB/s sustained and 61.4 GB/s peak at 50ms/token.** The workload fits under a 77 GB/s LPDDR5X peak in this model, but decode near the end of the conversation has little bandwidth headroom once runtime overhead and other apps are included.
 status: published
 provenance: imported
 requires_explanation: false

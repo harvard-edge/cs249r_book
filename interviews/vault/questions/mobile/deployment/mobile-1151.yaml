@@ -11,7 +11,7 @@ title: Shadow Deployment LMK Evictions on Tensor G3
 scenario: We initiated a shadow deployment for a new Gemini Nano-powered smart reply feature targeting Google Tensor G3 devices. The model runs silently in the background, computing responses using the on-device TPU to compare against the existing cloud API without showing results to the user. Shortly after the rollout began, telemetry showed a massive spike in the host app being forcefully closed by the Android Low Memory Killer (LMK).
 question: Given the Tensor G3 features 12 GB of LPDDR5X RAM and a 7.5 TOPS TPU, what hardware-level interaction is causing this shadow deployment to fail?
 details:
-  realistic_solution: The candidate must recognize that shadow deployments require running both the existing cloud architecture and the new on-device model simultaneously, which severely impacts the memory budget. Although the Tensor G3 has 12 GB of LPDDR5X RAM, this is unified system memory heavily utilized by the OS and background services. Loading the Gemini Nano weights and its execution context into memory on top of the legacy app's footprint pushes the process over the Android per-app memory safety threshold. The correct action is to halt the shadow rollout and switch to a fractional A/B traffic split, ensuring only one system executes per device.
+  realistic_solution: The failure mechanism is unified-memory contention, not a lack of TPU compute. During shadowing, the app keeps the existing cloud path alive while also loading Gemini Nano weights, KV cache, runtime arenas, and input/output buffers into the same LPDDR5X pool used by the CPU, TPU, GPU, OS, and background services. On constrained devices this can push the host app into low-memory pressure where Android LMKD may evict it. The remediation is to reduce or disable the concurrent on-device shadow workload on those devices, shrink context/buffers, or sample shadow execution so the cloud path and on-device model are not resident and active for every request.
   common_mistake: |
     **The Pitfall:** Assuming high TPU compute capacity guarantees successful background execution.
     **The Rationale:** Candidates focus on the 7.5 TOPS rating and assume thermal throttling or CPU starvation, failing to calculate the cumulative memory footprint of running both legacy and new models concurrently.
@@ -25,9 +25,10 @@ details:
     **Calculations:**
     - Gemini Nano Footprint: 1.8 GB (INT4 weights) + 0.5 GB (KV cache/context) = 2.3 GB.
     - Total Concurrent Memory: 1.0 GB + 2.3 GB = 3.3 GB.
+    - Remaining Margin: 4.0 GB - 3.3 GB = ~0.7 GB before normal app, graphics, and OS spikes.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.3 GB footprint (Memory-Bound)**. The concurrent models consume over 80% of available RAM, triggering the Android Low Memory Killer (LMK).
+    - **Result: 3.3 GB footprint (Memory-Pressure Risk).** The shadow path consumes over 80% of the estimated available RAM, leaving too little margin for a mobile app under background pressure. That does not prove a universal LMKD threshold, but it explains why device-specific low-memory eviction appears when the on-device shadow model is enabled.
 status: published
 provenance: imported
 requires_explanation: false

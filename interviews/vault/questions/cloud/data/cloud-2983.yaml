@@ -7,11 +7,11 @@ topic: feature-store-management
 competency_area: data
 bloom_level: create
 phase: both
-title: 'Feature Store: Mastery — Design Feature Store for Multi-Modal Real-Time LLM'
-scenario: 'You are designing a feature store for a multi-modal LLM serving system on 256 H100s handling 200K requests/second. P99 feature retrieval must be < 3ms.'
-question: 'What feature store architecture meets < 3ms p99 for 200K requests/s with text embeddings, session context, and image embeddings?'
+title: Low-Latency Multi-Modal Feature Store for LLM Serving
+scenario: You are designing a feature store for a multi-modal LLM serving system on 256 H100s handling 200K requests/second. P99 feature retrieval must be < 3ms.
+question: What feature store architecture meets < 3ms p99 for 200K requests/s with text embeddings, session context, and image embeddings?
 details:
-  realistic_solution: 'Layered by staleness and size: text embeddings (updated daily, large, L2 cache) -> session context (real-time, small, L1 per-server) -> image embeddings (updated weekly, large, L2/L3). Different retrieval paths for different feature types.'
+  realistic_solution: Use a tiered online feature path. Keep session context in a per-serving-host memory cache with local invalidation because it is small and changes per request. Serve hot text and image embeddings from a sharded in-memory KV store with client-side batching, consistent hashing, and replicas in the same AZ. Keep warm/cold embeddings in an SSD/object-backed offline store and promote hot keys asynchronously. The p99 target is met only when the synchronous path is local session lookup plus one batched in-AZ KV read, with cold misses handled by fallback/default features rather than blocking the request.
   common_mistake: |
     **The Pitfall:** Storing all feature types in a single, homogeneous feature store.
     **The Rationale:** Candidates optimize for architectural simplicity instead of accounting for the vastly different staleness requirements, sizes, and access frequencies of each feature type.
@@ -19,16 +19,22 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 200K requests/second SLA.
-    - Text (6KB), Session (200B), Image (4KB).
+    - Per request: text embedding 6KB, session context 200B, image embedding 4KB.
     - P99 < 3ms retrieval target.
+    - 80% of requests hit hot embeddings in online memory; 20% use defaults or async refresh for cold features.
+    - 64 online KV shards, each with a replica, in the same AZ as serving.
 
     **Calculations:**
-    - Feature bandwidth: 200K × (6KB + 0.2KB + 4KB) = ~2.04 GB/s.
-    - Text storage: 100M × 6KB = 600GB (L2 SSD, 1ms). Cache 1M users in L1 (6GB/server).
-    - Image storage: 50M × 4KB = 200GB (L2 SSD, 1ms).
-    - Session context: inline compute (L1 per-server, 0ms).
+    - Raw hot-path payload: 200K * (6KB + 0.2KB + 4KB) = 2.04 GB/s.
+    - Online-memory payload after 80% hot ratio: 2.04 GB/s * 0.8 = 1.63 GB/s.
+    - Per-shard payload: 1.63 GB/s / 64 = 25.5 MB/s, well below a 25/100GbE NIC.
+    - Hot text cache: 20M hot text keys * 6KB = 120 GB raw.
+    - Hot image cache: 10M hot image keys * 4KB = 40 GB raw.
+    - With 2x KV overhead and replicas: (120 GB + 40 GB) * 2 * 2 = 640 GB provisioned online memory.
+    - Session context: 200K * 200B = 40 MB/s served from local host memory.
+    - Latency budget: local session lookup < 0.1ms, batched same-AZ KV p99 ~1.5-2.0ms, merge/deserialization ~0.5ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 1ms (Bandwidth-Bound)**. Meets the < 3ms SLA.
+    - **Result: tiered in-memory online store with ~640 GB replicated hot capacity and ~1.6 GB/s online read traffic.** It can meet <3ms p99 if cold misses do not block the synchronous request path.
 status: published
 provenance: imported

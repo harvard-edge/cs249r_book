@@ -7,11 +7,11 @@ topic: graph-compilation
 competency_area: optimization
 bloom_level: apply
 phase: inference
-title: The Volatile Variable Wipe
+title: Shared TFLite Micro Arena Corruption
 scenario: You deploy a TFLite Micro model on an STM32. To save memory, you allocate a large `static uint8_t arena[10240]` and point both the ML inference engine and a secondary USB data-transfer task to use it. The ML model runs perfectly. When you plug in the USB cable to download logs, the device hard-faults.
 question: Why does sharing a 10,240-byte TFLite Micro arena between STM32 inference and USB logging cause a hard fault?
 details:
-  realistic_solution: You broke the **TFLite Micro Memory Lifecycles**. TFLite metadata takes ~2 KB. If your USB task writes a 512-byte payload to `arena[0]`, you just destroyed the pointers for the first 10 layers of your neural network.
+  realistic_solution: You reused memory that TFLite Micro still owns. The tensor arena contains persistent interpreter allocations, tensor metadata, operator state, scratch planning data, and activation buffers whose lifetimes are managed by TFLite Micro. If the USB task writes into the same array, it can overwrite those live allocations. The next inference or callback then dereferences corrupted state and hard-faults. A mutex would only serialize the overwrite; the USB logger needs a separate buffer or a region that TFLite Micro has explicitly released.
   common_mistake: |
     **The Pitfall:** Assuming a mutex lock resolves memory sharing issues for a static array.
     **The Rationale:** Candidates approach this as a threading problem, assuming tasks are just colliding concurrently.
@@ -19,16 +19,16 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Shared Memory: `arena[10240]` used by both TFLite Micro and USB buffer.
-    - TFLM Lifecycle: Maintains persistent structural metadata at the head of the arena.
+    - TFLM Lifecycle: The arena contains live persistent and temporary allocations managed by TFLite Micro.
     - USB Write: Unstructured 512-byte payload starting at `arena[0]`.
 
     **Calculations:**
-    - TFLM overhead: ~2 KB of persistent metadata (pointers, quantization params, graph state) at `arena[0]`.
-    - USB memory write: Overwrites `arena[0]` through `arena[511]`.
-    - Corruption: 100% of the metadata in the first 512 bytes is destroyed.
+    - Arena ownership during inference setup: TFLite Micro.
+    - USB ownership assumption: USB also writes to the same address range.
+    - Overlap: bytes written by USB intersect live TFLM allocations, so allocation lifetimes overlap illegally.
 
     **Conclusion & Interpretation:**
-    - **Result: HardFault (Memory-Bound)**. The USB task overwrites TFLM's persistent pointers, causing a null/invalid pointer dereference on the next inference due to a lifecycle violation.
+    - **Result: HardFault (Memory-Bound)**. The USB task corrupts memory owned by TFLite Micro, so a later access to persistent tensors, operator data, or scratch state can dereference invalid data.
 status: published
 provenance: imported
 requires_explanation: false

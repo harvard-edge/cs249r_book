@@ -9,25 +9,27 @@ bloom_level: apply
 phase: inference
 title: Analyzing ANE Memory Bottlenecks in Transformers
 scenario: You are profiling a 500 million parameter 8-bit quantized language model running on an NPU. The model requires 1 GOP per forward pass. The NPU provides 35 TOPS, but your trace tools show a consistent latency of 10 ms per token.
-question: "Why does a 500M INT8 language model take 10 ms/token despite a 35 TOPS Neural Engine?"
+question: Why does a 500M INT8 language model take 10 ms/token despite a 35 TOPS NPU?
 details:
-  realistic_solution: Autoregressive decoding is bounded by LPDDR5 memory bandwidth, not arithmetic logic units. For every generated token, the NPU stalls waiting for the 500 MB weight matrix to transfer from DRAM, reducing compute utilization to near zero.
+  realistic_solution: Autoregressive decoding is bounded by LPDDR memory bandwidth and data reuse, not just arithmetic throughput. A 500M INT8 model has about 500 MB of weights, and batch-size-1 decoding touches large weight and activation streams layer by layer for each generated token. The NPU may spend most of the token interval waiting on DRAM transfers rather than executing MACs, so the 35 TOPS compute ceiling is mostly irrelevant once memory movement sets the latency floor.
   common_mistake: |
     **The Pitfall:** Blaming framework overhead, thermal throttling, or underutilized TOPS.
     **The Rationale:** Candidates laser-focus on the compute specification (35 TOPS), ignoring the fundamental memory access mechanics of autoregressive decoding.
     **The Consequence:** Proposing solutions like operator fusion or layer refactoring that fail to improve performance, as the NPU is simply idling while waiting for weights.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 500M params (INT8 = 0.5 GB).
+    - 500M params (INT8 weights ≈ 0.5 GB).
     - 1 GOP compute.
     - NPU 35 TOPS. Bandwidth ~50 GB/s.
-    
+    - Simplified bandwidth model: cumulative per-token layer execution streams roughly the model-sized weight set from DRAM, plus smaller activation/KV traffic.
+
     **Calculations:**
     - Compute Time = 1 GOP / 35,000 GOPs = 0.028 ms.
-    - Transfer Time = 0.5 GB / 50 GB/s = 0.01s = 10 ms.
-    
+    - Weight-stream latency floor = 0.5 GB / 50 GB/s = 0.01s = 10 ms.
+    - Activation/KV and scheduling overhead can add to this, but the 10 ms observed latency is already explained by the bandwidth floor.
+
     **Conclusion & Interpretation:**
-    - **Result: Bandwidth-Bound**. Total latency is completely dominated by the 10 ms memory transfer, masking the 0.028 ms compute time.
+    - **Result: Bandwidth-Bound**. The trace is consistent with repeated layer-by-layer weight and activation movement dominating token latency, masking the 0.028 ms compute floor.
 status: published
 provenance: imported
 requires_explanation: false

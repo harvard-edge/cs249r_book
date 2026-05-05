@@ -9,25 +9,28 @@ bloom_level: analyze
 phase: inference
 title: TinyML Model Feasibility on Nordic nRF5340 for Gesture Recognition
 scenario: You must select between Model A (Float32 FCNN, 128-64-32, ~15k params) and Model B (INT8 Conv1D, ~50k params) for a real-time gesture system on an nRF5340 (128 MHz, 256 KB SRAM, 1 MB flash).
-question: "Based on the nRF5340's specifications, which model is more feasible to deploy given real-time memory and compute constraints?"
+question: Based on the nRF5340's specifications, which model is more feasible to deploy given real-time memory and compute constraints?
 details:
-  realistic_solution: Construct a granular memory arena evaluation tracking static weight layout and dynamic activation footprint. Model B leverages INT8 quantizing to massively suppress SRAM activation demands while utilizing hardware SIMD pipelines, drastically outperforming the Float32 fallback penalties of Model A.
+  realistic_solution: |
+    Model B is the more feasible deployment target, but only after confirming its peak activation arena fits in SRAM. Both models fit easily in the 1 MB flash budget: Model A's 15k FP32 parameters are about 60 KB, while Model B's 50k INT8 parameters are about 50 KB. The real decision is SRAM and latency. Model A has small weights but uses FP32 tensors and kernels, increasing activation bytes and compute cost on a battery microcontroller. Model B keeps weights and activations INT8 and can use optimized fixed-point/DSP kernels, so it is usually faster and more energy efficient if its Conv1D feature maps and tensor arena remain under the available 256 KB SRAM after stack, heap, and runtime overhead.
   common_mistake: |
     **The Pitfall:** Focusing exclusively on naive absolute parameter counts to predict flash feasibility.
     **The Rationale:** Candidates completely neglect the dominant impact of peak intermediate activation memory in SRAM and the catastrophic emulation penalty of Float32 on an integer DSP fabric.
     **The Consequence:** They select the structurally inferior Model A, guaranteeing immediate real-time latency failures via soft-float emulation.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Hardware: Nordic nRF5340 (No FPU support for 32-bit ML tensors).
+       - Hardware: Nordic nRF5340, 128 MHz, 256 KB SRAM, 1 MB flash.
+       - Reserve roughly 64 KB SRAM for stack, heap, RTOS, drivers, and I/O buffers, leaving about 192 KB for the ML arena.
        - Model A: Float32 (4 bytes), ~15k params, 128 max neurons.
-       - Model B: INT8 (1 byte), ~50k params, 128 max neurons.
+       - Model B: INT8 (1 byte), ~50k params, with Conv1D activations that must be profiled.
     2. **Calculations:**
-       - Model A Flash footprint: 15,000 * 4 = 60,000 bytes (~58.6 KiB).
-       - Model A SRAM footprint: 128 * 4 = 512 bytes peak layer minimum.
-       - Model B Flash footprint: 50,000 * 1 = 50,000 bytes (~48.8 KiB).
-       - Model B SRAM footprint: 128 * 1 = 128 bytes peak layer minimum.
+       - Model A weight flash footprint: 15,000 * 4 = 60,000 bytes (~58.6 KiB), well under 1 MB.
+       - Model B weight flash footprint: 50,000 * 1 = 50,000 bytes (~48.8 KiB), also well under 1 MB.
+       - Model A minimum visible activation vector: 128 * 4 = 512 bytes, but FP32 intermediate tensors and kernels increase runtime cost.
+       - Model B minimum visible activation vector at the same width: 128 * 1 = 128 bytes, but the full Conv1D arena must include im2col/scratch and feature maps.
+       - Feasibility condition for either model: weights in flash plus peak tensor arena in SRAM; for Model B, require profiled arena < about 192 KB.
     3. **Conclusion & Interpretation:**
-       - **Result: Model B natively uses less Flash (48.8 KiB), less SRAM, and fundamentally evades Float32 soft-emulation penalties (Architecture-Bound).**
+       - **Result: Prefer Model B if its profiled INT8 activation arena fits under the available SRAM (Architecture-Bound).** Both models fit flash, but Model B is more likely to meet real-time and energy constraints because INT8 fixed-point kernels reduce memory traffic and compute cost.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,49 +8,31 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: RoCEv2 vs InfiniBand Congestion Control
-scenario: You are architecting the network for an 8,192 GPU multi-tenant cluster. You must choose between
-  InfiniBand (NDR 400G) and Ethernet with RoCEv2 (400G). During multi-tenant training, incast traffic
-  (64 senders transmitting to 1 receiver simultaneously) is common. InfiniBand uses credit-based flow
-  control, while RoCEv2 uses Priority Flow Control (PFC) combined with DCQCN. Analyze the tradeoff between
-  these two technologies specifically regarding incast congestion and network deadlocks.
-question: For 8,192 GPUs with frequent 64-to-1 incast, how do InfiniBand and RoCEv2 trade off congestion
-  handling, deadlock risk, and cost?
+scenario: You are architecting the network for an 8,192 GPU multi-tenant cluster. You must choose between InfiniBand (NDR 400G) and Ethernet with RoCEv2 (400G). During multi-tenant training, incast traffic (64 senders transmitting to 1 receiver simultaneously) is common. InfiniBand uses credit-based flow control, while RoCEv2 uses Priority Flow Control (PFC) combined with DCQCN. Analyze the tradeoff between these two technologies specifically regarding incast congestion and network deadlocks.
+question: For 8,192 GPUs with frequent 64-to-1 incast, how do InfiniBand and RoCEv2 trade off congestion handling, deadlock risk, and cost?
 details:
-  realistic_solution: "InfiniBand (IB) uses a native credit-based flow control mechanism. A sender only\
-    \ transmits if it knows the receiver has buffer space. Under incast (64:1), IB smoothly throttles\
-    \ the senders at the source, preventing switch buffer overflow without dropping packets or spreading\
-    \ congestion. \n\nRoCEv2 relies on Ethernet, which is natively lossy. To make it lossless for RDMA,\
-    \ it uses Priority Flow Control (PFC). When a switch buffer fills during an incast, it sends a PFC\
-    \ 'pause' frame upstream. This causes 'congestion spreading'—a single congested port can pause an\
-    \ entire spine switch, cascading down to unrelated tenants (victim flows). Furthermore, cyclic buffer\
-    \ dependencies can cause PFC deadlocks, requiring complex watchdog timers to drop packets and break\
-    \ the lock, triggering expensive Go-Back-N retransmissions. \n\nTo mitigate this, RoCEv2 uses DCQCN\
-    \ (Data Center Quantized Congestion Notification) to rate-limit senders before PFC is triggered. However,\
-    \ DCQCN requires careful tuning of ECN (Explicit Congestion Notification) thresholds and relies on\
-    \ a control loop that takes multiple RTTs to react. The tradeoff: InfiniBand provides predictable,\
-    \ highly isolated performance under heavy incast via hardware credit loops, but at a premium cost\
-    \ and vendor lock-in. RoCEv2 leverages cheaper, multi-vendor Ethernet but requires complex, fragile\
-    \ tuning of PFC/DCQCN parameters, risking multi-tenant interference (victim flows) during microbursts."
-  common_mistake: '**The Pitfall:** Claiming RoCEv2 is strictly inferior because it drops packets.
+  realistic_solution: |
+    InfiniBand uses credit-based flow control: a sender transmits only when downstream buffer credits are available. Under a 64:1 incast, that gives the fabric explicit backpressure before buffers overflow, which generally makes congestion behavior more predictable, although the receiver and switch buffers are still finite and the fabric must be engineered for the offered load.
 
-    **The Rationale:** Engineers ignore that PFC makes RoCEv2 lossless but introduces congestion spreading
-    and deadlocks.
+    RoCEv2 runs RDMA over Ethernet and typically relies on PFC to avoid loss plus ECN/DCQCN to slow senders before PFC fires. In a heavy incast, switch buffers can fill quickly, PFC pause frames can propagate backpressure to upstream ports, and unrelated flows sharing those paused priorities can be affected. Cyclic dependencies between paused queues can create PFC deadlock risk, so operators use careful buffer/ECN tuning, watchdogs, and congestion-control settings to limit blast radius. Packet loss or watchdog intervention can force RDMA retransmission/recovery, but it is not accurately described as generic Go-Back-N behavior.
 
-    **The Consequence:** Incorrectly dismissing RoCEv2 without accounting for its actual operational challenges
-    like deadlocks.'
-  napkin_math: '**Assumptions & Constraints:**
-
+    The tradeoff is that InfiniBand gives more integrated congestion handling and isolation for large collectives at higher cost and with stronger vendor coupling, while RoCEv2 uses cheaper multi-vendor Ethernet but needs disciplined PFC, ECN/DCQCN, and operational tuning to avoid incast-induced tenant interference.
+  common_mistake: |
+    **The Pitfall:** Claiming RoCEv2 is strictly inferior because it drops packets.
+    **The Rationale:** Engineers ignore that PFC makes RoCEv2 lossless but introduces congestion spreading and deadlocks.
+    **The Consequence:** Incorrectly dismissing RoCEv2 without accounting for its actual operational challenges like deadlocks.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 64 senders at 400 Gbps, switch buffer = 64 MB.
-
+    - The receiver drains at 400 Gbps, so only the excess arrival rate fills the congested buffer.
     **Calculations:**
-
-    - Incast: 64 * 400 Gbps = 25.6 Tbps.
-
-    - Time to fill buffer = 64 MB / (25.6 Tbps - 400 Gbps) = 64 MB / 3.15 TB/s ≈ 20 microseconds.
-
+    - Arrival rate = 64 * 400 Gbps = 25.6 Tbps.
+    - Receiver drain rate = 400 Gbps.
+    - Excess rate = 25.6 Tbps - 0.4 Tbps = 25.2 Tbps = 3.15 TB/s.
+    - Time to fill 64 MB = 64 MB / 3.15 TB/s ≈ 20 microseconds using decimal units.
+    - If the receiver drain is ignored for a worst-case upper-arrival estimate, 64 MB / 3.2 TB/s is also about 20 microseconds.
     **Conclusion & Interpretation:**
-
-    DCQCN reaction time leaves a very narrow margin before PFC pause is triggered.'
+    The buffer can be consumed on a tens-of-microseconds timescale, leaving very little margin for a multi-RTT DCQCN control loop before PFC pause behavior appears.
 status: published
 provenance: imported
 requires_explanation: false

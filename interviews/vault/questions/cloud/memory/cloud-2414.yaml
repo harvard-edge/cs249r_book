@@ -11,7 +11,7 @@ title: MoE Routing Bandwidth Starvation
 scenario: You deploy a 128-expert Mixture of Experts (MoE) transformer on a custom 8-NPU cloud node. Each NPU has 1 TB/s of HBM bandwidth. Using standard top-2 token routing, compute utilization is stuck at 12%. Profiling reveals NPUs spend 85% of their time stalled on HBM reads.
 question: Why is the 128-expert MoE only 12% utilized, and what hardware-aware routing or placement change would restore compute efficiency?
 details:
-  realistic_solution: 'The problem requires hardware-algorithm co-design. Standard top-2 routing causes unstructured, all-to-all memory traffic. Because tokens can be routed to any of the 128 experts, the NPU must constantly page different expert weights in and out of its local SRAM from HBM. The tradeoff is model capacity utilization versus memory bandwidth efficiency. The solution is Expert Parallelism combined with routing constraints: pin 16 specific experts to each of the 8 NPUs and keep their weights stationary in SRAM/HBM. Modify the routing algorithm to penalize cross-NPU routing or enforce ''Expert Choice'' routing, which guarantees balanced expert assignment. This trades a slight drop in theoretical model perplexity for a massive reduction in HBM thrashing, converting the workload from memory-bound back to compute-bound.'
+  realistic_solution: 'The problem requires hardware-algorithm co-design. Standard top-2 routing causes unstructured, all-to-all expert traffic. Because tokens can be routed to any of the 128 experts, each NPU sees a changing working set and repeatedly pulls expert weights, activations, or remote token payloads through memory and interconnect instead of reusing local expert state. The tradeoff is model capacity utilization versus locality and memory bandwidth efficiency. The solution is Expert Parallelism combined with routing constraints: pin 16 specific experts to each of the 8 NPUs and bias routing toward local experts while preserving load balance, or use Expert Choice routing with placement-aware capacity constraints. This trades a possible quality or routing-flexibility cost for a large reduction in HBM stalls and cross-device traffic, improving compute utilization without assuming the workload becomes purely compute-bound.'
   common_mistake: |
     **The Pitfall:** Attempting to increase NPU clock speed or loop unrolling to fix the low utilization.
     **The Rationale:** Engineers see low compute utilization and attempt to optimize the math kernels, ignoring that standard MoE routing causes unstructured all-to-all memory thrashing.
@@ -20,13 +20,14 @@ details:
     1. **Assumptions & Constraints:**
        - 128-expert MoE, Top-2 token routing.
        - 8 NPUs, 1 TB/s HBM bandwidth per NPU.
-       - 128 GB total expert weights.
+       - 128 GB total expert weights, about 1 GB per expert.
+       - If experts are evenly sharded, each NPU owns 16 experts.
     2. **Calculations:**
-       - Standard Routing: Each NPU must randomly load all 128 experts (128 GB) per microbatch. 128 GB / 1 TB/s = 128 ms load time. If compute takes 15 ms, utilization = 15 / (128 + 15) = 10.4%.
-       - Pinned Routing Solution: Pin 16 specific experts to each NPU. Load drops to 16 GB (16 ms).
-       - New Utilization = 15 / (16 + 15) ≈ 48%.
+       - With unconstrained top-2 routing, each token can select two experts anywhere in the 128-expert pool, so a microbatch can touch a broad, poorly localized expert set.
+       - If only 15% of selected experts are local, then roughly 85% of expert accesses require remote traffic or fresh HBM reads, matching the observed 85% stall profile.
+       - Placement-aware routing that keeps most selections on the owning NPU changes the working set from scattered accesses across the full pool to repeated accesses over the local 16-expert shard, increasing reuse and reducing HBM churn.
     3. **Conclusion & Interpretation:**
-       - Pinned routing heavily reduces HBM thrashing, vastly improving throughput.
+       - Hardware-aware expert placement and locality-biased routing reduce HBM thrashing and remote token movement, which should raise utilization from the observed 12% without guaranteeing the system is fully compute-bound.
        - **Result: Memory-Bound (HBM Thrashing)**
 status: published
 provenance: imported

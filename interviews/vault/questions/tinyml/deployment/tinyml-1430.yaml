@@ -8,57 +8,29 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: Optimizing Semantic Segmentation Deployment on Cortex-M7 + Ethos-U55 with Model Format Conversion
-scenario: You are tasked with deploying a pre-trained semantic segmentation model onto an embedded system
-  powered by an ARM Cortex-M7 microcontroller (480 MHz, 512 KB SRAM) and an ARM Ethos-U55 microNPU (supporting
-  512 MAC/cycle). The deployment requires inference within 100ms and a total memory footprint under 256KB.
-  You've identified several custom operators in your PyTorch model that are not natively supported by
-  standard runtime conversions for the Ethos-U55.
-question: How should you convert a PyTorch segmentation model for Cortex-M7 plus Ethos-U55 when unsupported
-  operators threaten latency and memory?
+scenario: You are tasked with deploying a pre-trained semantic segmentation model onto an embedded system powered by an ARM Cortex-M7 microcontroller (480 MHz, 512 KB SRAM) and an ARM Ethos-U55-class microNPU. The deployment requires inference within 100ms and a working-memory footprint under 256KB for the tensor arena, activation buffers, and scratch space. You've identified several custom operators in your PyTorch model that are not natively supported by the Ethos-U55 deployment flow.
+question: How should you convert a PyTorch segmentation model for Cortex-M7 plus Ethos-U55 when unsupported operators threaten latency and memory?
 details:
-  realistic_solution: 'A realistic solution involves a methodical approach: 1. **Operator Mapping & Profiling**:
-    Identify all unsupported operators. For each, explore if a simpler, supported equivalent exists. 2.
-    **Hybrid Delegation Strategy**: For truly unavoidable operators, convert the majority to TFLite for
-    Ethos-U55 acceleration, and implement the unsupported segments as optimized custom C/C++ kernels on
-    the Cortex-M7. 3. **Aggressive Quantization**: Apply PTQ INT8 quantization to reduce model size. 4.
-    **Memory Optimization**: Analyze and optimize activation memory usage through techniques like activation
-    recomputation or careful layer fusion to stay within the 256KB total memory budget.'
-  common_mistake: '**The Pitfall:** Blindly converting the model without understanding the NPU''s operator
-    coverage.
-
-    **The Rationale:** Developers assume modern conversion tools seamlessly handle fallback without severe
-    penalty.
-
-    **The Consequence:** Unsupported operations transparently fall back to the slower Cortex-M7 CPU, creating
-    massive latency bottlenecks that violate the 100ms deadline.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Ethos-U55 @ 480 MHz, 512 MAC/cycle.
-
+  realistic_solution: 'A realistic solution involves a methodical approach: 1. **Operator Mapping & Profiling**: Export through an Ethos-U55-compatible path such as TFLite plus Vela-style compilation, then identify every unsupported operator and unsupported tensor shape. 2. **Model Surgery First**: Replace custom segmentation blocks with supported int8-friendly equivalents, fuse operations where legal, and retrain or calibrate so the rewritten graph preserves accuracy. 3. **Constrained Fallback**: Keep CPU fallback only for small, non-critical operators whose measured latency and copy costs fit the 100ms budget; otherwise implement a supported rewrite rather than relying on custom Cortex-M7 kernels. 4. **Quantization and Memory Planning**: Apply full-integer quantization and use offline arena planning, tiling, and scratch-buffer analysis so activations and runtime buffers stay within the 256KB working-memory budget.'
+  common_mistake: |
+    **The Pitfall:** Blindly converting the model without understanding the NPU's operator coverage.
+    **The Rationale:** Developers assume modern conversion tools seamlessly handle fallback without severe penalty.
+    **The Consequence:** Unsupported operations transparently fall back to the slower Cortex-M7 CPU, creating massive latency bottlenecks that violate the 100ms deadline.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Ethos-U55-class NPU effective sustained rate after overhead: about 20 GMAC/s for supported int8 subgraphs.
     - Cortex-M7 @ 480 MHz.
-
-    - Memory limit: 256 KB. Deadline: 100 ms.
-
+    - Cortex-M7 optimized int8 fallback estimate: about 0.5 GMAC/s.
+    - Working-memory limit: 256 KB. Deadline: 100 ms.
+    - Example segmentation model: 1.6 GMAC total.
 
     **Calculations:**
-
-    - U55 Theoretical Peak = 480 MHz * 512 MAC/cycle = 245 GMACs/s.
-
-    - 100 ms deadline allows ~24.5 GMACs (Ethos-U55).
-
-    - Cortex-M7 throughput = ~0.5 GMACs/s. 100 ms = ~0.05 GMACs.
-
-    - 4x reduction via INT8 quantization brings a 2MB model down to 500KB (still exceeds 256KB).
-
+    - If 95% runs on the NPU: 1.52 GMAC / 20 GMAC/s = ~76 ms.
+    - If 5% falls back to Cortex-M7: 0.08 GMAC / 0.5 GMAC/s = ~160 ms, before boundary-copy overhead.
+    - INT8 weights from a 2 MB FP32 weight file are roughly 500 KB in flash, but the 256 KB limit applies to tensor arena and scratch, not necessarily all stored weights.
 
     **Conclusion & Interpretation:**
-
-    - **Result: CPU fallback for even 10% of a 1.6 GMAC model takes 320ms violating the deadline (Latency-Bound)**.
-    Unsupported operators on the NPU require high-latency CPU fallbacks.
-
-    '
+    - **Result: Even a small unsupported 5% subgraph can dominate latency, so the release path is operator replacement, quantization, and memory-aware partitioning, with CPU fallback allowed only after measurement proves it fits.**
 status: published
 provenance: imported
 requires_explanation: true

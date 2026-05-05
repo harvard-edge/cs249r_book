@@ -7,30 +7,32 @@ topic: transformer-systems-cost
 competency_area: architecture
 bloom_level: create
 phase: both
-title: 'The Autonomous Perception Power Wall'
-scenario: 'Your current system, built on a Jetson AGX Orin, uses a large, monolithic CNN to fuse data from eight 6-megapixel cameras. This model consumes 55W of the SoC''s 60W thermal design power (TDP). The product team wants to add new features requiring a 40% increase in model FLOPs to hit accuracy targets. A hardware change is not possible for two years due to supply chain commitments.'
-question: 'What are your first three architectural decisions, and how do you justify them with quantitative reasoning?'
+title: The Autonomous Perception Power Wall
+scenario: Your current system, built on a Jetson AGX Orin, uses a large, monolithic CNN to fuse data from eight 6-megapixel cameras. This model consumes 55W of the SoC's 60W thermal design power (TDP). The product team wants to add new features requiring a 40% increase in model FLOPs to hit accuracy targets. A hardware change is not possible for two years due to supply chain commitments.
+question: What are your first three architectural decisions, and how do you justify them with quantitative reasoning?
 details:
-  realistic_solution: 'The correct L6+ approach is to abandon the monolithic paradigm and propose a conditional compute architecture, likely a Mixture of Experts (MoE). You don''t need to run your most powerful model on an empty highway.'
+  realistic_solution: |
+    The first decision is to stop scaling the monolithic CNN and move to conditional compute: a cheap shared backbone plus specialist heads or experts that run only when scene complexity requires them. The second decision is to reduce sensor work before the large model, using per-camera ROI selection, lower-rate heavy inference, and asynchronous fusion so empty highway frames do not pay the same cost as dense urban frames. The third decision is to partition and schedule the model around the accelerator: keep the shared encoder resident, fuse kernels, and reserve the expensive heads for bounded time slots so average power stays under 60W and worst-case latency remains controlled.
   common_mistake: |
     **The Pitfall:** Proposing incremental optimizations like switching to MobileNetV3 or aggressive INT8 quantization.
     **The Rationale:** Engineers assume 10-20% efficiency gains will scale, but a 40% capability increase within the same power budget requires an architectural paradigm shift.
     **The Consequence:** The system fails to meet product requirements within the hard 60W limit.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 8 cameras at 6MP = 48MP per frame.
-    - RGB format: 3 bytes/pixel.
-    - Orin bus bandwidth: 204.8 GB/s.
+    - Current model consumes 55W on a 60W TDP.
+    - Requested feature increase: +40% FLOPs.
+    - New design must fit under the same 60W envelope.
+    - 8 cameras at 6MP each = 48MP per fused frame.
 
     **Calculations:**
-    - Frame size: 48MP $\times$ 3 = 144MB.
-    - Transfer time = 144MB / 204.8GB/s = 0.7ms.
-    - Base compute: 8 $\times$ 100 GOPs = 800 GOPs.
-    - Compute time at 275 TOPS: 800G / 275T = 2.9ms.
-    - Total base time is 3.6ms (0.7ms + 2.9ms).
+    - Naively scaling the current model by 40% gives roughly 55W * 1.4 = 77W, which exceeds the 60W limit by 17W.
+    - To fit 60W, the average active compute must be no more than 60W / 77W = 78% of the naive always-on model.
+    - A conditional design can meet that if expensive experts run on at most about 50% of frames or regions: 55W shared baseline plus only the needed fraction of the added 22W compute.
+    - Raw RGB input for all cameras is 48MP * 3 bytes = 144MB per frame; at 30 FPS this is 4.32 GB/s before intermediate activations, so sensor traffic is manageable relative to 204.8 GB/s but activation reuse and scheduling still matter.
+    - ROI cropping or lower-rate heavy inference that removes 50% of pixels before specialist heads can reduce the new-feature compute and activation traffic by roughly 2x.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.6ms (Compute-Bound)**. Leaving plenty of 33ms budget, meaning 55W power draw can be reduced via underclocking if MoE is used.
+    - **Result: Naive scaling is a power failure, not a raw input-bandwidth failure.** Conditional compute, sensor/ROI gating, and accelerator-aware partitioning are the architectural decisions that make the 40% accuracy-driven capacity increase plausible within 60W.
 status: published
 provenance: imported
 requires_explanation: false

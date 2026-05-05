@@ -11,7 +11,8 @@ title: Data Parallelism Around an Expert-Parallel MoE Block
 scenario: An MoE Transformer has 64 experts placed 1-per-GPU across 64 GPUs (expert parallel). The team wants to scale throughput by *also* applying data parallelism — replicating the full 64-GPU expert topology N times so the global batch grows by N.
 question: When DP wraps an already expert-parallel 64-GPU MoE block, what does the DP layer actually replicate, and what AllReduce cost does it add?
 details:
-  realistic_solution: 'The DP layer replicates the entire expert-parallel mesh — each DP replica holds its own 64-GPU set of experts. The dense (non-expert) parts of the model (embeddings, attention, LayerNorms, the router) are also replicated across DP groups. After backward, the DP gradient AllReduce runs over the cross-replica group of identically-positioned ranks (one per replica), not over the expert dimension. So the DP collective synchronizes (a) the dense weight gradients across replicas and (b) one specific expert gradient across all replicas that hold a copy of that expert (which they all do — every replica has all 64 experts). Cost = one AllReduce of (dense + 1/64 * total expert params) per DP rank, sized to the active parameters per token, not the full sparse parameter count.'
+  realistic_solution: |
+    The DP layer replicates the entire 64-GPU expert-parallel mesh. Each DP replica has its own complete copy of the MoE model: dense modules plus all 64 experts partitioned across the 64 ranks in that replica. After backward, DP synchronizes gradients across the cross-replica group of identically positioned ranks, not across the expert-parallel dimension. In plain data parallelism, the replicated parameter gradients for that rank are AllReduced across DP replicas: its dense shard or replica plus the expert parameters owned by that rank. The cost is therefore based on the full replicated parameter set assigned to each rank, not on only the experts active for a token. A sparse or active-expert gradient communication model would require an explicitly different MoE-specific optimizer or communication scheme.
   common_mistake: |
     **The Pitfall:** Believing that adding DP on top of expert parallelism doubles the all-to-all dispatch cost.
     **The Rationale:** The dispatch all-to-all is *intra-replica* and is unaffected by DP. What DP adds is a *separate* AllReduce on the gradient at the end of backward, completely orthogonal to the dispatch step.
@@ -20,13 +21,13 @@ details:
     1. **Assumptions & Constraints:**
        - 64 GPUs per replica (1 expert/GPU).
        - DP replication factor: 4 (Total 256 GPUs).
-       - Params per GPU: ~1B dense + 7B expert = 8B params.
+       - Params owned by each rank: ~1B dense/sharded dense + 7B expert = 8B params.
        - Interconnect: IB NDR (~25 GB/s unidirectional).
     2. **Calculations:**
-       - DP gradient AllReduce only synchronizes the 8B active params per rank across the DP dimension.
+       - DP gradient AllReduce synchronizes the full 8B replicated parameter gradients owned by each rank across the DP dimension.
        - Payload size: 8B × 2 bytes (BF16) = 16 GB.
        - Ring AllReduce time (DP=4): (2 × 0.75 × 16 GB) / 25 GB/s = 0.96 seconds.
-    3. **Conclusion & Interpretation:** **AllReduce operates solely on the 16 GB local slice, ignoring sparse parameters. Network-Bandwidth-Bound.**
+    3. **Conclusion & Interpretation:** **AllReduce operates on the full 16 GB replicated local parameter slice for each identically positioned rank, not just active-token sparse experts. Network-Bandwidth-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

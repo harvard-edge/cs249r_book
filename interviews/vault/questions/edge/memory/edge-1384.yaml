@@ -11,7 +11,8 @@ title: Multi-Process Memory-Mapped Inference Footprint
 scenario: You are deploying a multi-camera computer vision system on an NVIDIA Jetson Orin (32 GB LPDDR5, Ampere GPU + DLA). The architecture spawns 4 independent processes to handle 4 separate video streams. Each process must load the identical 7-billion parameter vision-language model, quantized to INT8, to perform zero-shot anomaly detection. The host OS and base application buffers consume a fixed 5 GB of RAM.
 question: What are the total memory footprints for four private 7B INT8 model loads versus shared read-only mmap weights, and will either OOM?
 details:
-  realistic_solution: 'The correct implementation requires explicitly memory-mapping the weight file (using `mmap` with `MAP_SHARED` and `PROT_READ`) so that all 4 worker processes point to the same physical pages in the Jetson Orin''s 32 GB LPDDR5 memory. Because the weights are read-only for inference, this avoids duplication and drastically reduces the memory footprint, allowing the system to easily fit within the device''s hardware constraints.'
+  realistic_solution: |
+    Four private loads consume 4 x 7 GB + 5 GB = 33 GB before additional per-process overhead, so they exceed the 32 GB device and OOM. With read-only `mmap` using `MAP_SHARED` and `PROT_READ`, the 7 GB file-backed weight pages are shared physically, giving a 12 GB lower-bound footprint: 7 GB shared weights + 5 GB OS/app base. The mmap design fits as long as private worker overhead and runtime buffers stay below the remaining ~20 GB; mmap does not eliminate those private costs.
   common_mistake: |
     **The Pitfall:** Assuming OS-level implicit deduplication for files.
     **The Rationale:** Candidates often assume the operating system will automatically deduplicate identical file reads across processes.
@@ -23,9 +24,9 @@ details:
        - OS/app base memory = 5 GB.
     2. **Calculations:**
        - Individual file loading: (4 processes * 7 GB) + 5 GB = 33 GB (Exceeds 32 GB -> OOM).
-       - Memory-Mapped (mmap) loading: 7 GB (shared pages) + 5 GB = 12 GB.
+       - Memory-Mapped (mmap) loading: 7 GB shared read-only file-backed pages + 5 GB base = 12 GB lower bound, plus per-process private overhead/runtime buffers.
     3. **Conclusion & Interpretation:**
-       - **Result: 12 GB Footprint**. Using mmap ensures all processes share the exact same physical memory pages, successfully dropping the footprint to 12 GB and preventing an Out-Of-Memory failure.
+       - **Result: Private loads OOM; mmap fits with overhead caveat**. The shared-weight mmap footprint is 12 GB before private worker overhead, leaving about 20 GB of headroom on a 32 GB system.
 status: published
 provenance: imported
 requires_explanation: false

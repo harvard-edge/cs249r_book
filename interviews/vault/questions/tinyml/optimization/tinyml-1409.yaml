@@ -11,7 +11,8 @@ title: Optimizing TinyML Image Classification with Knowledge Distillation on Cor
 scenario: Your team is deploying a critical image classification model for industrial anomaly detection on an edge device. The target hardware features a Cortex-M7 paired with an Ethos-U55 NPU and a strict 512 KB of SRAM. A heavily pruned version of ResNet-18 fits within the SRAM and meets latency targets (40ms) but suffers a significant accuracy drop to 92%.
 question: How would you diagnose bottlenecks in the pruned model and propose a knowledge distillation strategy to recover accuracy on the Ethos-U55?
 details:
-  realistic_solution: The core issue is the accuracy drop after aggressive pruning to fit the 512 KB SRAM and 50ms latency. Knowledge distillation is ideal here. The solution should involve training a compact student model using the ResNet-18 teacher. Logit matching should be the first approach due to its simplicity and low overhead, fitting well within the SRAM. The Ethos-U55 excels at MAC operations, so the student model should be designed with depthwise separable convolutions or similar NPU-friendly operations. Distillation is superior to mere pruning here because it transfers the 'dark knowledge' from the high-capacity teacher, enabling the student to learn a more robust decision boundary.
+  realistic_solution: |
+    First diagnose whether the 92% accuracy is primarily a pruning-capacity problem or a deployment bottleneck. Compare teacher, unpruned student, pruned student, and quantized on-device outputs; inspect per-class errors; profile Ethos-U55 operator coverage; and record peak tensor arena, scratch buffers, DMA traffic, and CPU fallback time. If the pruned ResNet-18 already meets 40 ms, the latency budget is not the reason to add distillation; distillation should target the lost accuracy while preserving an Ethos-U55-friendly graph. Train a compact INT8/QAT student from the high-accuracy teacher using temperature-scaled logits plus a small amount of feature or attention matching only at layers whose tensors fit the SRAM budget. Prefer supported convolutions, depthwise convolutions only where the compiler maps them efficiently, channel counts aligned to the accelerator, and activation lifetimes that keep the tensor arena under 512 KB.
   common_mistake: |
     **The Pitfall:** Proposing general distillation without tailoring it to the hardware.
     **The Rationale:** Candidates fail to quantify the Ethos-U55 operations per cycle or the strict SRAM limits for intermediate features.
@@ -21,14 +22,17 @@ details:
     - Memory budget: < 512 KB.
     - Latency budget: 50 ms.
     - U55 at 480 MHz (512 MAC/cycle).
+    - Candidate student example: 200K INT8 parameters and 200M MACs.
 
     **Calculations:**
-    - 200K parameter INT16 student uses ~400 KB.
-    - 200M MACs compute = 200M / (480M * 512) ≈ 0.8 ms compute time.
-    - Total with overhead ≈ 40 ms.
+    - 200K INT8 parameters use ~200 KB for weights; INT16 weights would use ~400 KB and leave only ~112 KB for activations, usually too tight.
+    - Peak NPU throughput = 480e6 cycles/s * 512 MAC/cycle = 245.76 GMAC/s.
+    - Ideal NPU compute time = 200e6 MACs / 245.76e9 MAC/s = 0.000814 s = 0.814 ms.
+    - If observed latency is 40 ms, effective utilization is 0.814 ms / 40 ms ≈ 2.0% of peak, so the likely bottleneck is operator fallback, memory traffic, scheduling overhead, or activation SRAM pressure rather than raw MAC throughput.
+    - Weight memory alone is not enough: with 200 KB weights, the tensor arena, scratch buffers, stack, and I/O buffers must fit in the remaining ~312 KB.
 
     **Conclusion & Interpretation:**
-    - **Result: ~40 ms latency (Compute-Bound)**. Distillation fits within 400 KB and achieves 50 ms latency while recovering ~3-4% accuracy.
+    - **Result: Diagnose as memory/operator/accuracy-bound, not proven compute-bound.** Distillation is appropriate to recover pruning accuracy, but the release target is only credible after compiling the student for Ethos-U55, verifying no costly CPU fallbacks, and profiling peak SRAM plus measured latency; accuracy recovery should be reported from validation data, not promised from the napkin estimate.
 status: published
 provenance: imported
 requires_explanation: false

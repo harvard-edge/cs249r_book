@@ -7,11 +7,11 @@ topic: queueing-theory
 competency_area: latency
 bloom_level: create
 phase: inference
-title: 'Edge Queueing Theory Mastery: Queueing Analysis for Robot Fleet Coordinator'
+title: Jetson Orin Priority Queueing for Mixed Heavy and Light Robot Inference
 scenario: 'You are designing the inference queueing architecture for a warehouse robot fleet: 20 robots each sending 10 perception requests/s (λ=200 req/s). Requests are 30% heavy (3D scene reconstruction, 200ms service on Jetson Orin 60W) and 70% light (obstacle check, 5ms). Total P99 SLO is 500ms.'
 question: How many Jetson Orins are needed for the mixed heavy/light workload, can priority queues meet the 500 ms P99 SLO, and does power fit the 200W budget?
 details:
-  realistic_solution: 'Heavy: λ_h=60/s, service 0.2s. Light: λ_l=140/s, service 0.005s. Total load ρ = 12.7 Erlangs from ONE server — system is hugely overloaded on a single Jetson. With 16 Jetsons: ρ_total = 0.794. With priority scheduling (light preempts heavy): light tasks easily pass, but heavy tasks experience massive tail latency. Because the heavy tasks are bursty and take 200ms, P99_heavy exceeds the 500ms SLO. The solution is asynchronous processing for heavy tasks, or splitting the compute heterogeneously (e.g. Hailo-8 for light, Jetson for heavy).'
+  realistic_solution: Heavy traffic is λ_h=60/s with 200ms service, which consumes 12.0 Jetson-seconds of work per second. Light traffic is λ_l=140/s with 5ms service, which consumes 0.7 Jetson-seconds/s. The workload therefore needs at least ceil(12.7)=13 Jetson Orins just for stability; targeting about 80% utilization requires ceil(12.7/0.8)=16 Orins. A strict priority queue can protect light requests, but it cannot make the Jetson-only design meet the 500ms P99 SLO under the 200W power budget because 200W allows only 3 Orins and the workload would be unstable. Sixteen Orins would draw 960W, so the design is power-bound and needs workload reduction, asynchronous heavy processing, or heterogeneous offload.
   common_mistake: |
     **The Pitfall:** Using basic M/M/1 for mixed workloads.
     **The Rationale:** Candidates fail to separate the two classes into a priority queue M/G/1 analysis.
@@ -19,20 +19,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Fleet Traffic (λ): 200 req/s total.
-    - Heavy tasks (30%): λ_h = 60/s, Service time (μ_h) = 200ms (5/s).
-    - Light tasks (70%): λ_l = 140/s, Service time (μ_l) = 5ms (200/s).
+    - Heavy tasks (30%): λ_h = 60/s, service time S_h = 200ms.
+    - Light tasks (70%): λ_l = 140/s, service time S_l = 5ms.
     - Target P99 SLO: 500ms.
     - Power Budget: 200W. (Jetson Orin = 60W each).
 
     **Calculations:**
-    - Single Server Load: ρ_h = 60/5 = 12. ρ_l = 140/200 = 0.7. Total Load = 12.7 Erlangs.
-    - Fleet at 20 Jetsons: ρ_h = 60/100 = 0.6. ρ_l = 140/4000 = 0.035.
-    - M/G/1 Priority Delay (Heavy): Wq = 0.6 / (100 * (1 - 0.635)) = 16.4ms.
-    - Heavy Total Latency (W_h): 200ms + 16.4ms = 216ms. (High variance implies P99 > 500ms).
-    - Power for 20 Jetsons: 20 * 60W = 1200W.
+    - Offered load: λ_h*S_h + λ_l*S_l = 60*0.200 + 140*0.005 = 12.0 + 0.7 = 12.7 Erlangs.
+    - Minimum Jetsons for stability: ceil(12.7) = 13.
+    - Jetsons for a practical 80% utilization target: ceil(12.7 / 0.8) = 16.
+    - Power for 16 Jetsons: 16 * 60W = 960W.
+    - Jetsons allowed by 200W: floor(200 / 60) = 3, which provides only 3 Erlangs of service capacity.
+    - Priority scheduling can reduce light-task queueing, but with only 3 Jetsons the system is unstable; no finite P99 exists. With the 16-Jetson throughput design, power is still 4.8x over budget.
 
     **Conclusion & Interpretation:**
-    - **Result: Power-Bound and Latency-Bound.** 20 Jetsons violate the 200W budget by 6x. The architecture must utilize cheaper edge ASICs for light tasks and decouple heavy tasks asynchronously.
+    - **Result: Power-Bound and Latency-Bound.** A Jetson-only design needs about 16 Orins for reasonable utilization but exceeds the 200W budget. Priority queues alone cannot make the 500ms P99 SLO hold under the power constraint.
 status: published
 provenance: imported
 requires_explanation: true

@@ -9,26 +9,29 @@ bloom_level: create
 phase: both
 title: 'Network Bandwidth Bottlenecks: Specify InfiniBand Fabric for 256-GPU LLM Training Cluster'
 scenario: A 256-GPU training cluster (32 nodes, 8 GPUs per node) needs its InfiniBand fabric topology specified for training 70B+ models with 3D parallelism.
-question: "What InfiniBand topology, rail count, per-GPU bandwidth, AllReduce target, and bisection bandwidth would you use for a 256-GPU 70B+ training cluster?"
+question: What InfiniBand topology, rail count, per-GPU bandwidth, AllReduce target, and bisection bandwidth would you use for a 256-GPU 70B+ training cluster?
 details:
-  realistic_solution: '256 GPUs across 32 nodes. Each node: 8 GPUs with 900GB/s intra-node NVLink + 8 × 400Gb/s IB = 3.2Tb/s IB uplinks per node. 32 nodes × 8 IB ports = 256 ports. Recommended: 2-tier non-blocking fat-tree with 256-port leaf switches (1:1 oversubscription). Bandwidth per GPU: 400Gb/s = 50GB/s. AllReduce 70B across 32 DP ranks (TP-8): 2×31/32×(140GB/8) = 33.9GB per GPU. 33.9/50=678ms. Bisection BW: 256×400Gb/s/2=51.2Tb/s.'
+  realistic_solution: 'Use one 400Gb/s InfiniBand rail per GPU: 8 GPU/NIC rails per node, 3.2Tb/s node injection, and 256 total GPU-facing IB ports across 32 nodes. The intended fabric is a non-blocking 2-tier fat-tree or equivalent dragonfly/rail-optimized topology with 1:1 oversubscription for GPU rails. For the AllReduce target, make the parallelism assumption explicit: if a 70B model uses TP-8 and no pipeline parallelism for this estimate, then 256 GPUs form 32 DP replicas. Each DP rank all-reduces one TP shard of the FP16 gradients: 140GB/8 = 17.5GB. Ring AllReduce over 32 DP ranks moves 2*(32-1)/32*17.5GB = 33.9GB per GPU, so at 400Gb/s = 50GB/s the target bandwidth-bound time is 33.9/50 = 678ms. The aggregate GPU injection bandwidth is 256*400Gb/s = 102.4Tb/s; a full-bisection non-blocking design should provision about half of that, 51.2Tb/s, across the cut for worst-case balanced traffic, while rail-aware collectives should keep traffic on matching rails where possible.'
   common_mistake: |
     **The Pitfall:** Specifying a single-tier fat-tree for a 256-GPU cluster.
     **The Rationale:** People underestimate the number of uplinks required per node (32 per node for 8 GPUs with 4 rails).
     **The Consequence:** Designing a network that lacks enough switch ports, requiring a multi-tier design to be non-blocking.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 32 DP nodes, 400Gb/s IB per GPU (50GB/s).
+    - 256 GPUs, TP-8, no pipeline parallelism in this AllReduce sizing example, so DP size = 256 / 8 = 32.
+    - One 400Gb/s IB rail per GPU (50GB/s), 8 rails per node.
     - 70B FP16 model (140GB).
-    - TP-8.
 
     **Calculations:**
-    - Data per GPU = 140GB / 8 = 17.5GB.
-    - Ring AllReduce data moved = 2 * (31/32) * 17.5GB = 33.9GB.
-    - Transfer time = 33.9GB / 50GB/s = 678ms.
+    - Node injection bandwidth = 8 * 400Gb/s = 3.2Tb/s.
+    - Cluster injection bandwidth = 256 * 400Gb/s = 102.4Tb/s.
+    - Full-bisection target for balanced worst-case traffic = 102.4Tb/s / 2 = 51.2Tb/s.
+    - Gradient shard per GPU = 140GB / TP-8 = 17.5GB.
+    - DP-32 ring AllReduce data moved per GPU = 2 * (31/32) * 17.5GB = 33.9GB.
+    - Transfer time target = 33.9GB / 50GB/s = 678ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 678ms AllReduce time (Network-Bound)**. Network is heavily stressed during parameter synchronization.
+    - **Result: 1 rail/GPU at 400Gb/s, 3.2Tb/s per node, 102.4Tb/s aggregate injection, ~51.2Tb/s full-bisection target, and ~678ms DP-32 AllReduce target for a TP-8 70B shard.** The fabric design and AllReduce math both depend on the explicit DP size and one-rail-per-GPU assumption.
 status: published
 provenance: imported
 requires_explanation: true

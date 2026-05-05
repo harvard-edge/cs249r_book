@@ -8,56 +8,29 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Zero-Shot UI Action Grounding
-scenario: We're implementing a Ferret-UI-inspired agentic system where Siri can perform actions based
-  on what the user is currently looking at on their screen. The vision-language model needs to ground
-  user commands (e.g., 'Click the second checkout button') to explicit x,y coordinates. The constraint
-  is that this grounding model must reside entirely in-memory with a peak RAM footprint under 50MB, execute
-  in <30ms on the Apple Neural Engine (ANE), and support seamless handoff to Private Cloud Compute for
-  complex reasoning.
-question: How do you design the on-device grounding architecture and the handoff protocol under these
-  strict memory and latency constraints?
+scenario: We're implementing a Ferret-UI-inspired agentic system where Siri can perform actions based on what the user is currently looking at on their screen. The vision-language model needs to ground user commands (e.g., 'Click the second checkout button') to explicit x,y coordinates. The constraint is that this grounding model must reside entirely in-memory with a peak RAM footprint under 50MB, execute in <30ms on the Apple Neural Engine (ANE), and support seamless handoff to Private Cloud Compute for complex reasoning.
+question: How do you design the on-device grounding architecture and the handoff protocol under these strict memory and latency constraints?
 details:
-  realistic_solution: Use an asymmetric cascaded architecture. An ultra-small, specialized CoreML model
-    (e.g., a MobileNetV4-based encoder paired with a lightweight transformer decoder, ~15M parameters)
-    continuously runs on the ANE to output bounding boxes and semantic embeddings for UI elements. It
-    relies solely on pixels, bypassing the accessibility tree. For the handoff protocol, instead of sending
-    the raw screenshot to the cloud (which introduces latency and privacy risks), the on-device model
-    generates a highly compressed semantic embedding grid (e.g., 16x16 tokens) of the screen. Only this
-    grid and the user's audio transcript are securely handed off to the Apple Intelligence cloud nodes,
-    executing strictly under the 30ms latency and 50MB RAM budgets.
-  common_mistake: '**The Pitfall:** Suggesting running a multi-billion parameter Vision-Language Model
-    (VLM) on-device or relying on accessibility trees.
-
-    **The Rationale:** Candidates often underestimate the 50MB RAM constraint or overestimate the reliability
-    of OS-level UI accessibility features.
-
-    **The Consequence:** Violating memory constraints by orders of magnitude, or building a brittle system
-    that breaks on apps lacking complete accessibility metadata.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Memory: 15M parameters quantized to INT4 = 7.5MB.
-
-    - Activations: Downsampled 512x512 input → 256x256x16 channels x 2 bytes (FP16) = 2MB.
-
-    - Context/OS Buffer: ~5MB.
-
+  realistic_solution: |
+    Use a cascaded on-device perception stack with a compact CoreML grounding model that stays resident under the 50MB peak budget. The on-device path should detect UI regions, classify common element roles, encode a small set of candidate boxes, and resolve simple commands to x,y coordinates locally. Do not rely on pixels alone when better signals are available: combine the screenshot features with safe UI metadata such as element bounds and labels when the OS can provide them. For handoff, send Private Cloud Compute a minimal task packet: user transcript, screen/app context policy metadata, candidate element boxes, role scores, and compact per-element embeddings. The cloud performs complex reasoning over that representation and returns an element id or coordinate target; raw screenshots are avoided unless explicitly required by policy, and the device verifies the returned target against the current screen before action.
+  common_mistake: |
+    **The Pitfall:** Suggesting running a multi-billion parameter Vision-Language Model (VLM) on-device or relying on accessibility trees.
+    **The Rationale:** Candidates often underestimate the 50MB RAM constraint or overestimate the reliability of OS-level UI accessibility features.
+    **The Consequence:** Violating memory constraints by orders of magnitude, or building a brittle system that breaks on apps lacking complete accessibility metadata.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Model: 12M parameters quantized to INT4 = 6MB.
+    - Activations: 512x512 input downsampled to 256x256x16 FP16 = 256 * 256 * 16 * 2 bytes = 2.0MB.
+    - Candidate representation: 128 UI elements * 64-dim INT8 embedding plus boxes/scores is less than 0.1MB.
+    - Runtime buffers, CoreML overhead, and safety margin: ~20MB.
 
     **Calculations:**
-
-    - Total RAM Footprint: 7.5MB + 2MB + 5MB = 14.5MB (safely under 50MB constraint).
-
-    - Transferring 7.5 MB weights from DRAM to NPU SRAM at 25.6 GB/s LPDDR5 bandwidth = 0.29 ms.
-
-    - Compute latency: 12 ms vision encoding + 0.29 ms weight transfer + 8 ms text grounding + 2 ms action
-    mapping = 22.29 ms.
-
+    - Total peak RAM footprint: 6MB weights + 2MB activations + 0.1MB candidates + 20MB runtime/safety margin = 28.1MB.
+    - On-device latency: 12ms UI region encoder + 6ms role/box head + 4ms command matching + 2ms target verification = 24ms.
+    - Handoff payload: 128 * 64 bytes for INT8 embeddings plus metadata is roughly 10-20KB, small enough for cloud reasoning without sending the full screenshot in the default path.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 22.29 ms / 14.5 MB (Compute-Bound)**. System operates well within acceptable interaction
-    budgets, maintaining low memory footprints.'
+    - **Result: about 24ms and 28MB peak RAM on-device.** The design stays under the local constraints by sending only compact candidate state to Private Cloud Compute for hard reasoning cases and verifying the returned action locally.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: Zero-Copy DMA Pipeline for Ethos-U55
 scenario: You are deploying a 60 FPS visual wake-word model on an ARM Cortex-M7 with an Ethos-U55 NPU. The camera outputs 256x256 INT8 grayscale frames over DCMI. The system has 512 KB of shared SRAM.
 question: How should the Corstone-300 architecture utilize DMA to handle 60 FPS visual inference without inducing memory bus contention?
 details:
-  realistic_solution: The architecture must implement a zero-copy ping-pong DMA topology directly mapped to the Ethos-U55's input tensor buffers. The camera DMA writes asynchronously into two pre-allocated SRAM regions. Upon transfer completion, the M7 updates the NPU's input pointer, triggers execution, and sleeps. Weights reside persistently in XIP Flash and are streamed natively over the NPU's AXI bus, dedicating the bulk of the 512 KB SRAM strictly to high-speed activation buffers.
+  realistic_solution: The architecture must implement a zero-copy ping-pong DMA topology directly mapped to the Ethos-U55's input tensor buffers. The camera DMA writes asynchronously into two pre-allocated SRAM regions, the M7 synchronizes buffer ownership, triggers execution on the completed buffer, and avoids copying frames through an intermediate CPU buffer. Weights and activation placement must follow the Corstone-300 memory map and Vela allocation plan rather than assuming universal XIP streaming into the NPU. This topology reduces SRAM traffic and leaves most of the 512 KB SRAM for activations and other required tensor arenas.
   common_mistake: |
     **The Pitfall:** Relying on explicit, CPU-driven memory replication.
     **The Rationale:** Candidates map distinct camera capture buffers and NPU ingestion buffers, manually shuffling the payload via `memcpy` functions.
@@ -19,16 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Frame Size: 256 x 256 INT8 = 64 KB. 60 FPS (16.6ms per frame).
-    - Shared SRAM: 512 KB. 64-bit bus at 480 MHz.
+    - Shared SRAM: 512 KB.
+    - Bus-bandwidth calculations use an ideal peak figure only; real throughput is lower due to arbitration, protocol overhead, and concurrent NPU/CPU traffic.
 
     **Calculations:**
     - Ping-Pong Buffers: 64 KB * 2 = 128 KB (leaves 384 KB for activations).
     - Required DMA Bandwidth: 64 KB / 16.6ms = 3.85 MB/s.
-    - Total Bus Bandwidth: 8 bytes * 480 MHz = 3.84 GB/s.
-    - Bus Utilization: 3.85 MB/s / 3840 MB/s ≈ 0.1%.
+    - CPU-copy alternative: camera buffer (64 KB) + NPU input buffer (64 KB) can double the frame-buffer footprint and add 3.85 MB/s of read traffic plus 3.85 MB/s of write traffic for each software copy.
+    - Zero-copy DMA keeps the capture footprint to two 64 KB buffers and removes that CPU copy traffic from the shared SRAM bus.
+    - Against an ideal 64-bit, 480 MHz peak bus model, 3.85 MB/s / 3840 MB/s ≈ 0.1%, but real utilization must be budgeted with NPU tensor traffic and arbitration overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Optimization**. A zero-copy DMA ping-pong buffer consumes 128 KB of SRAM and mathematically isolates the transfer to ~0.1% of the bus bandwidth, permanently eliminating contention.
+    - **Result: Memory-Bound Optimization**. A zero-copy DMA ping-pong buffer consumes 128 KB of SRAM and reduces avoidable copy traffic, but it reduces rather than permanently eliminates contention; final placement of weights and activations is platform-specific.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,27 +7,30 @@ topic: responsible-ai
 competency_area: cross-cutting
 bloom_level: evaluate
 phase: inference
-title: 'Architecting On-Device Guardrails for Generative Text'
-scenario: 'You are designing an on-device text generation feature with strict content moderation requirements running on a Samsung Exynos 2400 NPU. The system must run a primary 3B parameter generative model and a secondary safety classifier concurrently to prevent toxic output generation. The dual-core NPU relies on shared 12 GB LPDDR5X memory.'
-question: 'How should the system concurrently run a 3B generator and safety classifier without breaking latency or safety?'
+title: Architecting On-Device Guardrails for Generative Text
+scenario: You are designing an on-device text generation feature with strict content moderation requirements running on a Samsung Exynos 2400 NPU. The system must run a primary 3B parameter generative model and a secondary safety classifier concurrently to prevent toxic output generation. The dual-core NPU relies on shared 12 GB LPDDR5X memory.
+question: How should the system concurrently run a 3B generator and safety classifier without breaking latency or safety?
 details:
-  realistic_solution: 'A robust architecture pipelines the generation and safety classification. The primary model streams tokens, and the safety model (e.g., a lightweight 100M parameter classifier) evaluates chunks of text asynchronously on the second NPU core. If the shared memory pressure from the ISP/GPU spikes (leaving limited RAM), the system dynamically quantizes the safety model or falls back to rule-based heuristics to maintain the safety SLA.'
+  realistic_solution: A robust architecture uses bounded streaming, not an unbounded parallel run. The generator emits small token chunks into a fixed-size buffer, and the safety classifier scores each chunk on the second NPU core before the text is released to the UI or downstream actions. If the safety path falls behind or memory pressure rises, generation is paused or the output is held in the buffer; the system must not bypass moderation. Resource limits should reserve headroom for KV cache, activations, runtime arenas, and OS/GPU/ISP spikes, with a smaller classifier or shorter context selected up front if the combined working set cannot stay inside that budget.
   common_mistake: |
     **The Pitfall:** Designing sequential pipelines (generate then classify).
     **The Rationale:** Candidates overlook stream-based moderation and the shared nature of mobile RAM, assuming all memory is available for the NPU.
     **The Consequence:** Unacceptable latency and potential OOM errors when system memory pressure spikes.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Primary Model Memory: 3B parameters at INT4 = ~1.5 GB.
-    - Safety Model Memory: 100M parameters at INT8 = ~100 MB.
-    - Available Memory: 12 GB total - ~9 GB (OS/GPU/ISP) = ~3 GB.
+    - Primary Model Weights: 3B parameters at INT4 = ~1.5 GB.
+    - Safety Model Weights: 100M parameters at INT8 = ~100 MB.
+    - Runtime Overhead: KV cache, activations, allocator/framework arenas, and double-buffered token chunks add ~0.8 GB.
+    - Concurrency Headroom: reserve ~25% of the 3 GB ML budget for OS/GPU/ISP spikes.
 
     **Calculations:**
-    - Total ML Memory: 1.5 GB + 0.1 GB = 1.6 GB.
-    - Compare Total ML Memory to Available Memory: 1.6 GB < 3 GB.
+    - Estimated Working Set: 1.5 GB + 0.1 GB + 0.8 GB = ~2.4 GB.
+    - Required Headroom: 3.0 GB * 25% = ~0.75 GB.
+    - Safe Budget After Headroom: 3.0 GB - 0.75 GB = ~2.25 GB.
+    - The estimated 2.4 GB working set is slightly above the safe budget, so context length, batch size, classifier size, or buffering must be capped before launch.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.6 GB (Memory-Bound)**. The 1.6 GB ML footprint fits comfortably within the 3 GB budget.
+    - **Result: Bounded Concurrent Streaming Required.** Model weights alone fit, but the concurrent working set is close to the shared-memory limit once runtime overhead and headroom are included. The design must gate release on safety results and apply backpressure instead of assuming both models can run freely.
 status: published
 provenance: imported
 requires_explanation: true

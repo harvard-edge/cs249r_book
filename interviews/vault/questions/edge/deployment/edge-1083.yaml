@@ -11,7 +11,7 @@ title: 'Model Format Conversion: Specify ONNX Conversion Pipeline with Validatio
 scenario: Specify a production-grade ONNX conversion pipeline for deploying PyTorch models to edge accelerators. The pipeline must validate numerical equivalence (< 0.1% MAE), handle unsupported ops, report conversion failures with actionable messages, and run in CI/CD in under 10 minutes.
 question: What CI/CD stages and pass/fail criteria would you specify for this PyTorch-to-ONNX conversion pipeline?
 details:
-  realistic_solution: 'Stage 1 (2min): ONNX export with torch.onnx.export, opset 17, static shapes. onnx.checker.check_model — fail if any violation. Stage 2 (1min): onnxruntime inference on 100 validation inputs, compute MAE vs. PyTorch. Fail if MAE > 0.001. Stage 3 (3min): Hailo DFC compilation with INT8 calibration (50 images). Stage 4 (2min): Run HEF on Hailo-8 simulator, compare vs. ONNX output on 50 inputs. Fail if accuracy drop > 1%. Stage 5 (2min): Report engine size, estimated throughput. Total: 10min ✓.'
+  realistic_solution: 'Stage 1 (2min): export with torch.onnx.export, opset 17, declared static deployment shapes, and onnx.checker.check_model. Stage 2 (1min): run compiler/operator coverage checks; fail with operator name, node path, and suggested replacement when unsupported ops, dynamic reshape, or shape-inference errors appear. Stage 3 (2min): run PyTorch and ONNX Runtime on 100 validation inputs; compute relative MAE = mean(abs(onnx - pytorch)) / mean(abs(pytorch)) and fail if >0.001 (0.1%). Stage 4 (3min): compile/calibrate INT8 with 50 representative images; fail on calibration, shape, or unsupported-op errors. Stage 5 (2min): run accelerator simulator on 50 inputs, compare against ONNX outputs, and fail if task metric drops >1 percentage point or output relative MAE exceeds the deployment threshold. Total budget: 10 minutes.'
   common_mistake: |
     **The Pitfall:** Validating numerical equivalence using only a single static input shape.
     **The Rationale:** Engineers verify a successful forward pass on a "dummy" tensor but skip rigorous validation against dynamic shapes or edge-case stride patterns.
@@ -20,11 +20,15 @@ details:
     1. **Assumptions & Constraints:**
        - 100 validation inputs. 30M param model. Target CI/CD deadline: 10 minutes.
     2. **Calculations:**
-       - ONNX Validation (CPU): 100 * 15 GFLOPs / 10 TFLOPS = 150 ms.
+       - ONNX Validation (accelerated runner estimate): 100 * 15 GFLOPs / 10 TFLOPS = 0.15 s of ideal compute, plus framework/I/O overhead; allocate 1 minute.
+       - Export + checker: 2 minutes.
+       - Operator coverage and shape checks: 1 minute.
        - Quantization Search/Compile: ~3 minutes.
-       - Edge Simulation: 50 inputs at 10 FPS simulator speed = 5 seconds.
+       - Edge Simulation: 50 inputs at 10 FPS simulator speed = 5 seconds; allocate 2 minutes including setup and comparisons.
+       - Reporting and artifact upload: 2 minutes.
+       - Total allocated CI time: 2 + 1 + 1 + 3 + 2 + 1 reporting slack = 10 minutes.
     3. **Conclusion & Interpretation:**
-       - **Result: Total CI Time < 4 minutes.** The entire pipeline (export + inference + compile + simulate) executes well within the 10-minute SLA constraint.
+       - **Result: Total CI Time = 10 minutes budgeted.** The pipeline meets the SLA only if unsupported ops and static-shape checks pass; otherwise CI hard-fails with actionable conversion diagnostics instead of silently accepting an invalid export.
 status: published
 provenance: imported
 requires_explanation: true

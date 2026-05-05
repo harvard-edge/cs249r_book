@@ -8,8 +8,8 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: JIT Tracing Memory Leak
-scenario: An NLP model deployed on an edge CPU processes variable-length text sequences. Inference takes 50ms, using 200MB memory. Over 24 hours of processing random lengths, memory grows linearly by 2MB per inference until the system OOMs at 4GB.
-question: Why does memory grow by 2MB per inference for variable-length text on the edge CPU, eventually OOMing at 4GB?
+scenario: An NLP model deployed on an edge CPU processes variable-length text sequences. Inference takes 50ms, using 200MB memory. Over long runs with random sequence lengths, memory grows by roughly 2MB each time a previously unseen tensor shape appears until the system OOMs at 4GB.
+question: Why does memory grow by 2MB per new variable-length tensor shape on the edge CPU, eventually OOMing at 4GB?
 details:
   realistic_solution: The framework relies on Just-In-Time (JIT) tracing, which maps static graph dimensions. Because input tensors fluctuate constantly in sequence length, the execution engine triggers a continuous cycle of caching misses. The framework recompiles and statically isolates a fresh 2MB workspace configuration per unique dimension, generating a devastating compilation leak across the dispatcher pool.
   common_mistake: |
@@ -20,12 +20,12 @@ details:
     **Assumptions & Constraints:**
     - Edge Limit: 4 GB (4000 MB).
     - Base Memory: 200 MB.
-    - JIT compilation tax: 2 MB per unique dimension sequence.
+    - JIT compilation tax: 2 MB per unique tensor shape.
 
     **Calculations:**
     - Available Buffer = 4000 MB - 200 MB = 3800 MB.
-    - Unique Lengths required to OOM = 3800 MB / 2 MB/length = 1900 unique lengths.
-    - Assume 1 unique length arrives per minute: 1900 mins = 31.6 hours.
+    - Unique shapes required to OOM = 3800 MB / 2 MB/shape = 1900 unique shapes.
+    - At 50ms/inference, a true 2 MB leak per inference would OOM in 1900 * 0.05s = 95 seconds, so a multi-hour failure points to shape-cache growth, not per-call tensor retention.
 
     **Conclusion & Interpretation:**
     - **Result: 1900 unique lengths to OOM (Tensor Shape Poisoning)**. 1900 dynamic length variations will inexorably fill the compiler cache, creating a terminal crash state.
@@ -38,7 +38,7 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
+  - Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
@@ -49,6 +49,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- jit-compilation
-- memory-leak
-- nlp
+  - jit-compilation
+  - memory-leak
+  - nlp

@@ -8,43 +8,32 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: 'Edge Systolic Array Mastery: Full EfficientNet Roofline on Jetson Orin DLA'
-scenario: Perform a complete Roofline analysis for EfficientNet-B0 on Jetson Orin DLA.
-question: For EfficientNet-B0 on Orin DLA, which layers are memory or compute bound, what MFU do you expect,
-  and what should run on GPU vs DLA?
+scenario: Perform a complete INT8 Roofline analysis for EfficientNet-B0 on Jetson Orin DLA. Assume an approximate DLA roofline of 11 TOPS peak compute and 200 GB/s effective on-chip/local memory bandwidth for layer-level reasoning.
+question: For EfficientNet-B0 on Orin DLA, which layers are memory or compute bound, what MFU do you expect, and what should run on GPU vs DLA?
 details:
-  realistic_solution: DLA architecture intrinsically bottlenecks on non-contiguous head classifier layouts.
-    Compute AI indicates severe starvation for terminal fully-connected bounds. Send late head projections
-    strictly to GPU.
-  common_mistake: '**The Pitfall:** Running the entire network blindly on the DLA.
+  realistic_solution: |
+    Use a layer-level roofline, not a whole-model FLOPs/data ratio. With 11 TOPS and 200 GB/s, the ridge point is 55 FLOPs/byte. Early stem and depthwise layers are memory-bound because they have modest channel reuse: the 3x3 stem is around 39 FLOPs/byte, and a 32-channel 112x112 depthwise layer is about 9 FLOPs/byte. Early 1x1 MBConv expansion/projection layers can be near the ridge because spatial reuse is high but channel counts are still small. Later 1x1 convolutions with larger channel counts are compute-bound or near compute-bound, often above 100 FLOPs/byte. The classifier/head FC is memory-bound because it streams roughly 1.28MB of weights for only about 2.6M FLOPs.
 
-    **The Rationale:** Candidates fail to identify that late layers (like the 1x1 classifier head) have
-    very low arithmetic intensity and are heavily memory-bound on the DLA.
-
-    **The Consequence:** Sub-optimal throughput because memory-bound operations are not offloaded to the
-    GPU which has better bandwidth handling for specific layers.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Ridge HW: 11 TOPS / 200 GB/s
-
-    - Model FLOPs: 390M
-
-    - Model Data: 17.3MB
-
+    Expected MFU should be estimated from each layer as min(peak TOPS, AI * bandwidth) / peak TOPS. That gives roughly 16% MFU for the depthwise example, about 70% for the stem, and near-peak for high-channel 1x1 layers before scheduling overhead. Across EfficientNet-B0, a practical DLA MFU estimate is roughly 25-45% depending on fusion and layout conversion overheads. Run DLA-supported convolutions and fused MBConv blocks on the DLA, especially high-channel 1x1 layers. Keep unsupported activations/layout transforms and the low-AI classifier/head on the GPU or CPU/GPU path if DLA handoff overhead exceeds the small compute cost.
+  common_mistake: |
+    **The Pitfall:** Running the entire network blindly on the DLA.
+    **The Rationale:** Candidates fail to identify that late layers (like the 1x1 classifier head) have very low arithmetic intensity and are heavily memory-bound on the DLA.
+    **The Consequence:** Sub-optimal throughput because memory-bound operations are not offloaded to the GPU which has better bandwidth handling for specific layers.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Approximate Orin DLA roofline: 11 TOPS / 200 GB/s.
+    - Ridge point = 11e12 / 200e9 = 55 FLOPs/byte.
+    - INT8 bytes; count compulsory input, output, and weight traffic for representative layers.
 
     **Calculations:**
-
-    - Hardware Ridge = 11T / 200G = 55 FLOPs/byte
-
-    - Model AI = 390M / 17.3M = 22.5 FLOPs/byte
-
+    - Stem 3x3 conv, 224x224x3 -> 112x112x32: FLOPs ≈ 2 * 112^2 * 32 * 3 * 3 * 3 = 21.7M. Bytes ≈ 150KB input + 0.9KB weights + 401KB output = 552KB. AI ≈ 39 FLOPs/byte, memory-bound.
+    - Early depthwise 3x3, 112x112x32: FLOPs ≈ 7.2M. Bytes ≈ 818KB. AI ≈ 8.8 FLOPs/byte, memory-bound; roofline MFU ≈ 8.8/55 = 16%.
+    - Early 1x1 expansion, 112x112x32 -> 96: FLOPs ≈ 77M. Bytes ≈ 401KB input + 3KB weights + 1.20MB output = 1.61MB. AI ≈ 48 FLOPs/byte, near the ridge.
+    - Later 1x1 projection, 14x14x192 -> 320: FLOPs ≈ 24M. Bytes ≈ 37.6KB input + 61.4KB weights + 62.7KB output = 162KB. AI ≈ 149 FLOPs/byte, compute-bound under the roofline.
+    - Classifier FC, 1280 -> 1000: FLOPs ≈ 2.56M. Bytes ≈ 1.28MB weights plus small input/output. AI ≈ 2 FLOPs/byte, memory-bound and sensitive to layout/handoff overhead.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Memory Bound.** AI < Ridge Point.
-
-    '
+    - **Result: mixed layer behavior.** Depthwise and classifier/head layers are memory-bound; high-channel 1x1 convolutions are the best DLA candidates. Estimate MFU per layer with min(11 TOPS, AI * 200 GB/s) / 11 TOPS, then place DLA-supported fused conv/MBConv work on DLA and keep unsupported or low-AI head/layout work on GPU.
 status: published
 provenance: imported
 requires_explanation: true

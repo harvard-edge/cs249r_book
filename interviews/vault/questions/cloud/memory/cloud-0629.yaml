@@ -8,46 +8,27 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: The Embedding Hotspot
-scenario: Your recommendation system has a 500 GB embedding table sharded across 32 GPUs. During a flash
-  sale event, GPU 14 OOMs while all other GPUs sit at 40% memory utilization. The embedding table hasn't
-  changed size.
+scenario: Your recommendation system has a 500 GB embedding table sharded across 32 GPUs. During a flash sale event, GPU 14 OOMs while all other GPUs sit at 40% memory utilization. The embedding table hasn't changed size.
 question: What happened on GPU 14?
 details:
-  realistic_solution: 'The flash sale created a massive traffic spike for a small set of product IDs.
-    With hash-based sharding, the hot product embeddings happen to cluster on GPU 14''s shard. GPU 14
-    receives 50x more lookup requests, and its gradient accumulation buffer for frequently accessed entries
-    grows because the optimizer step hasn''t run yet. Meanwhile, the forward pass allocates massive activation
-    memory. Fix: use consistent hashing with virtual nodes, replicate hot embeddings, or implement a memory-aware
-    request router.
-
-    '
-  common_mistake: '**The Pitfall:** Blaming uneven table sharding or a hardware defect.
-
+  realistic_solution: |
+    The flash sale changed the access distribution, not the embedding table size. A small set of product IDs received a disproportionate share of requests, and the shard serving those IDs became the hot path. GPU 14 OOMs because it sees a transient spike in lookup traffic, per-request activations, and any per-step update buffers for hot rows while the other shards remain lightly used. Fix the traffic skew by replicating hot embeddings, caching hot rows, batching or routing requests with shard load in mind, or temporarily throttling the flash-sale path; simply rebalancing the static table size will not address the dynamic memory spike.
+  common_mistake: |
+    **The Pitfall:** Blaming uneven table sharding or a hardware defect.
     **The Rationale:** Candidates confuse perfectly uniform storage distribution with dynamic access distribution.
-
-    **The Consequence:** Rebalancing the table does nothing because the problem is traffic-driven memory
-    allocation for hot keys.'
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Embeddings per GPU: 500 GB / 32 = 15.6 GB.
-
-    - GPU 14 receives 19,660 hot entries lookups per micro-batch.
-
-    - 100 queued micro-batches.
-
+    **The Consequence:** Rebalancing the table does nothing because the problem is traffic-driven memory allocation for hot keys.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Embedding table storage per GPU: 500 GB / 32 = 15.625 GB, before replication and overhead.
+    - Free headroom on GPU 14 before the event: 60% of local memory if it normally sits at 40% utilization.
+    - During the flash sale, assume GPU 14 receives 50,000 extra in-flight lookups because many hot IDs map to rows served by that shard.
+    - Temporary activation/workspace memory per lookup on the GPU serving the row: 64 KB.
     **Calculations:**
-
-    - Gradient buffer for 19,660 hot entries: 19,660 * 128 dims * 4 bytes = 10 MB.
-
-    - Activation memory for 19,660 lookups: 19,660 * 2 KB = ~38 MB per micro-batch.
-
-    - Queued activations (100 micro-batches): 100 * 38 MB = 3.8 GB.
-
+    - Static table size did not change: each shard still owns about 15.6 GB of rows.
+    - Transient memory from skewed in-flight lookups: 50,000 * 64 KB = 3,200,000 KB = 3.05 GB.
+    - If hot-row gradient/update buffers or optimizer staging are also retained until the next step, they add to the same shard's peak rather than being spread evenly across all 32 GPUs.
     **Conclusion & Interpretation:**
-
-    - **Result: Activation Memory Spike.** The OOM occurs because the massive spike in hot-key lookups
-    dynamically allocates gigabytes of activation and gradient memory on a single GPU, completely exhausting
-    its remaining capacity.'
+    - **Result: Traffic-Skew Memory Spike.** GPU 14 OOMs because flash-sale requests concentrate transient serving or training memory on one shard. The failure is caused by dynamic hot-key access skew, not by the 500 GB table becoming larger or uniformly imbalanced.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,47 +8,29 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: The Memory-Mapped Weight Strategy
-scenario: Your team's mobile ML app has a 3-second cold start because it loads 300 MB of model weights
-  into a malloc'd buffer at launch. The PM wants sub-500ms startup. You cannot make the model smaller.
+scenario: Your team's mobile ML app has a 3-second cold start because it loads 300 MB of model weights into a malloc'd buffer at launch. The PM wants sub-500ms startup. You cannot make the model smaller.
 question: How can mmap cut a 300 MB model startup from 3s to under 500ms without shrinking the model?
 details:
-  realistic_solution: 'Replace malloc + read with mmap() with MAP_SHARED. Memory-mapping the weight file
-    maps it directly into the process virtual address space without copying data into physical RAM. The
-    OS loads pages on demand. Startup drops from 3 seconds to <50 ms. First inference is slower due to
-    page faults, but total time remains under the 500 ms target.
-
-    '
-  common_mistake: '**The Pitfall:** Suggesting loading the model in a background thread and showing a
-    loading screen.
-
-    **The Rationale:** Candidates focus on hiding the delay rather than eliminating the underlying I/O
-    bottleneck.
-
+  realistic_solution: |
+    Replace the eager malloc + read path with a file-backed mmap and initialize the runtime so launch only maps the 300 MB file instead of allocating, copying, and touching all weights. mmap can cut user-visible startup because virtual mapping is cheap and pages are faulted in on demand. It does not make the model free: if first inference immediately touches the full 300 MB, that I/O and page-fault cost moves from launch into first inference. To meet a sub-500 ms startup target, map at launch, defer full warmup until the model is needed, optionally prefetch only the first layers or hot pages, and measure cold-cache first-inference latency separately.
+  common_mistake: |
+    **The Pitfall:** Suggesting loading the model in a background thread and showing a loading screen.
+    **The Rationale:** Candidates focus on hiding the delay rather than eliminating the underlying I/O bottleneck.
     **The Consequence:** The user still experiences a 3-second wait before the app is usable.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - malloc + read: 300 MB / 2 GB/s = 150ms I/O + 100ms allocation + 200ms framework init = 450ms minimum.
-
-    - First inference: ~200 layers * ~1.5 MB weights per layer.
-
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Current launch path takes 3 s because it eagerly allocates, reads, copies, verifies, and initializes 300 MB of weights.
+    - mmap launch path maps the file and builds lightweight metadata without touching every page.
+    - First inference still pays for the pages it actually touches.
 
     **Calculations:**
-
-    - mmap: 0ms upfront.
-
-    - Page fault overhead: 300 MB / 4 KB pages = 75,000 faults.
-
-    - 75,000 faults * ~0.7 us/fault = 52.5 ms extra.
-
+    - Eager read lower bound: 300 MB / 2 GB/s sequential read ≈ 150 ms, before allocation, copies, validation, and framework initialization.
+    - mmap setup: mapping a file and creating metadata is typically tens of ms because it does not copy 300 MB into heap.
+    - If launch touches only 20 MB of headers/hot weights, cold-page traffic at 2 GB/s is ~10 ms plus page-fault overhead, keeping startup comfortably below 500 ms.
+    - If first inference touches the full 300 MB, the deferred I/O lower bound is still ~150 ms plus page-fault and runtime costs, so that cost must be budgeted for first-use latency.
 
     **Conclusion & Interpretation:**
-
-    - **Result: <50ms startup (I/O-Bound)**. Startup drops to <50ms, and first inference adds ~52.5ms
-    overhead, easily beating the 500ms target.
-
-    '
+    - **Result: Startup I/O Shifted, Not Eliminated.** mmap can bring launch under 500 ms by avoiding eager allocation and copies, but the full model-read cost reappears when inference touches the mapped pages.
 status: published
 provenance: imported
 requires_explanation: false

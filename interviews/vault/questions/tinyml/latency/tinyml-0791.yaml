@@ -7,27 +7,27 @@ topic: latency-decomposition
 competency_area: latency
 bloom_level: analyze
 phase: inference
-title: Tinyml New 0013
+title: Shared L2 Thrash Between Concurrent Orin Models
 scenario: Two TinyML models (vision and audio) run concurrently on a Jetson Orin. Running either model alone hits 10ms latency.
 question: Why do two models that run in 10 ms alone spike to 45 ms latency when run concurrently on Jetson Orin?
 details:
-  realistic_solution: The concurrent execution is causing catastrophic thrashing of the Orin's L2 cache. Model A loads its activations and weights, and immediately Model B overwrites those cache lines. This forces both models to fetch from the much slower main memory (HBM/LPDDR) continuously. The solution is to execute them sequentially, or use partitioning/MPS to pin cache resources.
+  realistic_solution: The concurrent execution is causing shared resource contention on the Orin rather than a software correctness bug. Jetson Orin uses LPDDR5 main memory, not HBM, and the two models can contend for GPU/CPU execution slots, memory bandwidth, shared caches, and runtime scheduling. If their activation and weight streams no longer stay local when overlapped, extra LPDDR5 traffic and scheduler stalls can turn two individually 10 ms models into a much longer tail-latency path. Practical fixes include serializing the models, reducing one working set, assigning priorities or separate execution windows, and profiling memory bandwidth and GPU occupancy; do not assume a generic MPS setting can pin cache lines or prevent cache interference.
   common_mistake: |
     **The Pitfall:** Assuming edge GPUs can seamlessly multitask like cloud GPUs.
-    **The Rationale:** Candidates overlook the critical capacity limits of shared L2 caches on edge devices when multiple workloads overlap.
-    **The Consequence:** Concurrent models evict each other's data, forcing continuous fetches from slow main memory and destroying real-time performance.
+    **The Rationale:** Candidates overlook the capacity limits of shared L2 caches and the extra memory-controller contention created by concurrent workloads on edge devices.
+    **The Consequence:** Concurrent models evict each other's data, forcing frequent DRAM fetches and destroying real-time performance.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Hardware: Jetson Orin. L2 Cache Size = 2 MB.
-       - Model A Working Set (Activations + Weights) = 1.5 MB.
-       - Model B Working Set = 1.0 MB.
+       - Hardware: Jetson Orin with shared compute resources, shared cache hierarchy, and LPDDR5 memory bandwidth.
        - Baseline Latency (Isolated): 10 ms each.
+       - Concurrent Latency Observed: 45 ms.
     2. **Calculations:**
-       - Combined Working Set: 1.5 MB + 1.0 MB = 2.5 MB.
-       - Cache Deficit: 2.5 MB > 2.0 MB L2 capacity.
-       - Thrashing Penalty: 10 million evictions/sec × 100 ns LPDDR fetch penalty = 1.0 second added latency overhead spread across frames.
+       - Ideal overlap would keep tail latency near max(10 ms, 10 ms) = 10 ms if the models used independent resources.
+       - Sequential execution would take about 10 ms + 10 ms = 20 ms if contention were avoided.
+       - Observed extra delay beyond sequential: 45 ms - 20 ms = 25 ms.
+       - That 25 ms cannot be derived from a cache-capacity formula alone; it indicates shared compute, memory-bandwidth, cache-pressure, and scheduling stalls during overlap.
     3. **Conclusion & Interpretation:**
-       - **Result: 2.5 MB working set exceeds 2 MB L2 cache, destroying real-time performance.** **Result: Memory-Bound (L2 Cache Thrashing).**
+       - **Result: Concurrent execution adds about 25 ms beyond simple serialization, pointing to shared-resource contention rather than HBM or cache pinning behavior.** **Result: Contention-Bound Latency.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,7 @@ title: The On-Device RAG Memory Budget
 scenario: 'Your team is building an on-device RAG system on a Galaxy S24 Ultra with 12 GB RAM. The components: a 3B LLM in INT4 (1.5 GB), an embedding model (100 MB), a vector database of 500K document chunks with 768-dim embeddings, and retrieved context fed to the LLM.'
 question: Does a Galaxy S24 Ultra on-device RAG stack fit with a 3B INT4 LLM and 500K 768-dim embeddings?
 details:
-  realistic_solution: 'Calculate each component: The 3B INT4 model takes 1.5 GB. The embedding model takes 100 MB. A naive Full HNSW index for 500K 768-dim embeddings takes ~2.19 GB. By replacing it with a Product Quantization (PQ) compressed index, the size shrinks to ~31 MB, saving 2.16 GB (98.6% reduction). Recall drops slightly but remains acceptable. Factoring in the KV-cache and overhead, the total optimized memory footprint is around 5.59 GB. On a 12 GB device, this represents a 46.6% utilization, leaving a safe margin for the OS and multitasking. If it doesn''t fit, the naive HNSW vector database is the first thing that has to go, replaced by a quantized index.'
+  realistic_solution: Calculate each component separately. The 3B INT4 LLM is about 1.5 GB and the embedding model is about 100 MB. The raw 500K x 768 FP32 embedding vectors are 1.536 GB, and an HNSW graph adds link/metadata overhead; with about 64 neighbors at 4 bytes each plus metadata, the naive index is roughly 1.7 GB. Add a few hundred MB for KV-cache and runtime buffers, and the naive stack is around 3.8-4.2 GB before OS and app overhead, which can fit on a 12 GB flagship but leaves less multitasking headroom. A PQ index with 64-byte compressed vectors still needs graph metadata, so it is roughly 32 MB of codes plus ~150 MB of graph/metadata, or about 180 MB total. The optimized stack is roughly 2.3-2.7 GB plus app overhead, making the vector index the right component to compress if memory pressure appears.
   common_mistake: |
     **The Pitfall:** Adding just the model sizes and assuming the 12GB RAM is sufficient.
     **The Rationale:** Candidates forget to account for KV-cache growth and the massive vector database index overhead.
@@ -20,15 +20,20 @@ details:
     **Assumptions & Constraints:**
     - 3B INT4 LLM = 1.5 GB, Embedding Model = 100 MB
     - 500K embeddings, 768-dim FP32
+    - HNSW graph overhead estimate: 64 neighbor links/vector * 4 bytes plus metadata.
+    - KV-cache and runtime buffers for retrieved context: ~0.4-0.8 GB.
 
     **Calculations:**
-    - Full HNSW (FP32) = 500,000 * 768 * 4 bytes = 1.536 GB + 10% overhead = ~1.7 GB
-    - Naive Memory Total = 1.5 + 0.1 + 1.7 = 3.3 GB
-    - PQ Compressed (64 bytes/vector) = 500,000 * 64 bytes = ~32 MB
-    - Optimized Memory Total = 1.5 + 0.1 + 0.032 = ~1.63 GB
+    - Raw FP32 vector storage = 500,000 * 768 * 4 bytes = 1.536 GB.
+    - HNSW graph links = 500,000 * 64 * 4 bytes = 128 MB, plus metadata/allocator overhead ≈ 50 MB.
+    - Naive vector index total ≈ 1.536 GB + 0.178 GB = ~1.7 GB.
+    - Naive RAG memory = 1.5 GB LLM + 0.1 GB embedder + 1.7 GB vector index + 0.4-0.8 GB KV/runtime = ~3.7-4.1 GB.
+    - PQ compressed vectors = 500,000 * 64 bytes = 32 MB.
+    - PQ/HNSW index total ≈ 32 MB compressed codes + ~178 MB graph/metadata = ~210 MB.
+    - Optimized RAG memory = 1.5 GB + 0.1 GB + 0.21 GB + 0.4-0.8 GB = ~2.2-2.6 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: ~1.63 GB (Memory-Optimized via Compression)**. Product Quantization (PQ) shrinks the vector index by >98% (1.7 GB to 32 MB), easily fitting the entire RAG stack within the 12 GB RAM with ample headroom for the OS.
+    - **Result: Fits, but the vector index is the compression target.** The naive stack is roughly 4 GB plus app/OS pressure; PQ reduces vector storage substantially but does not eliminate HNSW graph and KV-cache overhead.
 status: published
 provenance: imported
 requires_explanation: true

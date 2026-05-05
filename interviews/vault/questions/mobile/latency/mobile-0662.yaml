@@ -11,7 +11,7 @@ title: The AR Navigation Preemption Crisis
 scenario: An AR navigation feature renders guidance over a camera feed at 30 FPS. A 'Vision Query' feature triggers a 2B parameter VLM.
 question: How do you schedule a 400ms VLM inference without starving a 30 FPS navigation task on a non-preemptible NPU?
 details:
-  realistic_solution: 'The core challenge is that a long-running, low-priority task (VLM) must not starve a short, high-priority, real-time task (Navigation) on shared, non-preemptible hardware like an NPU. The architecture must create the illusion of preemption by chunking the VLM inference into fine-grained execution blocks.'
+  realistic_solution: The core challenge is that a long-running, low-priority task (VLM) must not starve a short, high-priority, real-time task (Navigation) on shared, non-preemptible hardware like an NPU. The architecture must create the illusion of preemption by chunking the VLM inference into fine-grained execution blocks.
   common_mistake: |
     **The Pitfall:** Using a simple FIFO queue for NPU scheduling.
     **The Rationale:** Assuming the OS or hardware will magically multiplex tasks, ignoring that NPUs generally run coarse-grained workloads to completion.
@@ -24,13 +24,15 @@ details:
     - NPU is non-preemptible.
 
     **Calculations:**
+    - Scheduling policy: reserve the first 8 ms of every 33 ms frame for navigation, then allow at most one VLM slice before the next navigation deadline.
     - Remaining frame budget for VLM: 33 ms - 8 ms = 25 ms.
-    - Safe chunk size for VLM (leaving 2ms overhead): 23 ms.
-    - Number of VLM chunks needed: 400 ms / 23 ms/chunk ≈ 17.4 (18 chunks).
-    - Total wall-clock time for VLM: 18 chunks * 33 ms/frame = 594 ms.
+    - Safe non-preemptible VLM slice size after handoff overhead: 23 ms.
+    - Number of VLM slices needed for 400 ms of compute: ceil(400 ms / 23 ms) = 18 slices.
+    - Under the one-slice-per-frame policy, the VLM completes after 18 frame periods: 18 * 33 ms = 594 ms wall-clock.
+    - NPU compute consumed by the VLM is still about 400 ms; the extra ~194 ms is waiting for navigation deadlines and scheduler overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 594 ms completion time (Scheduling-Bound)**. Chunking the 400ms VLM into 23ms blocks maintains 30 FPS navigation, stretching VLM completion to 594ms.
+    - **Result: 594 ms wall-clock completion (Scheduling-Bound)**. Chunking preserves the 30 FPS navigation deadline, but the VLM stretches from 400 ms of compute to about 594 ms elapsed time because it can only run one safe slice per frame.
 status: published
 provenance: imported
 requires_explanation: true

@@ -9,9 +9,10 @@ bloom_level: evaluate
 phase: inference
 title: 'KV-Cache: Evaluate KV Cache Quantization Strategies on A17 Pro'
 scenario: 'For a 1B LLM on A17 Pro, compare KV cache strategies: (A) FP16 KV, (B) INT8 KV with per-head quantization, (C) INT4 KV with per-head quantization. The model targets 2048-token conversations.'
-question: 'How do FP16, INT8, and INT4 KV caches trade memory, bandwidth, quality, and complexity for a 1B LLM?'
+question: How do FP16, INT8, and INT4 KV caches trade memory, bandwidth, quality, and complexity for a 1B LLM?
 details:
-  realistic_solution: 'Per-head quantization requires 1 scale + 1 zero-point per head. INT8 offers a balanced tradeoff with <0.3% perplexity increase and cuts memory/bandwidth roughly in half. INT4 aggressively cuts bandwidth but degrades long-context quality severely over 2048 tokens. Both require custom CUDA/Metal kernel modifications to dequantize before attention.'
+  realistic_solution: |
+    Per-head KV quantization stores scale/zero-point metadata for each layer, K/V tensor, and KV head, then dequantizes inside or immediately before the attention kernel. INT8 usually offers the balanced tradeoff: roughly half the KV memory and bandwidth with modest quality risk after calibration. INT4 roughly quarters the FP16 KV bytes, but has higher long-context quality and dequantization risk and should be gated by perplexity/task-quality tests. On A17 Pro this may require a backend path that supports quantized KV reads or a custom Metal/Core ML delegate path; it is not inherently a CUDA requirement.
   common_mistake: |
     **The Pitfall:** Overlooking quantization overhead and context error accumulation.
     **The Rationale:** Candidates blindly assume INT4 is twice as fast as INT8 without accounting for dequantization compute stalls or the massive quality degradation in long sequences.
@@ -19,17 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Baseline Constants: 1B model, 24 layers, 8 KV heads, dim 128.
-    - Quantization Overhead: 1 scale + 1 zero-point per head (2 × 8 × 4B = 64B overhead/token/layer).
+    - Quantization Overhead: one FP16 scale and one FP16 zero-point per K/V tensor per KV head: 2 (K,V) * 8 heads * 2 values * 2B = 64B/token/layer.
     - Context Length: 2048 tokens.
     - Hardware Bandwidth: 68 GB/s.
 
     **Calculations:**
-    - (A) FP16: 24 × 2 × 8 × 128 × 2B = 98.3 KB/token. At 2048 context = 201 MB KV. Bandwidth time = 201MB / 68 GB/s = 2.96ms.
-    - (B) INT8: 49.2 KB/token + 3 KB overhead = 52.2 KB/token. At 2048 context = 107 MB KV. Bandwidth time = 107MB / 68 GB/s = 1.57ms.
-    - (C) INT4: 24.6 KB/token + 3 KB overhead = 27.6 KB/token. At 2048 context = 56.5 MB KV. Bandwidth time = 56.5MB / 68 GB/s = 0.83ms.
+    - (A) FP16: 24 layers * 2 (K,V) * 8 KV heads * 128 dim * 2B = 98,304B/token = 98.3 KB/token. At 2048 context = 201 MB KV. Bandwidth time = 201MB / 68 GB/s = 2.96ms.
+    - Quantization metadata across all layers: 64B/layer * 24 = 1536B/token = 1.5 KB/token.
+    - (B) INT8 payload: 24 * 2 * 8 * 128 * 1B = 49.2 KB/token. With metadata: 50.7 KB/token. At 2048 context = 104 MB KV. Bandwidth time = 104MB / 68 GB/s = 1.53ms.
+    - (C) INT4 payload: 24 * 2 * 8 * 128 * 0.5B = 24.6 KB/token. With metadata: 26.1 KB/token. At 2048 context = 53.5 MB KV. Bandwidth time = 53.5MB / 68 GB/s = 0.79ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Bandwidth-Bound**. INT8 provides the optimal tradeoff, halving bandwidth time (1.57ms vs 2.96ms) without the massive quality degradation of INT4 at 2048 context.
+    - **Result: Bandwidth-Bound.** INT8 cuts the KV read from about 201MB to 104MB at 2048 tokens, reducing the bandwidth component from ~2.96ms to ~1.53ms. INT4 reduces it further to ~0.79ms, but quality and dequantization overhead determine whether that extra saving is acceptable.
 status: published
 provenance: imported
 requires_explanation: false

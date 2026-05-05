@@ -11,7 +11,7 @@ title: 'Kernel Fusion: Evaluate Fused vs Unfused MLP Blocks'
 scenario: For a 13B LLM, compare fused vs unfused MLP block (Linear -> GELU -> Linear). Batch size 64, sequence length 2048, hidden size 5120, intermediate size 20480. Evaluate roofline position, memory bandwidth savings, and latency.
 question: Which parts of the 13B MLP block are compute-bound versus memory-bound, and how much does fusion help?
 details:
-  realistic_solution: 'Calculate Arithmetic Intensity (Compute FLOPs / Memory Bytes) and compare it to the hardware ridge point. Large matrix multiplications (Linear) have extremely high AI, landing them deep in the compute-bound regime where memory optimization provides no latency benefit. Elementwise operations (GELU) have low AI and are memory-bandwidth bound. Therefore, writing a custom CUDA kernel to fuse GELU with the subsequent Linear layer prevents writing/reading the intermediate 10GB activation tensor to HBM.'
+  realistic_solution: Calculate arithmetic intensity and compare it with the H100 ridge point. The two Linear layers are large GEMMs with arithmetic intensity far above the ridge point, so they are compute-bound. GELU is an elementwise pass over the 131K x 20480 intermediate activation and is memory-bandwidth bound. Fusion helps by removing the standalone GELU output write and the following read into the second Linear; it does not make the dense matmuls themselves faster except through reduced surrounding HBM traffic and launch overhead.
   common_mistake: |
     **The Pitfall:** Claiming kernel fusion helps equally across all operations without verifying if they are compute or memory bound.
     **The Rationale:** Operator fusion generally reduces overhead, leading to a blanket assumption that it's universally effective.
@@ -24,16 +24,19 @@ details:
     - Hardware Ridge Point (H100): ~295 FLOPs/B.
 
     **Calculations:**
-    - Linear Compute: 2 * 131K * 5120 * 20480 = 27.5 TFLOPs.
-    - Linear Memory: 209 MB (weights) + 1.34 GB (input) = ~1.55 GB.
-    - Linear AI: 27.5T / 1.55G = 17,741 FLOPs/B (Compute-bound).
-    - GELU Compute: 6 * 131K * 20480 = ~16 GFLOPs.
-    - GELU Memory: 2 * 131K * 20480 * 2 Bytes = 10.74 GB.
-    - GELU AI: 16G / 10.74G = 1.5 FLOPs/B (Memory-bound).
-    - Savings: Fusing GELU saves 10.74 GB of HBM traffic.
+    - Tokens: 64 * 2048 = 131,072.
+    - Linear 1 FLOPs: 2 * 131,072 * 5120 * 20480 = 27.5 TFLOPs.
+    - Linear 1 traffic floor: input 1.34 GB + weights 0.21 GB + output 5.37 GB = 6.92 GB.
+    - Linear 1 AI floor: 27.5T / 6.92G = ~3,970 FLOPs/B, above the 295 FLOPs/B ridge point.
+    - Linear 2 FLOPs: 2 * 131,072 * 20480 * 5120 = 27.5 TFLOPs, also compute-bound.
+    - GELU compute: roughly 6 * 131,072 * 20480 = 16 GFLOPs.
+    - GELU standalone traffic: read 5.37 GB + write 5.37 GB = 10.74 GB.
+    - GELU AI: 16G / 10.74G = ~1.5 FLOPs/B, far below the ridge point.
+    - Fusion savings: avoid writing GELU output and rereading it for Linear 2 = 10.74 GB.
+    - At 3.35 TB/s HBM bandwidth, 10.74 GB / 3350 GB/s = ~3.2 ms traffic time.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.2 ms savings (Memory-Bandwidth Bound)**. Fusing GELU saves 3.2 ms of HBM transfer time. Elementwise ops are Memory-Bandwidth Bound; Matmuls are Compute-Bound.
+    - **Result: Linear layers are compute-bound; GELU is memory-bound.** Fusion can save up to ~3.2 ms of HBM traffic for the intermediate activation, but it does not change the compute-bound nature of the two GEMMs.
 status: published
 provenance: imported
 requires_explanation: false

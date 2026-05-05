@@ -8,52 +8,32 @@ competency_area: reliability
 bloom_level: evaluate
 phase: inference
 title: The Checkpoint-Watchdog Death Spiral
-scenario: 'Your team is building a safety-critical misfire detection system for an automotive ECU using
-  a TinyML model. To prevent hanging, you''ve implemented a hardware watchdog timer (WDT) with a 100ms
-  timeout. Normal inference takes ~80ms. For added resilience, the system checkpoints state to flash memory
-  after every inference (30ms). During a ''cold start'', complex input causes inference to spike to 105ms.
-  The WDT correctly fires and reboots the device, but the ECU then enters a continuous reboot loop.
-
-  '
-question: Why does the watchdog and checkpoint design enter a deterministic reboot loop during cold-start
-  inference?
+scenario: |
+  Your team is building a safety-critical misfire detection system for an automotive ECU using a TinyML model. To prevent hanging, you've implemented a hardware watchdog timer (WDT) with a 100ms timeout. Normal inference takes ~80ms. For added resilience, the system checkpoints state to flash memory after every inference (30ms). During a 'cold start', complex input causes inference to spike to 105ms. The WDT correctly fires and reboots the device, but the ECU then enters a continuous reboot loop.
+question: Why does the watchdog and checkpoint design enter a deterministic reboot loop during cold-start inference?
 details:
-  realistic_solution: 'The total success path (110ms) inherently violates the 100ms WDT limit. The design
-    only survives normal operation because the watchdog is pet mid-cycle (between inference and checkpoint).
-    During a cold start, inference alone exceeds the WDT. Upon reboot, the system restores the checkpoint,
-    retries the exact same complex input, takes 105ms, and triggers the WDT again. The fix requires a
-    boot counter to discard pathological input frames.
+  realistic_solution: |
+    The root cause is the watchdog schedule, not corrupt checkpoint data. Normal operation survives because inference finishes in about 80 ms and the watchdog can be petted before the 30 ms flash checkpoint. During cold start, inference alone takes 105 ms, so the WDT expires before the first post-inference pet. After reboot, the ECU restores the last checkpoint and retries the same cold-start input through the same overlong inference path, so it deterministically times out again.
 
-    '
-  common_mistake: '**The Pitfall:** Blaming the checkpointed data corruption instead of the timing architecture.
-
-    **The Rationale:** Candidates guess the checkpoint is corrupt, ignoring that the scenario describes
-    a clean WDT timeout due to an execution spike.
-
-    **The Consequence:** Engineers will rewrite Flash drivers instead of fixing the fundamental real-time
-    scheduling flaw.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - WDT Timeout: 100 ms.
-
-    - Normal: 80ms (inf) + 30ms (chkpt) = 110ms. Petting occurs at 80ms.
-
-    - Cold Start: 105ms (inf).
-
+    A real fix is to change the timing architecture: pet the watchdog before entering a bounded inference slice, split inference into chunks with safe pet points, move flash checkpointing out of the WDT-critical path, or set the WDT timeout to cover the verified worst-case execution time plus margin. A boot counter may help enter a degraded recovery mode, but simply discarding frames is not the primary fix for a deterministic over-time inference path.
+  common_mistake: |
+    **The Pitfall:** Blaming the checkpointed data corruption instead of the timing architecture.
+    **The Rationale:** Candidates guess the checkpoint is corrupt, ignoring that the scenario describes a clean WDT timeout due to an execution spike.
+    **The Consequence:** Engineers will rewrite Flash drivers instead of fixing the fundamental real-time scheduling flaw.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - WDT timeout: 100 ms from the last successful pet.
+    - Normal inference: 80 ms, then pet WDT, then 30 ms checkpoint.
+    - Cold-start inference: 105 ms before the next opportunity to pet.
 
     **Calculations:**
-
-    - Cold Start Cycle: Boot (50ms) + Restore (10ms) + Inference (105ms).
-
-    - WDT fires at 100ms exactly during the 105ms inference step.
-
+    - Normal path before pet: 80 ms < 100 ms, so the WDT does not fire.
+    - The 30 ms checkpoint occurs after the pet, so it belongs to the next watchdog window.
+    - Cold-start path before pet: 105 ms > 100 ms, so the WDT fires 5 ms before inference returns.
+    - Reboot restores the same checkpoint/input state, so the same 105 ms inference repeats before any successful pet.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 105ms > 100ms WDT.** The system deterministically reboots before petting the WDT on the
-    retried input. **Bottleneck: Real-Time Scheduling.**'
+    - **Result: 105 ms > 100 ms WDT.** The system deterministically reboots before petting the WDT on the retried input. **Bottleneck: Real-Time Scheduling.** Fix the watchdog/inference scheduling or timeout budget rather than treating the checkpoint as corrupt.
 status: published
 provenance: imported
 requires_explanation: true

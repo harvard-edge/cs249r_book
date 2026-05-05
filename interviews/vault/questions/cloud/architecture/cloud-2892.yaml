@@ -8,10 +8,11 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Analyze EfficientNet compound scaling vs. naive width/depth scaling on throughput
-scenario: "Your team needs a cloud image classifier at 84% ImageNet top-1 accuracy. You have three candidates - EfficientNet-B4 (19M params, 4.2 GFLOPs), a naively widened ResNet-50 (35M params, 8.2 GFLOPs), and a naively deepened ResNet-101 (44M params, 7.8 GFLOPs)."
-question: "Which of EfficientNet-B4, widened ResNet-50, or deepened ResNet-101 has the best accuracy-per-FLOP and throughput?"
+scenario: Your team needs a cloud image classifier at 84% ImageNet top-1 accuracy. You have three candidates - EfficientNet-B4 (19M params, 4.2 GFLOPs), a naively widened ResNet-50 (35M params, 8.2 GFLOPs), and a naively deepened ResNet-101 (44M params, 7.8 GFLOPs).
+question: Which of EfficientNet-B4, widened ResNet-50, or deepened ResNet-101 has the best accuracy-per-FLOP and throughput?
 details:
-  realistic_solution: "EfficientNet-B4 achieves ~82.6% top-1 with 4.2 GFLOPs \u2014 best FLOP efficiency. Naive width/depth scaling adds FLOPs non-uniformly and doesn't balance resolution, width, and depth. However, EfficientNet's compound of SE blocks and MBConv can suffer from kernel launch overhead and low occupancy on small spatial resolutions. Profile with nsys profiling to verify whether EfficientNet-B4 actually achieves higher images/sec than ResNet-50 despite fewer FLOPs."
+  realistic_solution: |
+    EfficientNet-B4 has the best accuracy-per-FLOP because it reaches the target accuracy class with 4.2 GFLOPs, versus 7.8 GFLOPs for the deepened ResNet-101 and 8.2 GFLOPs for the widened ResNet-50. The throughput ranking is less certain from FLOPs alone: ResNet variants use dense, regular convolutions that usually achieve higher hardware utilization, while EfficientNet-B4 uses MBConv, depthwise conv, SE, and more fragmented kernels. Expected accuracy-per-FLOP ranking is EfficientNet-B4, then ResNet-101, then widened ResNet-50. Expected measured throughput on A100 may be widened ResNet-50 or ResNet-101 first despite higher FLOPs, with EfficientNet-B4 needing profiling to confirm.
   common_mistake: |
     **The Pitfall:** Comparing models only by parameter count or theoretical FLOPs.
     **The Rationale:** Assuming FLOPs directly translate to latency on modern accelerators.
@@ -20,13 +21,15 @@ details:
     1. **Assumptions & Constraints:**
        - EfficientNet-B4: 4.2 GFLOPs.
        - ResNet-50: 8.2 GFLOPs.
-       - 156 TFLOPS (50% util) expected for dense models.
+       - A dense ResNet path may sustain about 156 TFLOPS effective.
+       - EfficientNet-B4 may sustain lower effective throughput, e.g. 70 TFLOPS, due to depthwise/SE/kernel fragmentation.
+       - Batch size = 64.
     2. **Calculations:**
-       - EfficientNet-B4 Theoretical: 4.2 GFLOPs * 64 = 268.8 GFLOPs. At 156 TFLOPS = 1.7 ms/batch.
-       - ResNet-50 Theoretical: 8.2 GFLOPs * 64 = 524.8 GFLOPs. At 156 TFLOPS = 3.4 ms/batch.
-       - Real-World Limitation: EfficientNet uses depthwise convolutions which suffer kernel launch overhead.
+       - EfficientNet-B4 batch work: 4.2 GFLOPs/image * 64 = 268.8 GFLOPs. At 70 TFLOPS effective: 268.8 / 70,000 = 3.84 ms/batch.
+       - ResNet-50 batch work: 8.2 GFLOPs/image * 64 = 524.8 GFLOPs. At 156 TFLOPS effective: 524.8 / 156,000 = 3.36 ms/batch.
+       - ResNet-101 batch work: 7.8 GFLOPs/image * 64 = 499.2 GFLOPs. At 156 TFLOPS effective: 499.2 / 156,000 = 3.20 ms/batch.
     3. **Conclusion & Interpretation:**
-       **EfficientNet wins on pure FLOPs, but ResNet's dense ops often achieve higher hardware utilization. Result: Kernel-Launch-Bound.**
+       **EfficientNet-B4 wins accuracy-per-FLOP. Expected throughput can favor the dense ResNet models if their higher utilization offsets their higher FLOP count, so final serving choice should be based on measured images/sec at the target batch and resolution.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,8 @@ title: Scaling Strategy Under Physical Constraints
 scenario: 'Training a 175B model. Your facility supports 2,000 GPUs (power ceiling). Current approach: pure data parallelism with batch size 4M tokens, hitting critical batch size. MFU is 35% due to communication overhead. Option A: switch to 3D parallelism (tensor + pipeline + data). Option B: use gradient compression (8x). Option C: build a second facility with 2,000 more GPUs connected via WAN.'
 question: Which scaling strategy maximizes time-to-train reduction under the physical facility constraints?
 details:
-  realistic_solution: 'Option A (3D parallelism) is the correct approach. At 175B parameters and 2,000 GPUs: Option A reduces data-parallel degree by using tensor parallelism (8-way within a node) and pipeline parallelism (8 stages). Data parallel degree drops from 2,000 to 2000/(8*8)=31. Gradient AllReduce now operates on 31 nodes instead of 2,000, and only for the parameters within each pipeline stage (~22B). This dramatically reduces communication: AllReduce message size drops 8x (pipeline stages) and node count drops 64x. Expected MFU improvement: 35% -> 50-55%. Option B (gradient compression 8x) reduces AllReduce time by 8x but adds compression/decompression overhead and may hurt convergence for large models. Expected MFU: 35% -> 45%. Option C is impractical — WAN latency (1-10ms) between facilities makes synchronous gradient exchange impossible for every training step. Asynchronous methods could work but degrade convergence. Option A is the standard approach used by Meta (LLaMA), Google (PaLM), and others for 100B+ models.'
+  realistic_solution: 'Option A (3D parallelism) is the correct approach. At 175B parameters and 2,000 GPUs, an 8-way tensor-parallel by 8-stage pipeline-parallel layout uses 64 GPUs per model replica. That supports 31 full data-parallel replicas on 1,984 GPUs, with the remaining 16 GPUs reserved for spares, evaluation, or an uneven layout. Gradient AllReduce now runs across about 31 data-parallel replicas instead of 2,000 pure-DP replicas, and each pipeline stage synchronizes only its stage-local parameter shard, roughly 175B/8 ≈ 22B parameters before tensor-parallel sharding effects. This dramatically reduces the data-parallel communication pressure, though the exact message size depends on the partitioning implementation. Expected MFU improvement: 35% -> 50-55%. Option B (gradient compression 8x) reduces AllReduce bytes but adds compression/decompression overhead and may hurt convergence for large models. Expected MFU: 35% -> 45%. Option C is impractical — WAN latency (1-10ms) between
+    facilities makes synchronous gradient exchange impossible for every training step. Asynchronous methods could work but degrade convergence. Option A is the standard approach used by Meta (LLaMA), Google (PaLM), and others for 100B+ models.'
   common_mistake: |
     **The Pitfall:** Trying to scale with pure data parallelism beyond the critical batch size.
     **The Rationale:** Engineers assume data parallelism is the simplest and most scalable method.
@@ -22,7 +23,11 @@ details:
     - Current pure DP has 35% MFU.
 
     **Calculations:**
-    - Option A (3D Parallelism): Reduces data parallel degree from 2000 to 2000 / (8 * 8) = 31. AllReduce message size drops 8x, node count drops 64x. Expected MFU -> 55%.
+    - Option A (3D Parallelism): 8-way tensor parallelism * 8 pipeline stages = 64 GPUs per model replica.
+    - 2000 / 64 = 31.25, so the facility supports 31 full data-parallel replicas on 1984 GPUs, with 16 GPUs left for spares/eval or an uneven layout.
+    - Data-parallel AllReduce group size falls from 2000 pure-DP participants to about 31 replicas.
+    - Each pipeline stage owns roughly 175B / 8 ≈ 22B parameters before tensor-parallel sharding details, so synchronization is per stage rather than for the full model at once.
+    - Expected MFU -> 50-55% because communication pressure is reduced without increasing global batch beyond the critical region.
     - Option B (Gradient Compression): 8x reduction adds overhead, risks convergence. Expected MFU -> 45%.
     - Option C (WAN): 1-10ms latency makes synchronous training infeasible.
 

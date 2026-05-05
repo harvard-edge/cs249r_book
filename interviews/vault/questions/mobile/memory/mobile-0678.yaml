@@ -8,50 +8,31 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: The On-Device Training Storage Bloat
-scenario: Your keyboard app fine-tunes a next-word prediction model (50M params, FP16 = 100 MB) on device.
-  After 3 months, users complain the app is using 4.2 GB of storage, though the model is still 100 MB.
-question: Where did the 4.1 GB of storage bloat come from during on-device fine-tuning?
+scenario: Your keyboard app fine-tunes a next-word prediction model (50M params, FP16 = 100 MB) on device. After 3 months, users complain the app is using 4.2 GB of storage, though the model is still 100 MB.
+question: Where did the 4.2 GB of storage use come from during on-device fine-tuning?
 details:
-  realistic_solution: On-device training generates massive hidden storage via optimizer states and rolling
-    checkpoints. While the Adam optimizer requires 400 MB of FP32 state in memory, these states are often
-    compressed to FP16 (200 MB) when saved to disk. Ten rolling checkpoints plus active training data
-    easily consume over 4 GB.
-  common_mistake: '**The Pitfall:** Blaming user typing data accumulation.
-
-    **The Rationale:** Candidates assume the raw data inputs are bloated, ignoring the massive size of
-    intermediate training tensors.
-
-    **The Consequence:** The team deletes valuable user data while the device remains choked by hidden
-    Adam optimizer states and redundant checkpoints.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: On-device training generates hidden storage through optimizer snapshots, rolling checkpoints, and cached training batches. The 100 MB model is only the deployed FP16 weights. Adam keeps two per-parameter state tensors; if those states are stored as FP16 on disk, each checkpoint is 100 MB of model weights plus 200 MB of optimizer state. Ten rolling checkpoints, one active optimizer-state copy, and the local training/cache buffer account for the observed 4.2 GB.
+  common_mistake: |
+    **The Pitfall:** Blaming user typing data accumulation.
+    **The Rationale:** Candidates assume the raw data inputs are bloated, ignoring the massive size of intermediate training tensors.
+    **The Consequence:** The team deletes valuable user data while the device remains choked by hidden Adam optimizer states and redundant checkpoints.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Model size: 100 MB (FP16).
-
-    - Optimizer: Adam (Momentum + Variance require FP32 in RAM, compressed to FP16 on disk).
-
+    - Optimizer: Adam has two state tensors; assume FP32 in RAM and FP16 when checkpointed to disk.
     - Rolling checkpoints kept: 10.
 
-
     **Calculations:**
-
-    - Uncompressed optimizer state: 50M params * 4 bytes + 50M params * 4 bytes = 400 MB.
-
-    - Disk optimizer state (compressed to FP16): 50M params * 2 bytes + 50M params * 2 bytes = 200 MB.
-
-    - Checkpoint bloat: 10 checkpoints * (100 MB model + 200 MB compressed states) = 3000 MB.
-
-    - Buffers (Training data cache on disk): 900 MB.
-
-    - Total disk usage: 100 MB (model) + 200 MB (active states) + 3000 MB (checkpoints) + 900 MB (buffers)
-    = 4200 MB (4.2 GB).
-
+    - Disk optimizer state per checkpoint = 2 states * 50M params * 2 bytes = 200 MB.
+    - One checkpoint = 100 MB model weights + 200 MB optimizer state = 300 MB.
+    - Rolling checkpoint storage = 10 * 300 MB = 3000 MB.
+    - Active on-disk optimizer state = 200 MB.
+    - Current deployed/training model copy = 100 MB.
+    - Training data cache, logs, and batch staging = 900 MB.
+    - Total disk usage = 3000 MB + 200 MB + 100 MB + 900 MB = 4200 MB = 4.2 GB.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Optimizer State and Checkpoint Bloat**. The 4.1 GB bloat stems primarily from keeping
-    10 rolling checkpoints alongside active optimizer states and training buffers.'
+    - **Result: Optimizer State and Checkpoint Bloat.** The 4.2 GB comes primarily from ten 300 MB checkpoints, plus active optimizer state and cached training data; the 100 MB model is only a small part of the storage footprint.
 status: published
 provenance: imported
 requires_explanation: false

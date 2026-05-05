@@ -7,9 +7,9 @@ topic: streaming-ingestion
 competency_area: data
 bloom_level: evaluate
 phase: inference
-title: 'Real-Time Vibration Ingestion Pipeline on Corstone-300'
-scenario: 'You are designing a real-time predictive maintenance system for industrial motors using the ARM Cortex-M7 + Ethos-U55 (Corstone-300) platform. The system ingests 3-axis vibration data at 16 kHz (16-bit resolution) and must continuously extract spectrogram features on the 480 MHz Cortex-M7 before passing them to the Ethos-U55 for inference.'
-question: 'How would you architect the streaming ingestion pipeline, detailing your DMA buffering strategy, feature computation overlap, and memory partitioning to guarantee no dropped frames?'
+title: Real-Time Vibration Ingestion Pipeline with Ethos-U55
+scenario: You are designing a real-time predictive maintenance system for industrial motors using an ARM Cortex-M-class host CPU with an Ethos-U55 NPU and shared 512 KB SRAM. The system ingests 3-axis vibration data at 16 kHz (16-bit resolution) and must continuously extract spectrogram features on a 480 MHz host CPU before passing them to the Ethos-U55 for inference.
+question: How would you architect the streaming ingestion (DMA buffering, feature-compute overlap, memory partitioning) to minimize dropped-frame risk under the stated SRAM and compute budgets?
 details:
   realistic_solution: 'A robust design uses a DMA ping-pong (double) buffer to ingest raw sensor data asynchronously. While DMA fills one half, the Cortex-M7 processes the other half into spectrogram features, storing them in a dedicated ring buffer. To handle the shared 512 KB SRAM, memory must be strictly partitioned to prevent overlap: reserving sufficient space for the DMA buffers, M7 DSP workspace, and the Ethos-U55 model and activations.'
   common_mistake: |
@@ -18,19 +18,21 @@ details:
     **The Consequence:** The M7 halts data ingestion during FFT execution, dropping 16 kHz sensor frames and destroying predictive maintenance accuracy.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 16 kHz, 3 axes, 16-bit (96 KB/sec).
-    - 500ms inference window.
+    - 16 kHz, 3 axes, 16-bit = 16,000 * 3 * 2 = 96,000 bytes/s (~93.75 KiB/s).
+    - 500ms inference window per DMA half-buffer.
     - Shared 512 KB SRAM.
     - 480 MHz Cortex-M7.
 
     **Calculations:**
-    - DMA Ping-Pong Buffer: 48 KB * 2 = 96 KB.
+    - One 500ms raw half-buffer: 96,000 bytes/s * 0.5s = 48,000 bytes (~46.9 KiB).
+    - DMA Ping-Pong Buffer: 48,000 bytes * 2 = 96,000 bytes (~93.8 KiB).
     - M7 FFT Scratchpad: 128 KB.
-    - Remaining SRAM for U55: 512 KB - 96 KB - 128 KB = 288 KB.
+    - Remaining SRAM for U55: 512 KB - 96 KB - 128 KB ≈ 288 KB, using decimal KB for the buffer budget.
     - Cycles available in 500ms: 480 MHz * 0.5s = 240,000,000 cycles.
+    - A 50K-cycle FFT block takes 50,000 / 480,000,000 = 0.104 ms, well below the 500ms fill interval before accounting for memory traffic and scheduling overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 288 KB remaining for Ethos-U55 (Memory-Bound)**. Easily handles the ~50K cycle FFT cost.
+    - **Result: ~288 KB remaining for Ethos-U55 after raw DMA buffers and DSP scratch.** The compute budget is ample for a 50K-cycle FFT, so the design risk is SRAM partitioning and bus contention rather than raw M7 cycles. **Bottleneck: Shared SRAM and Streaming Buffering.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,10 +8,11 @@ competency_area: precision
 bloom_level: evaluate
 phase: training
 title: Mixed-Precision Strategy for On-Premise LLM
-scenario: 'You are deploying a 20B parameter autoregressive LLM on an edge accelerator with 32 GB of memory, 400 TOPS of INT8 compute, and a 75W power envelope. Option A uses strict W8A8. Option B uses W8A16.'
+scenario: You are deploying a 20B parameter autoregressive LLM on an edge accelerator with 32 GB of memory, 400 TOPS of INT8 compute, and a 75W power envelope. Option A uses strict W8A8. Option B uses W8A16.
 question: Should the 20B LLM use W8A8 or W8A16, and how do memory bandwidth and accuracy drive the choice?
 details:
-  realistic_solution: The optimal solution is Option B (W8A16) for the decoding phase, potentially paired with W8A8 only during the prefill phase. For a 20B model, FP16 weights would consume 40 GB, immediately exceeding the 32 GB capacity. Using INT8 weights reduces the footprint to 20 GB, leaving 12 GB for the KV cache and runtime overhead. Because autoregressive decoding loads the entire 20 GB weight matrix for every generated token, the system will be severely bottlenecked by the memory bandwidth, leaving the 400 TOPS INT8 compute engines massively underutilized. Therefore, forcing W8A8 sacrifices accuracy for a compute speedup that cannot be realized during generation.
+  realistic_solution: |
+    Choose Option B (W8A16) for batch-1 autoregressive decoding unless profiling shows activation bandwidth is the dominant bottleneck. Both options keep weights at INT8, so the 20B weights occupy about 20 GB and fit within the 32 GB memory budget while leaving room for KV cache and runtime buffers. The difference is activation precision: W8A8 reduces activation traffic and may help prefill or large-batch throughput, but decoding is usually dominated by streaming the large weight working set and KV-cache accesses, so the extra INT8 activation speedup often cannot be realized. W8A16 preserves more activation precision and is therefore the better accuracy/latency tradeoff for decoding; W8A8 is reasonable for prefill only if accuracy checks pass.
   common_mistake: |
     **The Pitfall:** Assuming W8A8 is strictly better for end-to-end latency.
     **The Rationale:** Candidates focus solely on the INT8 compute advantage and ignore the decoding phase's bottleneck.
@@ -19,17 +20,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 20B model.
-    - INT8 weights = 20 GB.
+    - Both options use INT8 weights: 20B parameters * 1 byte ≈ 20 GB.
     - Memory bandwidth = 136 GB/s.
     - Peak compute = 400 TOPS.
     - Autoregressive decoding batch size = 1.
 
     **Calculations:**
-    - Compute time for 1 token = 40 GOPs / 400 TOPS = 0.1 ms.
-    - Memory transfer time for 20 GB weights = 20 GB / 136 GB/s $\approx$ 147 ms.
+    - Approximate decode compute per token: 20B MACs * 2 ops/MAC = 40 GOPs.
+    - Compute-only lower bound: 40 GOPs / 400 TOPS = 0.1 ms.
+    - Weight working set is 20 GB, much larger than on-chip cache, so a bandwidth-bound decode step may move O(20 GB) from DRAM.
+    - Bandwidth lower bound for that working set: 20 GB / 136 GB/s ≈ 147 ms.
+    - Switching W8A16 to W8A8 reduces activation traffic, not the 20 GB INT8 weight working set common to both options.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory transfer of 147 ms dominates 0.1 ms compute (Memory-Bandwidth Bound)**. Lowering activation precision yields zero latency benefit.
+    - **Result: the shared INT8 weight working set dominates the 0.1 ms compute lower bound (Memory-Bandwidth Bound)**. W8A16 is preferred for decoding because it keeps better activation accuracy while W8A8's activation-bandwidth savings are unlikely to move the bottleneck.
 status: published
 provenance: imported
 requires_explanation: false

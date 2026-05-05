@@ -8,53 +8,29 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: Flash Endurance Under Continuous Inference Logging
-scenario: Your vibration monitoring sensor logs inference results to on-chip flash. The sensor runs 1
-  inference per second, 24/7.
-question: How does the ML model's output dimensionality dictate the flash write rate, and how does the
-  flash endurance budget determine the maximum model output complexity you can log?
+scenario: Your vibration monitoring sensor logs inference results to on-chip flash. The sensor runs 1 inference per second, 24/7.
+question: How does the ML model's output dimensionality dictate the flash write rate, and how does the flash endurance budget determine the maximum model output complexity you can log?
 details:
-  realistic_solution: Flash endurance is dictated by the number of page erases, which is driven by the
-    volume of data written. The ML model's output tensor size is the primary variable. If you deploy a
-    simple anomaly detector, the output must be tightly constrained. Based on a 5-year lifetime and a
-    10,000 cycle endurance limit for the 128 dedicated pages, you can write a maximum of 16 bytes per
-    second. At 1 inference per second, your model output, including any timestamps, cannot exceed 16 bytes
-    per inference without prematurely destroying the flash hardware.
-  common_mistake: '**The Pitfall:** Assuming flash memory is an infinite sink for small logs.
-
-    **The Rationale:** Engineers think "1 MB of flash is huge" because they only consider static capacity,
-    completely neglecting the physical page erase limits (endurance).
-
-    **The Consequence:** Unbounded continuous logging triggers rapid NOR flash write amplification, destroying
-    the hardware within months in the field.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: Flash endurance is dictated by page erase cycles, so the allowable log record size comes from total lifetime bytes, not from erases per second alone. With 128 pages, 2 KB per page, and 10,000 erase cycles per page, an ideal wear-leveled append log can store about 2.62 GB over its lifetime. Spread over 5 years at 1 inference per second, that is about 16 bytes per inference. That budget must include the model output plus timestamp, checksum, and record headers. If firmware erases a page for each tiny record instead of packing records into full pages, the allowable payload is far smaller.
+  common_mistake: |
+    **The Pitfall:** Assuming flash memory is an infinite sink for small logs.
+    **The Rationale:** Engineers think "1 MB of flash is huge" because they only consider static capacity, completely neglecting the physical page erase limits (endurance).
+    **The Consequence:** Unbounded continuous logging triggers rapid NOR flash write amplification, destroying the hardware within months in the field.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Logging rate: 1 Hz (24/7).
-
     - Flash specs: 2 KB pages, 10,000 cycle endurance.
-
     - Dedicated logging space: 256 KB (128 pages).
-
     - Target lifetime: 5 years (157 million seconds).
 
-
     **Calculations:**
-
-    - Total lifetime page erases: 128 pages * 10,000 cycles = 1.28 million erases.
-
-    - Max erase frequency for 5 years: 157,000,000 sec / 1,280,000 erases = 122.6 seconds per page erase.
-
-    - Max write budget: 2048 bytes (1 page) / 122.6 seconds = 16.7 bytes/second.
-
-    - Inference budget: At 1 inference/second, the maximum payload is ~16 bytes.
-
+    - Lifetime writable capacity with ideal wear leveling = 128 pages * 10,000 erases/page * 2,048 bytes/page = 2,621,440,000 bytes.
+    - Five years = 5 * 365 * 24 * 3600 = 157,680,000 seconds.
+    - Sustainable append-log rate = 2,621,440,000 bytes / 157,680,000 seconds = 16.6 bytes/second.
+    - At 1 inference/second, record budget = ~16 bytes per inference.
 
     **Conclusion & Interpretation:**
-
-    - **Result: <= 16 bytes per inference (I/O-Bound)**. The model''s complexity and logging payload is
-    physically capped at <= 16 bytes per inference to survive 5 years. Larger tensors will destroy the
-    flash.'
+    - **Result: ~16 bytes per inference with ideal page packing (I/O-Bound)**. The cap applies to the full log record, not just raw class scores. Page-aligned writes or poor wear leveling increase write amplification and reduce the safe payload.
 status: published
 provenance: imported
 requires_explanation: false

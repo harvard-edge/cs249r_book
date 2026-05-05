@@ -8,55 +8,32 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: The MoE Memory Bandwidth Tax
-scenario: A team replaces a 40B dense model with an 8x40B MoE model (Top-1 routing, 40B active parameters
-  per token). Both models require ~80 GFLOPs per token. They are deployed on an 8x H100 cluster (3.35
-  TB/s per GPU). At batch size 128, the dense model achieves 500 tokens/sec. The team expects the MoE
-  to match this since the active compute is identical. Instead, MoE throughput drops to roughly 120 tokens/sec.
-question: Why does the 8x40B MoE with the same active FLOPs as the 40B dense model drop from 500 to 120
-  tokens/sec?
+scenario: A team replaces a 40B dense model with an 8x40B MoE model (Top-1 routing, 40B active parameters per token). Both models require ~80 GFLOPs per token. They are deployed on an 8x H100 cluster (3.35 TB/s per GPU). At batch size 128, the dense model achieves 500 tokens/sec. The team expects the MoE to match this since the active compute is identical. Instead, MoE throughput drops to roughly 120 tokens/sec.
+question: Why does the 8x40B MoE with the same active FLOPs as the 40B dense model drop from 500 to 120 tokens/sec?
 details:
-  realistic_solution: Throughput at batch size 128 is determined by the roofline model. The dense 40B
-    model loads 80GB of weights, yielding a high arithmetic intensity. The MoE model has 320B total parameters
-    (640GB). At BS=128, tokens are distributed across all 8 experts, meaning the GPUs must load almost
-    the entire 640GB of weights from HBM to process the batch. The arithmetic intensity plummets, shifting
-    the workload deep into the memory-bound region and drastically reducing attainable throughput.
-  common_mistake: '**The Pitfall:** Assuming that equal active FLOPs implies equal throughput, ignoring
-    the severe arithmetic intensity drop caused by loading multiple experts.
-
+  realistic_solution: Throughput at batch size 128 is determined by the roofline model and by expert reuse. The dense 40B model applies one 80GB weight set to the whole batch. In the MoE, top-1 routing sends the 128 tokens across 8 separate 40B experts, so each expert sees only about 16 tokens of effective batch. If the routed experts are resident in HBM but their weights must be read for their assigned tokens during the step, the batch touches about 8 expert weight sets instead of one dense weight set. That lowers arithmetic intensity and adds routing/dispatch overhead, shifting the MoE toward the memory-bandwidth-bound region even though the active FLOPs per token are the same.
+  common_mistake: |
+    **The Pitfall:** Assuming that equal active FLOPs implies equal throughput, ignoring the severe arithmetic intensity drop caused by loading multiple experts.
     **The Rationale:** Loading multiple experts drops arithmetic intensity.
-
-    **The Consequence:** Incorrect throughput expectations.'
-  napkin_math: '**Assumptions & Constraints:**
-
+    **The Consequence:** Incorrect throughput expectations.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Dense Model: 40B parameters (80 GB).
-
-    - MoE Model: 8x40B experts = 320B parameters (640 GB).
-
-    - Batch Size: 128 (Tokens hit all 8 experts).
-
+    - MoE Model: 8x40B experts = 320B parameters total, with 40B active parameters per token.
+    - Batch Size: 128, approximately uniform top-1 routing, so about 16 tokens per expert.
     - Active FLOPs per token: ~80 GFLOPs.
-
     - H100 bandwidth: 3.35 TB/s. Ridge point: 295 FLOPs/Byte.
 
-
     **Calculations:**
-
-    - Dense Arithmetic Intensity: (128 tokens * 80 GFLOPs) / 80 GB = 128 FLOPs/Byte.
-
-    - MoE Arithmetic Intensity: (128 tokens * 80 GFLOPs) / 640 GB = 16 FLOPs/Byte.
-
-    - Dense Attainable Throughput: 3.35 TB/s * 128 FLOPs/Byte = 428 TFLOPS.
-
-    - MoE Attainable Throughput: 3.35 TB/s * 16 FLOPs/Byte = 53 TFLOPS.
-
+    - Dense batch work = 128 tokens * 80 GFLOPs/token = 10.24 TFLOPs.
+    - Dense weight traffic per step ≈ 80 GB, so dense AI ≈ 10.24 TFLOPs / 80 GB = 128 FLOPs/Byte.
+    - MoE batch work is still 10.24 TFLOPs, but the batch touches 8 resident expert weight sets.
+    - MoE weight traffic per step ≈ 8 * 80 GB = 640 GB, so MoE AI ≈ 10.24 TFLOPs / 640 GB = 16 FLOPs/Byte.
+    - Bandwidth-limited token rate estimate = 3.35 TB/s / (640 GB / 128 tokens) ≈ 670 tokens/sec before communication and kernel inefficiency.
+    - Applying realistic expert dispatch, all-to-all, load imbalance, and less efficient per-expert GEMMs can plausibly reduce this toward the observed ~120 tokens/sec.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 1/8th Effective Compute (Memory-Bandwidth Bound)**. Despite having identical active compute
-    per token, the MoE requires loading 8x the weights from HBM, devastating arithmetic intensity and
-    bottlenecking throughput.
-
-    '
+    - **Result: Lower Effective Arithmetic Intensity.** The problem is not that every token uses 640GB of weights; it is that the batch is fragmented across experts, so there is far less reuse of each expert's weights and additional routing overhead. Equal active FLOPs therefore do not imply equal throughput.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: Mixed-Precision Audio Keyword Spotting on ESP32-S3
 scenario: You are deploying a continuous keyword spotting (KWS) model on an ESP32-S3. The model initially uses standard INT8 per-tensor PTQ but exhibits unacceptable accuracy drops. To fit within 512 KB SRAM and meet real-time latency requirements, you must design a mixed-precision (INT4/INT8/INT16) quantization strategy from scratch.
 question: How do you architect the calibration pipeline, partition the network layers for different precisions, and ensure the vector extensions are maximally utilized despite the mixed bit-widths?
 details:
-  realistic_solution: Architect a hybrid Quantization-Aware Training (QAT) loop. Retain INT16 or highly-granular INT8 for feature extraction and final logits to guard dynamic range. Compress heavy intermediate layers to INT4 weights with INT8 activations. Crucially, unpack the INT4 weights to INT8 on-the-fly (or via LUT) before feeding them to the ESP32-S3's native INT8 vector extensions. This strategy isolates the working set strictly to SRAM, avoiding PSRAM cache penalties while leaning on hardware acceleration.
+  realistic_solution: Architect a hybrid Quantization-Aware Training (QAT) loop. Retain INT16 or highly-granular INT8 for feature extraction and final logits to guard dynamic range. Compress heavy intermediate layers to INT4 weights with INT8 activations, and prune or factorize enough low-sensitivity channels that the compressed weight arena leaves room for activations and scratch buffers in SRAM. Crucially, unpack INT4 weights to INT8 tile-by-tile before feeding them to the ESP32-S3's native INT8 vector extensions, so the active layer stays in SRAM without relying on unsupported INT4 MACs.
   common_mistake: |
     **The Pitfall:** Suggesting placing the entire INT8 model in external PSRAM to solve memory limits.
     **The Rationale:** Candidates fail to realize the massive latency penalty of PSRAM cache misses, or they propose INT4 MACs without checking hardware support.
@@ -19,16 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - ESP32-S3 @ 240 MHz. Target SRAM: < 512 KB.
-    - Model: 1M parameters. Native INT8 throughput: ~2 GMACs/sec.
+    - Model after structured pruning/factorization: 0.9M parameters. Native INT8 throughput: ~2 GMACs/sec.
     - 90% INT4 weights, 10% INT8 weights.
 
     **Calculations:**
-    - Memory: (0.9M * 0.5 bytes) + (0.1M * 1.0 bytes) = 0.45MB + 0.1MB = 0.55 MB total weights.
+    - Memory: (0.81M * 0.5 bytes) + (0.09M * 1.0 bytes) = 0.405 MB + 0.09 MB = 0.495 MB total weights.
+    - Weight headroom against 512 KB target: about 512 KB - 495 KB = 17 KB, so activations must be scheduled layer-by-layer rather than resident with all weights.
     - Unpack Efficiency Penalty: throughput drops to ~200 MMACs/sec.
     - Inference Time (10 MMAC workload): 10M / 200M = 50 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 50 ms (Fast On-the-Fly Unpacking)**. Despite the unpacking tax, 50 ms safely meets a 100ms real-time audio budget entirely within fast SRAM.
+    - **Result: 495 KB compressed weights, 50 ms compute estimate**. The original 1M-parameter 90/10 split would be ~0.55 MB and would not fit the <512 KB SRAM target. The mixed-precision plan only fits after reducing the parameter count and streaming one layer's unpacked weights/activations at a time.
 status: published
 provenance: imported
 requires_explanation: true

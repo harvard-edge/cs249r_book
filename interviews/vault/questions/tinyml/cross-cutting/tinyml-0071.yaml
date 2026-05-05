@@ -7,30 +7,30 @@ topic: federated-learning
 competency_area: cross-cutting
 bloom_level: analyze
 phase: inference
-title: 'The MCU Model Extraction Attack'
-scenario: 'You deploy a proprietary defect detection model on an STM32F4 MCU. A competitor connects a JTAG debugger to the exposed header and dumps the entire Flash memory, stealing your model weights in under 60 seconds.'
-question: 'How do you architect a defense-in-depth security strategy to protect the model on a constrained $3 MCU?'
+title: The MCU Model Extraction Attack
+scenario: You deploy a proprietary defect detection model on an STM32F4 MCU. A competitor connects a JTAG debugger to the exposed header and dumps the entire Flash memory, stealing your model weights in under 60 seconds.
+question: How do you architect a defense-in-depth security strategy to protect the model on a constrained $3 MCU?
 details:
-  realistic_solution: 'Defense-in-depth: (1) Enable STM32F4 Read-Out Protection Level 2 (RDP2) — permanently disables JTAG and SWD debug ports, requiring a $50K-100K decap+FIB attack to bypass. (2) Store AES-256 key in OTP (one-time programmable) fuses. (3) Encrypt model weights in flash; decrypt layer-by-layer into SRAM at boot. Only the current layer''s 40 KB of weights is decrypted in SRAM at a time, fitting within 256 KB. (4) Remove or depopulate the JTAG header on production boards. Total cost: $0.50 for a secure element per unit at scale.'
+  realistic_solution: Use defense in depth rather than one control. Enable the appropriate STM32 read-out protection level so production devices block external flash readout and debug access over JTAG/SWD; avoid unsupported claims that this makes extraction impossible. Remove or depopulate the debug header and lock the bootloader/update path so unsigned images cannot dump the model. Encrypt the model blob in flash and keep the device-unique wrapping key in protected nonvolatile storage such as OTP/option bytes when available, or derive it from a provisioned secret that is never exposed through the application interface. Decrypt only the chunk or layer needed for execution into SRAM, then clear it, so the 500 KB encrypted model never has to exist fully decrypted in 256 KB of SRAM. This raises the attack from a trivial debugger dump to invasive or side-channel work, while preserving the MCU memory budget.
   common_mistake: |
     **The Pitfall:** Proposing to encrypt the entire model in Flash and decrypt it completely into SRAM at runtime.
     **The Rationale:** Candidates apply cloud-security paradigms where RAM is abundant, ignoring the hard physical constraints of the MCU.
     **The Consequence:** The proposed solution is physically impossible; a 500 KB decrypted model cannot fit into 256 KB of SRAM, causing a memory fault at boot.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 500 KB model in Flash.
+    - 500 KB encrypted model in Flash.
     - 256 KB SRAM.
     - STM32F4 AES decryption throughput ≈ 168 MB/s.
-    - JTAG Read-Out Protection (RDP Level 2) is available.
+    - STM32 read-out protection can block normal external debug/flash readout in production.
 
     **Calculations:**
     - Attempting full decryption: 500 KB > 256 KB (OOM crash).
-    - Layer-by-layer decryption: Max layer size = 40 KB.
-    - 40 KB fits easily within 256 KB SRAM.
-    - AES overhead for 500 KB = 0.5 MB / 168 MB/s ≈ 3 ms (negligible boot latency).
+    - Chunked or layer-at-a-time decryption: keep the working decrypted chunk below the free SRAM after tensors, stack, and RTOS buffers.
+    - Example: a 40 KB layer/chunk fits within 256 KB only if the tensor arena and runtime leave at least 40 KB free.
+    - Raw AES time for the whole 500 KB blob is roughly 0.5 MB / 168 MB/s ≈ 3 ms, before flash I/O and software overhead; the main constraint is key handling and SRAM residency, not AES throughput.
 
     **Conclusion & Interpretation:**
-    - **Result: 40 KB Peak SRAM (Memory-Bound)**. The solution requires enabling hardware RDP2 to block JTAG, storing the AES key in OTP fuses, and decrypting the model layer-by-layer into SRAM to respect the 256 KB physical boundary.
+    - **Result: Defense in Depth Under SRAM Limits**. RDP/debug lockout, debug-header removal, authenticated firmware, protected key storage, encrypted flash, and bounded SRAM decryption together protect against simple model dumps without requiring the full model to fit in RAM.
 status: published
 provenance: imported
 requires_explanation: false

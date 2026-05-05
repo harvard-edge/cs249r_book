@@ -11,24 +11,26 @@ title: 'Model Size Estimation: Diagnose and Fix MCU SRAM Overflow at Inference'
 scenario: A TFLite Micro deployment on Cortex-M4 (256KB SRAM) crashes with a HardFault exception during the third convolutional layer of a 5-layer CNN (300K params INT8). The TFLM error log says it failed to allocate the tensor arena, which is currently set to 180KB.
 question: How would you diagnose a Cortex-M4 TFLM HardFault when a 180 KB arena fails at the third convolution?
 details:
-  realistic_solution: 'HardFault at layer 3 means activation tensor for layer 3 exceeds remaining arena space. Diagnosis: check peak activation size. Layer 3 output (say 28x28x128): 100.4KB. Layer 2 needs to remain until layer 3 finishes: double buffering: 100.4x2=200.8KB > 180KB. Fix: (1) Increase arena to 210KB (210+30KB runtime+8KB stack+4KB input=252KB < 256KB). (2) Use TFLM memory planning to find non-overlapping tensors (via offline arena planning in TFLM toolchain): reduces peak to 130KB. (3) Restructure model.'
+  realistic_solution: Treat the HardFault as a TFLM arena-sizing and memory-planning problem, not as proof that two convolution outputs must be manually double-buffered. First enable TFLM allocation logging or call the recording allocator to report persistent buffer use, scratch use, and peak tensor arena requirement at initialization. On a 256KB SRAM part with 30KB runtime, 8KB stack, and 4KB input reserved, the largest safe arena is about 214KB. If the allocator reports a required arena such as 196KB, increasing the arena from 180KB to about 200KB is valid because 200KB + 42KB fixed SRAM = 242KB. If the measured requirement exceeds about 214KB, increasing the arena will collide with stack/heap; then reduce activation memory by changing the model, lowering channel counts or feature-map dimensions, using supported in-place kernels, or applying an offline memory plan and verifying the new measured peak.
   common_mistake: |
     **The Pitfall:** Blindly increasing the arena size.
     **The Rationale:** Candidates assume the fix is simply allocating more memory without checking what SRAM structures the arena expands into.
     **The Consequence:** The arena overwrites the stack or heap, causing silent memory corruption and random system faults rather than addressing the actual peak memory issue.
   napkin_math: |
     **Assumptions & Constraints:**
-    - SRAM: 256 KB. Current Arena: 180 KB.
-    - L3 output: 100.4 KB. L2 output: 100.4 KB.
+    - SRAM: 256 KB.
+    - Current arena: 180 KB.
+    - Fixed SRAM reserve: 30 KB runtime + 8 KB stack + 4 KB input = 42 KB.
 
     **Calculations:**
-    - Peak overlap: 100.4 KB + 100.4 KB = 200.8 KB (> 180 KB).
-    - Fix 1 (Resize Arena): 210 KB + 42 KB (Stack/OS) = 252 KB (Fits under 256 KB).
-    - Fix 2 (Offline Planning): Yields ~35% overlap reduction.
-    - Planned Peak: 200.8 KB * 0.65 = ~130 KB.
+    - Maximum safe arena before model changes = 256 KB - 42 KB = 214 KB.
+    - Current shortfall must be measured from allocator logs; the layer number alone is not enough.
+    - Example if measured arena requirement is 196 KB: choose 200 KB arena.
+    - SRAM total with 200 KB arena = 200 KB + 42 KB = 242 KB, leaving 14 KB margin.
+    - If measured requirement is greater than 214 KB, the fix must reduce activations or scratch use rather than only increasing the arena.
 
     **Conclusion & Interpretation:**
-    - **Result: 130 KB Peak (Memory-Bound)**. Utilizing offline planning prevents the memory-bound crash without jeopardizing RTOS stack space.
+    - **Result: Diagnose with measured arena usage**. Increase the arena only up to the 214 KB SRAM-derived ceiling; beyond that, make model or memory-planner changes and remeasure.
 status: published
 provenance: imported
 requires_explanation: false

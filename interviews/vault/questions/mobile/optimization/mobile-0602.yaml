@@ -11,7 +11,8 @@ title: The Speculative Speedup
 scenario: You're deploying an INT4-quantized 7B LLM. The token rate is only ~10 tokens/sec. A colleague proposes implementing speculative decoding using a small 100M parameter draft model. The draft model generates 4 tokens that are accepted by the main model 75% of the time.
 question: Why can speculative decoding speed up a mobile 7B LLM despite adding a second draft model?
 details:
-  realistic_solution: Speculative decoding directly circumvents the 'Memory Wall'. During autoregressive generation, single-batch token generation is fundamentally memory-bandwidth bound because each token requires streaming the entire 7B parameter weight matrix from slow DRAM. Speculative decoding allows the primary model to verify multiple draft tokens in a single forward pass, essentially executing batched verification. This transforms repeated memory-bound operations into a single compute-dense operation.
+  realistic_solution: |
+    Speculative decoding can help because single-token autoregressive generation is often memory-bandwidth bound: each accepted token may require streaming the large 7B model weights from DRAM. A small draft model proposes several candidate tokens, and the main model verifies them in one batched pass. If enough candidates are accepted, one large weight-streaming pass yields multiple output tokens. The speedup depends on draft cost, acceptance rate, and rejection handling, so it should be treated as a bandwidth-amortization strategy rather than a guaranteed fixed multiplier.
   common_mistake: |
     **The Pitfall:** Assuming that introducing a second model will strictly increase latency due to the additional FLOPs overhead.
     **The Rationale:** Engineers view LLMs identically to CNNs, assuming they are strictly compute-bound and that more operations identically equal higher latency.
@@ -25,13 +26,14 @@ details:
     - Acceptance rate: 75%.
 
     **Calculations:**
-    - Max theoretical single-token TPOT: 77 GB/s / 3.5 GB = 22 tokens/sec.
-    - Draft generation cost: 4 * (50 MB / 77 GB/s) = ~2.6 ms.
+    - Baseline lower-bound single-token time from weight streaming: 3.5 GB / 77 GB/s = ~45 ms (~22 tokens/sec).
+    - Draft generation cost: 4 * (50 MB / 77 GB/s) = 200 MB / 77 GB/s = ~2.6 ms.
     - Verification cost (batched pass): 3.5 GB / 77 GB/s = ~45 ms.
     - Accepted tokens per pass: 4 tokens * 0.75 = 3 tokens.
+    - Ideal accepted-token time before rejection/control overhead: (45ms + 2.6ms) / 3 = ~15.9 ms/token.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Optimization**. By verifying multiple tokens in a single 45ms weight-streaming pass, speculative decoding exploits excess compute to mask memory bottlenecks, tripling observed throughput.
+    - **Result: Memory-Bound Optimization**. By verifying multiple candidate tokens in one large-model pass, speculative decoding can reduce average time per accepted token when the acceptance rate is high. The idealized math suggests a possible large gain, but real throughput will be lower after draft compute, rejected tokens, batching limits, and runtime overhead.
 status: published
 provenance: imported
 requires_explanation: false
@@ -41,13 +43,13 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- 'Inconsistent parameter count for the draft model: scenario states 200M, napkin math states 100M (50MB).'
+  - 'Inconsistent parameter count for the draft model: scenario states 200M, napkin math states 100M (50MB).'
 math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- Scenario specifies a 200M parameter draft model, but napkin math uses a 100M parameter draft model.
+  - Scenario specifies a 200M parameter draft model, but napkin math uses a 100M parameter draft model.
 human_reviewed:
   status: not-reviewed
   by: null

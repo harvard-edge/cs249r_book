@@ -8,33 +8,27 @@ competency_area: reliability
 bloom_level: create
 phase: training
 title: Zero-Overhead Distributed Tracing for LLM Serving
-scenario: You need to architect a distributed tracing framework for a 70B LLM serving platform across
-  A100 nodes to debug strict P99 latency SLAs, specifically focusing on tensor parallelism syncs and KV-cache
-  allocations.
-question: How would you trace a 70B LLM serving stack across A100 nodes to debug P99 spikes in TP syncs
-  and KV-cache allocations?
+scenario: You need to architect a distributed tracing framework for a 70B LLM serving platform across A100 nodes to debug strict P99 latency SLAs, specifically focusing on tensor parallelism syncs and KV-cache allocations.
+question: How would you trace a 70B LLM serving stack across A100 nodes to debug P99 spikes in TP syncs and KV-cache allocations?
 details:
-  realistic_solution: 'Implement a low-overhead, zero-allocation tracing framework using eBPF and CUDA
-    event hooks. Inject unique request IDs at the gateway. Propagate these IDs through the custom CUDA
-    kernels using PTX payload registers. Trace critical path boundaries: NCCL all-reduce times (TP sync),
-    KV-cache PCIe transfer latencies, and kernel launch queues. Aggregate the traces asynchronously to
-    a time-series database. Define SLA thresholds and trigger automated dump sequences when P99 tail latency
-    spikes occur.'
-  common_mistake: '**The Pitfall:** Using heavy CPU-based synchronous logging within the token generation
-    loop.
-
+  realistic_solution: 'Implement a low-overhead, zero-allocation tracing framework using eBPF and CUDA event hooks. Inject unique request IDs at the gateway. Propagate these IDs through the custom CUDA kernels using PTX payload registers. Trace critical path boundaries: NCCL all-reduce times (TP sync), KV-cache PCIe transfer latencies, and kernel launch queues. Aggregate the traces asynchronously to a time-series database. Define SLA thresholds and trigger automated dump sequences when P99 tail latency spikes occur.'
+  common_mistake: |
+    **The Pitfall:** Using heavy CPU-based synchronous logging within the token generation loop.
     **The Rationale:** Synchronous `logger.info()` is the standard tool for backend tracing.
-
-    **The Consequence:** The observer effect: the heavy CPU tracing artificially inflates the ultra-low
-    latency TP syncs, making it impossible to measure true P99 performance.
-
-    '
-  napkin_math: "1. **Assumptions & Constraints:**\n   - Model: 70B parameters with TP=8.\n   - NCCL All-Reduce\
-    \ syncs: ~80 times per token.\n   - Expected sync latency: ~5-10μs.\n   - Anomaly sync latency: 50μs.\n\
-    2. **Calculations:**\n   - Anomaly delta: 50μs - 10μs = 40μs per sync.\n   - Lost time per token:\
-    \ 80 syncs * 50μs = 4ms (compared to 80 * 10μs = 0.8ms).\n   - Total latency for 100 tokens (normal):\
-    \ 100 * (~0.5ms compute + 0.8ms sync) = ~130ms.\n   - Added latency from anomaly: 100 tokens * 4ms\
-    \ = 400ms.\n3. **Conclusion & Interpretation:** **>400ms added latency (Observer Effect/CPU-Bound).**\n"
+    **The Consequence:** The observer effect: the heavy CPU tracing artificially inflates the ultra-low latency TP syncs, making it impossible to measure true P99 performance.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Model: 70B parameters with TP=8.
+       - NCCL All-Reduce syncs: ~80 times per token.
+       - Expected sync latency: ~5-10μs.
+       - Anomaly sync latency: 50μs.
+    2. **Calculations:**
+       - Normal sync time per token: 80 syncs * 10μs = 0.8ms using the high end of the expected baseline.
+       - Anomalous sync time per token: 80 syncs * 50μs = 4.0ms.
+       - Anomaly delta: 4.0ms - 0.8ms = 3.2ms added per token if every TP sync on the request is affected.
+       - Total latency for 100 tokens (normal): 100 * (~0.5ms compute + 0.8ms sync) = ~130ms.
+       - Added latency from anomaly: 100 tokens * 3.2ms = 320ms. The anomalous sync component itself is 100 * 4.0ms = 400ms.
+    3. **Conclusion & Interpretation:** **~320ms Added Latency Upper Bound.** This assumes the anomaly affects every token and every TP sync in the sampled request; partial anomalies scale proportionally.
 status: published
 provenance: imported
 requires_explanation: true

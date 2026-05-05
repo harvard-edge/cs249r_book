@@ -11,26 +11,27 @@ title: Evaluating Hailo-8 vs. Jetson Orin Activation Memory Architecture for Emb
 scenario: Your team is selecting hardware for a smart camera CV pipeline running EfficientDet-D2 (8.1M parameters). Two options are Hailo-8 (26 TOPS, 2.5W, on-chip SRAM only — no external DRAM for activations) and Jetson Orin (275 TOPS, 60W, 32 GB LPDDR5).
 question: Which platform, Hailo-8 or Jetson Orin, better handles EfficientDet-D2 activation memory at 512x512, and what constraints matter?
 details:
-  realistic_solution: 'EfficientDet-D2 peak activation: the BiFPN feature network at resolution P3 (64x64) with 112 channels: 64x64x112x1 B (int8) = 450 KB per tensor. Hailo''s SRAM can hold multiple such tensors. However, the backbone (EfficientNet-B2) at early layers has spatial resolution 256x256x32 = 2 MB per tensor — exceeding Hailo''s per-layer SRAM if the full activation must be resident. Hailo''s compiler handles this via tiling: spatially tiles the input and streams through the chip, keeping only one tile in SRAM at a time. This is transparent to the user but adds 5-10% latency overhead. For EfficientDet-D2, Hailo-8 achieves ~30 fps at 512x512 at 2.5W vs Jetson Orin at ~120 fps at 60W. Choose Hailo-8 for power-constrained deployments, Orin for throughput-critical.'
+  realistic_solution: |
+    For activation-memory flexibility, Jetson Orin is the easier fit because it can place live activations and temporary buffers in its 32 GB external LPDDR5 pool. Hailo-8 can be efficient, but it relies on fixed on-chip SRAM for activations; if a full feature map plus double buffering and neighboring tensors do not fit, the compiler must tile or split the layer and stream tiles through the chip. At 512x512 input, an early 256x256x32 INT8 feature map is 2,097,152 B, about 2.0 MiB. A BiFPN P3 tensor such as 64x64x112 INT8 is 458,752 B, about 448 KiB. Those tensors are individually plausible for on-chip SRAM, but the real constraint is the live set: input/output tiles, double buffers, skip connections, and scheduling overhead. So Orin better handles uncertain activation memory, while Hailo-8 can handle the model only if the compiler schedule keeps each live tile set within SRAM.
   common_mistake: |
     **The Pitfall:** Evaluating accelerators purely on TOPS rating.
     **The Rationale:** Candidates ignore fixed on-chip SRAM size and the requirement that activation tensors fit within it.
     **The Consequence:** They miss that large activations force the Hailo compiler to split layers, reducing effective throughput and introducing latency.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Early Layer Size (EfficientNet-B2) is 256x256x32x1 bytes (INT8).
-    - Hailo-8 total SRAM is ~6 MB.
-    - Double buffering is required.
+    - Input resolution: 512x512.
+    - Representative early feature map after stride 2: 256x256x32 INT8.
+    - Representative BiFPN P3 feature map: 64x64x112 INT8.
+    - Hailo-8 must keep the scheduled live set in on-chip SRAM; Orin can spill to LPDDR5.
 
     **Calculations:**
-    - Full tensor size is 256 * 256 * 32 = ~2.1 MB.
-    - Double buffered size is 2.1 MB * 2 = 4.2 MB.
-    - Hailo Tiling mitigates this by splitting into 4 tiles of 128x128 = 0.53 MB each.
-    - Hailo-8 Efficiency is 26 TOPS / 2.5W = 10.4 TOPS/W.
-    - Jetson Orin Efficiency is 275 TOPS / 60W = 4.6 TOPS/W.
+    - Early tensor size = 256 * 256 * 32 * 1 B = 2,097,152 B = 2.0 MiB.
+    - Double-buffered early tensor alone = about 4.0 MiB before other live tensors.
+    - P3 BiFPN tensor size = 64 * 64 * 112 * 1 B = 458,752 B = 448 KiB.
+    - Four 128x128 spatial tiles of the early tensor would be 128 * 128 * 32 = 524,288 B each, reducing the per-tile live activation size at the cost of scheduling overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 10.4 TOPS/W (Memory-Bound)**. Hailo-8 is 2.3x more power-efficient but requires spatial tiling to fit activations in SRAM.
+    - **Result: Orin is more flexible for activation memory; Hailo-8 is SRAM-schedule-bound.** Hailo-8 may run EfficientDet-D2 if compiler tiling keeps the live set in SRAM, but Orin better handles large or uncertain activation peaks because it has external LPDDR5.
 status: published
 provenance: imported
 requires_explanation: false

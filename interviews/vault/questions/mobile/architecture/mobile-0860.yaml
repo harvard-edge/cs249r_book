@@ -11,7 +11,10 @@ title: 'Mastery: MobileNetV3 SE block impact on A17 Pro ANE vs Hexagon NPU'
 scenario: MobileNetV3 uses SE blocks with reduction ratio r=4. The A17 Pro ANE and Snapdragon 8 Gen 3 Hexagon NPU have different handling of SE blocks.
 question: How should MobileNetV3 SE blocks be handled on A17 Pro ANE versus Snapdragon Hexagon, and what latency overheads matter?
 details:
-  realistic_solution: 'A17 Pro ANE: SE blocks fully supported; GAP + two FC + sigmoid + scale are fused into a single ANE operation. Overhead: ~0.2ms for all SE blocks in MV3-Large. Accuracy gain: ~1.5pp. Worth keeping. Hexagon HTP v73: SE partially fused. GAP as native op, FC1+FC2+ReLU6+Hardsigmoid as fused block, final multiply is separate. If QNN compiler fuses properly: overhead ~0.3ms. If not fused: 12 separate dispatches × 0.1ms = 1.2ms overhead. Profile with nsys or qnn-net-run --profiling. Recommendation: keep SE for ANE; profile before deciding for Hexagon; consider SE reduction ratio r=8 to halve SE FLOPs.'
+  realistic_solution: |
+    Keep the MobileNetV3 SE blocks for the A17 Pro ANE unless profiling shows fallback or a material latency problem. With Core ML, static SE subgraphs are often lowered efficiently enough that the accuracy benefit is worth the small overhead, but the exact fusion of GAP, FC/1x1, sigmoid or h-sigmoid, and scale is compiler- and OS-dependent rather than guaranteed as one operation.
+
+    On Snapdragon Hexagon, treat SE as a profiling decision. QNN/HTP support for GAP, small FC layers, sigmoid-like activations, reshapes, broadcasts, and the final multiply depends on the SDK/backend version and quantization pattern. If those fragments remain on HTP, keep SE. If they cause repeated CPU fallback or synchronization, consider removing SE or using an SE-free variant for the Hexagon build while preserving the scenario's r=4 model for the ANE path.
   common_mistake: |
     **The Pitfall:** Treating SE block removal as universally beneficial or detrimental without hardware profiling.
     **The Rationale:** Assuming all NPUs handle custom layer fusion similarly.
@@ -21,13 +24,15 @@ details:
        - MV3-Large total SE FLOPs: ~3M FLOPs (1.4% of total 0.22G FLOPs).
        - A17 Pro ANE Compute: 35 TOPS.
        - Hexagon HTP Compute: 45 TOPS.
+       - Peak-throughput math is only a lower bound; measured latency is dominated by op lowering, memory movement, and dispatch for tiny SE fragments.
     2. **Calculations:**
-       - A17 Pro ANE Compute Time: 3M FLOPs / 35 TOPS = 0.086µs.
-       - A17 Pro ANE Practical Overhead (if separate): 15 blocks * 0.013ms = ~0.2ms (10% overhead on ~2.1ms total).
-       - Hexagon HTP Compute Time: 3M FLOPs / 45 TOPS = 0.067µs.
-       - Hexagon Overhead (if unfused): 12 dispatches * 0.1ms = 1.2ms.
+       - A17 Pro ANE lower-bound compute time: 3,000,000 ops / 35,000,000,000,000 ops/s = 0.000086ms = 0.086µs.
+       - Hexagon lower-bound compute time: 3,000,000 ops / 45,000,000,000,000 ops/s = 0.000067ms = 0.067µs.
+       - These lower bounds are far below practical per-block overheads, so they should not be used as predicted latency.
+       - Example dispatch sensitivity: if 12 unsupported SE fragments each add 0.1ms through fallback or synchronization, added latency is 12 x 0.1ms = 1.2ms.
+       - If the SE subgraph stays fused or scheduled on the accelerator, the measured overhead may instead be a small fraction of a millisecond.
     3. **Conclusion & Interpretation:**
-       - **Result: Dispatch-Bound. Hexagon overhead adds 80% latency for 1.4% FLOPs. Remove SE for Hexagon.**
+       - **Result: Dispatch-Bound Risk. Keep SE on ANE when profiling confirms accelerator execution; profile SE placement on Hexagon and remove or replace it only if fallback/synchronization overhead exceeds the accuracy benefit.**
 status: published
 provenance: imported
 requires_explanation: true

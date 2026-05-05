@@ -11,7 +11,8 @@ title: The Gradient Checkpoint Trade-off
 scenario: You're training a 32-layer transformer and running out of memory. Your colleague suggests gradient checkpointing.
 question: For a 32-layer transformer, how much memory does gradient checkpointing every k layers save, and what compute overhead does it add?
 details:
-  realistic_solution: Without checkpointing, you store activations for all 32 layers. With checkpointing every $k$ layers, you store activations at $\lceil 32/k \rceil$ checkpoint boundaries plus recompute the $k-1$ layers between checkpoints during the backward pass. Memory scales as $O(32/k + k)$ instead of $O(32)$. While continuous math suggests $k = \sqrt{32} \approx 5.6$, discrete layer counting shows $k=4, 5, 6,$ and $8$ all require exactly 11 layers of memory capacity. Therefore, $k=4$ is optimal as it achieves the minimum memory footprint while requiring the least recomputation.
+  realistic_solution: |
+    Without checkpointing, training stores activations for all 32 layers. With checkpointing every k layers, a simple segment model stores about ceil(32/k) checkpoint activations plus a working buffer for up to k layers during recomputation, so activation memory scales as ceil(32/k) + k layer-activation units rather than 32. The extra compute is the non-checkpointed forward work that must be replayed during backward: about 32 - ceil(32/k) layer-forwards. Under a common assumption that backward costs about two forward passes, the wall-time overhead is roughly (32 - ceil(32/k)) / (3 × 32). The best k depends on the memory target and accepted recompute; k=4, 5, 6, and 8 all land near the same 12-layer activation footprint in this simplified model, with k=4 having the least recompute among that group.
   common_mistake: |
     **The Pitfall:** Believing gradient checkpointing eliminates all activation memory.
     **The Rationale:** Candidates don't understand that checkpointing trades recomputation for memory by storing activations only at specific boundaries.
@@ -22,11 +23,12 @@ details:
        - Activation memory baseline: 128 MB/layer.
     2. **Calculations:**
        - Baseline (No Checkpointing): 32 layers * 128 MB = 4,096 MB (4 GB) activations. Recompute overhead: 0%.
-       - Checkpoint Every k=4 (Optimal): Store 8 checkpoints (layers 0, 4, ... 28) = 8 * 128 MB = 1,024 MB. Buffer for 3 recomputed layers = 384 MB. Total: 1,408 MB (1.4 GB). Savings: 65%. Recompute overhead: ~25% training time increase.
-       - Checkpoint Every k=6: Store 6 checkpoints (768 MB) + 5 layers buffer (640 MB) = 1,408 MB (1.4 GB). Savings: 65%. Recompute overhead: ~28% increase (worse compute, same memory as k=4).
+       - Simplified checkpoint memory: (ceil(32/k) + k) * 128 MB.
+       - k=4: (8 + 4) * 128 MB = 1,536 MB. Savings = 1 - 1,536/4,096 = 62.5%. Extra replay = 32 - 8 = 24 layer-forwards, or ~24/(3*32) = 25% training-step overhead if backward is ~2x forward cost.
+       - k=6: (6 + 6) * 128 MB = 1,536 MB. Savings = 62.5%. Extra replay = 32 - 6 = 26 layer-forwards, or ~27% training-step overhead under the same assumption.
+       - k=8: (4 + 8) * 128 MB = 1,536 MB. Savings = 62.5%. Extra replay = 28 layer-forwards, or ~29% training-step overhead.
     3. **Conclusion & Interpretation:**
-       - Checkpointing every k=4 minimizes memory footprint with the least recompute penalty.
-       - **Result: 1.4 GB Memory at k=4 (Optimal)**
+       - **Result: Memory/Compute Trade-off.** For this 32-layer, 128 MB/layer example, k=4 reduces activation memory from 4.0 GB to 1.5 GB and adds about 25% training-step overhead under the stated cost model. Other k values can have similar memory but more recompute, so "optimal" must be tied to the chosen memory target and compute budget.
 status: published
 provenance: imported
 requires_explanation: false

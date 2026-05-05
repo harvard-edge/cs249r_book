@@ -8,37 +8,21 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: The NVLink PCIe Bottleneck
-scenario: You are buying a custom 8-GPU server for training. Vendor A offers 8x RTX 4090s connected entirely
-  via PCIe Gen4 switches. Vendor B offers 8x H100s connected via NVLink and NVSwitch. Vendor A's server
-  is much cheaper, and they claim 'PCIe Gen4 x16 gives 64 GB/s, which is plenty for training.' Why will
-  Vendor A's server fail catastrophically at 8-GPU Data Parallel training compared to Vendor B?
-question: Why will Vendor A's server fail catastrophically at 8-GPU Data Parallel training compared to
-  Vendor B?
+scenario: You are buying a custom 8-GPU server for training. Vendor A offers 8x RTX 4090s connected entirely via PCIe Gen4 switches. Vendor B offers 8x H100s connected via NVLink and NVSwitch. Vendor A's server is much cheaper, and they claim 'PCIe Gen4 x16 gives 64 GB/s, which is plenty for training.' Why will Vendor A's server fail catastrophically at 8-GPU Data Parallel training compared to Vendor B?
+question: Why will Vendor A's server fail catastrophically at 8-GPU Data Parallel training compared to Vendor B?
 details:
-  realistic_solution: Vendor A's PCIe topology is a tree rooted at the CPU, while Vendor B's NVLink/NVSwitch
-    topology is a fully-connected mesh. During AllReduce, all 8 GPUs must exchange gradients simultaneously.
-    On NVLink, every GPU talks directly to every other GPU at 900 GB/s aggregate bisection bandwidth.
-    On PCIe, all traffic funnels through the CPU root complex, which has ~128 GB/s total bandwidth shared
-    across all GPUs. This creates a 28x bandwidth bottleneck. At 8 GPUs, communication time dominates
-    training, and the PCIe server spends 95%+ of its time waiting for gradient synchronization.
-  common_mistake: '**The Pitfall:** "PCIe is slower than NVLink." It is slower, but the real issue is
-    the *topology*, not just the raw speed.
-
+  realistic_solution: Vendor A's problem is the PCIe fabric bisection bandwidth, not the per-lane marketing number. During AllReduce, all 8 GPUs exchange gradients at the same time, so the bottleneck is the shared PCIe-switch/uplink capacity across the topology. Vendor B's NVLink/NVSwitch fabric provides much higher all-to-all GPU bandwidth and avoids forcing global synchronization traffic through a narrow shared PCIe bisection. The result is not that RTX 4090s cannot train at all, but that 8-GPU data-parallel scaling can collapse when gradient synchronization dominates the step time.
+  common_mistake: |
+    **The Pitfall:** "PCIe is slower than NVLink." It is slower, but the real issue is the *topology*, not just the raw speed.
     **The Rationale:** Topology restricts total bandwidth.
-
-    **The Consequence:** Training bottlenecks on PCIe.'
-  napkin_math: '**Assumptions & Constraints:**
-
+    **The Consequence:** Training bottlenecks on PCIe.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Topology bandwidth limits.
-
     **Calculations:**
-
-    NVLink Bisection Bandwidth on an 8-GPU node = ~3,600 GB/s. PCIe Gen4 CPU Root Complex limit = ~128
-    GB/s (total, shared by all lanes). The NVLink topology is roughly 28x faster during a global AllReduce.
-
+    NVLink/NVSwitch effective bisection bandwidth on an 8-GPU node = ~3,600 GB/s. A PCIe Gen4 switch fabric with about 128 GB/s of shared uplink/bisection bandwidth gives 3,600 / 128 ≈ 28x less bandwidth for global synchronization traffic.
     **Conclusion & Interpretation:**
-
-    NVLink is 28x faster.'
+    Vendor B has roughly 28x more synchronization bisection bandwidth under these assumptions. Vendor A can be much cheaper per GPU but still scale poorly because AllReduce is limited by shared PCIe fabric bandwidth rather than each GPU's local compute.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,27 +7,33 @@ topic: speculative-decoding
 competency_area: latency
 bloom_level: create
 phase: inference
-title: 'Speculative Decoding with On-Device LoRA Draft'
-scenario: 'On a mobile device with 50 GB/s memory bandwidth, you run a 3B INT4 target model. Instead of a separate draft model, you use a LoRA adapter (rank=8) applied to a 2-layer subset of the target to create a fast draft path that shares 93% of weights.'
-question: 'How would you design a shared-weight speculation system and analyze its memory savings compared to a separate 0.5B draft?'
+title: Speculative Decoding with On-Device LoRA Draft
+scenario: On a mobile device with 50 GB/s memory bandwidth, you run a 3B INT4 target model. Instead of a separate draft model, you use a LoRA adapter (rank=8) applied to a 2-layer subset of the target to create a fast draft path that shares 93% of weights.
+question: How would you design a shared-weight speculation system and analyze its memory savings compared to a separate 0.5B draft?
 details:
-  realistic_solution: 'Target: 3B INT4 = 1.5GB. Separate 0.5B INT4 draft = 0.25GB. Total with separate draft: 1.75GB of 8GB. LoRA draft: early-exit after 2 layers with LoRA adapters. LoRA params per layer: 2 x (8192 x 8 + 8 x 8192) x 0.5B (INT4) = 2 x 131K params x 0.5B = 131KB per layer x 2 layers = 262KB. Plus exit head: 8192 -> 128K vocab x 0.5B = 512MB. Wait — the exit head dominates! Even with weight sharing, the vocab projection head is 512MB. Total extra: 512MB + 262KB ≈ 512MB vs separate 0.5B draft at 250MB. The LoRA draft costs MORE memory because of the exit head. Optimization: share the vocab head with the target model (which already has one). Now extra = 262KB only. Draft forward: 2 layers at 3B/32 = 94M params per layer x 2 = 188M params = 94MB weight read at 50 GB/s = 1.9ms/token + LoRA compute (negligible). Acceptance rate: only 2 layers of context = alpha ~ 0.45. E[tok] at K=5 = 1.80. Not great, but zero extra memory.'
+  realistic_solution: |
+    Use a shared-weight draft with an early exit after two target layers, LoRA rank-8 adapters on those layers, and the target model's existing tied vocab projection for logits. Do not allocate a separate exit head: for a 128K vocab and 8192 hidden dimension, an INT4 copy would be about 128K x 8192 x 0.5 bytes = 512 MB, which would erase the memory benefit. With the vocab head shared, the extra persistent memory is only the LoRA adapters: 2 x (8192 x 8 + 8 x 8192) INT4 parameters per layer = about 131 KB per layer, or 262 KB for two layers. Compared with a separate 0.5B INT4 draft at about 250 MB, the shared LoRA draft saves roughly 249.7 MB. Latency should be treated as a secondary tradeoff: the two-layer draft is cheap, but its lower acceptance rate limits speculative speedup.
   common_mistake: |
     **The Pitfall:** Assuming a LoRA adapter on a small subset of layers functions effectively as a quality draft model without addressing the vocab head.
     **The Rationale:** Candidates think that weight sharing automatically equates to high-quality speculation and low memory, missing the massive vocab projection head size.
     **The Consequence:** The draft's distribution diverges significantly from the target, and unoptimized vocab heads blow up the memory budget, negating the latency benefits.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 50 GB/s memory bandwidth. 3B INT4 target (1.5GB), 0.5B INT4 draft (250MB).
-    - LoRA draft (rank=8) shares weights, requiring only 262KB extra (if vocab head is shared).
+    - Target model: 3B INT4 = 1.5 GB.
+    - Separate draft: 0.5B INT4 = 250 MB.
+    - LoRA draft: rank=8 adapters on 2 layers, hidden dimension 8192, INT4 adapter storage.
+    - Vocab projection: shared with the target model, so it adds 0 bytes of persistent memory.
 
     **Calculations:**
-    - Draft forward latency: 2 layers (94MB weights) / 50 GB/s = 1.9ms.
-    - Effective latency (alpha=0.45, E=1.80, K=5): (5 x 1.9ms + 29ms) / 1.80 = 21.4ms/tok.
-    - Baseline latency: 29ms/tok. Speedup: 29 / 21.4 = 1.36x.
+    - Separate target + draft memory: 1.5 GB + 250 MB = 1.75 GB.
+    - LoRA parameters per layer: 2 x (8192 x 8 + 8 x 8192) = 262,144 parameters.
+    - INT4 adapter storage per layer: 262,144 x 0.5 bytes = 131,072 bytes = 128 KB.
+    - Two-layer LoRA adapter storage: 2 x 128 KB = 256 KB, approximately 262 KB in decimal units.
+    - If the vocab head were not shared: 128,000 x 8192 x 0.5 bytes = 524 MB, so sharing it is required.
+    - Memory saved versus a separate draft: 250 MB - 0.26 MB = about 249.7 MB.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.36x Speedup (Latency-Bound)**. The LoRA draft provides a 1.36x speedup with almost zero extra memory overhead (262KB vs 250MB) compared to a separate draft model.
+    - **Result: ~250 MB Memory Savings (Shared-Weight Draft)**. The design is memory efficient only when the vocab projection is shared; any latency gain depends on the early-exit draft's measured acceptance rate.
 status: published
 provenance: imported
 requires_explanation: false

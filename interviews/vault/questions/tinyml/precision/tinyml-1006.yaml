@@ -8,22 +8,23 @@ competency_area: precision
 bloom_level: analyze
 phase: inference
 title: 4-bit Quantization Fallback Diagnosis on Ethos-U55
-scenario: You are deploying a 4-bit quantized keyword spotting model on an ARM Cortex-M7 + Ethos-U55 (Corstone-300) system. The model fits within the shared 512 KB SRAM. During profiling, inference latency is drastically higher than the 8-bit baseline, and the 480 MHz M7 CPU is pegged at 100% utilization while the Ethos-U55 NPU shows near-zero utilization.
-question: Why does a 4-bit Ethos-U55 keyword model peg the 480 MHz M7 CPU while the NPU sits idle?
+scenario: You are deploying a 4-bit quantized keyword spotting model on an ARM Cortex-M-class host CPU with an Ethos-U55 NPU and shared 512 KB SRAM. The model fits within SRAM. During profiling, inference latency is drastically higher than the 8-bit baseline, and the 480 MHz host CPU is pegged at 100% utilization while the Ethos-U55 NPU shows near-zero utilization.
+question: Why does a 4-bit Ethos-U55 keyword model peg the 480 MHz host CPU while the NPU sits idle?
 details:
-  realistic_solution: The root cause is an operator fallback from the NPU to the CPU. The Ethos-U55 natively accelerates 8-bit and 16-bit operations, but lacks native support for 4-bit activations across standard operations. The Vela compiler therefore maps these unsupported 4-bit convolutions to software kernels on the Cortex-M7. The M7 must sequentially unpack the 4-bit data into 8-bit or 16-bit registers before computing the MACs, completely bypassing the NPU and causing severe latency.
+  realistic_solution: The root cause is an operator fallback from the NPU to the CPU. Ethos-U55 acceleration is centered on supported TFLite Micro operators and quantized data types such as int8, with limited int16-style paths depending on the operation; arbitrary 4-bit activation or weight tensors are not a standard accelerated path. The Vela compiler therefore cannot keep those 4-bit convolutions on the NPU and the runtime executes software kernels on the Cortex-M7. The M7 must unpack or widen the 4-bit data before computing the MACs, bypassing the NPU and causing severe latency.
   common_mistake: |
     **The Pitfall:** Assuming 4-bit quantization universally accelerates execution.
     **The Rationale:** Candidates assume that lower precision always equals higher speed due to reduced memory bandwidth, without checking the NPU's operator support matrix.
     **The Consequence:** Unsupported operations trigger a software fallback to the CPU, leading to catastrophic latency degradation.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Hardware: Cortex-M7 (480 MHz) + Ethos-U55 (256 MACs/cycle).
+       - Hardware: Cortex-M-class host CPU (480 MHz) + Ethos-U55 (256 MACs/cycle illustrative peak).
        - Model: 4-bit quantized keyword spotting model.
        - Operations: 1,000,000 MACs.
        - NPU Support: Ethos-U55 lacks native 4-bit activation support (requires CPU fallback).
     2. **Calculations:**
-       - Ideal NPU Latency: 1,000,000 MACs / (256 MACs/cycle × 480 MHz) = 8.1 µs.
+       - Ideal NPU cycles: 1,000,000 MACs / 256 MACs/cycle = 3,906 cycles.
+       - Ideal NPU latency: 3,906 cycles / 480,000,000 cycles/s = 8.1 µs.
        - CPU Fallback Cycles: 1,000,000 MACs × 4 cycles/MAC (unpacking overhead) = 4,000,000 cycles.
        - CPU Fallback Latency: 4,000,000 cycles / 480 MHz = 8.33 ms.
        - Penalty Factor: 8.33 ms / 8.1 µs ≈ 1000x slower.

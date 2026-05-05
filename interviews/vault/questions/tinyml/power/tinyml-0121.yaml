@@ -8,39 +8,28 @@ competency_area: power
 bloom_level: evaluate
 phase: inference
 title: Power-Aware Inference Scheduler
-scenario: 'Your wearable health monitor on a Cortex-M33 runs three models: (1) heart rate estimation (25
-  Hz, 0.5ms inference, runs continuously), (2) arrhythmia detection (250 Hz, 8ms inference, runs every
-  10 seconds), (3) fall detection (50 Hz, 3ms inference, runs every 1 second). The device has an 80 mAh
-  battery and must last 7 days.'
-question: How would you design a power-aware scheduler that meets all real-time deadlines while maximizing
-  battery life?
+scenario: 'Your wearable health monitor on a Cortex-M33 runs three models: (1) heart rate estimation (25 Hz, 0.5ms inference, runs continuously), (2) arrhythmia detection (250 Hz, 8ms inference, runs every 10 seconds), (3) fall detection (50 Hz, 3ms inference, runs every 1 second). The device has an 80 mAh battery and must last 7 days.'
+question: How would you design a power-aware scheduler that meets all real-time deadlines while maximizing battery life?
 details:
-  realistic_solution: 'Design a time-slotted scheduler minimizing wake-ups and batching sensor reads with
-    inference. Slot allocation per 1-second superframe: Slot 0 (0-1 ms): wake from deep sleep (3.3 uA
-    to 8 mA, 0.5 ms transition). Slot 1 (1-14 ms): PPG read + heart rate (25 samples * 0.5 ms = 12.5 ms
-    at 8 mA). Slot 2 (every 10th frame, 14-32 ms): ECG burst + arrhythmia detection (250 samples * 0.04
-    ms + 8 ms inference at 12 mA). Slot 3 (14-18 ms or 32-36 ms): accelerometer + fall detection (1 ms
-    read + 3 ms inference at 8 mA). Sleep remainder: 964-982 ms at 3.3 uA. MCU Power: HR = 12.5 ms * 8
-    mA = 100 uA avg. Arrhythmia (10% duty) = 18 ms * 12 mA * 0.1 = 21.6 uA. Fall = 4 ms * 8 mA = 32 uA.
-    Sleep = 3.3 uA. Wake = 2.0 uA. MCU Total = 158.9 uA. Adding 280 uA for continuous/duty-cycled sensor
-    power (PPG+Accel~80 uA, ECG 10% duty~200 uA) yields a system total of ~439 uA. Battery: 80 mAh / 0.439
-    mA = 182 hours = 7.6 days. 7-day target met.'
-  common_mistake: '**The Pitfall:** Running all three models at their required rates and calculating average
-    power independently.
-
-    **The Rationale:** This ignores that models can be scheduled to avoid overlapping active periods,
-    and that MCU power depends heavily on which peripherals are active concurrently.
-
-    **The Consequence:** Producing a naive schedule with excess wake-up transitions and higher peak current
-    draw.
-
-    '
-  napkin_math: "**Assumptions & Constraints:**\n   - Continuous ECG: 2 mA. Duty-cycled ECG (10%): 200\
-    \ µA.\n   - Battery: 80 mAh. Target: 7 days (168 hours).\n**Calculations:**\n   - Inference Active\
-    \ Time (per sec) = (25 * 0.5 ms) + (8 ms / 10) + 3 ms = 16.3 ms.\n   - MCU active power ≈ 0.16 mA.\
-    \ Sensor power ≈ 0.28 mA. Total ≈ 0.44 mA.\n   - Battery Life = 80 mAh / 0.44 mA ≈ 182 hours (7.6\
-    \ days).\n**Conclusion & Interpretation:**\n   - **Result: Energy-Bound**. Duty-cycling the ECG saves\
-    \ 1.8 mA, ensuring the 168-hour target is met.\n"
+  realistic_solution: 'Use a 1-second superframe and coalesce work into one wakeup. Every second: wake once, process the 25 heart-rate updates as a 12.5 ms batch, run the 3 ms fall detector after a 1 ms accelerometer read, then sleep. Every 10th superframe, add a 10 ms arrhythmia slot for an ECG burst plus the 8 ms arrhythmia inference; this still completes early in the 1-second frame and is far inside the 10-second arrhythmia deadline. Keep sensor DMA active while the MCU sleeps where possible, and use deadline-monotonic priority inside the active window: fall response first, then heart-rate update, then the 10-second arrhythmia batch. Average MCU current is HR 100 uA + fall 32 uA + arrhythmia 12 uA + wake 2 uA + sleep 3.3 uA = 149.3 uA. Adding about 280 uA of sensor current gives 429.3 uA total. Battery life is 80 mAh / 0.429 mA = 186 hours = 7.8 days, meeting the 7-day target with modest margin.'
+  common_mistake: |
+    **The Pitfall:** Running all three models at their required rates and calculating average power independently.
+    **The Rationale:** This ignores that models can be scheduled to avoid overlapping active periods, and that MCU power depends heavily on which peripherals are active concurrently.
+    **The Consequence:** Producing a naive schedule with excess wake-up transitions and higher peak current draw.
+  napkin_math: |
+    **Assumptions & Constraints:**
+       - Continuous ECG: 2 mA. Duty-cycled ECG (10%): 200 µA.
+       - Battery: 80 mAh. Target: 7 days (168 hours).
+    **Calculations:**
+       - Heart-rate MCU current = (25 * 0.5 ms/s) * 8 mA = 100 µA average.
+       - Fall MCU current = (1 ms read + 3 ms inference per second) * 8 mA = 32 µA average.
+       - Arrhythmia MCU current = (10 ms every 10 seconds) * 12 mA = 12 µA average.
+       - Wake + sleep overhead ≈ 2 µA + 3.3 µA = 5.3 µA.
+       - MCU average current = 100 + 32 + 12 + 5.3 = 149.3 µA.
+       - Sensor power ≈ 280 µA. Total current ≈ 149.3 µA + 280 µA = 429.3 µA = 0.429 mA.
+       - Battery Life = 80 mAh / 0.429 mA ≈ 186 hours (7.8 days).
+    **Conclusion & Interpretation:**
+       - **Result: Energy-Bound**. A batched 1-second scheduler with a 10-second arrhythmia slot meets the deadlines and stays above the 168-hour battery target.
 status: published
 provenance: imported
 requires_explanation: true

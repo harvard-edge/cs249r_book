@@ -7,47 +7,28 @@ topic: graph-compilation
 competency_area: optimization
 bloom_level: analyze
 phase: inference
-title: The CoreML Custom Op Conversion Failure
-scenario: When converting a PyTorch model with a custom `RotaryPositionEmbedding` (RoPE) layer to CoreML,
-  it fails because `custom::rope` is unsupported.
-question: Why is simply removing the RoPE layer a bad idea, and how should unsupported ops be handled
-  in CoreML?
+title: CoreML RoPE Unsupported Op Conversion
+scenario: When converting a PyTorch model with a custom `RotaryPositionEmbedding` (RoPE) layer to CoreML, it fails because `custom::rope` is unsupported.
+question: Why is simply removing the RoPE layer a bad idea, and how should unsupported ops be handled in CoreML?
 details:
-  realistic_solution: 'Three approaches, ordered by preference: Approach 1 (decomposed): RoPE as 6 native
-    ops per layer. ANE overhead: ~0.05ms per layer × 32 layers = **1.6ms** total. Full ANE delegation
-    maintained. Approach 2 (custom converter): same runtime as approach 1 (converter runs at build time).  Approach
-    3 (MLCustomLayer): GPU dispatch per layer: 1ms × 64 calls = **64ms**. Plus ANE→GPU→ANE  transfers:
-    64 × 0.5ms = **32ms**. Total RoPE overhead: **96ms**.'
-  common_mistake: '**The Pitfall:** Replacing custom attention mechanics with standard embeddings just
-    to satisfy a compiler.
-
-    **The Rationale:** Candidates falsely believe sinusoidal absolute embeddings are mathematically equivalent
-    to rotary relative embeddings.
-
-    **The Consequence:** Removing RoPE severely degrades perplexity and entirely breaks the model''s ability
-    to extrapolate to unseen sequence lengths.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: Removing RoPE is not a safe compiler workaround because RoPE is part of the attention geometry; it encodes token position through rotations used by the trained model. Dropping it changes model behavior, hurts perplexity, and can break long-context behavior. In CoreML, first express RoPE as supported tensor operations so the graph can remain delegated to the ANE. Use a custom converter when the PyTorch op is only a conversion artifact. Use an `MLCustomLayer` only as a last resort, because it can force GPU/CPU execution and add dispatch plus transfer overhead.
+  common_mistake: |
+    **The Pitfall:** Replacing custom attention mechanics with standard embeddings just to satisfy a compiler.
+    **The Rationale:** Candidates falsely believe sinusoidal absolute embeddings are mathematically equivalent to rotary relative embeddings.
+    **The Consequence:** Removing RoPE severely degrades perplexity and entirely breaks the model's ability to extrapolate to unseen sequence lengths.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 32 layers with 6 ops per layer for RoPE.
-
-    - Custom GPU layer requires 64 dispatches and transfers.
-
+    - Decomposed native-op overhead: ~0.05ms per supported op.
+    - Custom GPU fallback: 2 calls per layer, each with ~0.2ms dispatch and ~0.1ms ANE/GPU transfer overhead.
 
     **Calculations:**
-
     - Approach 1 (Decompose ops): 6 native ops/layer * 0.05ms * 32 layers = 9.6ms ANE overhead.
-
-    - Approach 3 (Custom GPU layer): GPU dispatch (64ms) + Transfers (32ms) = 96ms overhead.
-
+    - Approach 2 (Custom converter): same runtime graph as approach 1 when it lowers RoPE to the same native ops.
+    - Approach 3 (MLCustomLayer): 32 layers * 2 calls/layer * (0.2ms dispatch + 0.1ms transfer) = 19.2ms overhead, plus loss of full ANE fusion/delegation opportunities.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Decomposing into native ops is 10x faster than writing a custom GPU layer plugin (9.6ms
-    vs 96ms).**
-
-    '
+    - **Result: Preserve RoPE and lower it to CoreML-supported ops when possible.** Removing RoPE breaks correctness, while a custom runtime layer should be reserved for cases where decomposition or conversion cannot express the operation.
 status: published
 provenance: imported
 requires_explanation: false

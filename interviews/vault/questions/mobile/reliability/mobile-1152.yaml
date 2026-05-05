@@ -8,47 +8,28 @@ competency_area: reliability
 bloom_level: analyze
 phase: inference
 title: Diagnosing High Latency in On-Device Gemini Nano Sanitization
-scenario: You are deploying Gemini Nano on the Google Tensor G3. To defend against prompt injection, inputs
-  route sequentially through a smaller 'sanitizer' model before hitting the main LLM. Telemetry shows
-  latency spiked to over 1.5 seconds.
-question: How would you analyze the interaction between the models and the hardware to identify the root
-  cause of the latency?
+scenario: You are deploying Gemini Nano on the Google Tensor G3. To defend against prompt injection, inputs route sequentially through a smaller 'sanitizer' model before hitting the main LLM. Telemetry shows latency spiked to over 1.5 seconds.
+question: How would you analyze the interaction between the models and the hardware to identify the root cause of the latency?
 details:
-  realistic_solution: The root cause is memory bandwidth contention and context switching overhead. While
-    the Tensor G3 has a capable TPU, running a sequential pipeline forces the OS to swap activations and
-    weights entirely in and out of the TPU's local SRAM over the LPDDR5X bus.
-  common_mistake: '**The Pitfall:** Assuming the TPU compute is simply too slow for two models.
-
-    **The Rationale:** Candidates assume the compute capacity is lacking or that prompt attacks add compute,
-    completely missing the sequential memory swapping overhead.
-
+  realistic_solution: The root cause is memory bandwidth pressure and graph handoff overhead from the sequential two-model pipeline. The weights should remain resident when possible, but each sanitizer-to-LLM handoff still moves prompts, activations, KV/context state, and runtime buffers through shared LPDDR5X and may break accelerator scheduling. The diagnosis should compare per-stage latency, memory-bandwidth counters, and accelerator idle time to confirm that the second model waits on data movement rather than raw TPU arithmetic.
+  common_mistake: |
+    **The Pitfall:** Assuming the TPU compute is simply too slow for two models.
+    **The Rationale:** Candidates assume the compute capacity is lacking or that prompt attacks add compute, completely missing the sequential memory swapping overhead.
     **The Consequence:** Unnecessary model compression that fails to address the root I/O cause.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Sanitizer: 100M params (100MB INT8).
-
-    - Main LLM: 1.8B params (1.8GB INT8).
-
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Sanitizer: 100M params (100MB INT8), normally resident during the request.
+    - Main LLM: 1.8B params (1.8GB INT8), normally resident during the request.
     - LPDDR5X Bandwidth: 50 GB/s.
-
+    - Per-turn intermediate traffic from prompts, activations, KV/context updates, and scheduler handoff: ~0.5-1.0 GB.
 
     **Calculations:**
-
-    - Total weights per full turn: 100MB + 1.8GB = 1.9GB.
-
-    - Memory swap time (read/write overhead): (1.9 GB / 50 GB/s) * 2 = 76ms.
-
-    - Actual TPU compute time: ~50ms.
-
+    - Lower-bound transfer time: 0.5 GB / 50 GB/s = ~10 ms.
+    - Upper illustrative transfer time: 1.0 GB / 50 GB/s = ~20 ms.
+    - Real tail latency can be much higher when transfers serialize with accelerator handoffs, cache misses, and OS contention; the 1.5 s symptom requires profiling those stalls, not assuming full weight swap time.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 76ms I/O Overhead (Memory-Bandwidth-Bound)**. The 76ms pure I/O overhead heavily dominates
-    the ~50ms compute time, proving the bottleneck is sequential memory swapping over the bus.
-
-    '
+    - **Result: Memory-Bandwidth and Handoff Bottleneck.** The math supports a qualitative diagnosis: sequential model execution can add significant shared-memory traffic and scheduling stalls, but weights are not read and written back in full for every turn.
 status: published
 provenance: imported
 requires_explanation: false

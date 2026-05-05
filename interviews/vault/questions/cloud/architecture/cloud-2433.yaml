@@ -9,7 +9,7 @@ bloom_level: evaluate
 phase: both
 title: The GQA Prefill Illusion
 scenario: A cloud provider serves a 70B LLM. To improve throughput, they switch from Multi-Head Attention (MHA) to Grouped-Query Attention (GQA), reducing KV heads by 8x. They observe a 3x throughput increase in the decoding phase. However, for a prominent enterprise customer who sends massive 50k-token prompts and only generates 10 tokens per request, the end-to-end latency drops by a mere 2%.
-question: "Why does GQA improve decoding throughput 3x but reduce end-to-end latency by only 2% for 50k-token prompts and 10 outputs?"
+question: Why does GQA improve decoding throughput 3x but reduce end-to-end latency by only 2% for 50k-token prompts and 10 outputs?
 details:
   realistic_solution: Decoding is heavily memory-bandwidth bound because the model must read the entire KV cache from HBM for every single generated token. GQA reduces this memory payload by 8x, directly speeding up decoding. Prefill (prompt processing), however, is compute-bound. It performs a dense matrix multiplication of Q x K^T. Even though the K matrix is smaller in GQA, the number of FLOPs required to compute the attention scores (N x N) remains dominated by the sequence length N and is bounded by the GPU's compute ceiling. Reducing memory traffic yields negligible latency benefits when the operation is bottlenecked by the MXUs.
   common_mistake: |
@@ -18,16 +18,17 @@ details:
     **The Consequence:** Promising massive latency reductions for long-context applications that mathematically cannot materialize.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Sequence (N): 50,000 tokens. Dim (d): 4096. Output: 10 tokens.
+       - Sequence (N): 50,000 tokens. Dim (d): 4096. Output: 10 tokens. Layers: 80.
        - Hardware: 989 TFLOPS FP16, 3.35 TB/s Bandwidth.
     2. **Calculations:**
-       - Prefill Compute (N x N) = 2 * 50k * 50k * 4096 = ~20.4 TFLOPs.
-       - Compute Time = 20.4 TFLOPs / 989 TFLOPS = ~20.6 ms.
-       - MHA KV Read = 50k * 4096 * 2 * 2 = ~800 MB -> ~0.24 ms transfer.
-       - GQA KV Read = ~100 MB -> ~0.03 ms transfer.
-       - Savings = 0.21 ms out of 20.6 ms total.
+       - Prefill attention-score compute per layer: 2 * 50,000 * 50,000 * 4096 = 20.5 TFLOPs.
+       - Prefill attention-score compute across 80 layers: 20.5 TFLOPs * 80 = 1.64 PFLOPs.
+       - Prefill compute time: 1.64 PFLOPs / 989 TFLOPS = about 1.66 seconds before other model work.
+       - MHA KV read per generated token across layers: 80 * 50,000 * 4096 * 2 bytes * 2 for K and V = about 65.5 GB.
+       - GQA with 8x fewer KV heads reads about 8.2 GB per generated token.
+       - Decode memory-time savings for 10 output tokens: 10 * ((65.5 - 8.2) GB / 3.35 TB/s) = about 171 ms.
     3. **Conclusion & Interpretation:**
-       - **Result: 1% Speedup (Compute-Bound).** Prefill is entirely dominated by the N^2 matrix multiplication FLOPs, rendering memory bandwidth optimizations like GQA irrelevant for long-context TTFT.
+       - **Result: small end-to-end gain despite faster decoding.** GQA substantially reduces decode KV traffic, but the request is dominated by long-prompt prefill compute, so saving about 171 ms from decoding changes total latency only modestly when prefill and other full-model work take many seconds.
 status: published
 provenance: imported
 requires_explanation: false
@@ -46,6 +47,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- llm
-- attention
-- throughput
+  - llm
+  - attention
+  - throughput

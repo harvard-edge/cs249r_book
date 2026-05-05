@@ -7,11 +7,11 @@ topic: model-size-estimation
 competency_area: memory
 bloom_level: create
 phase: inference
-title: 'Model Size Estimation: Specify Memory-Optimal Architecture for Battery-Powered MCU'
+title: Derive Power, Duty Cycle, and Latency Budget for a CR2032-Powered Cortex-M4 Sensor
 scenario: A battery-powered presence detection sensor runs on a Cortex-M4 (168MHz, 256KB SRAM, 512KB Flash) and is powered by a CR2032 coin cell (220mAh, 3V). Requirements include detecting presence within 1 second, achieving >95% accuracy, and operating continuously for 1 year.
 question: How would you derive maximum model parameters, inference latency, duty cycle, and average power budget?
 details:
-  realistic_solution: Calculate power envelope strictly. 1 year requires a 75.4 µW budget. Accounting for sleep power, the active budget mandates a 0.046% duty cycle, capping models at ~77K MACs per inference to avoid early battery death.
+  realistic_solution: Derive the energy envelope first. A 220mAh, 3V CR2032 stores about 660mWh, so 1 year allows 75.4µW average. With 2µA sleep current consuming 6µW, active inference can use only 69.4µW on average. At 50mA active current and 3V, that is a 0.046% duty cycle, or about 0.46ms of active time per 1-second detection window. At 168MHz, the hard compute budget is about 77K cycles per second. If the model costs roughly 1 cycle per INT8 MAC after kernel overhead, budget about 40K-70K MACs per inference and no more than roughly 77K int8 weights for a one-MAC-per-weight model; the exact parameter limit must also fit the 512KB Flash and tensor arena. The key answer is that the latency budget is sub-millisecond at 1Hz unless sensing is duty-cycled differently.
   common_mistake: |
     **The Pitfall:** Designing for maximum accuracy without power constraints.
     **The Rationale:** Candidates build a complex model to hit 95% accuracy without verifying if running it continuously fits the tiny energy envelope.
@@ -20,16 +20,19 @@ details:
     **Assumptions & Constraints:**
     - CR2032: 220 mAh at 3V = 660 mWh. Target life: 8760 hours.
     - M4 active: 50 mA (150 mW). Sleep: 2 µA (6 µW).
+    - Detection requirement: evaluate at least once per 1-second window.
 
     **Calculations:**
     - Total power budget: 660 mWh / 8760 h = 75.4 µW.
     - Active budget: 75.4 - 6 = 69.4 µW.
     - Max duty cycle: 69.4 µW / 150,000 µW = 0.046%.
-    - At 1 Hz: 0.46 ms active. Cycles: 0.46 ms * 168M = 77K MACs.
-    - Adjusting to 0.1 Hz (10s polling): duty=0.005%, power=13.5 µW. 77K MACs per inference.
+    - At 1 Hz: 0.00046 * 1 s = 0.46 ms active time per inference.
+    - Cycle budget: 0.46 ms * 168 MHz = 77,000 cycles.
+    - Practical compute budget: about 40K-70K INT8 MACs after loop, memory, and sensor overhead.
+    - Parameter estimate: at one MAC per int8 weight, the energy-bound upper limit is roughly 77K parameters; Flash/SRAM may impose a lower limit depending on activations.
 
     **Conclusion & Interpretation:**
-    - **Result: 77K MACs at 0.1 Hz (Power-Bound)**. The system is extremely power-bound, requiring drastic duty-cycling to hit the 1-year battery constraint.
+    - **Result: 75.4 µW average, 0.046% duty cycle, ~0.46 ms latency budget at 1 Hz, and roughly 40K-70K practical MACs per inference (Power-Bound)**. A larger model needs a lower sensing rate, a larger battery, or a different wake strategy.
 status: published
 provenance: imported
 requires_explanation: true

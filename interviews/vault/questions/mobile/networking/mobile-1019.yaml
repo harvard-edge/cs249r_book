@@ -11,7 +11,7 @@ title: 'Network Bandwidth Bottlenecks: Specify QoS Framework for Multi-Model Mob
 scenario: An Android device runs up to 5 simultaneous ML models with different priorities. A QoS framework is needed with defined priority tiers, bandwidth allocation, preemption policy, and degraded-mode fallback to handle dynamic contention.
 question: How would you specify a complete QoS framework to manage 77 GB/s bandwidth across 5 simultaneous ML models?
 details:
-  realistic_solution: 'Define rigid QoS bands: P1=Safety/Control (10GB/s reserved strictly). P2=User-interactive LLM (Target >60GB/s, preemptible only by P1). P3=Display compositing (5GB/s reserved). P4=Background updates (12GB/s max). Implement a dynamic preemption governor: P2 automatically preempts P4 to 0 GB/s when the LLM decode ring buffer is active, honoring the 77GB/s ceiling.'
+  realistic_solution: 'Define five explicit classes because the device can run five models at once: P0 safety/perception reserves 10 GB/s and is never preempted; P1 interactive LLM reserves 62 GB/s while decoding; P2 camera/vision reserves 3 GB/s; P3 always-on ASR reserves 0.5 GB/s; P4 background personalization/update jobs are capped at 1.5 GB/s and are fully preemptible. This sums to 77 GB/s in LLM-active mode. In normal mode, unused P1 bandwidth can be borrowed by P4. Overflow policy: if measured demand exceeds 77 GB/s, reclaim borrowed bandwidth first, then pause P4, then degrade P2 frame rate or resolution, while P0 and the minimum P1 reservation remain protected. In degraded mode, the LLM can shorten context or switch to a smaller model before violating its TPOT SLA.'
   common_mistake: |
     **The Pitfall:** Defining abstract QoS priorities (High/Medium/Low) without hard byte-level bandwidth limits or sum-total overflow handling.
     **The Rationale:** Assuming standard Linux process schedulers effectively govern memory bus access, which they do not.
@@ -19,18 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - System Bandwidth Limit: 77 GB/s.
-    - Static Reservations: P1 (Safety): 10 GB/s. P3 (Display): 5 GB/s. P4 (Background): 12 GB/s.
-    - Target P2 (LLM Decode): Requires <25 ms Time-Per-Output-Token (TPOT) for a 1.5 GB model.
+    - Five model classes: P0 safety/perception, P1 LLM, P2 camera/vision, P3 ASR, P4 background.
+    - Simplified bandwidth-bound approximation: a 1.5 GB LLM weight stream per output token.
+    - Target P1 LLM Decode: <25 ms Time-Per-Output-Token (TPOT).
 
     **Calculations:**
-    - Default P2 allocation: 77 - 10 - 5 - 12 = 50 GB/s.
-    - Default P2 TPOT: 1.5 GB / 50 GB/s = 30 ms (Violates SLA).
-    - Preempting P4 reallocates 12 GB/s to P2. New P2 = 62 GB/s.
-    - New P2 TPOT: 1.5 GB / 62 GB/s = 24.19 ms.
-    - Total Verification: 10 (P1) + 62 (P2) + 5 (P3) + 0 (P4) = 77 GB/s.
+    - Required LLM bandwidth for 25ms TPOT: 1.5GB / 0.025s = 60 GB/s.
+    - Active-mode reservations: P0 10 + P1 62 + P2 3 + P3 0.5 + P4 1.5 = 77 GB/s.
+    - P1 TPOT at 62 GB/s: 1.5GB / 62GB/s = 0.02419s = 24.19 ms.
+    - If P4 borrowed 12 GB/s during idle mode, reclaiming it before LLM decode prevents oversubscription.
 
     **Conclusion & Interpretation:**
-    - **Result: 24.19 ms (Bandwidth-Bound)**. Dynamically preempting the P4 background task guarantees the LLM hits its strict 25ms SLA without breaching the system's 77 GB/s hardware ceiling.
+    - **Result: 24.19 ms in a simplified bandwidth-bound model.** The five-tier policy fits the 77 GB/s ceiling, protects safety and interactive work, and defines degraded modes for background and vision tasks before the LLM SLA is missed.
 status: published
 provenance: imported
 requires_explanation: true

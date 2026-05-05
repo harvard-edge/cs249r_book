@@ -9,7 +9,7 @@ bloom_level: evaluate
 phase: both
 title: MoE Router Overhead in FP8 Inference
 scenario: You are serving a 140B MoE model. The entire model (weights and activations) is quantized to FP8 E4M3. However, because MoE router logits overflow the E4M3 range, the architecture requires casting activations to E5M2 just for the router, then back to E4M3. This casting introduces a 15ms latency penalty per generated token.
-question: "How would you eliminate the 15ms/token router casting penalty while preventing FP8 E4M3 router overflow?"
+question: How would you eliminate the 15ms/token router casting penalty while preventing FP8 E4M3 router overflow?
 details:
   realistic_solution: |
     Optimizing the cast is the wrong architectural approach because the router computation itself is purely compute-bound (a tiny matrix multiplication compared to the massive expert layers). The memory bandwidth saved by keeping the router inputs in FP8 is negligible, but the latency cost of dispatching casting kernels is high. The correct architecture is to keep the router inputs, weights, and computation entirely in higher precision (BF16 or FP16). By bypassing FP8 entirely for the routing mechanism, you eliminate the casting overhead, prevent numeric overflow, and incur almost zero memory penalty since the router parameters represent <0.1% of the model.
@@ -21,14 +21,18 @@ details:
     **Assumptions & Constraints:**
     - 140B MoE model, 8 experts, hidden_dim = 8192, 32 layers.
     - Casting kernel launch overhead is ~0.2ms per kernel.
+    - The observed 15ms/token penalty includes launch overhead plus small device-side conversion and synchronization costs.
 
     **Calculations:**
     - Router matrix: 8192 x 8 = 65,536 weights.
     - Memory in FP8: 65KB. Memory in BF16: 131KB (negligible difference).
+    - Extra BF16 router memory across 32 layers = 32 x (131KB - 65KB) = ~2.1MB.
+    - Compared with 140B FP8 weights (~140GB), 2.1MB / 140GB is about 0.0015%.
     - Launching 2 casting kernels (upcast, downcast) across 32 layers: 32 x 2 x 0.2ms = 12.8ms.
+    - The remaining observed penalty is about 15.0ms - 12.8ms = 2.2ms for conversion work, scheduling gaps, and synchronization.
 
     **Conclusion & Interpretation:**
-    - **Result: Kernel-Launch-Bound**. Keeping the router in BF16 bypasses 12.8ms of pure kernel launch overhead with almost zero memory penalty.
+    - **Result: Mostly Kernel-Launch-Bound**. Keeping the router in BF16 bypasses the dominant 12.8ms launch component and the rest of the 15ms cast path, with almost zero memory penalty.
 status: published
 provenance: imported
 requires_explanation: true
@@ -47,6 +51,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- inference
-- fp8
-- moe
+  - inference
+  - fp8
+  - moe

@@ -11,7 +11,7 @@ title: Sizing a Distilled Keyword Spotting Model for nRF5340
 scenario: We are deploying a continuous keyword spotting model on a Nordic nRF5340, leveraging its 128 MHz app core for inference while the 64 MHz net core handles BLE 5.3 communications to keep the system near its ~5mA active power target. The baseline teacher model achieves high accuracy but requires 4MB of Flash and 1MB of SRAM, vastly exceeding the device's 1MB Flash and 256KB SRAM. We are using knowledge distillation to train a highly optimized student model.
 question: How would you evaluate the strict platform constraints and size the student model's parameters and peak activations concretely?
 details:
-  realistic_solution: A robust solution reserves sufficient Flash and SRAM for the BLE stack and OS components before sizing the neural network. The candidate should propose a student model architecture designed to fit the remaining memory budget, relying on INT8 quantization to halve the distilled model's footprint. They must structure the network such that the largest single layer's input and output feature maps do not exceed the restricted SRAM peak memory arena.
+  realistic_solution: A robust solution subtracts the app-core and net-core reservations before choosing the student architecture. With about 350 KB of flash reserved for Zephyr, BLE support, IPC, and application code, the INT8 student has roughly 674 KB for weights and metadata. With about 96 KB of SRAM reserved for RTOS, BLE IPC, stacks, audio buffers, and application state, the TFLite Micro arena has roughly 160 KB. The candidate should size parameters as parameter_count times bytes per parameter, then size peak activations from the largest live input/output tensors and scratch buffers in the operator schedule. INT8 quantization gives 1 byte per weight and activation, but it does not automatically solve peak activation memory.
   common_mistake: |
     **The Pitfall:** Sizing the neural network to consume the entire 1MB Flash and 256KB SRAM.
     **The Rationale:** Candidates forget to subtract the memory overhead of the RTOS, the BLE 5.3 stack, and application state.
@@ -22,12 +22,15 @@ details:
     - Overhead (OS/BLE): ~350 KB Flash, ~96 KB SRAM.
 
     **Calculations:**
+    - Available Flash for student weights/metadata: 1024 - 350 = 674 KB.
     - Available SRAM: 256 - 96 = 160 KB.
-    - Activation Example (32x32x64 INT8): 32 * 32 * 64 = 64 KB.
-    - Peak SRAM Usage: 64 KB (input) + 64 KB (output) = 128 KB.
+    - Parameter cap example: 600k INT8 weights ≈ 600 KB, leaving about 74 KB for metadata and alignment.
+    - Activation example: 32 * 32 * 64 INT8 = 65,536 bytes = 64 KB.
+    - If the schedule must keep a 64 KB input tile, a 48 KB output tile, and 16 KB scratch live together, peak arena = 128 KB.
+    - SRAM margin: 160 KB - 128 KB = 32 KB.
 
     **Conclusion & Interpretation:**
-    - **Result: 128 KB Peak SRAM (Memory-Bound).** Network sizing must be derived after rigidly allocating the networking stack overheads.
+    - **Result: about 674 KB Flash for INT8 parameters and 160 KB SRAM for the arena.** A student near 600k parameters with a 128 KB peak activation schedule fits this example budget, but a wider layer that pushes live tensors above 160 KB fails even if the weights fit flash.
 status: published
 provenance: imported
 requires_explanation: false

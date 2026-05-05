@@ -11,7 +11,8 @@ title: The Bi-Modal GPU Dilemma
 scenario: 'You are the founding ML Systems Engineer at a startup that just secured a single, precious Blackwell B200 GPU. To maximize ROI, leadership wants to launch two products simultaneously: a background batch processing pipeline and a low-latency chatbot using a 70B parameter model.'
 question: How would you serve both products on a single B200 without violating SLAs or thrashing GPU memory?
 details:
-  realistic_solution: The correct approach is a unified, symbiotic architecture where the models assist each other, rather than competing for resources.
+  realistic_solution: |
+    Do not run two independently loaded 70B services on the B200. Keep one resident serving stack on the GPU and make the chatbot the priority workload. Load the 70B model once, preferably weight-only quantized to 8-bit or 4-bit if quality allows, reserve a fixed KV-cache budget for interactive requests, and run the server with priority continuous batching so chatbot prefills and decode steps can preempt background work at token boundaries. The batch product should use the same resident model through a low-priority queue with capped batch size, capped context length, and admission control; it consumes only slack GPU time and is paused or drained when chatbot TTFT or TPOT approaches the SLA. If the batch job uses a different large model or requires long contexts that would evict chatbot KV cache, place it off-GPU, on a smaller distilled/quantized model, or on rented burst capacity instead of swapping models on the B200. The key mechanism is isolation by memory reservation and scheduler priority, not CUDA time-slicing that repeatedly reloads weights.
   common_mistake: |
     **The Pitfall:** Using time-slicing or CUDA MPS to rapidly swap models.
     **The Rationale:** Standard resource schedulers multiplex smaller workloads easily.

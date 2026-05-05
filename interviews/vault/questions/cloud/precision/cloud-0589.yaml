@@ -11,7 +11,7 @@ title: The Mixture-of-Experts Quantization Collapse
 scenario: You are responsible for a fleet of Mixtral-class 8x22B Mixture-of-Experts (MoE) models. The total model has ~141B parameters. To reduce serving cost, your team applied standard post-training INT8 quantization to the entire model. While this successfully reduced the memory footprint from ~282GB to ~141GB, allowing it to fit on fewer GPUs, downstream quality metrics plummeted by over 50%.
 question: How do you design a quantization strategy that works, and what specific architectural failure explains the initial collapse?
 details:
-  realistic_solution: 'The core insight is that not all parameters are created equal, especially in an MoE architecture. The catastrophic failure is caused by quantizing the **gating network''s logits**. This tiny part of the model determines which experts are routed to for each token. Quantizing them to INT8 collapses their expressive power, leading to poor routing decisions. The total model has ~141B parameters. In FP16 this requires ~282 GB for weights alone — needing 5 H100s to serve with KV cache. The initial INT8 quantization reduced this to ~141 GB, fitting on 2-3 H100s, but destroyed routing quality. The fix is a mixed-precision strategy: keep the gating network and attention layers in FP16 while quantizing only the expert FFN weights to INT8. This results in ~146 GB for weights, fitting comfortably on 3 H100s (a 40% cost reduction from 5 GPUs) without degrading quality.'
+  realistic_solution: 'The core insight is that not all parameters are created equal, especially in an MoE architecture. The catastrophic failure is caused by quantizing the **gating network''s logits**. This tiny part of the model determines which experts are routed to for each token. Quantizing them to INT8 collapses their expressive power, leading to poor routing decisions. The total model has ~141B parameters. In FP16 this requires ~282 GB for weights alone, needing roughly 5 H100 80GB GPUs once serving overhead is included. The initial INT8 quantization reduced this to ~141 GB, fitting on 2-3 H100s, but destroyed routing quality. The fix is a mixed-precision strategy: keep the gating network and attention layers in FP16 while quantizing only the expert FFN weights to INT8. This results in ~146 GB for weights; on 3 H100 80GB GPUs that leaves about 94 GB for KV cache, activations, and runtime overhead, so the 5-to-3 GPU reduction is the defensible cost claim.'
   common_mistake: |
     **The Pitfall:** Suggesting Quantization-Aware Training (QAT) to fix the issue.
     **The Rationale:** Engineers default to QAT as a universal fix for quantization degradation, ignoring the underlying architectural sensitivity of MoE routers.
@@ -19,15 +19,18 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Total Model: 141B params.
-       - FP16 requires ~282 GB.
+       - H100 memory assumption: 80 GB per GPU.
+       - FP16 weights require ~282 GB before KV cache and runtime overhead.
        - Target is memory footprint reduction without quality degradation.
     2. **Calculations:**
        - Naive INT8 Quantization: 141 GB total (destroys gating precision).
        - Mixed-Precision Fix:
-         - Gating Networks + Attention in FP16: ~10 GB.
+         - Gating Networks + Attention in FP16: ~10 GB estimate.
          - Expert FFN Weights (~136B params) in INT8: ~136 GB.
        - Total Mixed Memory: 10 GB + 136 GB = 146 GB.
-    3. **Conclusion & Interpretation:** **Result: Memory-Optimized.** Maintaining critical parameters in FP16 slightly increases footprint to 146 GB but completely preserves routing quality, yielding a 40% cost reduction.
+       - 3 × 80 GB H100 = 240 GB, leaving ~94 GB for KV cache, activations, communication buffers, and allocator overhead.
+       - 5 × 80 GB H100 = 400 GB for the FP16 deployment class; 3/5 GPUs = 60% of the original count.
+    3. **Conclusion & Interpretation:** **Result: Memory-Optimized.** Maintaining critical parameters in FP16 slightly increases the INT8 footprint to ~146 GB but preserves routing quality and supports a 3-H100 deployment under the stated overhead budget, yielding a 40% GPU-count reduction from a 5-H100 FP16 serving footprint.
 status: published
 provenance: imported
 requires_explanation: true

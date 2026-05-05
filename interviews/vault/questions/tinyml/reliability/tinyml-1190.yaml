@@ -11,24 +11,28 @@ title: Asymmetric Dual-Model Degradation on ESP32-S3
 scenario: You are designing an always-on acoustic anomaly detection system for an industrial sensor using an ESP32-S3. Under normal conditions, the system streams a 3 MB INT8 CNN from PSRAM to classify faults. However, when the battery drops below 10% or the PSRAM interface experiences thermal throttling, the system must shed power while maintaining fail-operational status.
 question: How should ESP32-S3 degrade from a PSRAM-streamed CNN to an SRAM-resident anomaly model under low battery or PSRAM throttling?
 details:
-  realistic_solution: Architect a hard fallback regime utilizing an asymmetric dual-model strategy. Pin a tiny, sub-100 KB temporal convolutional network (TCN) permanently in the 512 KB internal SRAM alongside the OS kernel. During deep degradation, forcibly power-collapse the PSRAM controller and halt the secondary core, routing all continuous telemetry strictly through the sub-100 KB SRAM gatekeeper to preserve zero-cost QoS baseline monitoring.
+  realistic_solution: |
+    Keep a small anomaly detector permanently resident in internal SRAM with its activation arena and thresholds. Under normal conditions, run the PSRAM-streamed CNN for detailed classification. If battery drops below 10%, PSRAM latency/error counters exceed a health threshold, or thermal throttling is detected, atomically switch the scheduler to the SRAM detector, stop PSRAM streaming, reduce classification detail to anomaly/no-anomaly, and optionally lower the sampling or inference rate to preserve fail-operational monitoring. Recovery should require hysteresis and a successful PSRAM self-test before returning to the full CNN.
   common_mistake: |
-    **The Pitfall:** Attempting to dynamically page a fallback model from cold non-volatile Flash into SRAM strictly upon hitting a low-battery state.
-    **The Rationale:** Candidates conventionally assume that "lazy loading" from Flash on demand provides elegant memory efficiency.
-    **The Consequence:** Pulling megabytes from Flash generates a monstrous I/O energy spike, triggering battery brownout voltage drops precisely when the system is weakest.
+    **The Pitfall:** Attempting to dynamically page a fallback model from Flash or continuing to stream the large PSRAM CNN during low-battery or thermal events.
+    **The Rationale:** Candidates assume lazy loading or cache behavior will hide the transition cost, while ignoring PSRAM power, bandwidth, and throttling failure modes.
+    **The Consequence:** The system can brown out, stall on PSRAM, or lose fail-operational coverage exactly when it should degrade gracefully.
   napkin_math: |
     **Assumptions & Constraints:**
     - ESP32-S3 @ 240 MHz. SRAM: 512 KB.
     - OS/Network stack: ~200 KB.
-    - Fallback Model: 2M MAC inference, 100 KB weights + 100 KB arena.
+    - Fallback Model: 100 KB weights + 100 KB arena.
+    - Normal CNN: 3 MB streamed from PSRAM.
 
     **Calculations:**
     - Usable SRAM = 512 KB - 200 KB = 312 KB.
     - Fallback Footprint = 200 KB. (200 KB < 312 KB).
-    - Compute Execution = 2M MACs / (240 MHz * 1 MAC/cycle) = ~8.33 ms.
+    - SRAM headroom after fallback = 312 KB - 200 KB = 112 KB for stacks, queues, thresholds, and DMA buffers.
+    - Keeping the normal CNN resident internally is impossible: 3 MB > 312 KB usable SRAM.
+    - Degraded mode can stop the 3 MB PSRAM stream and run only the resident fallback; if power remains tight, halve the inference rate or sampling window while preserving anomaly coverage.
 
     **Conclusion & Interpretation:**
-    - **Result: 8.33 ms (Verified Graceful Shedding)**. The model executes smoothly inside native SRAM, consuming just 8.33 ms and completely severing the PSRAM power drain.
+    - **Result: Fallback fits with 112 KB SRAM headroom.** The degradation strategy is supported by memory residency and PSRAM avoidance, not by a single MAC timing number.
 status: published
 provenance: imported
 requires_explanation: true

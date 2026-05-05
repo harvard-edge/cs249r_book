@@ -11,7 +11,7 @@ title: Edge TPU Spatial Tiling Overhead
 scenario: You are deploying a U-Net based super-resolution model on a Google Edge TPU (8MB SRAM, USB 3.0 interface). To fit the 1080p input image, the host CPU spatially tiles the image into 16x16 overlapping patches and sends them to the TPU sequentially. The system targets 30 FPS but only achieves 4 FPS. USB bandwidth monitoring shows 1.8 GB/s of sustained bidirectional transfer.
 question: What is causing the 4 FPS bottleneck, and how would you change tiling and execution to reach 30 FPS?
 details:
-  realistic_solution: The severe bottleneck is the redundant PCIe/USB host-to-device data transfer caused by naive spatial tiling. Because convolutions have receptive fields, splitting an image into spatial tiles requires overlapping 'halos' to prevent edge artifacts. In a deep U-Net, this halo grows exponentially with depth. If the host tiles the input, it must transmit the massive overlapping regions repeatedly, saturating the USB 3.0 bandwidth. The co-design solution is 'Fused Layer Execution' or 'Depth-First Scheduling' inside the compiler. Instead of host-side tiling, send the entire image (or large chunks) to the TPU's DRAM. The TPU compiler should be configured to tile the computation internally inside the 8MB SRAM, calculating a tile all the way through the depth of the network before evicting. This keeps the intermediate halo exchanges entirely within the high-bandwidth on-chip SRAM, drastically reducing USB I/O.
+  realistic_solution: The severe bottleneck is redundant USB host-to-accelerator transfer caused by naive 16x16 spatial tiling. Convolutions require overlapping halo pixels around each tile; in a U-Net the required halo grows with the network receptive field and skip connections, not exponentially, so very small tiles can spend far more bandwidth on overlap than useful pixels. The fix is to avoid host-side micro-tiling and instead compile a supported, fully quantized model or supported subgraphs for the Edge TPU using larger tiles or full-frame staging on the host. Let the Edge TPU compiler schedule supported operators and SRAM tiling internally, while keeping unsupported U-Net operators on the host or redesigning the model to fit the Edge TPU op set. This reduces repeated USB traffic without implying arbitrary full-network fusion or large on-device DRAM.
   common_mistake: |
     **The Pitfall:** Compressing the image data over the USB bus using JPEG to save bandwidth.
     **The Rationale:** Candidates see a bandwidth bottleneck and immediately apply standard image compression techniques from general networking.
@@ -19,19 +19,20 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - 1080p image = 1920 x 1080 x 3 = ~6.22 MB.
-       - USB 3.0 practical bandwidth: ~400 MB/s.
-       - Tiling redundancy: 4x area redundancy.
+       - Measured sustained bidirectional USB traffic: 1.8 GB/s.
+       - Observed throughput: 4 FPS.
     2. **Calculations:**
-       - Tiled frame size = 6.22 MB * 4 = 24.88 MB.
-       - Bidirectional data per frame = 24.88 MB (in) + 24.88 MB (out) = 49.76 MB.
-       - Max framerate = 400 MB/s / 49.76 MB/frame = 8 FPS (or ~4 FPS under heavy contention).
+       - Effective USB traffic per frame = 1.8 GB/s / 4 FPS = 0.45 GB/frame = 450 MB/frame.
+       - Useful full-frame input+output traffic is only about 6.22 MB in + 6.22 MB out = 12.44 MB/frame before intermediate tensors.
+       - Implied traffic amplification = 450 MB / 12.44 MB = ~36x useful image I/O, consistent with tiny overlapping tiles plus host round-trips for intermediate tensors.
+       - To reach 30 FPS at the same measured bus rate, USB traffic must fall below 1.8 GB/s / 30 = 60 MB/frame.
     3. **Conclusion & Interpretation:**
-       - **Result: 49.76 MB per frame.** The tiling strategy saturates the bus, making the system critically **I/O-Bandwidth-Bound**.
+       - **Result: ~450 MB per frame observed.** The tiling strategy amplifies USB traffic far beyond useful image bytes, making the system critically **I/O-Bandwidth-Bound**. Larger host tiles plus compiler-managed SRAM tiling for supported Edge TPU subgraphs must reduce traffic to under ~60 MB/frame for 30 FPS.
   options:
-  - The severe bottleneck is the redundant PCIe/USB host-to-device data transfer caused by naive spatial tiling. Because convolutions have receptive fields, splitting an image into spatial tiles requires overlapping 'halos' to prevent edge artifacts. In a deep U-Net, this halo grows exponentially with depth.
-  - The system should be redesigned to offload inference to the cloud, as edge hardware fundamentally cannot meet the latency and accuracy requirements.
-  - Profiling overhead is masking the true performance; disabling all instrumentation will reveal that the system is already meeting targets.
-  - Compressing the image data over the USB bus using JPEG, which introduces latency and compression artifacts ruining the super-resolution.
+    - The severe bottleneck is redundant USB host-to-accelerator transfer from naive spatial tiling; U-Net receptive fields require overlapping halos around each tile, so tiny host tiles repeatedly resend the same pixels and intermediate boundaries.
+    - The system should be redesigned to offload inference to the cloud, as edge hardware fundamentally cannot meet the latency and accuracy requirements.
+    - Profiling overhead is masking the true performance; disabling all instrumentation will reveal that the system is already meeting targets.
+    - Compressing the image data over the USB bus using JPEG, which introduces latency and compression artifacts ruining the super-resolution.
   correct_index: 0
 status: published
 provenance: imported
@@ -42,7 +43,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- '`reasoning_competency` and `reasoning_mode` are set to `None`, which limits proper classification of the question''s learning objectives.'
+  - '`reasoning_competency` and `reasoning_mode` are set to `None`, which limits proper classification of the question''s learning objectives.'
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

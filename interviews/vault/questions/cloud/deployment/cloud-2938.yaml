@@ -7,24 +7,25 @@ topic: container-orchestration
 competency_area: deployment
 bloom_level: analyze
 phase: inference
-title: Analyzing RBAC and Security Context for Multi-Tenant GPU Namespaces
-scenario: "A regulated enterprise runs ML workloads on a shared Kubernetes cluster. A security audit finds that researchers in Namespace A can inadvertently see GPU metrics from Namespace B via the cluster-wide DCGM Exporter DaemonSet, which scrapes all GPUs on every node."
-question: "What is the blast radius of the cluster-wide DCGM Exporter, and how would you design RBAC and GPU metric isolation between namespaces?"
+title: Analyzing DCGM Exporter Metric Blast Radius in Multi-Tenant GPU Clusters
+scenario: A regulated enterprise runs ML workloads on a shared Kubernetes cluster. A security audit finds that researchers in Namespace A can inadvertently see GPU metrics from Namespace B via the cluster-wide DCGM Exporter DaemonSet, which scrapes all GPUs on every node.
+question: What is the blast radius of the cluster-wide DCGM Exporter, and how would you design RBAC and GPU metric isolation between namespaces?
 details:
-  realistic_solution: "DCGM Exporter exposes metrics at node level without namespace awareness. Isolation requires: (1) Deploy per-namespace metric proxies that only scrape pods within their namespace. (2) Use RBAC to restrict metrics.k8s.io endpoint access. (3) For GPU-level isolation, use MIG on H100 \u2014 each team gets a named MIG instance, and DCGM can be configured to report per-MIG metrics. (4) PodSecurityAdmission to block privileged containers."
+  realistic_solution: |
+    The blast radius is cluster-wide for every metric exposed by the shared DCGM Exporter endpoint: a tenant that can reach or query that scrape target can infer GPU utilization, memory, errors, power, and MIG activity for all nodes, not just its namespace. RBAC on `metrics.k8s.io` does not protect these Prometheus/DCGM series. Isolation should be enforced at the metrics plane: restrict NetworkPolicy and Service exposure for the exporter, put Prometheus or the query API behind tenant-aware authorization, and use Prometheus relabeling/recording rules so tenants only see allowed node, GPU, or MIG labels. For stronger isolation, run separate DCGM exporter and Prometheus stacks per tenant node pool, or dedicate MIG/node pools per namespace and scrape only those targets. Keep PodSecurityAdmission and least-privilege ServiceAccounts so tenants cannot deploy privileged scrapers, but treat RBAC as protection for Kubernetes objects, not as the primary control for DCGM metric series.
   common_mistake: |
     **The Pitfall:** Attempting to solve metric isolation via NetworkPolicy alone or trying to namespace-scope a DaemonSet.
     **The Rationale:** Engineers don't realize DaemonSets are inherently node-scoped and NetworkPolicies don't restrict Kubernetes API RBAC access.
     **The Consequence:** A false sense of security where tenants can still easily scrape the central /metrics endpoint to snoop on competitors' hardware utilization.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - 25 nodes * 8 GPUs = 200 GPUs.
-       - MIG Partitioning: 7 instances per GPU = 1,400 slices.
+       - 25 nodes * 8 GPUs = 200 physical GPUs exposed by the cluster-wide exporter.
+       - DCGM emits roughly 150 useful GPU/MIG health and utilization series per visible device or slice, depending on configuration.
     2. **Calculations:**
-       - Metric Cardinality: DCGM exports ~150 metrics per slice.
-       - Total Series: 150 * 1,400 = 210,000 metrics scraped cluster-wide.
+       - Without MIG-level partition metrics: 200 GPUs * 150 series/GPU = about 30,000 cluster-wide series visible to any tenant with access to the shared scrape/query path.
+       - If all GPUs are split into 7 MIG instances and the exporter emits per-MIG series: 200 * 7 * 150 = about 210,000 per-slice series. That is a worst-case cardinality estimate, not the baseline blast radius.
     3. **Conclusion & Interpretation:**
-       **The lack of isolation creates a massive 210,000-series blast radius. Result: Security-Isolation-Bound.**
+       **The blast radius is all 25 nodes and 200 GPUs, with tens of thousands of cross-tenant series in the baseline and more if per-MIG metrics are enabled. Result: Security-Isolation-Bound.**
 status: published
 provenance: imported
 requires_explanation: false

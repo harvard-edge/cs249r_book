@@ -12,7 +12,7 @@ scenario: 'A shared Jetson Orin (275 TOPS INT8, 60W) serves 3 tenants: Tenant A 
 question: What priority levels and queueing policy should the shared Jetson Orin use for tenants A, B, and C, and do their P99 SLOs hold?
 details:
   realistic_solution: |
-    Three-level priority: A=high, B=medium, C=low. Preemptive priority scheduling. Model A must be optimized to < 2ms service to meet the P99 SLO.
+    Use three-level preemptive priority scheduling with A=high, B=medium, and C=low/background. Tenant A should run in a reserved preemptive lane so it is not blocked behind B or C. Under the stated service times, A's P99 is about 6.3ms, so A holds its 10ms SLO. B also holds its 100ms SLO under the A+B priority load, with an approximate P99 around 45ms. C does not hold as an admitted 5 req/s tenant because total utilization is exactly 1.0; background work must be throttled below 5 req/s, made best-effort, or moved off the shared Orin.
   common_mistake: |
     **The Pitfall:** Using a single FIFO queue for all tenants.
     **The Rationale:** Defaulting to simple server queue logic without accounting for strict safety-critical latency limits.
@@ -21,16 +21,18 @@ details:
     **Assumptions & Constraints:**
     - Arrival Rates: A = 20/s, B = 50/s, C = 5/s.
     - Service Times: A = 5ms, B = 8ms, C = 100ms.
-    - SLO for A: P99 < 10ms.
+    - SLOs: A P99 < 10ms, B P99 < 100ms, C P99 < 5000ms.
 
     **Calculations:**
-    - Service Rates (mu): A = 200/s, B = 125/s, C = 10/s.
-    - Utilization (rho): A = 0.1, B = 0.4, C = 0.5. Total = 1.0 (At capacity!). Reduce C to 4/s -> rho_C = 0.4.
-    - Priority Queue Wq_A: rho_A / (mu_A * (1 - rho_A)) = 0.1 / (200 * 0.9) = 0.556 ms.
-    - P99_A: 4.6 * (0.556 + 5) ms = 25.6 ms.
+    - Utilization: ρ_A = 20*0.005 = 0.10, ρ_B = 50*0.008 = 0.40, ρ_C = 5*0.100 = 0.50. Total ρ = 1.00.
+    - Highest-priority A, M/D/1 approximation: Wq_A = λ_A*S_A^2 / (2*(1-ρ_A)) = 20*0.005^2 / (2*0.9) = 0.278 ms.
+    - P99_A approximation: S_A + ln(100)*Wq_A = 5 + 4.605*0.278 = 6.3 ms, so A holds.
+    - For B, approximate the A+B priority class as ρ_AB=0.50 with dominant B service: Wq_B ≈ 50*0.008^2 / (2*(1-0.50)) = 3.2 ms.
+    - P99_B approximation: 8 + 4.605*(3.2 + 0.278) = 24.0 ms, so B holds with margin.
+    - Tenant C sees the remaining background capacity. Because total ρ = 1.00, C has no stable spare capacity and its P99 is unbounded unless throttled or offloaded.
 
     **Conclusion & Interpretation:**
-    - **Result: 25.6 ms (Compute-Bound SLA Violation)**. 25.6 ms violates the 10 ms SLO. Tenant A's model must be optimized to < 2 ms service time to meet the SLA.
+    - **Result: A and B Hold, C Fails Without Throttling.** Preemptive priority protects A and B, but the admitted C load pushes total utilization to 100%, so C must be treated as best-effort or rate-limited.
 status: published
 provenance: imported
 requires_explanation: true

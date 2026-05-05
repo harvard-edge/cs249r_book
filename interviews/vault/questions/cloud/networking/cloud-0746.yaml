@@ -11,7 +11,7 @@ title: The Bisection Bandwidth Requirement
 scenario: 'You''re designing the network fabric for a 1,024-GPU training cluster to train a 70B parameter model. The target step time is 500ms with a sequence length of 2048, hidden size of 8192, micro-batch size of 4, and 16 micro-batches per step. The workload uses 3D parallelism: TP=8 (within node), PP=4 (across nodes), DP=32 (across nodes).'
 question: What minimum bisection bandwidth is needed to avoid communication bottlenecks, and is a fat-tree topology sufficient or optimal for this 1,024-GPU 3D-parallel workload?
 details:
-  realistic_solution: The minimum bisection bandwidth is ~1,497 GB/s, driven primarily by DP AllReduce traffic (1,085 GB/s) and PP activation/gradient communication (412 GB/s). TP is handled by intra-node NVLink and does not use the network fabric. A standard non-blocking fat-tree topology with 400 Gbps links (8 per node) provides well over this capacity (up to 25,600 GB/s) and IS sufficient. However, fat-tree may not be the most cost-effective choice because it treats all traffic identically. PP needs low-latency point-to-point paths (pipeline bubbles grow with hop count), while DP needs high bandwidth but tolerates latency. A rail-optimized or hybrid topology can reduce cost by ~30% while better matching these distinct traffic patterns.
+  realistic_solution: 'The workload-derived minimum bisection bandwidth is about 1.36 TB/s under a topology-aware placement: roughly 1.09 TB/s from DP AllReduce traffic plus about 0.27 TB/s from PP activation and gradient transfers across the busiest stage boundary. TP is inside each 8-GPU node over NVLink, so it should not drive the external fabric. A full non-blocking fat-tree with 400 Gbps links has far more aggregate bisection than this estimate and is sufficient for bandwidth, but it is not automatically optimal. PP traffic wants low-latency, predictable point-to-point paths, while DP wants high aggregate bandwidth and can often use rail or hierarchical layouts. A hybrid or rail-aware topology may be cheaper if placement keeps PP boundaries local and DP rings well aligned.'
   common_mistake: |
     **The Pitfall:** Treating all 3D parallelism traffic identically and just adding up per-GPU bandwidth.
     **The Rationale:** Designing the network solely for aggregate capacity without modeling the specific latency/bandwidth needs of TP, PP, and DP.
@@ -19,14 +19,18 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - 1024 GPUs, 128 nodes. 3D Parallelism: TP=8, PP=4, DP=32.
-       - PP Activations: 134 MB. DP parameters per PP stage: 17.5B (35 GB FP16).
+       - PP activation tensor per micro-batch crossing a stage boundary: 134 MB.
+       - DP parameters per PP stage: 17.5B parameters, sharded across TP=8.
        - Step time: 500ms. 16 micro-batches.
     2. **Calculations:**
-       - PP Bisection: ~48 cross-bisection boundaries. Each boundary = 16 * 134 MB * 2 / 0.5s = 8.58 GB/s. Total PP = 48 * 8.58 = 412 GB/s.
-       - DP Bisection: Ring AllReduce per GPU = 2 * (31/32) * (35GB / 8) = 8.48 GB in 500ms = 16.95 GB/s. Total DP = 32 rings * 2 links * 16.95 = 1,085 GB/s.
-       - Total Bisection: 412 + 1,085 = 1,497 GB/s.
+       - PP traffic per stage boundary per replica: 16 micro-batches * 134 MB * 2 forward/backward / 0.5s = 8.58 GB/s.
+       - With 32 DP replicas, the busiest PP bisection boundary is about 32 * 8.58 = 275 GB/s, assuming topology-aware placement does not cut all three PP boundaries at once.
+       - Per-GPU DP gradient shard for one stage/tensor rank: 17.5B * 2 bytes / TP=8 = 4.375 GB.
+       - Ring AllReduce per GPU: 2 * (31/32) * 4.375 GB = 8.48 GB per step = 16.95 GB/s.
+       - There are PP * TP = 4 * 8 = 32 independent DP groups. A bisection can carry two ring streams per group, so DP bisection ≈ 32 * 2 * 16.95 = 1,085 GB/s.
+       - Total modeled bisection: 275 + 1,085 ≈ 1,360 GB/s.
     3. **Conclusion & Interpretation:**
-       - **Result: 1,497 GB/s Minimum Bisection.** While a full fat-tree provides sufficient aggregate bandwidth (25,600 GB/s), a rail-optimized topology is required to satisfy DP's high-bandwidth needs and PP's low-latency point-to-point requirements efficiently.
+       - **Result: ~1.36 TB/s Minimum Bisection.** A full fat-tree is sufficient on aggregate bandwidth, but topology-aware placement or a hybrid design may be more cost-efficient for the distinct DP and PP traffic patterns.
 status: published
 provenance: imported
 requires_explanation: true

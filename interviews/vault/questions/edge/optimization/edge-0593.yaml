@@ -7,25 +7,27 @@ topic: graph-compilation
 competency_area: optimization
 bloom_level: evaluate
 phase: inference
-title: 'The Speculative Execution JIT Stall'
-scenario: 'You are the tech lead for the perception team on a new autonomous vehicle. The core of your system is a large Vision Transformer (ViT) that processes 1200x1200 images for object detection. It''s highly accurate but runs at 50ms on your automotive ECU (an NVIDIA Jetson AGX Orin), missing the hard 33ms real-time deadline.'
-question: 'Why would a drafter-verifier design that invokes the ViT only occasionally blow the 33ms deadline with 100-200ms latency spikes?'
+title: The Speculative Execution JIT Stall
+scenario: You are the tech lead for the perception team on a new autonomous vehicle. The core of your system is a large Vision Transformer (ViT) that processes 1200x1200 images for object detection. It's highly accurate but runs at 50ms on your automotive ECU (an NVIDIA Jetson AGX Orin), missing the hard 33ms real-time deadline.
+question: Why would a drafter-verifier design that invokes the ViT only occasionally blow the 33ms deadline with 100-200ms latency spikes?
 details:
-  realistic_solution: 'The root cause is a Just-in-Time (JIT) Compilation Stall. Edge inference runtimes like TensorRT perform aggressive, profile-guided kernel optimization and fusion for a given model. When the ViT runs on every frame, the runtime compiles and caches highly specialized CUDA kernels that are ''hot'' and ready. The ''drafter-verifier'' design makes the ViT''s execution sparse and intermittent. When the ViT is suddenly invoked after being dormant for hundreds of frames, the JIT runtime may treat it as a ''new'' workload. It has to re-select, re-load, and potentially re-compile or re-specialize the kernels. This compilation and kernel dispatch process itself can take 100-200ms on an embedded device.'
+  realistic_solution: The root cause is a Just-in-Time (JIT) Compilation Stall. Edge inference runtimes like TensorRT perform aggressive, profile-guided kernel optimization and fusion for a given model. When the ViT runs on every frame, the runtime compiles and caches highly specialized CUDA kernels that are 'hot' and ready. The 'drafter-verifier' design makes the ViT's execution sparse and intermittent. When the ViT is suddenly invoked after being dormant for hundreds of frames, the JIT runtime may treat it as a 'new' workload. It has to re-select, re-load, and potentially re-compile or re-specialize the kernels. This compilation and kernel dispatch process itself can take 100-200ms on an embedded device.
   common_mistake: |
     **The Pitfall:** Blaming data movement, cache pollution, or slow DRAM.
     **The Rationale:** Memory stalls are the typical answer for edge bottlenecks, but they only add a few milliseconds, not a catastrophic 150ms+ spike.
     **The Consequence:** Misdiagnosing the non-linear system failure and failing to disable the Just-In-Time (JIT) compilation optimizations causing the stall.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Memory read: 300MB / 204.8 GB/s = 1.46ms.
-    - Compute: 0.5 TFLOPS / 137 TFLOPS = 3.6ms.
-    - Expected total latency: ~5ms.
+    - The ViT normally runs in 50ms when its kernels and execution plan are already compiled and cached.
+    - The real-time budget is 33ms.
+    - Intermittent verifier calls may hit a cold or invalidated TensorRT/CUDA specialization path.
 
     **Calculations:**
-    - JIT compilation cost: ~40-50ms CPU time if dynamic inputs trigger recompilation.
+    - Warm ViT execution alone: ~50ms, already above the 33ms deadline.
+    - Cold specialization/reload cost: roughly 50-150ms on the CPU/runtime path.
+    - Intermittent invocation latency = 50ms warm execution + 50-150ms JIT/runtime stall = 100-200ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 45ms idle stall (Software/JIT-Bound)**. The GPU idles waiting for the compiler, missing the 33ms real-time deadline despite ample hardware capacity.
+    - **Result: 100-200ms latency spike (Software/JIT-Bound)**. The spike is a compilation or specialization stall layered on top of normal ViT inference, not a steady-state compute or DRAM throughput estimate.
 status: published
 provenance: imported

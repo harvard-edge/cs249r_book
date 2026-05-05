@@ -8,37 +8,32 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Implement depthwise separable conv for Cortex-M4 with CMSIS-NN
-scenario: 'You are deploying a 3-layer depthwise separable CNN on an STM32F4 (Cortex-M4, 168MHz, 256KB
-  SRAM) for keyword detection. The model has layers: depthwise 3x3 (16ch, 32x32 input), pointwise 1x1
-  (16->32ch), depthwise 3x3 (32ch, 16x16).'
-question: How should the three-layer depthwise separable CNN be implemented with CMSIS-NN and buffered
-  to fit STM32F4 SRAM?
+scenario: 'You are deploying a 3-layer depthwise separable CNN on an STM32F4 (Cortex-M4, 168MHz, 256KB SRAM) for keyword detection. The model has layers: depthwise 3x3 (16ch, 32x32 input, stride 1), pointwise 1x1 (16->32ch, stride 2, producing 16x16x32), depthwise 3x3 (32ch, 16x16 input, stride 1).'
+question: How should the three-layer depthwise separable CNN be implemented with CMSIS-NN and buffered to fit STM32F4 SRAM?
 details:
-  realistic_solution: 'CMSIS-NN functions: arm_depthwise_conv_s8() for depthwise, arm_convolve_1x1_s8_fast()
-    for pointwise 1x1. Buffer strategy: ping-pong buffers A and B. Layer 1: input from A, output to B.
-    Layer 2: input from B, output to A. Layer 3: input from A, output to B. Peak SRAM: max(|input| + |output|)
-    + scratch buffer. |A_0| = 16KB. |B_0| = 16KB. After pointwise: |A| = 32KB. After layer 3 depthwise:
-    |B| = 8KB. Peak is 48KB (B after layer 1 + A after layer 2) plus model weights.'
-  common_mistake: '**The Pitfall:** Allocating separate input and output buffers globally for every layer
-    simultaneously.
-
-    **The Rationale:** Candidates used to high-level frameworks (like Python/PyTorch) assume dynamic allocation
-    handles memory, rather than statically reusing memory buffers.
-
-    **The Consequence:** The model immediately runs out of SRAM (OOM) because all intermediate activations
-    are needlessly kept alive at once.
-
-    '
-  napkin_math: "1. **Assumptions & Constraints:**\n   - Architecture: 3-layer depthwise separable CNN.\n\
-    \   - Layer 1: Depthwise 3x3, 16ch, 32x32 input.\n   - Layer 2: Pointwise 1x1, 16->32ch.\n   - Layer\
-    \ 3: Depthwise 3x3, 32ch, 16x16 input (assumed stride 2 from prev).\n   - Memory Strategy: Ping-pong\
-    \ buffers A and B.\n2. **Calculations:**\n   - Buffer A (Layer 1 Input): 32 x 32 x 16 x 1B = 16 KB.\n\
-    \   - Buffer B (Layer 1 Output / L2 Input): 32 x 32 x 16 x 1B = 16 KB.\n   - Buffer A (Layer 2 Output\
-    \ / L3 Input): 32 x 32 x 32 x 1B = 32 KB.\n   - Buffer B (Layer 3 Output): 16 x 16 x 32 x 1B = 8 KB.\n\
-    \   - Peak Buffer Memory: Max simultaneous allocation (Layer 2 uses B for input and A for output)\
-    \ = 16 KB + 32 KB = 48 KB.\n   - Total Memory: 48 KB + Scratch/Weights (~5 KB) = 53 KB.\n3. **Conclusion\
-    \ & Interpretation:**\n   - **Result: Ping-pong buffering yields a 53 KB peak, fitting easily in 256\
-    \ KB.** **Result: Memory-Bound Optimization.**"
+  realistic_solution: 'Use int8 CMSIS-NN kernels that match the tensor layout, quantization parameters, stride, and padding: arm_depthwise_conv_s8() for the 3x3 depthwise layers and an optimized 1x1 s8 convolution path for the pointwise layer only if its fast-kernel preconditions are met. Use two statically allocated activation buffers and reuse them layer by layer: Layer 1 reads A and writes B; Layer 2 reads B and writes A; Layer 3 reads A and writes B. With the stated stride-2 pointwise layer, the live activation peak is Layer 1 input plus output: 16KB + 16KB = 32KB, before CMSIS-NN scratch and separate weight storage. The later layers use 16KB + 8KB and 8KB + 8KB, so the ping-pong plan easily fits within 256KB SRAM.'
+  common_mistake: |
+    **The Pitfall:** Allocating separate input and output buffers globally for every layer simultaneously.
+    **The Rationale:** Candidates used to high-level frameworks (like Python/PyTorch) assume dynamic allocation handles memory, rather than statically reusing memory buffers.
+    **The Consequence:** The model immediately runs out of SRAM (OOM) because all intermediate activations are needlessly kept alive at once.
+  napkin_math: |
+    1. **Assumptions & Constraints:**
+       - Architecture: 3-layer depthwise separable CNN.
+       - Layer 1: Depthwise 3x3, 16ch, 32x32 input, stride 1.
+       - Layer 2: Pointwise 1x1, 16->32ch, stride 2, producing 16x16x32.
+       - Layer 3: Depthwise 3x3, 32ch, 16x16 input, stride 1.
+       - Memory Strategy: Ping-pong buffers A and B.
+    2. **Calculations:**
+       - Buffer A (Layer 1 Input): 32 x 32 x 16 x 1B = 16 KB.
+       - Buffer B (Layer 1 Output / L2 Input): 32 x 32 x 16 x 1B = 16 KB.
+       - Buffer A (Layer 2 Output / L3 Input): 16 x 16 x 32 x 1B = 8 KB.
+       - Buffer B (Layer 3 Output): 16 x 16 x 32 x 1B = 8 KB.
+       - Layer 1 live buffers: 16 KB input + 16 KB output = 32 KB.
+       - Layer 2 live buffers: 16 KB input + 8 KB output = 24 KB.
+       - Layer 3 live buffers: 8 KB input + 8 KB output = 16 KB.
+       - Peak activation memory: max(32 KB, 24 KB, 16 KB) = 32 KB, plus CMSIS-NN scratch and separate weight storage.
+    3. **Conclusion & Interpretation:**
+       - **Result: Ping-pong buffering yields a 32 KB activation peak plus scratch and weights, fitting within 256 KB.** **Result: Memory-Bound Optimization.**
 status: published
 provenance: imported
 requires_explanation: true

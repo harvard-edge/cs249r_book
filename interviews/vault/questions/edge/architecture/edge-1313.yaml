@@ -7,29 +7,34 @@ topic: cnn-efficient-design
 competency_area: architecture
 bloom_level: evaluate
 phase: both
-title: Evaluating MobileNet vs ResNet on Hailo-8 Dataflow
-scenario: Your team is deploying an object detection model onto a spatial dataflow architecture with no local DRAM, meaning all intermediate activations must be efficiently routed through on-chip memory or streamed to/from host memory. You are evaluating a standard MobileNetV2 (heavy depthwise convolutions) versus a custom ResNet-50 variant optimized for INT8.
+title: Evaluating MobileNetV2 vs ResNet on Hailo-8 Dataflow
+scenario: Your team is deploying an object detection model onto a Hailo-8 class spatial dataflow accelerator with no external DRAM on the accelerator package. Intermediate activations and weights must be scheduled through the on-chip memory fabric, so layers with poor reuse can underutilize the compute array even when their total MAC count is small. You are evaluating a standard MobileNetV2 (heavy depthwise convolutions) versus a custom ResNet-50 variant optimized for INT8.
 question: Which architecture do you choose for this specific hardware, and how do the platform's memory characteristics drive your decision?
 details:
-  realistic_solution: 'Opt for the standard ResNet-50 variant. Stream-based dataflow architectures lack large local SRAM for deep intermediate caching. Depthwise convolutions suffer from abysmally low Arithmetic Intensity (AI), forcing constant tensor spilling over PCIe. Standard convolutions maximize spatial data reuse in the compute grid, maintaining high arithmetic intensity and preventing the host memory bandwidth from becoming an I/O bottleneck.'
+  realistic_solution: Prefer the custom INT8 ResNet-style variant if its layer shapes fit the compiler's on-chip scheduling model. On a spatial dataflow accelerator, standard 3x3 convolutions reuse each input activation across many output channels and reuse each weight across many spatial positions, which keeps the compute array fed from the on-chip fabric. MobileNetV2's depthwise layers have far fewer MACs, but each input channel is used only for its own channel, so arithmetic intensity is low and the layer can become limited by activation movement, buffering, and scheduling overhead. The choice should be verified with the Hailo compiler's per-layer utilization and memory-plan reports rather than by FLOP count alone.
   common_mistake: |
     **The Pitfall:** Assuming fewer FLOPs automatically translates to lower latency and power on dataflow hardware.
-    **The Rationale:** Depthwise convolutions are efficient on generic CPUs/GPUs but have low arithmetic intensity, creating severe bottlenecks on stream-based architectures.
-    **The Consequence:** The compute array starves for data, resulting in massive underutilization and missed real-time performance targets.
+    **The Rationale:** Depthwise convolutions reduce MACs, but they also reduce channel reuse and can expose activation movement, tiling, and scheduling overheads on a spatial fabric.
+    **The Consequence:** The compute array may run at low utilization even though the model appears cheap on a FLOP spreadsheet.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hardware: 26 TOPS, stream-based architecture.
-    - Standard 3x3 conv (64 in/out): 73,728 OPs, 128 bytes stream.
-    - Depthwise 3x3 conv: 18 OPs, 2 bytes stream.
+    - Compare one 112x112 feature map with 64 INT8 channels.
+    - Standard 3x3 conv: 64 input channels, 64 output channels.
+    - Depthwise 3x3 conv: 64 input channels, one filter per channel.
+    - Count 1 MAC as 2 operations.
 
     **Calculations:**
-    - Standard AI = 73,728 / 128 = 576 OPs/byte.
-    - Depthwise AI = 18 / 2 = 9 OPs/byte.
-    - Bandwidth for 26 TOPS (Standard) = 26e12 / 576 ≈ 45.1 GB/s.
-    - Bandwidth for 26 TOPS (Depthwise) = 26e12 / 9 ≈ 2.89 TB/s.
+    - Input activations: 112 * 112 * 64 = 802,816 bytes.
+    - Output activations: 112 * 112 * 64 = 802,816 bytes.
+    - Standard weights: 3 * 3 * 64 * 64 = 36,864 bytes.
+    - Standard compute: 112 * 112 * 64 * 64 * 3 * 3 * 2 = 924,844,032 ops.
+    - Standard arithmetic intensity: 924.8M ops / (802.8KB + 802.8KB + 36.9KB) ≈ 563 ops/byte.
+    - Depthwise weights: 3 * 3 * 64 = 576 bytes.
+    - Depthwise compute: 112 * 112 * 64 * 3 * 3 * 2 = 14,450,688 ops.
+    - Depthwise arithmetic intensity: 14.45M ops / (802.8KB + 802.8KB + 0.6KB) ≈ 9 ops/byte.
 
     **Conclusion & Interpretation:**
-    - **Result: Standard convolutions are viable; depthwise convolutions are severely bandwidth-bound (Memory-Bandwidth-Bound)**.
+    - **Result: the standard convolution has about 60x higher arithmetic intensity for the same activation tensor (Data-Reuse Bound)**. On this class of accelerator, the ResNet-style design is more likely to sustain high utilization, while MobileNetV2 must be accepted only if compiler reports show the depthwise layers schedule efficiently.
 status: published
 provenance: imported
 requires_explanation: false

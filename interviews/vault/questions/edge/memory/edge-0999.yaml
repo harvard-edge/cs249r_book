@@ -8,27 +8,28 @@ competency_area: memory
 bloom_level: understand
 phase: training
 title: 'Fluency: Explaining Activation Memory vs. Weight Memory Trade-off for Edge Practitioners'
-scenario: 'A hardware engineer new to ML asks why a MobileNetV3 model with only 5 MB of weights consumes over 200 MB of memory during inference on a Jetson Orin. They expect memory usage to equal model size.'
-question: 'Why can a MobileNetV3 with only 5MB of weights consume over 200MB during inference on Jetson Orin?'
+scenario: A hardware engineer new to ML asks why a MobileNetV3 model with only 5 MB of weights consumes over 200 MB of memory during inference on a Jetson Orin. They expect memory usage to equal model size.
+question: Why can a MobileNetV3 with only 5MB of weights consume over 200MB during inference on Jetson Orin?
 details:
-  realistic_solution: 'Weights are stored once and are fixed: 5 MB for MobileNetV3. Activations are the feature maps that flow through the network during the forward pass: at input 224x224x3 the first conv produces 112x112x16 = 790 KB; the next stage 56x56x24 = 300 KB. These exist simultaneously with adjacent layers during computation. With TensorRT''s memory reuse, peak is bounded by the two largest concurrent tensors. At batch 8, each tensor multiplies by 8. The engineering constraint: activation memory scales as O(B * H * W * C) while weight memory is O(C_in * C_out * k^2) — independent of batch and spatial dimensions.'
+  realistic_solution: 'Weights are stored once and are fixed: 5 MB for MobileNetV3. Activations are the feature maps that flow through the network during the forward pass, and they scale with batch size, image resolution, channel count, precision, and the number of live tensors TensorRT must keep for residuals, unfused operators, format conversions, and workspace. For example, a 112x112x96 fp32 activation is about 4.8 MB for batch 1 and about 38.5 MB for batch 8. A few such live buffers plus TensorRT engine workspace can easily push runtime memory well above the 5 MB weight footprint, even though the persistent parameters are small.'
   common_mistake: |
     **The Pitfall:** Explaining activations simply as 'temporary memory' without explaining how they mathematically scale.
     **The Rationale:** Candidates fail to quantify that activation tensor size scales quadratically with spatial resolution and linearly with batch size, both of which are independent of the parameter count.
     **The Consequence:** The engineer fails to grasp the root cause, leading to incorrect optimization attempts (like model pruning) when input resolution or batch size is the true culprit.
   napkin_math: |
     **Assumptions & Constraints:**
-    - First expansion layer: input 112x112x16, output 112x112x96.
-    - Both tensors must exist simultaneously during computation.
     - Batch size = 8.
     - Precision: FP32 (4 bytes).
+    - Representative large early activation: 112x112x96.
+    - Runtime peak includes live activations plus TensorRT temporary/workspace buffers, not just weights.
 
     **Calculations:**
-    - Size: (112x112x16 + 112x112x96) * 4 bytes = 5,619,712 bytes = ~5.6 MB.
-    - At batch=8: 5.6 MB * 8 = 44.8 MB just for this layer pair.
+    - One 112x112x96 activation at batch 1 = 112 * 112 * 96 * 4 B = 4,816,896 B = 4.8 MB.
+    - At batch 8, that one activation = 4.8 MB * 8 = 38.5 MB.
+    - If several comparable live buffers are needed for input/output, residuals, format conversion, or unfused layer boundaries, 4-5 * 38.5 MB = 154-193 MB before adding the 5 MB weights.
 
     **Conclusion & Interpretation:**
-    - **Result: ~200 MB Peak (Memory-Bound)**. With optimal memory reuse, the peak forward pass consumes ~200 MB at batch=8, dwarfing the 5 MB weight footprint.
+    - **Result: roughly 150-200 MB runtime peak is plausible (Memory-Bound)**. The excess over 5 MB comes from batched live activations and TensorRT temporary buffers, not from duplicating the weights.
 status: published
 provenance: imported
 requires_explanation: false

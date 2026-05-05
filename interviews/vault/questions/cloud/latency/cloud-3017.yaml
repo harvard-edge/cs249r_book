@@ -8,10 +8,10 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: 'Latency Decomposition: Diagnose and Fix Decode Latency Regression on H100'
-scenario: 'After deploying a new model checkpoint (13B to 20B parameters, same architecture) on an H100, decode latency increases from 7.8ms/token to 12ms/token (a 54% increase, proportional to model size). However, a team member notices GPU memory utilization jumped from 58% to 89%.'
-question: 'Why did memory utilization jump to 89% after moving from 13B to 20B, and how would you quantify the fix?'
+scenario: After deploying a new model checkpoint (13B to 20B parameters, same architecture) on an H100, decode latency increases from 7.8ms/token to 12ms/token (a 54% increase, proportional to model size). However, a team member notices GPU memory utilization jumped from 58% to 89%.
+question: Why did memory utilization jump to 89% after moving from 13B to 20B, and how would you quantify the fix?
 details:
-  realistic_solution: 'At 89% memory utilization, KV-cache for long sequences gets evicted. Each eviction triggers a re-prefill that adds 50-200ms. Fix: quantize KV-cache to INT8 (halves KV memory), freeing ~8GB for more concurrent sequences. Or reduce max sequence length from 4096 to 2048, halving KV footprint.'
+  realistic_solution: 'The 20B checkpoint explains only part of the jump: FP16 weights are 40GB, and batch-4 KV at 4096 tokens is about 13.4GB, for roughly 53.4GB or 67% of an 80GB H100 before overhead. Observed 89% implies additional resident memory, such as about 8 long-context sequences plus runtime/fragmentation overhead. Quantify the fix against the actual resident KV pool: INT8 KV halves that pool, saving about 13-14GB in an 8-sequence case and dropping utilization from about 89% to about 72%; reducing max sequence length from 4096 to 2048 saves the same order of HBM.'
   common_mistake: |
     **The Pitfall:** Assuming the latency increase is purely proportional to weight size.
     **The Rationale:** Engineers miss that higher memory pressure reduces the effective KV-cache capacity, causing cache evictions and re-prefills for long sequences.
@@ -19,15 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 20B Model Size: 40GB in FP16.
-    - KV Cache Size (Batch 4): 4096 tokens, 40 layers.
+    - KV Cache Size: 4096 tokens, 40 layers, hidden size 5120, FP16 K/V.
+    - Runtime/allocator/activation overhead: ~4GB.
 
     **Calculations:**
-    - FP16 KV Cache: 4096 * 2 * 5120 * 2 * 40 = 3.4GB per request. For batch 4: 13.6GB.
-    - Total memory: 40GB + 13.6GB = 53.6GB (67%).
-    - INT8 KV Cache: Halves to 1.7GB/request. For batch 4: 6.8GB.
+    - FP16 KV Cache per 4096-token request: 4096 tokens * 2 (K,V) * 5120 hidden * 2 bytes * 40 layers = 3.36GB.
+    - Batch 4 KV: 4 * 3.36GB = 13.4GB.
+    - Batch 4 total: 40GB weights + 13.4GB KV = 53.4GB, or 67% of 80GB before overhead; this does not explain 89%.
+    - To reach 89%, total resident memory is 0.89 * 80GB = 71.2GB.
+    - With 40GB weights and ~4GB overhead, implied KV pool = 27.2GB, or about 8 long-context requests.
+    - INT8 KV halves the implied KV pool to 13.6GB, saving 13.6GB.
+    - New total after INT8 KV: 40GB + 13.6GB + 4GB = 57.6GB, or 72% of 80GB.
 
     **Conclusion & Interpretation:**
-    - **Result: 46.8GB (Memory-Bound)**. Quantizing KV Cache to INT8 restores headroom and eliminates severe latency spikes from re-prefills.
+    - **Result: Observed 89% requires more than a batch-4 KV calculation**. Use the actual resident KV pool for the fix estimate; INT8 KV or halving max context restores about 13-14GB of headroom in the implied 8-sequence case.
 status: published
 provenance: imported
 requires_explanation: false

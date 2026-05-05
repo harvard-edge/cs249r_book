@@ -7,11 +7,11 @@ topic: 3d-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: Cloud New 0002
+title: 500B Model 3D Parallelism on 1024 80GB GPUs
 scenario: You need to architect a 3D parallelism strategy for training a 500B parameter dense model on a cluster of 1024 80GB GPUs. They are connected via NVLink within nodes and 400Gbps IB NDR across nodes.
 question: What 3D parallelism strategy would you use to train the 500B dense model to maximize hardware utilization and minimize communication bottlenecks?
 details:
-  realistic_solution: "Combine Tensor Parallelism (TP=8) strictly within a single node to leverage the 600GB/s NVLink. Use Pipeline Parallelism (PP=16) across nodes to partition the 500B model, utilizing micro-batching (1F1B) to reduce bubble time. Finally, use Data Parallelism (DP=8) across the remaining dimensions. Map PP stages across the 400Gbps IB NDR fabric, ensuring gradient synchronization for DP uses overlapping communication and computation architectures like ZeRO-1."
+  realistic_solution: Combine Tensor Parallelism (TP=8) strictly within a single node to leverage the 600GB/s NVLink. Use Pipeline Parallelism (PP=16) across nodes to partition the 500B model, utilizing micro-batching (1F1B) to reduce bubble time. Finally, use Data Parallelism (DP=8) across the remaining dimensions. Map PP stages across the 400Gbps IB NDR fabric, and use ZeRO-1-style optimizer sharding plus overlapped gradient synchronization for DP. The main design goal is to keep high-frequency TP collectives inside NVLink, while accepting lower-frequency PP sends and overlapped DP reductions over IB.
   common_mistake: |
     **The Pitfall:** Splitting Tensor Parallelism across nodes.
     **The Rationale:** Focusing strictly on mathematically dividing the layers without considering the physical interconnect topology.
@@ -24,11 +24,14 @@ details:
 
     **Calculations:**
     - Cluster Memory: 1024 \times 80GB = 81.9TB.
-    - Parallelism Split: TP=8 (node size) \times PP=16 = 128 GPUs per replica.
-    - Model footprint per GPU: 1TB / 128 = ~7.8GB.
+    - Parallelism Split: TP=8 (node size) \times PP=16 = 128 GPUs per replica; DP = 1024 / 128 = 8 replicas.
+    - Weights per GPU: 1TB / 128 = ~7.8GB.
+    - Gradients per GPU: ~1TB / 128 = ~7.8GB.
+    - Optimizer per GPU with ZeRO-1 over DP=8: 8TB / (128 * 8) = ~7.8GB.
+    - Base training state per GPU before activations, buffers, and fragmentation: ~23.4GB, leaving roughly 56GB of an 80GB GPU for activations and runtime overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 600GB/s NVLink domain (Network-Topology-Bound)**. TP=8 keeps intense All-Reduce traffic strictly within the 600GB/s NVLink domain, preventing the 50GB/s IB fabric from bottlenecking.
+    - **Result: Topology-Aware 3D Parallelism.** TP=8 keeps per-layer collectives inside the 600GB/s NVLink domain; PP and DP still use 50GB/s IB, so they must be scheduled with micro-batching and communication overlap rather than treated as non-bottlenecks.
 status: published
 provenance: imported
 requires_explanation: true

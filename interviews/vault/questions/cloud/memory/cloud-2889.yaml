@@ -8,47 +8,29 @@ competency_area: memory
 bloom_level: analyze
 phase: training
 title: Specifying Activation Memory Budget for a Multi-Tenant Training Cluster on H100
-scenario: You are writing memory budget specifications for a shared training cluster that will run jobs
-  from multiple teams with models ranging from 1B to 70B parameters. You need to define a per-job activation
-  memory allocation policy that accounts for model size, sequence length, batch size, and gradient checkpointing
-  configuration, and that can be enforced by the cluster scheduler before job launch.
-question: What activation memory allocation policy should the scheduler enforce for jobs across model
-  size, sequence length, batch, and checkpointing?
+scenario: You are writing memory budget specifications for a shared training cluster that will run jobs from multiple teams with models ranging from 1B to 70B parameters. You need to define a per-job activation memory allocation policy that accounts for model size, sequence length, batch size, and gradient checkpointing configuration, and that can be enforced by the cluster scheduler before job launch.
+question: What activation memory allocation policy should the scheduler enforce for jobs across model size, sequence length, batch, and checkpointing?
 details:
-  realistic_solution: 'Define activation memory spec as: M_act = N_layers_stored × (M_residual + M_attention
-    + M_mlp) × safety_factor, where N_layers_stored = ceil(N_layers / checkpoint_interval), M_residual
-    = 2×B×S×H×dtype_bytes, M_attention = 0 if FlashAttention else num_heads×B×S²×dtype_bytes, M_mlp =
-    8×B×S×H×dtype_bytes, safety_factor = 1.2 for fragmentation. Add peak_gradient_buffer = M_largest_parameter_tensor
-    × 2 for backward workspace. Enforce via CUDA memory fraction limit: `torch.cuda.set_per_process_memory_fraction(M_act_budget
-    / 80e9)` in the job launch wrapper.'
-  common_mistake: '**The Pitfall:** Specifying only peak theoretical activation memory.
+  realistic_solution: |
+    Require each job to submit a memory contract with model layers, hidden size, sequence length, micro-batch size per GPU, precision, checkpoint interval, attention implementation, and sharding plan. The scheduler should estimate M_act_peak = stored_layers * (residual + checkpoint boundaries + non-recomputed intermediates) + active_segment_workspace, then multiply by a 1.2-1.3 safety factor for fragmentation and fused-kernel workspaces. For FlashAttention, do not budget an S^2 attention matrix; for unfused attention, include the B * heads * S^2 term.
 
-    **The Rationale:** Candidates forget to account for memory fragmentation overhead (typically 10-20%),
-    intermediate workspace buffers for fused kernels, and gradient buffers that co-exist at the backward-pass
-    peak.
-
-    **The Consequence:** Setting a rigid memory boundary that causes jobs to randomly OOM during training
-    spikes.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - 7B Model Spec: N_stored = 8 (checkpoint every 4 of 32 layers).
-
-    - Layer memory: M_residual = 128 MiB, M_mlp = 512 MiB.
-
-    - 70B Model Spec: N_stored = 10 (checkpoint every 8 of 80 layers).
-
+    Enforcement should happen at placement time: reserve GPU memory against the actual HBM capacity of the target SKU, subtract weights, optimizer state, gradients, communication buckets, and runtime headroom, and reject or resize jobs whose requested activation budget exceeds the remaining per-GPU capacity. Use Kubernetes/Slurm admission controls, MIG where applicable, cgroup/container memory limits for host memory, and launcher-side validation. `torch.cuda.set_per_process_memory_fraction` can be a guardrail inside a job, but it is not the cluster scheduler's enforcement policy.
+  common_mistake: |
+    **The Pitfall:** Specifying only peak theoretical activation memory.
+    **The Rationale:** Candidates forget to account for memory fragmentation overhead (typically 10-20%), intermediate workspace buffers for fused kernels, and gradient buffers that co-exist at the backward-pass peak.
+    **The Consequence:** Setting a rigid memory boundary that causes jobs to randomly OOM during training spikes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - H100 80 GB has about 80 GB decimal, or about 74.5 GiB, of HBM before framework/runtime reservations.
+    - Reserve at least 10% HBM for fragmentation, CUDA context, communication buckets, and fused-kernel workspaces.
+    - Example 7B job after sharding leaves 45 GiB available for activations.
+    - Example 70B job after sharding leaves 28 GiB available for activations.
     **Calculations:**
-
-    - Total (7B): 8 layers * 640 MiB * 1.2 (Safety) = 6144 MiB = 6.0 GiB.
-
-    - Total (70B): (256 + 1024) MiB/layer * 10 layers * 1.2 = 15360 MiB = 15.0 GiB.
-
+    - 7B estimate: 8 stored layers * 640 MiB/layer * 1.25 safety = 6400 MiB = 6.25 GiB. Admit because 6.25 GiB < 45 GiB.
+    - 70B estimate: 10 stored layers * 1280 MiB/layer * 1.25 safety = 16000 MiB = 15.6 GiB. Admit only if weights, optimizer, gradients, and communication buffers leave at least 15.6 GiB activation headroom on the chosen GPU SKU.
+    - If the same 70B job lands on a smaller-memory SKU or runs with larger B or S, the scheduler recomputes the budget and can require smaller micro-batches, more checkpointing, stronger sharding, or a different placement.
     **Conclusion & Interpretation:**
-
-    - **Result: 6.0 GiB and 15.0 GiB (Memory-Capacity-Bound)**. Both fit easily alongside weights in the
-    HBM.'
+    - **Result: Scheduler-Enforced Activation Reservation**. The policy admits jobs based on remaining per-GPU HBM after all non-activation allocations, not on a fixed per-process fraction or a claim that the examples always fit.
 status: published
 provenance: imported
 requires_explanation: true

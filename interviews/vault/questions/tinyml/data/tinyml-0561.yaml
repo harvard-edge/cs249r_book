@@ -7,11 +7,11 @@ topic: data-pipeline-engineering
 competency_area: data
 bloom_level: analyze
 phase: training
-title: The DMA Pipeline for Sensor Data
+title: SPI DMA Single-Buffer Sample Drops
 scenario: Your Cortex-M4 reads accelerometer data over SPI at 1.6 kHz. Without DMA, your firmware polls the SPI bus in a tight loop, consuming 100% CPU. With DMA, the CPU is free to run inference. But your colleague's DMA setup drops 5% of samples.
 question: Why does single-buffer SPI DMA at 1.6 kHz drop samples during 30-50 ms Cortex-M4 inference, and how do you fix it?
 details:
-  realistic_solution: The problem is a single-buffer race condition. The DMA writes sensor data into a buffer while the CPU reads from the same buffer for feature extraction. When the DMA write pointer overtakes the CPU read pointer, unprocessed samples are overwritten — hence the 5% drop rate (it happens during inference when the CPU is busy for 30-50ms).
+  realistic_solution: The problem is single-buffer ownership. With only one SPI DMA buffer, the firmware has no safe place for new samples while the CPU is consuming that same buffer for feature extraction or inference. Depending on the implementation, the DMA either overwrites samples the CPU has not finished reading or must be stopped while inference runs; both cases create gaps in the stream. The fix is double-buffering or a ring buffer with full/empty ownership flags, so DMA fills one buffer while the CPU processes another and an overrun is detected instead of silently dropping samples.
   common_mistake: |
     **The Pitfall:** Believing DMA automatically prevents data loss.
     **The Rationale:** Engineers assume pointing DMA at a single buffer completely offloads I/O safely.
@@ -25,10 +25,13 @@ details:
     **Calculations:**
     - Buffer size: 256 * 6 = 1,536 bytes (1.5 KB).
     - DMA fill time: 256 / 1600 Hz = 160 ms.
-    - Race condition overlap: 50 ms / 160 ms = 31.25%.
+    - Samples arriving during 30 ms inference: 1600 * 0.030 = 48 samples.
+    - Samples arriving during 50 ms inference: 1600 * 0.050 = 80 samples.
+    - If DMA is paused during a 50 ms inference once per second, dropped samples = 80 / 1600 = 5%.
+    - With two 256-sample buffers, the DMA has 160 ms to fill the next buffer while the CPU needs at most 50 ms to finish processing the previous one.
 
     **Conclusion & Interpretation:**
-    - **Result: 31% overlap (I/O-Race-Condition)**. CPU and DMA compete 31% of the time, and double-buffering eliminates the drop rate.
+    - **Result: Single-Buffer Overrun/Gap.** The inference latency is short enough for double-buffering, but not safe with one shared buffer because 48-80 new samples arrive while the CPU is busy.
 status: published
 provenance: imported
 requires_explanation: false

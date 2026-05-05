@@ -8,56 +8,31 @@ competency_area: data
 bloom_level: analyze
 phase: training
 title: The I2C Bus Lockup
-scenario: Your predictive maintenance system on a Cortex-M4 reads a BME680 environmental
-  sensor over I2C at 400 kHz while running a 35ms anomaly detection inference. Randomly,
-  the I2C bus locks up — the SDA line is held low permanently by the sensor.
-question: How does a long ML inference blocking the I2C ISR cause the sensor to clock-stretch
-  indefinitely, and how does the model's layer execution time determine the maximum
-  safe I2C timeout?
+scenario: Your predictive maintenance system on a Cortex-M4 reads a BME680 environmental sensor over I2C at 400 kHz while running a 35ms anomaly detection inference. Randomly, the I2C bus locks up — the SDA line is held low permanently by the sensor.
+question: How does a long ML inference blocking the I2C ISR cause the sensor to clock-stretch indefinitely, and how does the model's layer execution time determine the maximum safe I2C timeout?
 details:
-  realistic_solution: 'I2C is a clocked protocol where the master (MCU) drives SCL
-    and the slave (sensor) drives SDA. During a read transaction, the slave pulls
-    SDA low for ''0'' bits. If the master fails to clock SCL at the expected time
-    (because the CPU is busy with inference and misses the I2C interrupt), the slave
-    enters an undefined state: it''s partway through transmitting a byte, holding
-    SDA low, waiting for the next clock edge that never comes.'
-  common_mistake: '**The Pitfall:** Assuming the I2C peripheral hardware is buggy
-    and attempting to switch to SPI.
-
-    **The Rationale:** Candidates fail to trace the interaction between interrupt
-    latency caused by long ML computation blocks and the synchronous I2C state machine.
-
-    **The Consequence:** The true software timing issue remains unresolved, and unnecessary
-    hardware changes are pursued.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: I2C is a clocked protocol where the master drives SCL and the slave drives SDA. During a read transaction, the sensor may be partway through a byte and holding SDA low for a 0 bit while it waits for the next SCL edge. If the ML inference disables interrupts or runs a non-preemptible kernel long enough for the I2C ISR/service routine to miss deadlines, the master stops advancing the transaction; the slave appears to hold SDA low indefinitely because it is waiting for clocks or a recovery sequence. The safe timeout must be longer than the worst-case interval in which the I2C service can be delayed, plus transaction margin, but shorter than the system-level fault recovery budget. Better fixes are to keep inference preemptible, avoid long interrupt-disabled sections, use DMA/peripheral-driven I2C where possible, and add bus recovery clocks on timeout.
+  common_mistake: |
+    **The Pitfall:** Assuming the I2C peripheral hardware is buggy and attempting to switch to SPI.
+    **The Rationale:** Candidates fail to trace the interaction between interrupt latency caused by long ML computation blocks and the synchronous I2C state machine.
+    **The Consequence:** The true software timing issue remains unresolved, and unnecessary hardware changes are pursued.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - I2C clock: 400 kHz.
-
-    - Inference time: 35ms.
-
+    - Inference time: 35 ms total.
     - Conv2D critical section: 200-500 µs.
-
     - I2C timeout setting: 100 µs.
-
+    - Timeout must cover worst-case I2C service delay, not full inference time if inference remains preemptible.
 
     **Calculations:**
-
     - I2C byte time: 9 bits / 400 kHz = 22.5 µs.
-
-    - CPU blocks I2C ISR for up to 500 µs during Conv2D.
-
-    - Timeout (100 µs) < Critical Section (500 µs).
-
+    - Worst observed non-preemptible Conv2D section: 500 µs.
+    - Existing timeout: 100 µs < 500 µs, so the HAL can abort while the slave is still waiting for clocks.
+    - A practical timeout must be greater than the worst interrupt-blocked interval plus byte/ISR margin; for example, 500 µs + several 22.5 µs byte times and software margin suggests about 1 ms.
+    - If any layer disables interrupts for longer than 1 ms, the timeout must be raised or, preferably, the layer must be split/preempted.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 500 µs (Latency-Bound)**. The HAL aborts mid-byte while the CPU executes
-    Conv2D. Setting the timeout to 1ms (2x the longest layer execution time) allows
-    the transaction to complete safely.
-
-    '
+    - **Result: Timeout Tied to Worst ISR Blockage**. The model causes clock-stretch-like bus stalls when it prevents timely I2C service; choose the timeout from the maximum non-preemptible inference section plus I2C transaction margin, not from the 35 ms average inference time.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,7 @@ title: The Fault-Tolerant Training Framework
 scenario: You're training a 175B model on 2,048 H100 GPUs for 90 days. At this scale, the mean time between failures (MTBF) for any single GPU is ~1,000 hours, but with 2,048 GPUs, the cluster MTBF is under 30 minutes.
 question: What fault-tolerant training framework would achieve >95% effective utilization with 2,048 GPUs and a cluster MTBF under 30 minutes?
 details:
-  realistic_solution: 'A fault-tolerant framework at this scale needs five mechanisms: (1) **In-memory redundant checkpointing** — replicate optimizer state across nodes so a failure doesn''t require disk I/O. Each node stores its shard + one neighbor''s shard in CPU RAM. Recovery: <30 seconds. (2) **Elastic training** — when a node fails, the surviving nodes redistribute work without stopping. Requires a topology-aware parallelism planner that can re-shard TP/PP/DP groups on the fly. (3) **Hot spare pool** — maintain 3–5% spare GPUs pre-loaded with the model. When a failure occurs, the spare swaps in while the failed node is replaced. (4) **Hierarchical health monitoring** — heartbeat every 5 seconds, with local (intra-node NVLink) and global (inter-node InfiniBand) failure domains. Detect failures in <10 seconds. (5) **Asynchronous checkpointing** — overlap checkpoint writes with training computation. Write to local NVMe first (fast), then async replicate to distributed storage.'
+  realistic_solution: 'Use an elastic fault-tolerant training framework in the style of TorchElastic plus FSDP/ZeRO sharded state, backed by hot spares and asynchronous distributed checkpointing. The concrete design is: (1) shard model and optimizer state so each rank can reload only its partition; (2) keep a small hot-spare pool in the same topology tier with container images, data-loader state, and latest checkpoint manifest preloaded; (3) on failure, evict the bad rank, insert a spare, restore the affected shards, and rebuild TP/PP/DP groups from a topology-aware planner; (4) overlap durable checkpoint writes with training and use frequent lightweight manifests so recovery uses the newest consistent shard set; (5) detect fail-stop and fail-slow nodes with heartbeats and NCCL/per-rank timing. This is a framework pattern, not just periodic checkpoint-restart: the goal is bounded recovery per event rather than reloading the entire 175B job.'
   common_mistake: |
     **The Pitfall:** Relying on traditional infrequent checkpoint-restart.
     **The Rationale:** Engineers use the same fault tolerance strategy that worked for 8-GPU jobs, failing to realize the math breaks at scale.
@@ -20,18 +20,19 @@ details:
     **Assumptions & Constraints:**
     - Single GPU MTBF: ~1,000 hours.
     - Cluster Size: 2,048 H100 GPUs.
+    - Approximation: independent GPU failures, and any failed GPU interrupts training until recovery completes.
     - Training Duration: 90 days (2,160 hours).
 
     **Calculations:**
     - Cluster MTBF: 1,000 hours / 2,048 GPUs ≈ 0.49 hours ≈ 29 minutes.
-    - Failures in 90 Days: 2,160 hours / 0.49 ≈ 4,408 failures.
-    - Naive Restart Cost: 15 mins recovery * 4,408 = 1,102 hours lost.
-    - Naive Utilization: (2,160 - 1,102) / 2,160 = 49%.
-    - Hot Spare Restart Cost: 30 sec recovery * 4,408 = 37 hours lost.
-    - Hot Spare Utilization: (2,160 - 37) / 2,160 = 98.3%.
+    - Expected failures in 90 Days: 2,160 hours / 0.49 ≈ 4,408 failures.
+    - Naive Restart Cost: 15 mins recovery × 4,408 = 66,120 mins = 1,102 hours lost.
+    - Naive Utilization: 2,160 / (2,160 + 1,102) ≈ 66%.
+    - Elastic Hot-Spare Recovery Cost: 30 sec × 4,408 = 132,240 sec = 36.7 hours lost.
+    - Elastic Utilization: 2,160 / (2,160 + 36.7) ≈ 98.3%.
 
     **Conclusion & Interpretation:**
-    - **Result: 98.3% utilization (Reliability-Bound)**. Using a hot spare pool and in-memory redundant checkpointing avoids plummeting to 49% utilization.
+    - **Result: 98.3% utilization (Reliability-Bound)**. A framework with elastic recovery, hot spares, and sharded async checkpoints can exceed 95% utilization if recovery is bounded to about 30 seconds per failure.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,56 +8,32 @@ competency_area: compute
 bloom_level: create
 phase: inference
 title: The 8K Sensor Upgrade Dilemma
-scenario: Your team is upgrading the main forward-facing camera from a 4K sensor to a new 8K sensor to
-  improve long-range object detection. The perception stack runs on an edge SoC, and you have a hard real-time
-  deadline of 33ms per frame (30 FPS).
-question: For 8K/30FPS on the edge SoC, should you launch DenseViT or FastFusion-CNN, and what roofline
-  bottleneck drives the choice?
+scenario: Your team is upgrading the main forward-facing camera from a 4K sensor to a new 8K sensor to improve long-range object detection. The perception stack runs on an edge SoC, and you have a hard real-time deadline of 33ms per frame (30 FPS).
+question: For 8K/30FPS on the edge SoC, should you launch DenseViT or FastFusion-CNN, and what roofline bottleneck drives the choice?
 details:
-  realistic_solution: 'The architectural decision is to deploy **FastFusion-CNN**. High-resolution 8K
-    processing on edge SoCs is fundamentally bottlenecked by memory bandwidth, not raw compute. A standard
-    Vision Transformer (DenseViT) has low Arithmetic Intensity (Ops/Byte), heavily underutilizing the
-    NPU''s MACs while saturating the memory bus. FastFusion-CNN uses depthwise separable convolutions
-    and optimized fusion kernels to drastically reduce memory reads/writes, allowing it to operate closer
-    to the compute roofline and safely meet the 33ms real-time deadline.
-
-    '
-  common_mistake: '**The Pitfall:** Relying on the theoretical peak TOPS and proposing software optimizations
-    (CUDA graph tuning) to fix "underutilization."
-
-    **The Rationale:** Engineers fixate on compute limits and assume 275 TOPS is enough to process 8K
-    images quickly.
-
-    **The Consequence:** Launching a model that misses hard real-time deadlines because the memory subsystem,
-    not the compute units, is the physical bottleneck.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - 8K Image Size: 33.1 MP. FP16 input = 66.3 MB.
-
+  realistic_solution: |
+    Deploy **FastFusion-CNN**. The roofline bottleneck for 8K/30 FPS is memory bandwidth and low arithmetic intensity, not peak TOPS. DenseViT moves too much activation and attention data per useful operation, so it saturates DRAM while leaving the NPU underutilized. FastFusion-CNN is the better edge model because fused stages, tiled execution, and separable convolutions reduce repeated reads/writes and raise arithmetic intensity enough to fit the 33ms frame budget.
+  common_mistake: |
+    **The Pitfall:** Relying on the theoretical peak TOPS and proposing software optimizations (CUDA graph tuning) to fix "underutilization."
+    **The Rationale:** Engineers fixate on compute limits and assume 275 TOPS is enough to process 8K images quickly.
+    **The Consequence:** Launching a model that misses hard real-time deadlines because the memory subsystem, not the compute units, is the physical bottleneck.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 8K Image Size: 7680 * 4320 = 33.2 MP.
     - Hardware: 275 TOPS INT8 compute, 204.8 GB/s memory bandwidth.
-
     - Deadline: 33ms (30 FPS).
-
+    - DenseViT candidate: 500 GOP/frame at ~30 ops/byte effective AI.
+    - FastFusion-CNN candidate: 150 GOP/frame at ~180 ops/byte effective AI after fusion and tiling.
 
     **Calculations:**
-
     - Hardware Ridge Point: 275,000 GOPS / 204.8 GB/s = 1342 Ops/Byte.
-
-    - Standard CNN Arithmetic Intensity (AI): ~30 Ops/Byte.
-
-    - Achieved Throughput: 30 Ops/Byte * 204.8 GB/s = 6.14 TOPS.
-
-    - Inference Time (500 GOPs model): 500 / 6.14 = 81 ms.
-
+    - DenseViT achieved throughput = min(275 TOPS, 30 ops/byte * 204.8 GB/s) = 6.14 TOPS.
+    - DenseViT latency = 500 GOP / 6.14 TOPS = 81ms, missing the deadline.
+    - FastFusion achieved throughput = min(275 TOPS, 180 ops/byte * 204.8 GB/s) = 36.9 TOPS.
+    - FastFusion latency = 150 GOP / 36.9 TOPS = 4.1ms before camera ingest and post-processing, leaving substantial margin inside 33ms.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 81 ms inference time misses the 33ms deadline (Memory Bandwidth-Bound)**. AI << Ridge
-    Point.
-
-    '
+    - **Result: FastFusion-CNN is the correct choice.** Both candidates are below the ridge point and therefore bandwidth-sensitive, but DenseViT's low AI misses the deadline while FastFusion's higher AI and lower per-frame work leave enough latency margin for the full pipeline.
 status: published
 provenance: imported
 requires_explanation: true

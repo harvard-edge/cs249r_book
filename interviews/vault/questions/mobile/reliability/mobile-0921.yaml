@@ -7,53 +7,31 @@ topic: fault-tolerance-checkpointing
 competency_area: reliability
 bloom_level: apply
 phase: training
-title: 'Fault Tolerance: Realize Checkpoint Architecture for Continuous Mobile Personalization'
-scenario: An on-device personalization system trains nightly for 10 minutes and serves inferences asynchronously
-  24/7.
-question: How would you specify storage layout, checkpoint schedule, retention policy, and recovery paths
-  for an on-device training system?
+title: On-Device Training Checkpointing for Mobile Personalization
+scenario: An on-device personalization system trains nightly for 10 minutes and serves inferences asynchronously 24/7.
+question: How would you specify storage layout, checkpoint schedule, retention policy, and recovery paths for an on-device training system?
 details:
-  realistic_solution: 'Decouple the architecture into two explicitly separate state objects: (1) Inference
-    State: Lightweight LoRA weights (fp32, 4MB) loaded instantly for serving. (2) Training State: The
-    full heavy checkpoint (weights + Adam optimizer moments, 24MB). Apply distinct retention policies:
-    keep only the latest serving weights, but hold a rolling window of 3 training checkpoints to prevent
-    catastrophic corruption.'
-  common_mistake: '**The Pitfall:** Refusing to structurally separate the inference model state from the
-    heavy training optimizer state.
-
-    **The Rationale:** Using standard server-side PyTorch checkpointing paradigms on a constrained mobile
-    NAND flash system.
-
-    **The Consequence:** App restarts load massive 24MB optimizer states into RAM completely unnecessarily,
-    wasting IO operations and risking background app eviction.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: 'Decouple the architecture into two explicitly separate state objects: (1) Inference State: Lightweight LoRA weights (fp32, 4MB) loaded instantly for serving. (2) Training State: The full heavy checkpoint (weights + Adam optimizer moments, 24MB). Apply distinct retention policies: keep only the latest serving weights, but hold a rolling window of 3 training checkpoints to prevent catastrophic corruption.'
+  common_mistake: |
+    **The Pitfall:** Refusing to structurally separate the inference model state from the heavy training optimizer state.
+    **The Rationale:** Using standard server-side PyTorch checkpointing paradigms on a constrained mobile NAND flash system.
+    **The Consequence:** App restarts load massive 24MB optimizer states into RAM completely unnecessarily, wasting IO operations and risking background app eviction.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Base Model: 500 MB. Inference LoRA: 4 MB (FP32).
-
     - Optimizer State (Adam): 24 MB.
-
     - Checkpoint Frequency: Every 3 minutes (3 checkpoints per 10-min window).
-
-    - Device Flash Write Speed: ~3 GB/s.
-
+    - Keep serving state separate from training state so 24/7 inference startup does not need optimizer state.
 
     **Calculations:**
-
     - Single Training Checkpoint Size: 4 MB (LoRA) + 24 MB (Optimizer) = 28 MB.
-
-    - Write latency to Flash: 28 MB / 3000 MB/s = ~9.3 ms.
-
-    - Storage footprint for rolling recovery (3 ckpts): 28 MB * 3 = 84 MB.
-
+    - Three checkpoints during a 10-minute window gives recovery points about every 3 minutes.
+    - Worst-case lost training progress after a crash: about 3 minutes instead of the full 10-minute session.
+    - Storage footprint for rolling recovery: 28 MB * 3 = 84 MB.
+    - Serving startup reads only the 4 MB LoRA state, not the 28 MB training checkpoint.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 84 MB (I/O-Bound)**. Decoupling the 4 MB serving weights from the 24 MB training state
-    prevents severe I/O read penalties during 24/7 app launches.
-
-    '
+    - **Result: Bounded Recovery With Small Serving State**. A 3-checkpoint rolling window costs 84 MB and bounds training loss to roughly 3 minutes, while decoupling serving weights from optimizer state keeps app restart and inference paths from loading unnecessary training data.
 status: published
 provenance: imported
 requires_explanation: false

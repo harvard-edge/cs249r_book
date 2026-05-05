@@ -8,49 +8,30 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: The Edge GPU Driver Crash Loop
-scenario: Your traffic monitoring system uses 500 Jetson Orin NX devices. After a JetPack update, 30 devices
-  (6%) enter a pattern where the GPU driver crashes every 45–90 minutes, producing a kernel oops in `nvgpu`.
-  The device recovers after a 15-second GPU reset, but during recovery, 450 frames go uninspected (30
-  FPS × 15s). The other 470 devices are fine on the same firmware.
-question: What's different about these 30 devices, and how do you design the system to tolerate GPU driver
-  crashes?
+scenario: Your traffic monitoring system uses 500 Jetson Orin NX devices. After a JetPack update, 30 devices (6%) enter a pattern where the GPU driver crashes every 45–90 minutes, producing a kernel oops in `nvgpu`. The device recovers after a 15-second GPU reset, but during recovery, 450 frames go uninspected (30 FPS × 15s). The other 470 devices are fine on the same firmware.
+question: What's different about these 30 devices, and how do you design the system to tolerate GPU driver crashes?
 details:
-  realistic_solution: 'The 30 affected devices share a common trait: they''re deployed at intersections
-    with the highest traffic volume, running at sustained >90% GPU utilization. The driver bug is a **race
-    condition in the GPU memory allocator** that only triggers under sustained high memory pressure —
-    a classic Heisenbug that passed NVIDIA''s testing because their test workloads don''t sustain 90%+
-    utilization for hours.'
-  common_mistake: '**The Pitfall:** Rolling back the JetPack update on the affected devices.
-
-    **The Rationale:** Rollback fixes the symptom but doesn''t address the root cause, and reintroduces
-    known security vulnerabilities.
-
-    **The Consequence:** Leaves the devices vulnerable to security exploits without solving the high-utilization
-    edge case.'
-  napkin_math: '**Assumptions & Constraints:**
-
-    - GPU crash frequency: 1 per 67.5 minutes average (45-90 min range).
-
+  realistic_solution: 'The 30 affected devices likely share an operational trait: highest traffic volume, sustained >90% GPU utilization, and higher GPU memory churn after the JetPack update. That makes them hit a driver or GPU-memory-allocator race that the other 470 devices never stress. The system design should assume accelerator resets can happen: isolate GPU inference in a supervised worker process, use a watchdog/health check to detect `nvgpu` reset events, keep frame ingest and recording independent of GPU inference, run a degraded CPU or lightweight DLA fallback during reset, and queue or mark frames so downstream analytics know which frames were processed at reduced fidelity. Also cap GPU memory pressure or shed optional workloads on high-volume intersections until the driver fix is validated.'
+  common_mistake: |
+    **The Pitfall:** Rolling back the JetPack update on the affected devices.
+    **The Rationale:** Rollback fixes the symptom but doesn't address the root cause, and reintroduces known security vulnerabilities.
+    **The Consequence:** Leaves the devices vulnerable to security exploits without solving the high-utilization edge case.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GPU crash frequency: every 45-90 minutes; use 67.5 minutes as a midpoint estimate.
     - Downtime per crash: 15 seconds.
-
+    - Missed frames without fallback: 30 FPS * 15s = 450 frames per crash per device.
 
     **Calculations:**
-
-    - Daily crashes per device = 24h * 60 / 67.5 = 21.3 crashes.
-
-    - Daily downtime = 21.3 * 15s = 319.5 seconds = ~5.3 minutes.
-
-    - Baseline Availability = (1440 - 5.3) / 1440 = 99.63%.
-
-    - Effective Availability with CPU fallback = 99.99%.
-
+    - Daily crashes per device at midpoint = 24h * 60 / 67.5 = 21.3 crashes.
+    - Daily downtime per affected device = 21.3 * 15s = 319.5 seconds = ~5.3 minutes.
+    - Availability without fallback = (86,400 - 319.5) / 86,400 = 99.63%.
+    - Range from 45-90 minutes: 32 to 16 crashes/day, or 8.0 to 4.0 minutes downtime/day.
+    - Missed frames per affected device at midpoint = 21.3 * 450 = ~9,600 frames/day.
+    - Across 30 affected devices = ~288,000 frames/day at the midpoint if no fallback processes them.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 99.99% availability (Reliability-Bound)**. Implementing a CPU fallback during the 15-second
-    recovery period maintains high availability and mitigates the unmonitored intersection liability risk.
-
-    '
+    - **Result: ~99.63% raw GPU availability on affected devices (Reliability-Bound)**. A supervised GPU worker plus CPU/DLA fallback does not make the GPU more available; it preserves service continuity and reduces the ~288k uninspected frames/day exposure.
 status: published
 provenance: imported
 requires_explanation: false

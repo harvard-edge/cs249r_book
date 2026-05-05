@@ -7,12 +7,12 @@ topic: model-size-estimation
 competency_area: memory
 bloom_level: create
 phase: inference
-title: 'Model Size Estimation: Design Memory-Efficient LLM Stack for Android Flagship'
+title: 3B LLM Memory Budgeting on 16GB Android Devices
 scenario: Design a memory-efficient stack for running a 3B-parameter LLM on a flagship 16GB mobile device. The assistant app must coexist with the OS overhead and allow the user to switch to other apps without OOM-killing the LLM process.
 question: How should a mobile device allocate precision, KV cache, and context length for a 3B LLM in 16 GB RAM?
 details:
   realistic_solution: |
-    Allocate a strictly budgeted memory pool to prevent OS eviction. Android OS requires ~3GB; standard app overhead (JVM, UI) takes ~1GB. Leaving ~12GB. To maximize headroom, quantize the 3B model to INT4 (W4A16), reducing weight footprint to 1.5GB. Allocate a fixed 3GB ring-buffer for the KV cache to prevent dynamic allocation fragmentation. For a 3B model (32 layers, 32 heads, 128 dim), the KV cache is ~524KB per token, yielding a max context of ~5,725 tokens. Wrap the LLM inference engine in an Android Foreground Service to elevate process priority, and implement an `onPause` callback to aggressively page the KV cache to flash storage, reloading on `onResume`.
+    Allocate a strictly budgeted memory pool to prevent OS eviction. Reserve about 4GB for Android system and app overhead, then quantize the 3B model to INT4 (W4A16), reducing the weight footprint to 1.5GB. Size the KV cache explicitly instead of letting it grow without bound. For a 3B model with 32 layers, 32 heads, and 128-dimensional heads, the KV cache is about 524KB per token, so a 3GB KV budget supports about 6,144 tokens. In practice, choose a smaller cap, such as 4K tokens, if the app must coexist with other foreground work. Use a foreground service to reduce eviction risk, but do not assume KV cache should be paged to flash.
   common_mistake: |
     **The Pitfall:** Designing for 16GB total RAM without reserving memory for the OS.
     **The Rationale:** Candidates assume all advertised device memory is available to their application.
@@ -30,10 +30,11 @@ details:
     - KV Cache Size for 4096 tokens: 4096 * (2 * 32 * 32 * 128 * 2 bytes) = 2.15 GB.
     - Total Resident Memory: 5.5 GB + 2.15 GB = 7.65 GB.
     - Available Background Headroom: 16 GB - 7.65 GB = 8.35 GB.
+    - KV budget for 3 GB: 3 GB / 524 KB per token ≈ 6,144 tokens.
     - TPOT: 1.5 GB / 77 GB/s = 19.5 ms/token.
 
     **Conclusion & Interpretation:**
-    - **Result: 19.5 ms/token (Memory Capacity-Bound)**. A 3B INT4 model with a 4096-token context consumes under 50% of system RAM, leaving a safe 8.35GB buffer for background apps. The 19.5ms TPOT easily meets real-time conversational thresholds.
+    - **Result: Memory capacity is the governing constraint.** A 3B INT4 model with a 4K context fits comfortably on a 16GB device, and a 3GB KV budget supports roughly 6K tokens. Use a fixed KV cap and keep some headroom for other apps instead of paging the cache to flash.
 status: published
 provenance: imported
 requires_explanation: true

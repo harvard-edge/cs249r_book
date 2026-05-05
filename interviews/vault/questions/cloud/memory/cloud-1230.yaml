@@ -8,42 +8,26 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Evaluating Error Feedback Memory Trade-offs
-scenario: You are training a 20B parameter Dense model across 64 A100 (40GB) GPUs. To alleviate a network
-  bottleneck, your team implements Top-K (1%) gradient sparsification. To prevent divergence, you add
-  local Error Feedback (EF) to accumulate the 99% of truncated gradients. However, enabling EF immediately
-  causes an Out-Of-Memory (OOM) error.
-question: Why does error feedback cause OOM for the 20B model, and how would you fix it while preserving
-  the communication reduction?
+scenario: You are training a 20B parameter Dense model across 64 A100 (40GB) GPUs. To alleviate a network bottleneck, your team implements Top-K (1%) gradient sparsification. To prevent divergence, you add local Error Feedback (EF) to accumulate the 99% of truncated gradients. However, enabling EF immediately causes an Out-Of-Memory (OOM) error.
+question: Why does error feedback cause OOM for the 20B model, and how would you fix it while preserving the communication reduction?
 details:
-  realistic_solution: Store the error feedback state in FP16 instead of FP32, and shard the error tensor
-    across the data parallel ranks using ZeRO-2. The dense FP16 error tensor for 20B parameters is 40GB
-    — enough to OOM an A100 40GB when combined with model and optimizer states. Sharding across 8 GPUs
-    per node reduces the overhead to 5GB per GPU, safely resolving the OOM while maintaining mathematical
-    convergence of the sparsified gradient communication.
-  common_mistake: '**The Pitfall:** Assuming error feedback is purely a compute operation.
-
-    **The Rationale:** It''s easy to view EF as just "adding the leftover gradients back," forgetting
-    that the dense error tensor must persist in memory across training steps.
-
-    **The Consequence:** The system immediately OOMs because the error tensor doubles the gradient memory
-    footprint, crashing the entire training run.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    Error feedback causes OOM because Top-K communication still requires a dense persistent residual buffer proportional to the full model size. FP16 alone is not enough: a 20B-parameter FP16 residual tensor is 40GB, which fills an A100 40GB before model, activations, gradients, optimizer state, or runtime workspace. Preserve the communication reduction by partitioning/sharding the EF residual state across data-parallel ranks with a custom EF-state layout, or by using a sparse/quantized residual representation with a convergence-aware update rule.
+  common_mistake: |
+    **The Pitfall:** Assuming error feedback is purely a compute operation.
+    **The Rationale:** It's easy to view EF as just "adding the leftover gradients back," forgetting that the dense error tensor must persist in memory across training steps.
+    **The Consequence:** The system immediately OOMs because the error tensor doubles the gradient memory footprint, crashing the entire training run.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 20B parameter Dense model on A100 (40GB) GPUs.
-
+    - Error feedback is a dense model-sized state unless explicitly sharded, sparsified, or quantized.
     **Calculations:**
-
     - Dense error tensor: 20e9 * 2 bytes (FP16) = 40 GB.
-
-    - OOM Cause: 40 GB consumes all available memory on an A100.
-
-    - ZeRO-2 Sharding: 40 GB / 8 = 5 GB overhead per GPU.
-
+    - OOM cause: FP16 EF alone can consume the full 40GB device before any other training memory.
+    - If the EF state is custom-sharded across all 64 data-parallel GPUs: 40 GB / 64 = 0.625 GB per GPU, plus metadata and communication overhead.
+    - If only sharded within an 8-GPU node: 40 GB / 8 = 5 GB per GPU, but that requires explicit EF-state partitioning and still must fit alongside the rest of the training memory.
     **Conclusion & Interpretation:**
-
-    - **Result: Sharding the error state reduces memory overhead to 5GB, safely resolving the OOM.**'
+    - **Result: FP16 alone does not solve the OOM.** The fix is to partition, sparsify, or further quantize the dense EF state while preserving error-feedback semantics for the dropped gradients.
 status: published
 provenance: imported
 requires_explanation: false

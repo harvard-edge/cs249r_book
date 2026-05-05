@@ -7,11 +7,11 @@ topic: dma-data-movement
 competency_area: memory
 bloom_level: create
 phase: inference
-title: 'Continuous DMA Ingestion and Bus Contention'
-scenario: 'You are designing a continuous vibration anomaly detection pipeline on an ARM Cortex-M4 (STM32F4) running at 168 MHz with 256 KB SRAM, 1 MB flash, and no FPU. A sensor streams 16-bit data at 32 kHz over SPI via DMA. Your INT8 model requires 120 KB of SRAM for activations and 800 KB of Flash for weights, executing 15 million MACs per inference using CMSIS-NN.'
-question: 'How would you design the memory architecture and data movement strategy to guarantee zero-copy ingestion, zero data loss, and minimal memory bus contention between the DMA controller and the CPU?'
+title: Continuous DMA Ingestion and Bus Contention
+scenario: You are designing a continuous vibration anomaly detection pipeline on an ARM Cortex-M4 (STM32F4) running at 168 MHz with 256 KB SRAM, 1 MB flash, and no FPU. A sensor streams 16-bit data at 32 kHz over SPI via DMA. Your INT8 model requires 120 KB of SRAM for activations and 800 KB of Flash for weights, executing 15 million MACs per inference using CMSIS-NN.
+question: How would you design the memory architecture and data movement strategy to guarantee zero-copy ingestion, zero data loss, and minimal memory bus contention between the DMA controller and the CPU?
 details:
-  realistic_solution: 'Implement a zero-copy ping-pong (double) buffering strategy where the DMA controller automatically alternates between two memory regions. To prevent bus contention, explicitly map the DMA buffers to a peripheral SRAM bank while placing the 120 KB NN activations in the main SRAM or Core Coupled Memory (CCM, which offers zero-wait-state CPU access but is invisible to DMA). The CPU processes the ''pong'' buffer directly in-place while the DMA fills the ''ping'' buffer.'
+  realistic_solution: Implement a zero-copy ping-pong (double) buffering strategy where the DMA controller automatically alternates between two memory regions. To prevent bus contention, explicitly map the DMA buffers to a peripheral SRAM bank while placing the 120 KB NN activations in the main SRAM or Core Coupled Memory (CCM, which offers zero-wait-state CPU access but is invisible to DMA). The CPU processes the 'pong' buffer directly in-place while the DMA fills the 'ping' buffer.
   common_mistake: |
     **The Pitfall:** Proposing single-buffer DMA with CPU copying or ignoring ARM bus matrix contention.
     **The Rationale:** Candidates overlook that CPU fetches and DMA writes to the same SRAM bank cause pipeline stalls, degrading INT8 MAC throughput.
@@ -20,13 +20,16 @@ details:
     **Assumptions & Constraints:**
     - Sensor Data Rate: 32 kHz * 2 bytes = 64 KB/sec.
     - Buffer Size (500ms window): 32 KB per buffer. Ping-pong = 64 KB total.
+    - CMSIS-NN compute: 2 MACs/cycle at 168 MHz.
 
     **Calculations:**
     - Remaining SRAM: 256 KB - 64 KB = 192 KB (fits 120 KB activations).
     - Compute Time: 15M MACs / (2 MACs/cycle * 168 MHz) = 44.6 ms.
+    - Data arriving during one inference: 64 KB/s * 44.6 ms = 2.85 KB, far below one 32 KB half-buffer.
+    - DMA write bandwidth needed is only 64 KB/s, so correctness depends more on zero-copy buffer ownership and SRAM bank placement than on raw bus bandwidth.
 
     **Conclusion & Interpretation:**
-    - **Result: 44.6 ms (Memory-Bound)**. Zero-copy buffering ensures throughput and avoids memory bus contention.
+    - **Result: 64 KB buffering plus SRAM bank separation.** Ping-pong buffers absorb the 32 kHz stream while the CPU runs a 44.6 ms inference. Place DMA buffers and NN activations in different accessible SRAM banks or CCM/main SRAM regions to minimize contention; zero-copy alone does not prove the model is memory-bound.
 status: published
 provenance: imported
 requires_explanation: true

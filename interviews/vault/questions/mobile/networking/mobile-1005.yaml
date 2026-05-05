@@ -7,15 +7,15 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: analyze
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Diagnose LLM TPOT Regression After App Update'
+title: Unified Memory and Metal GPU Contention Causing Mobile LLM TPOT Regression
 scenario: An iOS app update adds a background animation (Metal shader rendering at 60fps) alongside an already-running 1B INT4 LLM. TPOT degrades from 7.4ms to 11ms after the update. The model weights are unchanged.
 question: Can a 60 FPS Metal animation explain a 1B INT4 LLM TPOT jump from 7.4ms to 11ms on A17 Pro?
 details:
-  realistic_solution: While shared unified memory architecture means the GPU animation does compete with the LLM for DRAM bandwidth, the mathematical volume of contention is totally insufficient to cause a 3.5ms regression. The true root cause lies in Apple's OS-level scheduling. Rendering UI via CoreAnimation enforces strict privacy API checks and queue serialization, which forcibly blocks the NPU execution thread, injecting a massive 3-4ms scheduling spike completely unrelated to memory physics.
+  realistic_solution: A 60 FPS Metal animation can explain part of the TPOT regression only if it creates more than a simple framebuffer write. The direct pixel traffic is small, but a shader with multiple render targets, texture samples, compositing passes, or offscreen buffers can add several GB/s of unified-memory pressure and can also interfere through GPU/ANE scheduling, shared caches, power limits, or thermal headroom. The diagnosis should measure DRAM bandwidth, GPU occupancy, ANE/Metal queue timing, and thermals before blaming model weights. If the regression correlates with render passes, reduce animation resolution/pass count, use lower-precision render targets, avoid extra texture copies, and schedule decode away from the heaviest frame work.
   common_mistake: |
-    **The Pitfall:** Automatically blaming compute starvation or NPU thermal throttling for the latency regression.
-    **The Rationale:** Engineers assume distinct execution cores operate independently and fail to recognize OS-level API blocking on shared queues.
-    **The Consequence:** Completely ignoring the severe scheduling penalties imposed by the mobile operating system, resulting in fruitless debugging of memory subsystems.
+    **The Pitfall:** Assuming the animation is "just UI" and therefore cannot affect LLM decode latency.
+    **The Rationale:** Engineers often count only the final framebuffer bandwidth and ignore extra render targets, texture sampling, compositing copies, shared-cache effects, and power or scheduler contention on a unified-memory SoC.
+    **The Consequence:** The team misses the real interaction between Metal rendering and model decode, or chases fabricated API serialization bugs instead of measuring bandwidth, queue timing, and thermal behavior.
   napkin_math: |
     **Assumptions & Constraints:**
     - LLM Model: 1B INT4 (500 MB footprint).
@@ -26,12 +26,13 @@ details:
     - Baseline LLM TPOT: 500 MB / 68 GB/s = 7.35 ms.
     - Render texture read bandwidth: 1080*2340*4*60 = ~608 MB/s.
     - Framebuffer + Display controller contention: ~1.4 GB/s.
-    - Total Contention: ~2.0 GB/s.
-    - Contention TPOT: 500 MB / (68 - 2) GB/s = 7.58 ms (Fails to explain 11ms).
-    - Hidden latency: CoreAnimation synchronization adds 3-4 ms.
+    - Simple render contention estimate: ~2.0 GB/s.
+    - Contention TPOT from simple bandwidth only: 0.5 GB / (68 - 2) GB/s = 7.58 ms.
+    - Observed 11 ms TPOT implies effective bandwidth of 0.5 GB / 0.011 s = 45.5 GB/s.
+    - Equivalent lost headroom: 68 - 45.5 = 22.5 GB/s, far above the simple framebuffer estimate.
 
     **Conclusion & Interpretation:**
-    - **Result: System Scheduling-Bound**. While shared unified memory contention exists, it is mathematically insufficient to explain the regression. The massive spike is caused by OS-level API serialization blocking the Metal queue.
+    - **Result: Contention or scheduling beyond simple pixel traffic**. A basic 60 FPS framebuffer does not explain 11 ms TPOT by itself; look for extra render passes/copies, shared memory pressure, GPU/ANE queue interference, power limits, or thermal throttling.
 status: published
 provenance: imported
 requires_explanation: false

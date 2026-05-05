@@ -9,7 +9,7 @@ bloom_level: apply
 phase: inference
 title: 3-bit vs 4-bit Unpacking Overhead on Tensor G3
 scenario: Your team is deploying a 3 Billion parameter generative model to a mobile platform. To minimize memory footprint, the team applies 3-bit GPTQ extreme quantization instead of standard 4-bit. However, profiling shows that during auto-regressive decoding, the 3-bit model generates tokens significantly slower than the 4-bit version.
-question: Explain why the smaller 3-bit model exhibits worse latency than the larger 4-bit model.
+question: Explain why the smaller 3-bit model exhibits worse latency than the larger 4-bit model?
 details:
   realistic_solution: |
     Mobile NPUs are rigorously optimized for power-of-two precisions (INT8, INT4) and lack native hardware instructions to directly compute or efficiently unpack 3-bit integers. The 3-bit weights must be unpacked to INT4 or FP16 using complex bit-shifting and masking operations. This dequantization overhead transforms a memory-bound process into a severe compute bottleneck, often forcing fallbacks to slower CPU cores and negating any memory read speedups.
@@ -22,17 +22,16 @@ details:
     - 3B parameter model.
     - Bandwidth: 60 GB/s.
     - 4-bit size: 1.5 GB. 3-bit size: 1.125 GB.
+    - Decode is modeled as a batch-size-1 stream over the quantized weights; actual latency depends on cache residency and backend packing.
 
     **Calculations:**
-    - Read time savings: (1.5 GB - 1.125 GB) = 0.375 GB.
-    - Saved time per token: 0.375 GB / 60 GB/s = 6.25 ms.
-    - Unpacking cost: 5 ops/weight * 3B = 15 Giga-ops.
-    - CPU Fallback compute rate: ~100 GOPS.
-    - Unpacking latency: 15 GOPS / 100 GOPS = 150 ms.
-    - Net latency delta: -6.25 ms (memory) + 150 ms (compute) = +143.75 ms penalty.
+    - Maximum read-time savings if all weights are streamed once per decoded token: (1.5 GB - 1.125 GB) / 60 GB/s = 6.25 ms/token.
+    - If unsupported 3-bit packing requires even 1-2 scalar unpack/mask operations per weight-equivalent during that stream, overhead is 3-6 GOPS/token.
+    - At a 100 GOPS effective CPU or fallback unpack rate, unpack latency is 30-60 ms/token before the NPU can consume the aligned INT4/INT8 data.
+    - Net effect: 30-60 ms unpack overhead minus at most 6.25 ms bandwidth savings = roughly +24-54 ms/token penalty in this simplified model.
 
     **Conclusion & Interpretation:**
-    - **Result: +143.75 ms penalty (Compute-Bound)**. Unpacking adds 150 ms per token, vastly outweighing the 6.25 ms memory savings.
+    - **Result: Slower Despite Smaller Weights**. The 3-bit model saves only about 6 ms/token of raw memory traffic in the best case, while non-native unpacking can add tens of milliseconds, so the odd-bit format can be slower than a larger hardware-friendly 4-bit model.
 status: published
 provenance: imported
 requires_explanation: false

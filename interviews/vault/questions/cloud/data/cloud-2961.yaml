@@ -11,23 +11,28 @@ title: 'Dataset Curation: Mastery — End-to-End Pre-Training Data Strategy for 
 scenario: You are designing the data strategy for a 100B parameter LLM to be trained on 512 GPUs for 3 months. The model must excel at code, math, and instruction following.
 question: What complete data curation strategy (sourcing, filtering, deduplication, mixing) is required, and what throughput must the pipeline sustain?
 details:
-  realistic_solution: 'Source: 10T raw tokens (web 70%, code 15%, math 5%, books 7%, instructions 3%). Filter: language ID (keep 6 languages) -> heuristic (65% pass) -> KenLM perplexity < 300 (70% pass) -> MinHash dedup (75% pass). Final: ~3.4T unique tokens. Chinchilla for 100B model: 2T tokens optimal. Mix with quality weighting: code/math 3x. Pipeline must sustain 512 H100s training at 35% MFU.'
+  realistic_solution: Target about 2.0T high-quality tokens for a Chinchilla-style 100B run, with an over-collected pool for mixing and ablations. Source roughly 8-10T raw tokens (web 65%, code 15%, math 7%, books/papers 8%, instruction/dialog 5%). Apply language and license filters, quality classifiers/KenLM thresholds, exact and MinHash dedup, PII removal, contamination checks, and domain-aware mixing with code/math upweighted. For 512 H100 SXM GPUs at 35% MFU, training throughput is about 590K tokens/sec, so the online loader must sustain about 4.7 MB/s of token ids plus enough prefetching to hide latency; the offline curation system must average at least 260K accepted tokens/sec over 90 days to produce 2T tokens, with much higher burst capacity for reprocessing.
   common_mistake: |
     **The Pitfall:** Under-investing in data quality scaling compared to model architecture scaling.
     **The Rationale:** Assuming that simply dumping petabytes of raw text into a dataloader will yield an intelligent model.
     **The Consequence:** The model memorizes garbage data, and the data loading pipeline throttles the expensive 512-GPU cluster.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hardware: 512 GPUs at 35% MFU (~177,200 TFLOPS).
-    - Model: 100B params (~6 FLOPs/token). Training duration: 3 months.
+    - Hardware: 512 H100 SXM GPUs, 989 TFLOP/s bf16 peak each, 35% MFU.
+    - Model: 100B params. Training compute: ~6 * params FLOPs/token = 600B FLOPs/token.
+    - Training duration: 90 days = 7.78M seconds.
+    - Tokenized samples stored as int32 token ids plus masks/packing metadata, budget ~8 bytes/token delivered to the loader.
 
     **Calculations:**
-    - Processing rate: 177,200 TFLOPS / 600 GFLOPs = ~295,000 tokens/sec.
-    - Total tokens: 3 months (7.77M seconds) * 295K tokens/s = ~2.3 Trillion tokens.
-    - Dataloader throughput: 295,000 * 4 bytes = 1.18 MB/s.
+    - Effective compute: 512 * 989 TFLOP/s * 0.35 = 177,178 TFLOP/s.
+    - Training throughput: 177,178e12 / 600e9 = ~590,600 tokens/sec.
+    - Tokens consumed in 90 days: 590.6K * 7.78M = ~4.6T tokens if running continuously.
+    - Chinchilla target for 100B params: ~2.0T tokens, so either train for ~39 days at this throughput or run additional epochs/ablations on the curated pool.
+    - Online DataLoader bandwidth: 590.6K tokens/sec * 8 bytes/token = ~4.7 MB/s before filesystem/request overhead.
+    - Offline accepted-token production for a 2T-token corpus over 90 days: 2T / 7.78M = ~257K accepted tokens/sec. At a 25% end-to-end pass rate, raw processing must average ~1.0M raw tokens/sec.
 
     **Conclusion & Interpretation:**
-    - **Result: Data-Scale Bound.** The runtime pipeline throughput (1.18 MB/s) is trivial, but the offline curation phase must source and filter over 10T raw tokens to output 2.3T high-quality unique tokens.
+    - **Result: Curation-Throughput Bound, Not Byte-Bandwidth Bound.** The online loader bandwidth is small after tokenization, but the corpus builder must continuously process about 1M raw tokens/sec and produce a measurable 2T-token quality-controlled pool.
 status: published
 provenance: imported
 requires_explanation: true

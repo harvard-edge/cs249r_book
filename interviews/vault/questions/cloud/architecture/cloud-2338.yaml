@@ -8,11 +8,11 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Die-to-Die Interconnect Bottleneck in Chiplet ASICs
-scenario: Evaluating a next-gen cloud accelerator composed of 4 identical compute chiplets integrated via a 2.5D silicon interposer. Workload A (a massive element-wise GeLU) achieves 800 TFLOPS. Workload B (a large Matrix Multiply requiring global reductions across the M dimension) only achieves 120 TFLOPS, despite having identical theoretical FLOP counts. The package power draw spikes near the chip edges.
+scenario: Evaluating a next-gen cloud accelerator composed of 4 identical compute chiplets integrated via a 2.5D silicon interposer. Workload A (a massive element-wise GeLU) achieves 800 TFLOPS. Workload B (a large Matrix Multiply partitioned across the reduction dimension K, requiring global partial-sum reductions for C) only achieves 120 TFLOPS, despite having identical theoretical FLOP counts. The package power draw spikes near the chip edges.
 question: Why does the chiplet accelerator run GeLU at 800 TFLOPS but the reduction-heavy GEMM at 120 TFLOPS, and how should GEMM be partitioned?
 details:
   realistic_solution: |
-    Workload A (element-wise GeLU) requires zero inter-chiplet communication — each chiplet processes its local partition independently at full throughput. Workload B (GEMM partitioned along the reduction dimension K) requires partial-sum reduction across all 4 chiplets via the D2D interposer. Each partial sum is 512 MB, and the ring AllReduce across 4 chiplets takes 15-30 ms depending on effective D2D bandwidth (50 GB/s nominal, but reduced by protocol overhead, contention, and synchronization). Combined with compute time (~11 ms), the total time reaches ~50-73 ms, yielding only 120-170 TFLOPS effective — far below the 800 TFLOPS peak. The edge power spikes from D2D PHY drivers at the chiplet boundaries. Fix: repartition the GEMM along M or N dimensions so each chiplet computes complete output rows/columns without cross-chiplet reduction.
+    Workload A (element-wise GeLU) requires zero inter-chiplet communication: each chiplet processes its local partition independently at full throughput. Workload B is slow because the GEMM is split across the reduction dimension K. Each chiplet computes a partial C tile, then the four partial results must be summed over the die-to-die interposer before the output is complete. For a 16K x 16K output accumulated in FP32, that reduction moves hundreds of megabytes per GEMM and the ring schedule makes each chiplet send and receive about 1.5 times that payload. With protocol overhead, contention, and synchronization, D2D communication dominates the ~11 ms compute time and drives effective throughput down near the observed 120 TFLOPS. Fix: partition along M or N instead, so each chiplet owns complete output rows or columns and avoids inter-chiplet partial-sum reduction on the critical path.
   common_mistake: |
     **The Pitfall:** Assuming Workload B is bound by external HBM bandwidth or lacks compute parallelization.
     **The Rationale:** Engineers usually look to DRAM bandwidth or core utilization as the primary bottlenecks for GEMMs.
@@ -22,16 +22,19 @@ details:
     - Workload B Setup (GEMM): 16K x 16K x 16K FP16.
     - Total FLOPs: 2 * 16384^3 ≈ 8.8 TFLOPs.
     - Per-Chiplet Compute: Partitioned across 4 chiplets -> 2.2 TFLOPs per chiplet.
+    - Partial sums are accumulated in FP32 and reduced across 4 chiplets.
+    - Effective D2D bandwidth after protocol overhead/contention: ~25 GB/s per chiplet for this collective.
 
     **Calculations:**
     - Compute Time: 2.2 TFLOPs / 200 TFLOPS = 11.0 ms.
-    - Reduction Requirement: 16K x 16K x 2 bytes = 512 MB partial sums.
-    - Ring AllReduce Time: 2 * (3/4) * 512 MB / 50 GB/s = 15.4 ms.
-    - Effective Throughput (Ideal): (Compute 11ms + Comm 15.4ms) = 26.4 ms -> 8.8 TFLOPs / 0.0264s = ~333 TFLOPS.
-    - Effective Throughput (Real): Overhead slows total time to ~73 ms. 8.8 TFLOPs / 0.073s = ~120 TFLOPS.
+    - C partial-sum payload per chiplet: 16,384 * 16,384 * 4 bytes = 1.07 GB.
+    - 4-chiplet ring AllReduce traffic per chiplet: 2 * (4 - 1) / 4 * 1.07 GB = 1.61 GB.
+    - D2D reduction time: 1.61 GB / 25 GB/s ≈ 64 ms.
+    - Total time: 11 ms compute + 64 ms exposed D2D/synchronization ≈ 75 ms.
+    - Effective throughput: 8.8 TFLOPs / 0.075s ≈ 117 TFLOPS, close to the observed 120 TFLOPS.
 
     **Conclusion & Interpretation:**
-    - **Result: ~120 TFLOPS (Communication-Bound)**. Verifies the massive performance collapse caused by the D2D interconnect reduction bottleneck.
+    - **Result: ~120 TFLOPS (D2D Reduction-Bound)**. Partitioning along M or N lets each chiplet produce complete C tiles and removes the global partial-sum reduction.
 status: published
 provenance: imported
 requires_explanation: false
@@ -50,7 +53,7 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- chip-packaging
-- die-to-die
-- accelerator
-- reductions
+  - chip-packaging
+  - die-to-die
+  - accelerator
+  - reductions

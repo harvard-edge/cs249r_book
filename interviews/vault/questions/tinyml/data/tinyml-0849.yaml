@@ -11,24 +11,24 @@ title: 'Dataset Curation: Implement Feature Extraction Pipeline for Cortex-M4 De
 scenario: You need to implement an MFCC feature extraction pipeline that produces training data compatible with your Cortex-M4 (168MHz, 256KB SRAM) inference runtime. The MCU will use fixed-point arithmetic. Implement the quantization-aware feature extraction that ensures training/inference feature parity.
 question: How should MFCC feature extraction simulate Cortex-M4 fixed-point behavior to maintain training and inference parity?
 details:
-  realistic_solution: 'Simulate MCU fixed-point: extract MFCC with float64 precision, then quantize to Q15 fixed-point (int16, 1 sign + 15 fractional bits). Train on Q15-simulated features. Use the same quantization parameters during MCU inference.'
+  realistic_solution: 'Simulate MCU fixed-point behavior during training: extract MFCCs with the same preprocessing settings used on-device, clip or calibrate the expected MFCC range, then quantize and dequantize with the same int16/Q15 scale that the Cortex-M4 inference code will use. Train on those Q15-simulated features and use the identical scale and zero point during MCU inference.'
   common_mistake: |
     **The Pitfall:** Not simulating MCU fixed-point behavior during training.
     **The Rationale:** Candidates extract float32 MFCC features during training but use int8/int16 on the MCU.
     **The Consequence:** The mismatch causes a 5-10% accuracy degradation during inference.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Q15 range: -1.0 to +0.9999695. MFCC range: typically -50 to +50 dB.
-    - Scale factor: 1/50 fits perfectly in Q15.
-    - Feature size: 99 frames * 40 * 2B = 7.92 KB.
+    - MFCC values are calibrated and clipped to approximately -50 to +50 dB.
+    - Symmetric Q15 mapping: q = round(x * 32767 / 50), then x_hat = q * 50 / 32767.
+    - On-device feature buffer: 99 frames * 40 coefficients * 2 bytes.
 
     **Calculations:**
-    - Quantization step: 1/32768 = 0.0000305.
-    - Scaled step: 50 * 0.0000305 = 0.001525.
-    - Max quantization error (half step): ~0.00076.
+    - Q15 step in scaled MFCC units: 50 / 32767 = 0.001526 dB.
+    - Maximum rounding error: 0.5 * 0.001526 = 0.000763 dB, assuming values stay within the calibrated range.
+    - Feature buffer size: 99 * 40 * 2 = 7,920 bytes, about 7.7 KiB.
 
     **Conclusion & Interpretation:**
-    - **Result: Max error ~0.00076 (Precision-Bound)**. Max error is ~0.00076, fitting in Q15 with high SNR and 7.92 KB memory footprint.
+    - **Result: Max in-range quantization error is about 0.00076 dB with a 7.7 KiB int16 feature buffer.** This preserves training/inference parity as long as the same clipping and scale are used on both sides.
 status: published
 provenance: imported
 requires_explanation: false

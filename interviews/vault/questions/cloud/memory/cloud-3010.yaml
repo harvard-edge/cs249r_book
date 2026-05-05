@@ -8,38 +8,31 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: 'KV-Cache: Specification — KV Cache Budget for Multi-Model Serving'
-scenario: 'Write the KV cache specification for a multi-model serving setup on a single H100: Model A
-  (7B, 30 concurrent) and Model B (3B, 70 concurrent). Both use bf16. Define memory partitioning, priority
-  policy, and overflow handling.'
-question: What per-token KV-cache size should the single-H100 multi-model setup budget for its GQA-8 models?
+scenario: 'Write the KV cache specification for a multi-model serving setup on a single H100: Model A (7B, 30 concurrent) and Model B (3B, 70 concurrent). Both use bf16. Define memory partitioning, priority policy, and overflow handling.'
+question: For two GQA-8 models on a single H100 budgeting 128 KiB/token and up to 2048 active tokens per request, what KV-cache partitioning, priority policy, and overflow handling should you use?
 details:
-  realistic_solution: KV cache per token = 2 * 32 * 8 * 128 * 2B = 131,072 bytes ≈ 128KB (not 40KB).
-  common_mistake: '**The Pitfall:** Miscalculating the per-token KV cache size or failing to account for
-    multi-model HBM sharing.
-
-    **The Rationale:** Candidates forget the factor of 2 for K and V, or fail to specify eviction policies
-    when one model''s requests surge.
-
-    **The Consequence:** Out-of-memory errors (OOMs) in production when concurrent requests exceed the
-    shared HBM boundary.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - GQA-8 model (32 layers, 8 KV heads, head_dim=128, FP16/BF16 2 bytes)
-
+  realistic_solution: Reserve memory first for model weights, then partition the remaining HBM by each model's concurrency target. Model A needs 30 * 2048 * 128 KiB = 7.5 GiB of KV cache; Model B needs 70 * 2048 * 128 KiB = 17.5 GiB. With about 20GB for weights and a 5GB runtime/fragmentation reserve, this leaves ample shared burst capacity on an 80GB H100. Use hard minimum reservations for each model, a shared overflow pool for unused KV pages, priority admission for latency-critical Model A traffic, and reject or queue lower-priority requests once a model exhausts both its reservation and the shared pool.
+  common_mistake: |
+    **The Pitfall:** Miscalculating the per-token KV cache size or failing to account for multi-model HBM sharing.
+    **The Rationale:** Candidates forget the factor of 2 for K and V, or fail to specify eviction policies when one model's requests surge.
+    **The Consequence:** Out-of-memory errors (OOMs) in production when concurrent requests exceed the shared HBM boundary.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - GQA-8 model (32 layers, 8 KV heads, head_dim=128, FP16/BF16 2 bytes).
+    - Model A: 30 concurrent requests, 2048 active tokens/request.
+    - Model B: 70 concurrent requests, 2048 active tokens/request.
+    - Approximate weights: 7B bf16 = 14GB, 3B bf16 = 6GB.
+    - Runtime/fragmentation reserve: 5GB.
 
     **Calculations:**
-
-    - KV per token = 32 layers * 2 (K,V) * 8 heads * 128 dim * 2 bytes = 131,072 bytes = 128 KiB (~128KB)
-
+    - KV per token = 32 layers * 2 (K,V) * 8 heads * 128 dim * 2 bytes = 131,072 bytes = 128 KiB.
+    - Model A reservation = 30 * 2048 * 128 KiB = 7.5 GiB.
+    - Model B reservation = 70 * 2048 * 128 KiB = 17.5 GiB.
+    - Baseline HBM = 14GB + 6GB weights + 7.5GiB + 17.5GiB KV + 5GB reserve = about 50GB.
+    - Remaining HBM can be used as a shared overflow pool, subject to per-model caps.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 128KB/token (Memory-Bound)**. The accurate 128KB/token baseline is mandatory to define
-    the single HBM partition across multiple concurrent models.
-
-    '
+    - **Result: Partitioned KV Budget (Memory-Bound)**. Guarantee the 7.5GiB and 17.5GiB reservations, use shared free pages for bursts, prefer high-priority Model A traffic during contention, and queue or shed Model B overflow before either model can evict protected KV pages from the other.
 status: published
 provenance: imported
 requires_explanation: true
@@ -53,7 +46,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- Model B KV per token arithmetic is incorrect (32*2*8*128*2 = 128KB, not 32KB)
+  - Model B KV per token arithmetic is incorrect (32*2*8*128*2 = 128KB, not 32KB)
 human_reviewed:
   status: not-reviewed
   by: null

@@ -11,7 +11,7 @@ title: The Context Length Latency Spike
 scenario: A local mobile chat app runs a 2B parameter model using a mobile GPU. Decode latency is perfectly stable at 35ms/token. However, exactly when the conversation history reaches 1024 tokens, decode latency instantly jumps to 110ms/token and remains there. Device thermals are normal and there is no OS memory paging.
 question: Why does mobile chat decode latency jump exactly at a 1024-token context length?
 details:
-  realistic_solution: The step-function increase in latency is caused by a hardware-specific FlashAttention tile size limit. Mobile GPUs have strictly limited threadgroup shared memory (e.g., 32KB per workgroup). The FlashAttention kernel is heavily optimized to keep the K and V blocks in this fast SRAM. At exactly 1024 tokens, the required tile size for the sequence length exceeds the maximum shared memory allocation for the shader. The inference engine's fallback mechanism silently switches to a standard, unoptimized attention kernel, which requires O(N) reads and writes to the slower LPDDR5 DRAM for every single token generated.
+  realistic_solution: The step-function increase in latency is caused by a hardware-specific FlashAttention tiling limit. Mobile GPUs have strictly limited threadgroup shared memory (e.g., 32KB per workgroup). FlashAttention does not need the full 1024-token context in SRAM; it streams K/V blocks through a small tile. The cliff appears when the engine's chosen block shape for contexts at or above 1024 tokens requires more shared memory than the shader can allocate, so the runtime silently falls back to a standard attention kernel that streams K and V from LPDDR5 for every generated token.
   common_mistake: |
     **The Pitfall:** Assuming the device ran out of RAM and started swapping to flash storage.
     **The Rationale:** Engineers equate sudden latency spikes to traditional OOM paging behavior.
@@ -20,16 +20,16 @@ details:
     **Assumptions & Constraints:**
     - Architecture: 32 layers, 8 heads, 64 dim (FP16).
     - Mobile GPU limitation: 32 KB max shared memory per workgroup.
-    - Context length: 1024 tokens.
+    - Optimized attention streams K/V blocks through shared memory; it does not materialize the full sequence there.
 
     **Calculations:**
-    - FlashAttention Tile Size Requirement: 1024 tokens * 64 dim * 2 bytes = 131 KB.
-    - Hardware Mismatch: 131 KB > 32 KB GPU shared memory limit.
-    - Fallback Penalty: Standard attention requires K (131 KB) + V (131 KB) reads per head per layer.
-    - Total Extra DRAM Traffic: 262 KB * 8 heads * 32 layers = 67 MB per token.
+    - Safe tile example: 128 tokens * 64 dim * 2 bytes * 2 (K and V) = 32 KB, before shader scratch space.
+    - If the 1024-token threshold makes the kernel select a larger K/V block, such as 256 tokens, the tile requires 256 * 64 * 2 * 2 = 64 KB, which exceeds a 32 KB shared-memory budget.
+    - The runtime therefore falls back to standard attention for contexts at or above that threshold.
+    - Fallback DRAM traffic per generated token still scales with context length: K+V reads = 1024 * 64 * 2 bytes * 2 = 256 KB per head per layer, or about 64 MB across 8 heads and 32 layers.
 
     **Conclusion & Interpretation:**
-    - **Result: Standard Attention Fallback**. Exceeding the 32 KB SRAM limit forces fallback to unoptimized O(N) DRAM reads, generating **67 MB of extra traffic per token** and bottlenecking the GPU.
+    - **Result: Standard Attention Fallback**. The 1024-token cliff is best explained by a per-tile shared-memory threshold that changes the selected kernel, not by needing the entire context in SRAM. The fallback adds tens of MB of K/V DRAM traffic per token and bottlenecks the GPU.
 status: published
 provenance: imported
 requires_explanation: false

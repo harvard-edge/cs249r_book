@@ -7,11 +7,11 @@ topic: model-size-estimation
 competency_area: architecture
 bloom_level: analyze
 phase: both
-title: Edge New 0035
+title: Pipeline vs Tensor Parallelism for a 30B Transformer over 1GbE Edge Orins
 scenario: Deploying a 30B parameter transformer across an edge cluster of 4 Orin devices communicating via 1Gbps Ethernet.
-question: 'For a 30B transformer across 4 Orins on 1Gbps Ethernet, should you use pipeline parallelism or tensor parallelism, and why?'
+question: For a 30B transformer across 4 Orins on 1Gbps Ethernet, should you use pipeline parallelism or tensor parallelism, and why?
 details:
-  realistic_solution: 'Tensor parallelism requires frequent synchronization (All-Reduce) for every layer, which would be catastrophically slow over a 1Gbps Ethernet link. Pipeline parallelism only requires passing intermediate activations at the boundaries of model partitions. The optimal tradeoff strongly favors pipeline parallelism to minimize communication volume, despite the potential ''bubble'' idle time overhead during the startup and teardown phases.'
+  realistic_solution: Tensor parallelism requires frequent synchronization (All-Reduce) for every layer, which would be catastrophically slow over a 1Gbps Ethernet link. Pipeline parallelism only requires passing intermediate activations at the boundaries of model partitions. The optimal tradeoff strongly favors pipeline parallelism to minimize communication volume, despite the potential 'bubble' idle time overhead during the startup and teardown phases.
   common_mistake: |
     **The Pitfall:** Applying cloud data center topologies (like Megatron-LM TP) directly to edge hardware.
     **The Rationale:** Candidates assume tensor parallelism scales universally, ignoring the catastrophic latency of 1Gbps Ethernet compared to NVLink.
@@ -20,15 +20,15 @@ details:
     **Assumptions & Constraints:**
     - 30B model (60GB FP16); 4 Orins
     - Network: 1Gbps Ethernet (125 MB/s)
-    - SeqLen(1000), Hidden(8192)
+    - Example pipeline boundary activation: batch 1, sequence length 1000, hidden size 8192, FP16
 
     **Calculations:**
-    - Pipeline communication chunk = 1000 * 8192 * 2B = ~16MB
-    - Pipeline overhead = 16MB / 125MB/s = 128ms per stage
-    - Tensor Parallelism requires all-reduce on multi-MBs *every layer*
+    - Pipeline sends the boundary activation once per partition handoff: 1 * 1000 * 8192 * 2 B = 16,384,000 B = ~16.4 MB.
+    - Transfer time per handoff over 1GbE: 16.4 MB / 125 MB/s = ~0.131 s (~131 ms), plus protocol latency.
+    - Tensor parallelism would communicate partial activations or weight products with all-reduce/all-gather at many transformer layers, so the network cost repeats dozens of times per forward pass instead of only at pipeline boundaries.
 
     **Conclusion & Interpretation:**
-    - **Result: Pipeline Parallelism is heavily favored (Network-Bound)**. 1Gbps network causes catastrophic latency for Tensor Parallelism.
+    - **Result: Pipeline Parallelism is heavily favored (Network-Bound)**. 1GbE is slow enough that reducing communication frequency matters more than eliminating pipeline bubbles.
 status: published
 provenance: imported
 requires_explanation: false

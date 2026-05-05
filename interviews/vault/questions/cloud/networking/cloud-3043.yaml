@@ -11,7 +11,7 @@ title: 'Network Bandwidth Bottlenecks: Compare AllReduce over NVLink vs. InfiniB
 scenario: 'A distributed training job runs data-parallel with 8 GPUs across two scenarios: (A) single DGX node (NVLink 600GB/s all-to-all) vs. (B) 8 GPUs across 4 servers connected by 200Gb/s InfiniBand HDR.'
 question: For a 13B model with 26GB FP16 gradients, how long does the AllReduce take with NVLink versus InfiniBand, and what is the efficiency ratio?
 details:
-  realistic_solution: 'Ring-AllReduce data per GPU: 2×(8-1)/8 × 26GB/8 = 2×7/8 × 3.25GB = 5.69GB per GPU. NVLink 600GB/s: 5.69/600=9.5ms. InfiniBand 200Gb/s = 25GB/s per link. Inter-server traffic: 26GB/8=3.25GB per GPU crosses IB. 3.25/25=130ms. Ratio: 130ms/9.5ms = 13.7× slower for inter-server.'
+  realistic_solution: 'Use the same ring-AllReduce volume model for both fabrics and treat each rank as bandwidth-bound by one effective link. Each GPU owns 26GB/8 = 3.25GB of the gradient tensor. Ring-AllReduce moves 2×(8-1)/8×3.25GB = 5.69GB per GPU. On a single DGX NVLink fabric at 600GB/s, time is 5.69/600 = 9.5ms. Across 4 servers on 200Gb/s InfiniBand, use the same 5.69GB per GPU and 25GB/s effective bandwidth: 5.69/25 = 228ms. The time ratio is 228/9.5 = 24x slower on InfiniBand; equivalently, InfiniBand delivers about 4.2% of the NVLink bandwidth-bound throughput in this simplified model.'
   common_mistake: |
     **The Pitfall:** Computing AllReduce bandwidth as total gradient size divided by link bandwidth.
     **The Rationale:** Candidates forget to apply the ring-AllReduce formula (2(n-1)/n × data per participant).
@@ -25,11 +25,12 @@ details:
     **Calculations:**
     - Ring-AllReduce data per GPU = 2 * (8-1)/8 * (26GB / 8) = 5.69 GB.
     - NVLink time: 5.69 GB / 600 GB/s = 9.5 ms.
-    - InfiniBand time: 26GB / 8 = 3.25GB inter-server per GPU. 3.25 GB / 25 GB/s = 130 ms.
-    - Ratio = 130 ms / 9.5 ms = 13.7x.
+    - InfiniBand time using the same ring volume: 5.69 GB / 25 GB/s = 228 ms.
+    - Time ratio = 228 ms / 9.5 ms = 24x slower on InfiniBand.
+    - Throughput efficiency relative to NVLink = 9.5 ms / 228 ms = 4.2%.
 
     **Conclusion & Interpretation:**
-    - **Result: NVLink is 13.7x faster (Network-Bandwidth-Bound).**
+    - **Result: 9.5ms on NVLink vs 228ms on InfiniBand.** Under this simplified per-rank bandwidth-bound model, InfiniBand is 24x slower, or about 4.2% as efficient as NVLink for the same AllReduce volume.
 status: published
 provenance: imported
 requires_explanation: false

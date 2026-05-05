@@ -9,21 +9,23 @@ bloom_level: evaluate
 phase: inference
 title: The Resource Contention Stutter
 scenario: Users of your LLM service complain that generation intermittently freezes for several seconds. You notice this happens whenever a new user submits a very long prompt.
-question: "Based on the diagram, why can't your GPUs handle both tasks simultaneously?"
+question: Based on the diagram, why can't your GPUs handle both tasks simultaneously?
 details:
-  realistic_solution: 'The single GPU pool is the problem. **Prefill** is compute-bound and monopolizes the ALUs, while **Decode** is memory-bandwidth bound. When a long prompt arrives, prefill seizes the compute units, causing concurrent decode requests to stall. The fix is **Disaggregated Serving**: split Prefill and Decode onto separate GPU clusters to isolate these different workload profiles.'
+  realistic_solution: The GPUs can run both phases, but not without resource contention and scheduling interference. **Prefill** for a long prompt is compute-heavy and launches large matrix multiplications, while **Decode** for active users is latency-sensitive and memory-bandwidth-bound. When both share the same queue and GPU pool, long prefill work can occupy execution slots and delay decode batches, so users see generation pauses. Disaggregated serving, reserved decode capacity, or phase-aware scheduling are mitigations that isolate these different workload profiles.
   common_mistake: |
     **The Pitfall:** Suggesting to "add more GPUs to the pool" or "rate-limit long prompts."
     **The Rationale:** Throwing hardware at a problem is a common crutch, but it doesn't solve architectural resource contention between compute-bound and memory-bound operations.
     **The Consequence:** Wasting hardware budgets while continuing to punish users with severe latency spikes.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       * Prefill Compute: Scales with O(N^2).
-       * Decode Compute: Scales with O(N).
+       * Active decode target: 20 tokens/sec per user, or one token every 50ms.
+       * Concurrent active decode users: 40.
+       * A long-prompt prefill occupies the shared GPU scheduler for 250ms.
     2. **Calculations:**
-       * Execution Time: A 4k token prefill can take 200ms lock.
-       * Missed Work: During this 200ms lock, 10 decode tokens should have been generated.
-    3. **Conclusion & Interpretation:** **Result: 200ms freeze (Compute-Bound)**. The multi-second freeze is the direct cost of ALU compute-lock.
+       * Decode slots missed per user during the prefill: 250ms / 50ms = 5 slots.
+       * Total delayed token opportunities: 40 users × 5 slots = 200 decode tokens.
+       * If several long prompts arrive back-to-back, these 250ms stalls accumulate into visible multi-second tail latency.
+    3. **Conclusion & Interpretation:** **Result: Resource Contention.** The problem is not that the GPU is categorically unable to execute both phases; it is that compute-heavy prefill work delays latency-sensitive decode unless the scheduler or architecture isolates them.
 status: published
 provenance: imported
 requires_explanation: false

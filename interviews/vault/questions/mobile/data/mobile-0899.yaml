@@ -11,7 +11,7 @@ title: 'Dataset Curation: Fluency — Token Budget for On-Device Fine-Tuning on 
 scenario: On an A17 Pro, you want to fine-tune a 1B parameter language model for personalization using 500 user-generated examples of average 128 tokens each.
 question: How would you estimate the total fine-tuning compute, memory required, and time to complete?
 details:
-  realistic_solution: 'A17 Pro Neural Engine is inference-only. Fine-tuning must use CPU or GPU cores. Use LoRA to reduce trainable parameters. 1B model in FP16 = 2GB weights. LoRA rank-8 adds ~0.1% params = 1M trainable params. Time to complete will be on the order of an hour or two since each token requires ~4 GFLOPs for the forward and backward pass through the 1B model.'
+  realistic_solution: A17 Pro Neural Engine is inference-only. Fine-tuning must use CPU or GPU cores. Use LoRA to reduce trainable parameters, but remember that the frozen 1B-parameter model still participates in the forward and backward pass. A 1B model in FP16 is about 2GB of weights; LoRA rank-8 might add roughly 1-2M trainable parameters plus optimizer state. Runtime is likely measured in hours, not minutes, and depends heavily on sequence length, batch size, precision, activation checkpointing, thermal throttling, and whether optimizer state stays on device.
   common_mistake: |
     **The Pitfall:** Assuming the Neural Engine supports training, or underestimating FLOPs.
     **The Rationale:** Mistakenly believing only the 1M trainable LoRA parameters determine the required FLOPs, ignoring the full forward/backward pass through the 1B frozen model.
@@ -19,14 +19,17 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Tokens: 500 examples * 128 tokens = 64K tokens.
-       - Model: 1B frozen params. Forward+backward = ~4 GFLOPs/token.
-       - A17 CPU peak capacity: ~150 GFLOPS.
+       - Training pass: 3 epochs, so 64K * 3 = 192K token-updates.
+       - Model: 1B frozen params with LoRA adapters. Forward+backward through the base model is roughly 4-6 GFLOPs/token.
+       - Sustained CPU/GPU training throughput after framework overhead and thermal limits: 25-100 GFLOPS, not peak ANE inference throughput.
     2. **Calculations:**
-       - Total Compute: 4 GFLOPs * 64K * 3 epochs = 768 TFLOPs.
-       - Time: 768,000 GFLOPs / 150 GFLOPS = 5120 seconds (~1.4 hours).
-       - Memory: 2 GiB (base FP16) + 2 MB (LoRA) + 8 MB (AdamW) + 50 MB (Activations) = ~2.1 GiB.
+       - Total Compute Range: 192K tokens * 4-6 GFLOPs/token = 768-1152 TFLOPs.
+       - Time at 100 GFLOPS sustained: 768,000-1,152,000 GFLOPs / 100 GFLOPS = 2.1-3.2 hours.
+       - Time at 25 GFLOPS sustained: 8.5-12.8 hours.
+       - Memory floor: 2.0 GiB FP16 base weights + adapter weights/gradients + optimizer state + activations + framework buffers.
+       - LoRA/optimizer example: 2M trainable params with FP16 weights/grads and FP32 Adam moments is roughly 2M * (2 + 2 + 8) bytes = 24 MB, before activations and temporary tensors.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound. Safely fits inside 8 GiB RAM and completes fine-tuning reasonably quickly on the CPU.**
+       - **Result: Compute-Bound. Memory may fit inside 8 GiB with small batches and checkpointing, but the time estimate is a multi-hour range and must be validated on the actual training stack.**
 status: published
 provenance: imported
 requires_explanation: false

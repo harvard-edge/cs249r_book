@@ -8,38 +8,28 @@ competency_area: memory
 bloom_level: evaluate
 phase: both
 title: Zero-DRAM Accelerator Host Memory Scheduling
-scenario: You are designing a multi-camera traffic monitoring system using a host SoC with 4GB of shared
-  DRAM and a Hailo-8 dataflow accelerator. The Hailo-8 provides 26 TOPS INT8 at 2.5W but has no local
-  DRAM, relying entirely on continuous streaming of inputs, intermediate activations, and outputs to and
-  from the host memory. The system processes four concurrent 1080p video streams through a cascaded pipeline.
-  Because the accelerator relies strictly on host memory streaming, the host OS frequently experiences
-  memory pressure, severe fragmentation from dynamic crops, and OOM kills during bursty traffic scenes.
-question: How would you manage host memory for the Hailo-8 cascaded 4-stream pipeline to avoid fragmentation,
-  memory pressure, and OOM kills?
+scenario: You are designing a multi-camera traffic monitoring system using a host SoC with 4GB of shared DRAM and a Hailo-8 dataflow accelerator. The Hailo-8 provides 26 TOPS INT8 at 2.5W but has no local DRAM, relying entirely on continuous streaming of inputs, intermediate activations, and outputs to and from the host memory. The system processes four concurrent 1080p video streams through a cascaded pipeline. Because the accelerator relies strictly on host memory streaming, the host OS frequently experiences memory pressure, severe fragmentation from dynamic crops, and OOM kills during bursty traffic scenes.
+question: How would you manage host memory for the Hailo-8 cascaded 4-stream pipeline to avoid fragmentation, memory pressure, and OOM kills?
 details:
-  realistic_solution: The optimal design implements a pre-allocated contiguous memory pool (e.g., using
-    Linux CMA or hugepages) on the host to completely bypass the OS virtual memory manager and eliminate
-    fragmentation. Since Hailo-8 streams dataflow continuously, dynamic crops must be padded to fixed
-    sizes or packed into uniform tensor shapes before streaming. The host scheduler must enforce strict
-    backpressure by tracking available blocks in the memory pool; if the pool is exhausted by intermediate
-    activations, the system drops incoming frames rather than triggering an OS-level OOM.
-  common_mistake: '**The Pitfall:** Proposing OS-level swap space or garbage collection.
-
-    **The Rationale:** Candidates ignore that the Hailo-8 has zero local DRAM and rely on cloud-native
-    memory paradigms.
-
-    **The Consequence:** Severe memory fragmentation causes OOM kills, crashing the pipeline during bursty
-    traffic scenes.
-
-    '
-  napkin_math: "**Assumptions & Constraints:**\n   - Host RAM: 4 GB\n   - OS/System reserve: 1.5 GB\n\
-    \   - 1080p INT8 frame (1920x1080x3): 6.2 MB\n   - Concurrent streams: 4\n**Calculations:**\n   -\
-    \ Available contiguous memory pool = 4.0 GB - 1.5 GB = 2.5 GB\n   - Triple-buffer ring (4 streams\
-    \ * 3 buffers) = 12 frames = 74.4 MB\n   - Intermediate activations (4 streams * 40 MB) = 160 MB\n\
-    \   - Fixed-size crop buffer pool = 2.5 GB - (0.074 GB + 0.16 GB) = 2.266 GB\n   - Max crop tensors\
-    \ (10 MB each) = 2.266 GB / 10 MB = 226 crops\n**Conclusion & Interpretation:**\n   - **Result: Memory-Bound.\
-    \ The system can hold exactly 226 crops in host memory before the scheduler must drop frames to prevent\
-    \ OOM.**\n"
+  realistic_solution: The optimal design implements preallocated host memory pools using Linux CMA, dma-buf, or hugepages to reduce fragmentation and keep accelerator-facing buffers physically suitable for DMA, while still operating under the OS memory manager. Each stream should use bounded ring buffers, fixed-size tensor arenas for activations, and a slab or bucket allocator for dynamic crops so bursty scenes reuse existing blocks instead of allocating new shapes. The host scheduler must enforce per-stream budgets and backpressure by tracking available blocks in the pool; if the pool is exhausted by intermediate activations or crops, the system drops or down-samples incoming frames rather than triggering an OS-level OOM.
+  common_mistake: |
+    **The Pitfall:** Proposing OS-level swap space or garbage collection.
+    **The Rationale:** Candidates ignore that the Hailo-8 has zero local DRAM and rely on cloud-native memory paradigms.
+    **The Consequence:** Severe memory fragmentation causes OOM kills, crashing the pipeline during bursty traffic scenes.
+  napkin_math: |
+    **Assumptions & Constraints:**
+       - Host RAM: 4 GB
+       - OS/System reserve: 1.5 GB
+       - 1080p RGB8 frame (1920x1080x3): ~6.22 MB
+       - Concurrent streams: 4
+    **Calculations:**
+       - Available contiguous memory pool = 4.0 GB - 1.5 GB = 2.5 GB
+       - Triple-buffer ring (4 streams * 3 buffers) = 12 frames = ~74.6 MB
+       - Intermediate activations (4 streams * 40 MB) = 160 MB
+       - Fixed-size crop buffer pool = 2.5 GB - (~0.075 GB + 0.160 GB) = ~2.265 GB before allocator overhead
+       - With 10 MB crop blocks and a 10% safety margin, usable crop capacity is roughly 2.0 GB / 10 MB = ~200 crop blocks
+    **Conclusion & Interpretation:**
+       - **Result: Memory-Bound Estimate. The scheduler should budget for roughly 200 reusable crop blocks, not an exact count, and apply backpressure before the fixed pools are exhausted.**
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,48 +8,30 @@ competency_area: memory
 bloom_level: create
 phase: training
 title: Designing a Memory-Constrained Training Loop for On-Device Fine-Tuning on Jetson Orin
-scenario: A robotics team wants to run on-device continual learning on a Jetson Orin (32 GB LPDDR5, 275
-  TOPS). They are fine-tuning a 3B parameter vision-language model (ViLT variant) with LoRA adapters using
-  only fp16 mixed precision. The base model (frozen) uses 6 GB; LoRA adapters add 120 MB of trainable
-  parameters.
-question: How would you design the LoRA fine-tuning loop on Orin to fit the 3B VLM within 16GB total memory
-  while achieving at least 5 training steps per minute?
+scenario: A robotics team wants to run on-device continual learning on a Jetson Orin (32 GB LPDDR5, 275 TOPS). They are fine-tuning a 3B parameter vision-language model (ViLT variant) with LoRA adapters using only fp16 mixed precision. The base model (frozen) uses 6 GB; LoRA adapters add 120 MB of trainable parameters.
+question: How would you design the LoRA fine-tuning loop on Orin to fit the 3B VLM within 16GB total memory while achieving at least 5 training steps per minute?
 details:
-  realistic_solution: Apply gradient checkpointing to all frozen base model layers. Only the LoRA adapter
-    layers require stored activations for the weight gradient. This reduces stored activations from 3B-model-full-forward
-    to only the LoRA insertion points.
-  common_mistake: '**The Pitfall:** Freezing the base model but still storing full activation gradients
-    through all layers during the LoRA backward pass.
-
+  realistic_solution: Freeze the 3B base weights, train only the LoRA adapters, and checkpoint/recompute through the transformer blocks rather than only treating the frozen prefix as free. Even though base weights do not need gradients, backprop through LoRA still needs the adapter inputs and enough block-boundary activations to compute gradients for the low-rank matrices. Use microbatch 1, mixed precision, activation checkpointing across the relevant blocks, and gradient accumulation if a larger effective batch is needed. The 5 steps/min target is only 12 seconds per step, so the design should reserve memory first and then verify throughput with a benchmark; it does not require claiming millisecond-scale steps.
+  common_mistake: |
+    **The Pitfall:** Freezing the base model but still storing full activation gradients through all layers during the LoRA backward pass.
     **The Rationale:** Assuming that freezing weights automatically eliminates activation memory overhead.
-
-    **The Consequence:** Rapidly exceeding the 16 GB budget.'
-  napkin_math: '**Assumptions & Constraints:**
-
+    **The Consequence:** Rapidly exceeding the 16 GB budget.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Budget: 16 GB total. Base model: 6 GB.
-
-    - LoRA weights + optimizer (AdamW fp32): 120 MB * 4 = 480 MB.
-
+    - LoRA trainable weights: 120 MB.
+    - AdamW-style mixed-precision optimizer state is implementation-dependent; reserve about 3-4x the LoRA weight size for trainable parameters plus optimizer/master weights.
+    - Throughput target: at least 5 steps/min = at most 12 seconds/step.
 
     **Calculations:**
-
-    - Activation memory with full checkpointing of frozen prefix: ~150 MB (storing only LoRA inputs and
-    checkpoint boundaries).
-
+    - LoRA weights + optimizer reserve: 120 MB * 4 = 480 MB as a conservative planning estimate.
+    - Checkpointed activation reserve: ~1-3 GB for LoRA inputs, block boundaries, and temporary backward buffers; exact value must be profiled for sequence length and image resolution.
     - OS + runtime overhead: ~2 GB.
-
-    - Total memory footprint: 6 GB + 0.48 GB + 0.15 GB + 2 GB = 8.63 GB.
-
-    - Throughput: Orin at 275 TOPS; LoRA backward pass is ~2x TOPS demand of frozen inference. At batch=1,
-    S=512, step time is ~50 ms.
-
+    - Total planned footprint: 6 GB + 0.48 GB + 3 GB + 2 GB = 11.48 GB, leaving about 4.5 GB headroom under a 16 GB cap.
+    - Required throughput is modest: 5 steps/min means each microbatch step can take up to 12 s. If the benchmarked step time is above that, reduce sequence length/resolution, freeze more adapter sites, or accumulate fewer microbatches.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 8.63 GB Footprint (Memory-Bound)**. Selective checkpointing fits the fine-tuning loop
-    safely in 16 GB and easily exceeds the 5 steps/min target.
-
-    '
+    - **Result: about 11.5 GB planned footprint before profiling (Memory-Bound)**. Full-path checkpointing plus LoRA-only optimizer state can fit under 16 GB; the throughput claim should be confirmed against the 12 s/step target with an on-device benchmark.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,51 +8,38 @@ competency_area: latency
 bloom_level: create
 phase: both
 title: 'Latency Decomposition: Specify Prefill/Decode Split Requirements for SLA on H100'
-scenario: Design a latency budget specification for a chat application using a 13B model on a single GPU
-  (80GB HBM3, 3.35TB/s, 989 TFLOPS). The SLA requires TTFT < 200ms and time-per-output-token (TPOT) <
-  30ms at P95.
-question: What prompt length, decode length, GPU count, and batch-size constraints satisfy TTFT < 200ms
-  and TPOT < 30ms for the 13B chat app?
+scenario: Design a latency budget specification for a chat application using a 13B model on a single GPU (80GB HBM3, 3.35TB/s, 989 TFLOPS). The SLA requires TTFT < 200ms and time-per-output-token (TPOT) < 30ms at P95.
+question: What prompt length, decode length, GPU count, and batch-size constraints satisfy TTFT < 200ms and TPOT < 30ms for the 13B chat app?
 details:
-  realistic_solution: 'TPOT constraint: 13B model = 26GB FP16. Single GPU: 26GB/3.35TB/s = 7.8ms/token
-    < 30ms. Max batch for TPOT < 30ms: memory-bound, batching doesn''t increase per-token time (same weights
-    read). TTFT constraint: at batch=1, prefill for N tokens at 13B requires N*26B FLOPs. For N=512: 13.3T/989T
-    = 13.5ms << 200ms. Max prompt: 200ms budget -> N = 200ms * 989TFLOPS / (2*13B) = 7607 tokens. So max
-    prompt ~7K tokens with margin.'
-  common_mistake: '**The Pitfall:** Solving for TTFT and TPOT independently.
-
-    **The Rationale:** Candidates fail to realize that while larger batches improve TTFT amortization,
-    they consume memory that limits prompt/decode lengths and can degrade TPOT if the batch size becomes
-    compute-bound.
-
-    **The Consequence:** Designing a system that meets the SLA under light load but OOMs or violates TPOT
-    under peak concurrent traffic.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    A defensible single-GPU spec is max_prompt=2048, max_decode=512, GPU_count=1, decode_batch<=20, and prefill_microbatch=1 for max-length prompts. TPOT lower bound for the 13B model is 26GB / 3.35TB/s = 7.8ms/token; at batch 20 and 2560 active tokens/request, KV reads add about 12.5GB per decode step, or 3.7ms, leaving margin under the 30ms P95 TPOT target after kernel overhead. TTFT for a 2048-token prompt is about 2 * 13B * 2048 = 53TFLOPs; at 40% effective H100 utilization this is about 135ms, leaving roughly 65ms for tokenization, queueing, and network. Larger prefill batches or prompts longer than about 2.4K tokens would violate the 200ms TTFT budget.
+  common_mistake: |
+    **The Pitfall:** Solving for TTFT and TPOT independently.
+    **The Rationale:** Candidates fail to realize that while larger batches improve TTFT amortization, they consume memory that limits prompt/decode lengths and can degrade TPOT if the batch size becomes compute-bound.
+    **The Consequence:** Designing a system that meets the SLA under light load but OOMs or violates TPOT under peak concurrent traffic.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 13B model (26GB FP16).
-
     - Single GPU: 80GB HBM3, 3.35TB/s, 989 TFLOPS.
-
+    - Effective prefill utilization: 40% of peak.
+    - 13B KV layout: 40 layers, 40 KV heads, head_dim=128, FP16/BF16.
+    - Runtime/fragmentation reserve: 8GB.
 
     **Calculations:**
-
-    - **TPOT:** 26GB / 3.35TB/s = 7.8ms/token (satisfies < 30ms).
-
-    - **TTFT for 512 tokens:** 13.3T FLOPs / 989TFLOPS = 13.5ms.
-
-    - **Budget remaining for queue/network:** 200 - 13.5 = 186.5ms.
-
-    - **Memory check (Batch 25):** 26GB weights + 25 * 2560 * 5120 * 2(KV) * 40 layers * 2B = 26GB + 52.4GB
-    = 78.4GB < 80GB.
-
+    - **TPOT weight lower bound:** 26GB / 3.35TB/s = 7.8ms/token.
+    - **KV per token:** 40 layers * 2 (K,V) * 40 heads * 128 dim * 2 bytes = 819,200 bytes = 800 KiB.
+    - **Context per request:** 2048 prompt + 512 decode = 2560 tokens.
+    - **KV per request:** 2560 * 800 KiB = 1.95 GiB.
+    - **Memory available for KV:** 80GB - 26GB weights - 8GB reserve = 46GB.
+    - **Memory batch limit:** 46GB / ~2.0GB per request = about 23 requests, so set decode_batch <= 20 for headroom.
+    - **KV read at batch 20 near max context:** 20 * 2560 * 800 KiB = 39 GiB; streamed across many attention kernels, this adds about 12ms of bandwidth work before implementation effects.
+    - **TPOT budget:** 7.8ms weights + about 12ms KV/overhead margin stays below 30ms P95 when decode_batch <= 20.
+    - **TTFT for 2048 tokens:** 2 * 13B * 2048 = 53.2TFLOPs.
+    - **Effective compute:** 989TFLOPS * 40% = 396TFLOPS.
+    - **Prefill time:** 53.2TFLOPs / 396TFLOPS = 134ms, leaving about 66ms for queue/network/tokenization.
 
     **Conclusion & Interpretation:**
-
-    - **Spec: max_prompt=2048, max_decode=512, batch_size <= 25 on 1 GPU.**
-
-    '
+    - **Spec: max_prompt=2048, max_decode=512, GPU_count=1, decode_batch<=20, prefill_microbatch=1 for max-length prompts.**
 status: published
 provenance: imported
 requires_explanation: true

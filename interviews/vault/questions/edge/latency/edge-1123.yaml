@@ -7,55 +7,31 @@ topic: queueing-theory
 competency_area: latency
 bloom_level: create
 phase: inference
-title: 'Edge Queueing Theory Specification: P99 SLO for Robotic Arm Control'
-scenario: 'Specify a real-time inference system for a robotic arm: control loop at 100Hz (10ms budget
-  per cycle), vision model (object localization, 2 GOPS INT8) must complete in <5ms P99. Design the queueing
-  architecture using Jetson Orin (275 TOPS INT8) or Hailo-8 (26 TOPS INT8). Ensure the system meets hard
-  real-time constraints and specify the scheduling policy.'
-question: Should the robotic arm use Jetson Orin or Hailo-8 for the 100Hz vision task, and what scheduling
-  policy guarantees the 5ms deadline?
+title: Robotic Arm Real-Time Inference Hardware and Scheduling Policy
+scenario: 'Specify a real-time inference system for a robotic arm: control loop at 100Hz (10ms budget per cycle), vision model (object localization, 2 GOPS INT8) must complete within a 5ms hard inference deadline. Design the queueing architecture using Jetson Orin (275 TOPS INT8) or Hailo-8 (26 TOPS INT8). Ensure the system meets hard real-time constraints and specify the scheduling policy.'
+question: Should the robotic arm use Jetson Orin or Hailo-8 for the 100Hz vision task, and what queueing and scheduling policy guarantees the 5ms inference deadline under the stated WCET assumptions?
 details:
-  realistic_solution: 'For hard real-time (100Hz control): must guarantee WCET, not P99. Queueing theory
-    gives probabilistic bounds, insufficient for robot safety. Correct approach: use Rate Monotonic Scheduling
-    (RMS) on Jetson Orin. Vision task: 2 GOPS / 275 TOPS = 7.3μs WCET (compute). Memory: 4MB weights /
-    102.4GB/s = 39μs. Real WCET ≈ 100μs (with OS jitter, DMA, cache effects). Period = 10ms. Utilization
-    = 100μs/10ms = 1%. Schedulable. Use CUDA with NVDLA on Jetson for deterministic latency. Specify:
-    dedicated NVDLA core, pinned memory, pre-allocated buffers, no dynamic allocation during runtime.'
-  common_mistake: '**The Pitfall:** Using probabilistic SLOs (P99) for hard real-time control systems.
-
-    **The Rationale:** Queueing theory gives probabilistic bounds, which is insufficient for real-time
-    safety control loops.
-
-    **The Consequence:** Missing even one deadline can cause physical damage, requiring candidates to
-    use worst-case execution time (WCET) analysis instead.'
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: 'For hard real-time control, use WCET and bounded queues rather than a probabilistic P99 queue. Both devices have enough raw compute, but Hailo-8 is the better fit for a dedicated low-power inference path: 2 GOPS / 26 TOPS = 76.9μs compute time, leaving large margin inside the 5ms inference deadline. Use a single-slot latest-frame buffer, drop/overwrite stale frames, pre-allocate all buffers, and run the inference task as a fixed-priority periodic task under rate-monotonic or deadline-monotonic scheduling. With a conservative 0.5ms WCET for accelerator execution plus DMA/runtime overhead, utilization is 0.5ms/10ms=5%, so the periodic task is schedulable and cannot build queue backlog.'
+  common_mistake: |
+    **The Pitfall:** Using probabilistic SLOs (P99) for hard real-time control systems.
+    **The Rationale:** Queueing theory gives probabilistic bounds, which is insufficient for real-time safety control loops.
+    **The Consequence:** Missing even one deadline can cause physical damage, requiring candidates to use worst-case execution time (WCET) analysis instead.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Control loop budget: 100Hz (10ms period).
-
     - Vision model: 2 GOPS INT8, 4MB weights.
-
-    - Hardware: Jetson Orin (275 TOPS, 102.4GB/s).
-
+    - Hardware choice: Hailo-8 dedicated accelerator (26 TOPS, 2.5W).
+    - Queue policy: single-slot latest-frame buffer; overwrite stale frames rather than FIFO backlog.
 
     **Calculations:**
-
-    - Compute WCET = 2 GOPS / 275 TOPS = 7.3 μs.
-
-    - Memory WCET = 4MB / 102.4 GB/s = 39 μs.
-
-    - OS Jitter = ~100 μs.
-
-    - Total WCET ≈ 150 μs (conservative 200 μs).
-
-    - Utilization = 200 μs / 10ms = 2%.
-
+    - Hailo-8 compute time lower bound = 2 GOPS / 26,000 GOPS/s = 76.9 μs.
+    - Conservative validated WCET budget including DMA/runtime overhead = 0.5ms.
+    - Deadline margin = 5ms - 0.5ms = 4.5ms.
+    - Periodic utilization = 0.5ms / 10ms = 5%.
+    - With one periodic inference task and a single-slot input queue, fixed-priority RMS/deadline-monotonic scheduling has no accumulated inference backlog.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 200 μs WCET (Latency-Bound)**. Rate Monotonic Scheduling easily accommodates the 2% utilization,
-    guaranteeing the strict 5ms hard real-time deadline.
-
-    '
+    - **Result: 0.5ms Conservative WCET (Hard-Deadline Feasible)**. A dedicated Hailo-8 with latest-frame buffering and fixed-priority periodic scheduling meets the 5ms inference deadline with large margin.
 status: published
 provenance: imported
 requires_explanation: true

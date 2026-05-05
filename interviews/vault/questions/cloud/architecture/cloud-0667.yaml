@@ -8,53 +8,27 @@ competency_area: architecture
 bloom_level: create
 phase: both
 title: The Sparsity Fallacy
-scenario: You wrote a custom CUDA kernel that skips calculating zeros (90% sparse). But it runs slower
-  than a dense PyTorch matrix multiply that does 10x more math.
+scenario: You wrote a custom CUDA kernel that skips calculating zeros (90% sparse). But it runs slower than a dense PyTorch matrix multiply that does 10x more math.
 question: Why does doing less work take more time?
 details:
-  realistic_solution: Hardware acceleration relies on dense, regular computation blocks. Tensor Cores
-    and Systolic Arrays are physically hard-wired to perform $16\times16$ matrix blocks in a single instruction.
-    Irregular sparse operations force the hardware to fall back to standard, un-fused CUDA cores, completely
-    destroying the throughput advantage of the specialized silicon.
-  common_mistake: '**The Pitfall:** Assuming that skipping floating-point operations via conditional logic
-    always results in faster execution.
-
-    **The Rationale:** Software engineers apply scalar CPU intuition ("less math = faster loop") to highly
-    parallelized GPU architectures, fundamentally misunderstanding the physics of hardware accelerators.
-
-    **The Consequence:** Millions of dollars and engineering hours are wasted writing bespoke sparse kernels
-    that actively fight the silicon, resulting in catastrophic performance degradation.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Sparsity: 90% (Custom kernel performs 10x less math).
-
-    - Hardware: NVIDIA H100.
-
-    - Dense Engine: Tensor Cores (Peak 989 TFLOPS).
-
-    - Sparse Engine Fallback: standard CUDA cores (Peak ~60 TFLOPS).
-
+  realistic_solution: Hardware acceleration relies on dense, regular computation blocks. Tensor Cores and Systolic Arrays are physically hard-wired to perform $16\times16$ matrix blocks in a single instruction. Irregular sparse operations force the hardware to fall back to standard, un-fused CUDA cores, completely destroying the throughput advantage of the specialized silicon.
+  common_mistake: |
+    **The Pitfall:** Assuming that skipping floating-point operations via conditional logic always results in faster execution.
+    **The Rationale:** Software engineers apply scalar CPU intuition ("less math = faster loop") to highly parallelized GPU architectures, fundamentally misunderstanding the physics of hardware accelerators.
+    **The Consequence:** Millions of dollars and engineering hours are wasted writing bespoke sparse kernels that actively fight the silicon, resulting in catastrophic performance degradation.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dense PyTorch matmul uses Tensor Cores with regular tiles and coalesced memory access.
+    - A custom unstructured sparse kernel may skip 90% of multiply-adds, but it also pays index lookup, branch divergence, poor cache locality, and often cannot use Tensor Cores.
+    - End-to-end latency depends on effective throughput, not just nominal FLOP count.
 
     **Calculations:**
-
-    - Tensor Core throughput multiplier = 989 / 60 ≈ 16.5x faster.
-
-    - The custom kernel reduces work by 10x.
-
-    - Net performance = (1 / 10 math) × (16.5x hardware slowdown).
-
-    - Performance penalty = 1.65x slower than doing 100% of the dense math.
-
+    - Dense path: high arithmetic count, but the work is issued as large regular Tensor Core tiles.
+    - Sparse path: lower arithmetic count, but extra metadata traffic and irregular gathers reduce effective bandwidth and may move execution to less efficient kernels.
+    - A 10x FLOP reduction only helps if the sparse kernel preserves enough hardware efficiency and memory locality to offset those overheads.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Hardware-Utilization Bound**. Irregular sparsity destroys the contiguous memory access
-    required by Tensor Cores. The massive 16.5x penalty of falling back to standard CUDA cores effortlessly
-    annihilates the 10x mathematical savings.
-
-    '
+    - **Result: Hardware-Utilization Bound**. Irregular sparsity can be slower because it trades dense Tensor Core work for fragmented memory access, control overhead, and lower utilization. Fewer FLOPs do not guarantee lower latency; sparse kernels win only when the sparsity structure is regular enough for efficient hardware and library support.
 status: published
 provenance: imported
 requires_explanation: true

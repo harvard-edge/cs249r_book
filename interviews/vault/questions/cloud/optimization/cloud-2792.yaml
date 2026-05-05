@@ -7,11 +7,11 @@ topic: graph-compilation
 competency_area: optimization
 bloom_level: create
 phase: inference
-title: Cloud New 0005
-scenario: 'You need to serve a 13B model with highly dynamic sequence lengths (10 to 8000) using a hybrid AOT/JIT compilation architecture. The goal is to minimize both kernel launch overhead and compilation latency.'
-question: 'How would you design a hybrid AOT/JIT compiler for a 13B model with sequence lengths from 10 to 8000?'
+title: Hybrid AOT JIT Compilation for Dynamic 13B Inference
+scenario: You need to serve a 13B model with highly dynamic sequence lengths (10 to 8000) using a hybrid AOT/JIT compilation architecture. The goal is to minimize both kernel launch overhead and compilation latency.
+question: How would you design a hybrid AOT/JIT compiler for a 13B model with sequence lengths from 10 to 8000?
 details:
-  realistic_solution: 'Architect a bucketing system combined with PTX JIT compilation. Pre-compile (AOT) kernels for a fixed set of sequence length buckets (e.g., 32, 128, 512, 2048, 8192) using fixed shapes to maximize register utilization. Route requests to the nearest upper bucket and pad inputs to the bucket size to reuse the highly optimized AOT kernels. For extremely large or irregular shapes that cause high memory fragmentation in buckets, trigger a background JIT compilation cache.'
+  realistic_solution: Architect a bucketing system combined with PTX JIT compilation. Pre-compile (AOT) kernels for a fixed set of sequence length buckets (e.g., 32, 128, 512, 2048, 8192) using fixed shapes to maximize register utilization. Route requests to the nearest upper bucket and pad inputs to the bucket size to reuse the highly optimized AOT kernels. For extremely large or irregular shapes that cause high memory fragmentation in buckets, trigger a background JIT compilation cache. On an 80GB GPU, the 13B FP16 weights leave about 54GB before runtime overhead; an 8192-token KV cache at 800KB/token is about 6.55GB, so 8 max-bucket requests is a theoretical upper bound and 7 is the safer production target after reserving memory for activations, workspaces, and fragmentation.
   common_mistake: |
     **The Pitfall:** Attempting to JIT compile kernels on-the-fly for every unique sequence length.
     **The Rationale:** Engineers want to perfectly optimize hardware usage for every request to avoid padding waste.
@@ -23,12 +23,14 @@ details:
     - Max bucket size: 8192 context.
 
     **Calculations:**
-    - Memory for max bucket: 8192 * 800KB = 6.5GB.
-    - Padding penalty (e.g., 4000 to 8192): Wastes ~3.3GB.
-    - Capacity on 80GB GPU: 80 - 26 = 54GB. 54GB / 6.5GB ≈ 8 fully padded requests.
+    - Memory for max bucket: 8192 * 800KB = 6,553,600KB ≈ 6.55GB decimal.
+    - Padding penalty (e.g., 4000 to 8192): 4192 * 800KB = 3,353,600KB ≈ 3.35GB decimal (about 3.2GiB).
+    - Raw remaining memory on 80GB GPU: 80GB - 26GB = 54GB.
+    - Theoretical max-bucket capacity: 54GB / 6.55GB ≈ 8.2, so at most 8 fully padded requests before overhead.
+    - With a modest ~10% reserve for activations, workspaces, allocator fragmentation, and runtime buffers: 48.6GB / 6.55GB ≈ 7.4, so plan for 7 concurrent max-bucket requests.
 
     **Conclusion & Interpretation:**
-    - **Result: 8 fully padded requests (Memory-Capacity-Bound)**. Trading memory capacity for zero compilation latency via bucketing is the optimal tradeoff to eliminate CPU bottlenecks.
+    - **Result: Memory-Capacity-Bound.** Bucketing trades memory for low compilation latency; 8 max-bucket requests is the arithmetic ceiling, while 7 is the safer operating target after overhead.
 status: published
 provenance: imported
 requires_explanation: true

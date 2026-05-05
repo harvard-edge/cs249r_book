@@ -8,51 +8,29 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: 'Model Format Conversion: Size Multi-Model TFLM Deployment on Cortex-M7+NPU'
-scenario: You must size the Flash and SRAM layout for deploying two TFLM models on a Cortex-M7+Ethos-U55
-  (480MHz, 512KB SRAM). Model 1 is an always-on keyword spotting model (100K INT8 params, 0.09 MOPs).
-  Model 2 is a speaker verification model (500K INT8 params, 5 MOPs) triggered by the keyword. Both models
-  use the NPU.
-question: How should Flash, SRAM, and activation arenas be sized for two triggered TFLM models on Cortex-M7
-  plus Ethos-U55?
+scenario: You must size the Flash and SRAM layout for deploying two TFLM models on a Cortex-M7+Ethos-U55 (480MHz, 512KB SRAM). Model 1 is an always-on keyword spotting model (100K INT8 params, 0.09 MOPs). Model 2 is a speaker verification model (500K INT8 params, 5 MOPs) triggered by the keyword. Both models use the NPU.
+question: How should Flash, SRAM, and activation arenas be sized for two triggered TFLM models on Cortex-M7 plus Ethos-U55?
 details:
-  realistic_solution: 'Flash: KWS model 100KB + SV model 500KB + TFLM runtime 30KB + app 64KB = 694KB.
-    Need 1MB Flash MCU. SRAM: KWS activation arena (peak: 0.09M ops → ~10KB). SV activation arena (5M
-    ops, larger layers → ~80KB). Shared arena (use max): 80KB. TFLM runtime: 30KB. Model weight buffers:
-    KWS 100KB + SV 500KB — but only KWS active at idle. Load SV to SRAM on trigger from external Flash.
-    Active memory: KWS 100+10+30=140KB. On trigger: +500KB SV weights? Exceeds 512KB SRAM. Fix: SV weights
-    in external Flash, load layer-by-layer.'
-  common_mistake: '**The Pitfall:** Allocating separate activation arenas for both models simultaneously;
-    since speaker verification is triggered (not concurrent), the activation arena can be shared/reused.
-
+  realistic_solution: 'Keep weights Flash-resident and size SRAM for live tensors, not for the sum of both model files. Flash must hold KWS weights 100KB + SV weights 500KB + TFLM/runtime kernels 30KB + app 64KB = 694KB, so a 1MB Flash part or internal Flash plus external XIP Flash is required. SRAM uses a shared activation arena because the models are not concurrent: max(10KB KWS arena, 80KB SV arena) = 80KB, plus about 30KB TFLM runtime/scratch and ordinary stack/IO budget. That is roughly 110KB plus system buffers, well under 512KB. Do not copy the whole 500KB SV model into SRAM on trigger; 500KB weights + 80KB arena + runtime would exceed 512KB. If the NPU cannot read the SV weights directly from Flash, the feasible design is external/internal Flash residency with layer-by-layer staging into a small SRAM weight buffer.'
+  common_mistake: |
+    **The Pitfall:** Allocating separate activation arenas for both models simultaneously; since speaker verification is triggered (not concurrent), the activation arena can be shared/reused.
     **The Rationale:** The candidate misunderstands the architecture constraints.
-
-    **The Consequence:** The model is deployed incorrectly or fails to meet system requirements.'
-  napkin_math: '**Assumptions & Constraints:**
-
+    **The Consequence:** The model is deployed incorrectly or fails to meet system requirements.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - Models: KWS (100KB Flash, 10KB activations), SV (500KB Flash, 80KB activations).
-
     - Target: Cortex-M7+Ethos-U55 (512KB SRAM, 480MHz).
-
     - TFLM Runtime: 30KB.
 
-
     **Calculations:**
-
-    - Shared SRAM arena: 80KB (max of 10KB and 80KB).
-
-    - SRAM at idle: 100KB KWS weights + 80KB arena + 30KB TFLM = 210KB.
-
-    - SRAM on trigger: 210KB + 500KB SV weights = 710KB (> 512KB SRAM limit).
-
-    - Flash load overhead: 10 layers * 50KB avg at 100MB/s XIP = 5ms overhead.
-
+    - Flash footprint: 100 KB + 500 KB + 30 KB + 64 KB = 694 KB.
+    - Flash choice: use at least a 1 MB Flash budget, or place the 500 KB SV model in external XIP Flash.
+    - Shared SRAM arena: max(10 KB, 80 KB) = 80 KB.
+    - SRAM runtime budget: 80 KB arena + 30 KB TFLM runtime/scratch = 110 KB, plus stack and IO buffers.
+    - Invalid full-load trigger path: 500 KB SV weights + 80 KB arena + 30 KB runtime = 610 KB > 512 KB SRAM.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 710KB SRAM usage (Memory-Capacity-Bound)**. SV weights must be loaded layer-by-layer from
-    Flash to fit within the 512KB SRAM constraint.
-
-    '
+    - **Result: 694 KB Flash and about 110 KB core SRAM**. The design fits SRAM only if SV weights remain Flash-resident or are streamed layer-by-layer; staging the whole SV model in SRAM is not feasible.
 status: published
 provenance: imported
 requires_explanation: false

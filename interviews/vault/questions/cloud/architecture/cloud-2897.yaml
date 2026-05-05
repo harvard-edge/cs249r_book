@@ -8,8 +8,8 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Diagnose low GPU utilization when serving MobileNetV3 on H100
-scenario: 'A production MobileNetV3-Large serving endpoint on H100 shows only 12% GPU-SM utilization in nvidia-smi despite receiving 5,000 QPS. The model processes 224x224 images in BF16. Each request is a single image.'
-question: 'Why is MobileNetV3-Large only reaching 12% SM utilization at 5,000 QPS batch=1 on H100, and how would you fix it?'
+scenario: A production MobileNetV3-Large serving endpoint on H100 shows only 12% GPU-SM utilization in nvidia-smi despite receiving 5,000 QPS. The model processes 224x224 images in BF16. Each request is a single image.
+question: Why is MobileNetV3-Large only reaching 12% SM utilization at 5,000 QPS batch=1 on H100, and how would you fix it?
 details:
   realistic_solution: |
     At 5K QPS with batch=1, each forward pass takes ~0.8ms at 12% SM util. Root causes: (1) batch size=1 means each 0.22-GFLOP inference is dominated by kernel launch overhead; (2) CPU preprocessing (decode + resize) taking 3–5ms per image; (3) H2D PCIe transfers serializing GPU work. Fix: implement server-side dynamic batching (10ms window → batch=50), move preprocessing to GPU with DALI, use CUDA graphs to fuse kernel launches.
@@ -23,12 +23,13 @@ details:
     - H100 peak 989 TFLOPS BF16.
 
     **Calculations:**
-    - Actual compute time: 0.22 GFLOPs / 119 TFLOPS (at 12% util) = 1.8 μs. The H100 is idle 99.9% of the time.
-    - With dynamic batching (batch=50): 50 * 0.22 GFLOPs = 11 GFLOPs.
-    - Compute time: 11 GFLOPs / 594 TFLOPS (60% util) = 0.019ms.
+    - Work arriving per second: 5,000 req/s * 0.22 GFLOPs = 1.1 TFLOPs/s, far below H100 peak.
+    - Pure math time per single request at 119 TFLOPS effective would be 0.22 GFLOPs / 119,000 GFLOPs/s = 0.00185 ms = 1.85 microseconds.
+    - A 10 ms batching window at 5,000 QPS collects about 50 requests, for 50 * 0.22 GFLOPs = 11 GFLOPs per batch.
+    - Pure math time for that batch at 119 TFLOPS is 11 / 119,000 = 0.092 ms; real latency is dominated by launch overhead, preprocessing, transfer, and framework scheduling, not FLOPs.
 
     **Conclusion & Interpretation:**
-    - **Result: GPU utilization jumps to ~50% safely fitting within a 10ms dynamic batching window. (CPU-Bound Preprocessing Overhead)**. Ultra-fast models hit CPU dispatch limits without smart batching.
+    - **Result: Dispatch and Preprocessing Bound**. Dynamic batching can greatly improve occupancy and amortize overhead within the 10 ms queueing budget, but the exact SM utilization must be measured; it does not follow directly from the FLOP count.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: Diagnose Attention Head Collapse in Quantized MCU Transformer
 scenario: After INT4 quantization of a 4-head attention transformer deployed on Cortex-M4, word error rate jumps from 8% to 31% on a wake-word detection task. Attention visualization shows 3 of 4 heads produce nearly uniform distributions (entropy > 0.95 of maximum) while 1 head handles all meaningful patterns. The model was quantized using post-training quantization (PTQ) with 100 calibration samples.
 question: How would you diagnose why INT4 caused head collapse and propose a targeted fix?
 details:
-  realistic_solution: 'INT4 provides only 16 discrete levels. Attention logits before softmax typically span [-3, 3] std devs. With 100 calibration samples, scale = max(|logits|)/7 ≈ 3.0/7 = 0.43. Values < 0.43 quantize to 0 (dead zone). Heads 2-4 with lower-magnitude weights get zeroed out. Fix: (1) increase calibration to 1000+ samples, (2) use per-head quantization scales instead of per-tensor, (3) apply attention logit clipping at 2.5σ before quantization.'
+  realistic_solution: 'The entropy observation shows that three heads have lost useful contrast after PTQ, but it does not prove that INT4 precision is uniformly impossible. A likely diagnosis is range mismatch: with only 100 calibration samples, a per-tensor INT4 scale can be dominated by outliers or by the one high-magnitude head, leaving lower-magnitude heads with too few effective levels. For symmetric INT4 with range -8..7 and a calibrated max magnitude of 3.0, the scale is about 3.0/7 = 0.43 per code step, so values within roughly half a step of zero quantize to zero and small logit differences are rounded away. The targeted fix is to collect representative calibration data, inspect per-head activation/logit ranges and saturation rates, and use per-head or per-channel quantization for Q/K/V and attention projections. If INT4 still collapses heads, use quantization-aware training or keep the attention logits/softmax path at INT8 while retaining INT4 weights elsewhere.'
   common_mistake: |
     **The Pitfall:** Blaming INT4 precision uniformly across all heads.
     **The Rationale:** Candidates fail to trace the error back to the PTQ calibration sample size, causing outlier-driven scale factors that crush small attention weights.
@@ -20,16 +20,18 @@ details:
     **Assumptions & Constraints:**
     - Quantization: INT4 (range -8 to +7).
     - Sequence length: 64.
-    - Calibration max logit magnitude: 3.0.
+    - Example per-tensor calibrated max logit magnitude: 3.0.
+    - Symmetric INT4 uses about 15-16 levels; signed range is commonly treated as -8 to +7.
 
     **Calculations:**
-    - Scale factor: max / 7 = 3.0 / 7 = 0.43.
-    - Dead zone: Weights < 0.43 map to 0.
+    - Per-tensor scale factor: max / 7 = 3.0 / 7 = 0.43 per quantization step.
+    - Rounding dead zone around zero is about half a step: 0.43 / 2 = 0.215. Values with magnitude below this round to zero under symmetric quantization.
+    - If a low-range head has logits mostly within +/-0.4, it receives only about three integer codes (-1, 0, +1), so softmax contrast can collapse toward uniform.
     - Uniform distribution entropy: log_e(64) = 4.16 nats.
-    - Observed entropy: 0.95 * 4.16 = 3.95 nats.
+    - Observed entropy: >0.95 * 4.16 = >3.95 nats, confirming near-uniform attention in the affected heads.
 
     **Conclusion & Interpretation:**
-    - **Result: < 0.43 (Precision-Bound)**. Values < 0.43 are crushed to 0, collapsing attention heads into near-uniform entropy.
+    - **Result: Per-tensor INT4 scale can erase low-magnitude head contrast (Precision-Bound).** Diagnose with per-head range and saturation statistics, then fix with representative calibration plus per-head/per-channel quantization or QAT.
 status: published
 provenance: imported
 requires_explanation: false

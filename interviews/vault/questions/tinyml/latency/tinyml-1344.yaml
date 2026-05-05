@@ -11,25 +11,30 @@ title: Latency Decomposition on Nordic nRF5340 for TinyML Inference
 scenario: You are deploying a tinyML model for real-time anomaly detection on a Nordic nRF5340 SoC. The end-to-end latency budget from sensor data acquisition to decision output is 50ms. The model processes 100-byte sensor data arriving via BLE every 10ms.
 question: How should you measure and optimize TTFT, TPOT, BLE, preprocessing, and postprocessing latency on nRF5340 anomaly detection?
 details:
-  realistic_solution: 'Implement detailed profiling using hardware timers or GPIO toggles at key execution points. Optimize each stage individually by: 1) data packing and efficient BLE connections, 2) utilizing DSP extensions and fixed-point arithmetic for preprocessing, and 3) applying extreme INT8 quantization, Top-K Sparsification, and custom CMSIS-NN kernel optimization for inference to reduce memory access.'
+  realistic_solution: 'Define TTFT for this pipeline as the time from BLE packet arrival or sensor sample readiness to the first anomaly decision, including buffering, preprocessing, inference startup, and postprocessing. Define TPOT as the steady-state time per subsequent decision when packets arrive every 10 ms. Instrument BLE ISR entry/exit, packet copy or DMA completion, preprocessing start/end, TFLM/CMSIS-NN inference start/end, postprocessing, and application output with the nRF5340 cycle counter, GPIO toggles, or Zephyr tracing. Optimize the stage that consumes the budget: tune BLE connection interval and payload packing, avoid extra copies, keep preprocessing fixed-point, use INT8 kernels, reduce MACs or tensor arena pressure if inference dominates, and keep postprocessing constant time.'
   common_mistake: |
     **The Pitfall:** Focusing exclusively on the model inference time (TPOT/TTFT).
     **The Rationale:** Candidates fail to account for the significant overheads of BLE communication protocols and the interrupt service routines (ISRs) for data acquisition.
     **The Consequence:** They miss the real bottleneck, leaving the system failing the 50ms latency budget despite an optimized ML model.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Clock: 128 MHz. BLE data: 100 bytes (1Mbps effective).
-    - Pre/Post: 700 CPU cycles.
+    - Clock: 128 MHz.
+    - BLE data: 100 bytes at 1 Mbps effective payload rate plus protocol/ISR overhead.
+    - Preprocessing: 500 cycles; postprocessing: 200 cycles.
+    - BLE ISR and queue/copy overhead: 2,000 cycles.
     - Inference: 100,000 MACs at 10 cycles/MAC.
 
     **Calculations:**
-    - BLE Transmission: ~1.0 ms.
-    - Pre/Post DSP: 700 / 128 MHz = ~5.5 µs.
+    - BLE air/payload time: 100 bytes * 8 bits / 1 Mbps = 0.8 ms; budget about 1.5 ms including connection-event, ISR, and queue overhead.
+    - ISR/queue overhead: 2,000 / 128 MHz = 0.016 ms.
+    - Preprocessing: 500 / 128 MHz = 0.004 ms.
     - Inference: 1M cycles / 128 MHz = ~7.8 ms.
-    - Total Active Time: 1.0 + 0.0055 + 7.8 = ~8.8 ms.
+    - Postprocessing: 200 / 128 MHz = 0.002 ms.
+    - TTFT estimate: 1.5 + 0.016 + 0.004 + 7.8 + 0.002 = 9.322 ms.
+    - TPOT estimate in steady state: max(10 ms packet cadence, about 7.822 ms local processing) = 10 ms if stages are pipelined.
 
     **Conclusion & Interpretation:**
-    - **Result: 8.8 ms (Compute-Bound Latency)**. 8.8 ms is well within the 50ms budget, leaving 41.2ms for OS scheduling and TTFT overhead.
+    - **Result: about 9.3 ms TTFT and 10 ms steady-state TPOT/cadence (Inference-Dominated Local Processing)**. This fits the 50 ms budget, but BLE scheduling jitter and Zephyr scheduling overhead should be measured rather than assumed.
 status: published
 provenance: imported
 requires_explanation: false
@@ -39,7 +44,7 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- Reasoning Competency, Knowledge Area, and Mode are missing.
+  - Reasoning Competency, Knowledge Area, and Mode are missing.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

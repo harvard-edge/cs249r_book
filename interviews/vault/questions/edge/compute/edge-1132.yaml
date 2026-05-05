@@ -7,29 +7,32 @@ topic: systolic-dataflow
 competency_area: compute
 bloom_level: evaluate
 phase: both
-title: 'Edge Systolic Array Evaluation: Weight-Stationary vs Row-Stationary on Jetson'
-scenario: Compare weight-stationary (WS) and row-stationary (RS) dataflow for a depthwise convolution on an edge accelerator. The block is an EfficientNet-B0 block (32 channels, 112x112, 3x3 dw-conv).
+title: EfficientNet-B0 32x112x112 Depthwise Convolution WS vs RS SRAM Access
+scenario: Compare weight-stationary (WS) and row-stationary (RS) dataflow for an INT8 depthwise convolution on an edge accelerator. The block is an EfficientNet-B0 block (32 channels, 112x112, 3x3 dw-conv).
 question: For the 32-channel 112x112 3x3 depthwise conv, how do WS and RS dataflows compare in SRAM access and energy?
 details:
-  realistic_solution: 'DW conv: 32 channels, weights = 32*9 = 288 values. Activations: 32*112^2 = 401K values. WS dataflow: weights stationary in register file. Activations (input) read: 32*112^2 (with padding: 32*114^2 = 415K). Output written: 32*112^2=401K. Total SRAM accesses: 288 (weight load, amortized) + 415K + 401K = 816K accesses (415K reads + 401K writes). RS dataflow: processes one output row at a time, keeping partial sums stationary. Input row read: 3 rows of 32*114 = 10.95K, output row written: 32*112. Total for 112 rows: same 816K accesses. Both similar for DW. RS wins for standard conv where partial sums are large.'
+  realistic_solution: 'DW conv: 32 channels, weights = 32*9 = 288 INT8 values. Activations: 32*112^2 = 401K values. Under a compulsory SRAM-access convention, WS keeps the 288 weights in the register file and streams the padded input once: 32*114^2 = 415,872 reads, then writes 32*112^2 = 401,408 outputs. That is about 817K activation/weight accesses. RS processes one output row band at a time with a 3-row input window and local partial sums; for depthwise conv there are only 9 MACs per output, so partial-sum traffic is tiny and the same input/output activation traffic dominates. RS can be slightly better or worse depending on row-buffer capacity and halo rereads, but it is the same order as WS for this depthwise layer. The important conclusion is not exact equality: depthwise weights are too small for WS to save much energy, while RS shows larger advantages on standard convolutions with large partial sums.'
   common_mistake: |
     **The Pitfall:** Applying weight-stationary dataflow logic strictly to depthwise convolutions.
     **The Rationale:** Candidates assume weights dominate memory accesses, forgetting that depthwise weights are tiny (9 values per channel).
     **The Consequence:** Memory bandwidth bottlenecks are completely misidentified, as activations heavily dominate the dataflow.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Depthwise 32ch, 3x3, 112x112.
-    - Weight size: 32 * 9 = 288 bytes INT8.
-    
+    - Depthwise 32ch, 3x3, 112x112, INT8.
+    - Count compulsory SRAM reads/writes for weights, padded input, and output; ignore cache-line effects and optional halo rereads.
+    - Weight size: 32 * 9 = 288 bytes.
+
     **Calculations:**
     - Activation in (with padding): 32 * (112+2)^2 = 415,872 bytes.
     - Output: 32 * 112^2 = 401,408 bytes.
-    - Total memory access: ~0.818 MB per inference.
+    - Weight reads: 288 bytes.
+    - Compulsory traffic ≈ 415,872 + 401,408 + 288 = 817,568 bytes = 0.818 MB.
     - FLOPs: 2 * 32 * 112^2 * 9 = 7.2M FLOPs.
-    - Arithmetic Intensity = 7.2M / 0.818MB = 8.8 FLOPs/byte.
-    
+    - Arithmetic Intensity = 7.225M / 0.818M bytes = 8.8 FLOPs/byte.
+    - WS and RS therefore differ mainly in local buffering and possible halo rereads, not in the dominant compulsory activation traffic.
+
     **Conclusion & Interpretation:**
-    - **Result: 8.8 FLOPs/byte (Memory-Bound)**. The layer is completely memory-bound by activations, making both WS and RS dataflows yield similar massive SRAM access counts.
+    - **Result: ~8.8 FLOPs/byte and activation-dominated.** WS and RS have similar SRAM traffic for this depthwise layer under the stated counting convention; neither gets the large reuse benefit seen in dense convolution.
 status: published
 provenance: imported
 requires_explanation: false

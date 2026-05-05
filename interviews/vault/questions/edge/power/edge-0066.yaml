@@ -7,31 +7,32 @@ topic: power-budgeting
 competency_area: power
 bloom_level: analyze
 phase: both
-title: 'The Thermal Zone Juggle'
+title: The Thermal Zone Juggle
 scenario: 'Your industrial edge box runs three concurrent AI pipelines: defect detection on GPU (25W), predictive maintenance on DLA (8W), and anomaly detection on CPU (12W) in a 50°C factory. Total power is 45W, under the 60W TDP limit. After 20 minutes, the defect detection model''s latency doubles. The other two pipelines are unaffected. GPU utilization hasn''t changed.'
-question: 'What is causing the sudden latency increase for the GPU model despite being under the system TDP?'
+question: What is causing the sudden latency increase for the GPU model despite being under the system TDP?
 details:
-  realistic_solution: 'Modern SoCs have multiple independent **thermal zones** with separate temperature sensors and throttling policies. The Orin has distinct zones for: GPU, CPU, DLA, and DRAM controller. The GPU die area is physically adjacent to the CPU cluster. Even though total chip power (45W) is under TDP (60W), the GPU''s *local* thermal density matters. The GPU dissipates 25W in ~50 mm² of die area = 0.5 W/mm². The CPU adds 12W in an adjacent ~30 mm² = 0.4 W/mm². The combined thermal density in that region of the die creates a **hotspot** that exceeds the GPU thermal zone''s throttle threshold (typically 95°C junction), even though the DLA zone (on the other side of the die) is cool. In a 50°C ambient factory with fan cooling, the thermal resistance from GPU junction to ambient might be 0.8°C/W. GPU junction temp = 50°C + (25W × 0.8) = 70°C from GPU alone, but add CPU thermal coupling: +12W × 0.3 (cross-coupling factor) = 73.6°C. Over 20 minutes, the heatsink''s thermal mass saturates and junction temp climbs to ~97°C → GPU throttles. The fix: (1) move anomaly detection from CPU to DLA (physically distant from GPU), reducing the hotspot, (2) implement a **thermal-aware scheduler** that monitors per-zone temperatures and migrates workloads before throttling occurs, (3) apply thermal paste with lower thermal resistance or add a vapor chamber heatsink.'
+  realistic_solution: 'Modern SoCs have multiple independent thermal zones with separate temperature sensors and throttling policies. Even though total chip power (45W) is under the 60W TDP limit, the GPU can still throttle if its local zone exceeds its own thermal limit. The GPU workload dissipates 25W in one die region, and the 12W CPU workload is physically near enough to add heat to the same local zone. GPU utilization has not changed; the latency doubles because DVFS reduces GPU clocks to protect that localized hotspot. A coherent steady-state estimate is ambient + local GPU heating + coupled CPU heating, for example 50°C + (25W * 0.8°C/W) + (12W * 0.3°C/W) = 73.6°C under the assumed resistances. If the real sensor crosses the throttle threshold after heat soak, the diagnosis is still local GPU-zone temperature, not total TDP. The fix: (1) move anomaly detection from CPU to DLA or another zone farther from the GPU, (2) implement a thermal-aware scheduler that monitors per-zone temperatures
+    and migrates workloads before throttling occurs, (3) improve the GPU heat path with better TIM or a vapor chamber heatsink.'
   common_mistake: |
     **The Pitfall:** Assuming that staying under the total chip TDP guarantees thermal safety.
     **The Rationale:** Candidates treat TDP as a whole-chip metric without realizing that thermal throttling happens at localized thermal zones due to physical die proximity.
     **The Consequence:** Overlooking severe die-level hotspots that cause individual components (like the GPU) to throttle while the rest of the system runs fine.
   napkin_math: |
     **Assumptions & Constraints:**
-    - GPU thermal zone: 25W GPU.
-    - Thermal resistance: 0.8°C/W.
-    - CPU cross-coupling: 12W * 0.3°C/W = 3.6°C.
+    - GPU local workload: 25W.
+    - GPU-to-ambient thermal resistance estimate: 0.8°C/W.
+    - Coupled CPU heat into the GPU zone: 12W through an estimated 0.3°C/W coupling path.
     - Ambient temp: 50°C.
 
     **Calculations:**
     - GPU Self-heating: 25W * 0.8°C/W = 20°C.
-    - Steady-state junction temp: 50°C + 20°C + 3.6°C = 73.6°C.
-    - Transient overshoot reaches ~97°C, triggering thermal throttling.
+    - CPU coupled heating: 12W * 0.3°C/W = 3.6°C.
+    - Estimated GPU-zone junction temp: 50°C + 20°C + 3.6°C = 73.6°C under these assumptions.
     - Migrating CPU anomaly detection to DLA reduces CPU power to 0W in that region.
     - New junction temp: 50°C + 20°C = 70°C.
 
     **Conclusion & Interpretation:**
-    - **Result: 70°C Safe Zone (Thermal-Bound)**. Migrating the CPU workload away from the GPU hotspot drops the local junction temperature safely below the throttle threshold.
+    - **Result: 3.6°C less local GPU-zone heating (Thermal-Bound)**. The latency increase is caused by localized GPU-zone throttling after heat soak; moving adjacent CPU work away from that zone reduces hotspot temperature even though total system power was already under TDP.
 status: published
 provenance: imported
 requires_explanation: false

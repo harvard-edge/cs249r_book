@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: inference
 title: MHA vs GQA Decoding Bottlenecks
 scenario: You are deploying a 7B parameter LLM on an NPU targeting an interactive chat application. The system has 45 TOPS INT8 compute and a shared 12-16 GB LPDDR5X memory pool between the CPU, GPU, and NPU. During auto-regressive decoding with a 2048-token context, you observe that the NPU compute utilization drops to under 5% when using standard Multi-Head Attention (MHA), resulting in slow token generation.
-question: 'Why does the NPU sit idle despite having 45 TOPS available, and why does Grouped-Query Attention (GQA) significantly increase the token generation rate?'
+question: Why does the NPU sit idle despite having 45 TOPS available, and why does Grouped-Query Attention (GQA) significantly increase the token generation rate?
 details:
   realistic_solution: During decoding, every single generated token requires loading the entire KV cache and model weights from the shared LPDDR5X memory into the NPU's SRAM. Standard MHA stores separate Key and Value vectors for every single query head, creating a massive memory footprint per token that saturates the memory bus before the NPU can perform any meaningful work. GQA solves this by sharing a single KV head across multiple query heads (e.g., 4 queries per KV head), slashing the total KV cache size by 75% and directly alleviating the LPDDR5X memory bandwidth bottleneck, allowing the NPU to process generation steps much faster.
   common_mistake: |
@@ -19,19 +19,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Hardware: 45 TOPS INT8, shared LPDDR5X.
-    - Context Length: 2048 tokens.
+    - Batch size: 1. Context length: 2048 tokens.
     - Model: 7B params (~7 GB INT8).
     - MHA Topology: 32 layers, 32 heads, 128 head dim.
 
     **Calculations:**
-    - MHA KV Cache Size (FP16): 2 * 128 * 32 * 32 * 2048 * 2 bytes = ~1 GB.
-    - Total Memory Read per Token (Weights + KV): 7 GB + 1 GB = 8 GB.
-    - Attention Compute per Token: 2 * 2048 * 4096 * 2 = ~33.5 MegaOps.
-    - Compute Time (45 TOPS): ~0.0007 ms.
-    - GQA (8 groups) Cache Reduction: 1 GB / 4 = 256 MB.
+    - MHA KV cache size = batch * layers * sequence * 2 (K,V) * heads * head_dim * bytes.
+    - MHA KV cache size = 1 * 32 * 2048 * 2 * 32 * 128 * 2 bytes = 1,073,741,824 bytes ≈ 1.0 GiB.
+    - Approximate per-token DRAM stream if weights and full attention history are not resident: ~7 GB weights + ~1.0 GiB KV cache ≈ ~8 GB.
+    - Attention score/value work across all layers = 2 (QK) * heads * sequence * head_dim * 2 ops/MAC * layers ≈ 1.07 GOPS, small compared with the memory stream on a 45 TOPS NPU.
+    - GQA with 8 KV heads instead of 32 reduces KV cache traffic by 4x: ~1.0 GiB / 4 ≈ 256 MiB.
 
     **Conclusion & Interpretation:**
-    - **Result: 7.25 GB fetch (Memory-Bound)**. GQA shrinks the massive 8GB fetch to 7.25GB per token, significantly lifting the bandwidth ceiling.
+    - **Result: ~7.25 GB Weight+KV Stream After GQA (Memory-Bound)**. Under this simplified bandwidth model, GQA reduces the KV portion from ~1.0 GiB to ~256 MiB, cutting total per-token traffic from roughly 8 GB to roughly 7.25 GB and improving token rate by relieving memory pressure.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,23 +12,24 @@ scenario: You write a custom Metal Compute Shader configured with a threadgroup 
 question: Why does a Metal shader with 1024-thread groups run on newer hardware but crash on older devices?
 details:
   realistic_solution: |
-    Apple's GPU architecture physically restricts the maximum threadgroup size based on the generation's execution unit and register file capacity. Newer SoCs physically possess enough threadgroup memory and registers to hold state for 1024 concurrent threads, while older SoCs cap at 512. Metal evaluates this asynchronously at dispatch, not at compile time. The robust architectural solution relies on dynamic querying using `device.maxThreadsPerThreadgroup` and dynamically sizing execution parameters at runtime, combined with optimizing `threadExecutionWidth`.
+    Metal exposes a per-device maximum threadgroup size, and older GPUs may report a lower `maxThreadsPerThreadgroup` than newer ones. A 1024-thread dispatch is legal only on devices whose reported limit allows it; older devices that cap the limit at 512 reject the dispatch even if the shader compiles. The robust solution is to query `device.maxThreadsPerThreadgroup`, account for the pipeline's `threadExecutionWidth`, and choose a threadgroup size that fits the current device.
   common_mistake: |
-    **The Pitfall:** Assuming the older phone doesn't have enough GPU RAM.
-    **The Rationale:** Candidates conflate threadgroup size with total VRAM allocation.
-    **The Consequence:** They try to optimize the model's memory footprint instead of dynamically sizing the threadgroup width.
+    **The Pitfall:** Assuming the older phone is running out of general GPU RAM.
+    **The Rationale:** Candidates conflate a per-dispatch threadgroup capability with total memory capacity.
+    **The Consequence:** They try to optimize the model's memory footprint instead of querying device limits and sizing the threadgroup accordingly.
   napkin_math: |
     **Assumptions & Constraints:**
     - Shader threadgroup request: 1024 threads.
-    - New SoC maximum capacity: >= 1024 threads.
-    - Old SoC maximum capacity: 512 threads.
+    - New SoC reported `maxThreadsPerThreadgroup`: at least 1024 threads.
+    - Old SoC reported `maxThreadsPerThreadgroup`: 512 threads.
 
     **Calculations:**
-    - Older architecture register allocation: 16 KB memory / 512 threads = 32 bytes/thread.
-    - Requesting 1024 threads demands 32 KB memory, which physically does not exist on the older compute unit.
+    - New SoC check: 1024 requested <= 1024 allowed, so the dispatch is valid.
+    - Old SoC check: 1024 requested > 512 allowed, so Metal rejects the dispatch.
+    - Safe runtime choice: clamp the requested size to <= 512 on the older device, preferably as a multiple of `threadExecutionWidth`.
 
     **Conclusion & Interpretation:**
-    - **Result: 32 KB memory (Hardware Constraint-Bound)**. The crash is a rigid physical limit, not a memory allocation bug. Shaders must dynamically adapt their layout to the underlying silicon geometry.
+    - **Result: 1024 > 512 (Device-Limit-Bound)**. The crash is a per-device threadgroup limit violation, not a general memory allocation bug.
 status: published
 provenance: imported
 requires_explanation: false

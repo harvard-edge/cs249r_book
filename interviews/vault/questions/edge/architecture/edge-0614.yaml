@@ -21,14 +21,21 @@ details:
     - Input resolution: 640x640
     - Hard latency deadline: 33.3ms (30 FPS)
     - Available SoC Compute: ~33.7 effective TOPS (at 15W TDP)
+    - ViT example: 16x16 patches, width d=768, 12 transformer layers.
+    - MobileNet-style CNN estimate: 1.5 GOPs with depthwise separable convolutions.
 
     **Calculations:**
     - Max allowed ops per frame = 33.7 TOPS * 0.0333s = 1.12 Tera-operations
-    - Standard MobileNet CNN requires ~1.5 GOPs (0.0015 Tera-operations) -> fits easily.
-    - ViT at 640x640 requires quadratic patch attention, drastically exceeding 1.12 TOPs.
+    - CNN compute time = 1.5 GOPs / 33.7 TOPS = 0.045ms ideal; even at 10% effective utilization this is ~0.45ms, leaving budget for memory, pre/post-processing, and safety margin.
+    - ViT token count = (640/16) * (640/16) = 1,600 tokens.
+    - ViT attention work per layer is approximately 4 * N^2 * d = 4 * 1,600^2 * 768 = 7.9 GOPs.
+    - ViT projection work per layer is approximately 8 * N * d^2 = 7.5 GOPs.
+    - Attention + projections for 12 layers = (7.9 + 7.5) * 12 = 184.8 GOPs before MLP blocks.
+    - A transformer MLP commonly adds about 16 * N * d^2 per layer = 15.1 GOPs/layer, or 181.2 GOPs for 12 layers.
+    - Total ViT block estimate = 184.8 + 181.2 = 366 GOPs, about 24x the CNN. Ideal compute time is 366 / 33,700 = 10.9ms, but the large activation and attention traffic make actual edge latency much less predictable than the CNN under a 33ms hard deadline.
 
     **Conclusion & Interpretation:**
-    - **Result: CNN (Compute-Bound)**. The ViT mathematically violates the compute ceiling; the CNN is the only viable path.
+    - **Result: Choose the MobileNet-style CNN.** The CNN has a small, regular latency budget that can be profiled and bounded. The ViT may fit only under optimistic peak-compute assumptions, but its token and memory costs create too much latency risk for a constrained 33ms SoC deployment.
 status: published
 provenance: imported
 requires_explanation: true

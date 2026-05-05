@@ -7,7 +7,7 @@ topic: cnn-efficient-design
 competency_area: architecture
 bloom_level: evaluate
 phase: both
-title: Optimize MobileNetV2 latency on Jetson Orin via layer pruning and depthwise op scheduling
+title: Optimize Jetson Orin Depthwise Convolution Latency with TensorRT Fusion
 scenario: MobileNetV2 inference on a Jetson Orin achieves 120 FPS with TensorRT FP16. Profiling shows 35% of the execution time is spent in depthwise convolution layers, even though they represent only 5% of total FLOPs.
 question: How would you optimize the depthwise convolutions specifically for the Jetson Orin's Ampere architecture to reduce this latency?
 details:
@@ -21,15 +21,19 @@ details:
     **Assumptions & Constraints:**
     - Current metrics: 120 FPS = 8.3ms total time. 35% of 8.3ms = 2.9ms spent in depthwise ops.
     - FLOPs utilization: 5% of 0.3 GFLOPs = 15M FLOPs.
-    - Hardware capability: Ampere CUDA core FP16 is ~100 TFLOPS.
+    - Hardware capability: peak dense FP16 throughput is not a useful bound for depthwise kernels, which are often memory/launch/occupancy limited.
 
     **Calculations:**
     - Observed performance: 15M FLOPs / 2.9ms = 5.2 GFLOPS.
-    - Utilization: 5.2 GFLOPS / 100 TFLOPS = 0.0052% utilization.
-    - Optimization: Fusing depthwise+BN+ReLU6 reduces 17 launches to 17 fused kernels at ~50µs each = 0.85ms.
+    - This low observed arithmetic rate indicates the depthwise section is not limited by peak tensor throughput.
+    - If 17 depthwise blocks each launch separate depthwise, BN, and ReLU6 kernels, that is about 51 launches.
+    - Fusing each block to one depthwise+activation kernel reduces this to 17 launches.
+    - With about 40 us launch/scheduling overhead avoided for each removed launch, saved time is (51 - 17) * 0.040ms = 1.36ms.
+    - New depthwise time estimate: 2.9ms - 1.36ms = 1.54ms, about 1.9x faster for the depthwise portion.
+    - New end-to-end latency estimate: 8.3ms - 1.36ms = 6.94ms, or about 144 FPS.
 
     **Conclusion & Interpretation:**
-    - **Result: 4x speedup (Compute-Bound)**. The 2.9ms is entirely kernel launch overhead; fusing yields massive performance gains.
+    - **Result: Depthwise Section Is Kernel-Efficiency Bound**. TensorRT fusion and better CUDA-core scheduling can materially reduce latency, but the derived gain is about 1.9x for depthwise ops and about 1.2x end-to-end under these assumptions, not an unsupported 4x overall speedup.
 status: published
 provenance: imported
 requires_explanation: true

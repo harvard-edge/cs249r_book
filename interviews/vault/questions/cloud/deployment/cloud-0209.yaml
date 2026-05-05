@@ -8,51 +8,32 @@ competency_area: deployment
 bloom_level: analyze
 phase: inference
 title: The A/B Testing at Scale
-scenario: We want to A/B test our current 13B model against a new 70B model in shadow mode. The product
-  team says 'just mirror 100% of traffic to both models for a week to gather data.'
-question: Why is this statistically unnecessary but infrastructure-ruinous, and how does the GPU memory
-  asymmetry between these models dictate your A/B testing architecture?
+scenario: We want to A/B test our current 13B model against a new 70B model in shadow mode. The product team says 'just mirror 100% of traffic to both models for a week to gather data.'
+question: Why is this statistically unnecessary but infrastructure-ruinous, and how does the GPU memory asymmetry between these models dictate your A/B testing architecture?
 details:
-  realistic_solution: The infrastructure cost of an A/B test is dominated by hardware provisioning, not
-    the statistical sample size. A 13B model fits on a single A100 (40GB) with room for KV-cache. A 70B
-    model requires tensor parallelism across at least 4× A100s (80GB) or 2× H100s just to fit the weights,
-    plus massive KV-cache overhead. Mirroring 100% of traffic means provisioning a 70B cluster that is
-    5-8× larger and more expensive than your production 13B cluster, just for a test. Instead, use an
-    asymmetric traffic split (e.g., 95/5) or sample-based shadow routing. You only need to route enough
-    traffic to the 70B model to reach statistical significance, which is typically a few thousand requests.
-  common_mistake: '**The Pitfall:** Blindly mirroring 100% of traffic to the shadow deployment.
-
-    **The Rationale:** Engineers follow standard web-service A/B testing practices, forgetting the massive,
-    non-linear hardware cost of LLM inference.
-
-    **The Consequence:** Hundreds of thousands of dollars are wasted on GPU compute to gather millions
-    of statistically redundant data points.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Memory Asymmetry: 13B FP16 = 26 GB. 70B FP16 = 140 GB.
-
-    - Traffic Cost: Prod is 1,000 QPS on 50 A100s.
-
+  realistic_solution: |
+    Separate statistical need from serving capacity. Shadow mode should not mirror every production request into the 70B path unless the experiment truly needs that many paired samples. Log production requests and mirror only a sampled fraction to the 70B deployment, or replay sampled logs asynchronously through a small evaluation cluster. Keep the 13B production serving path unchanged; send sampled shadow traffic to a separately quota-limited 70B pool so evaluation cannot steal production KV cache or GPU slots. With FP16 weights, 13B is about 26 GB and can fit on one 40 GB or 80 GB A100 depending on context and batch requirements, while 70B is about 140 GB and usually needs TP=2 on 80 GB H100/A100 or more shards if context and KV cache are large. That memory asymmetry dictates a sampled shadow architecture, not a 100% mirror.
+  common_mistake: |
+    **The Pitfall:** Blindly mirroring 100% of traffic to the shadow deployment.
+    **The Rationale:** Engineers follow standard web-service A/B testing practices, forgetting the massive, non-linear hardware cost of LLM inference.
+    **The Consequence:** Hundreds of thousands of dollars are wasted on GPU compute to gather millions of statistically redundant data points.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Memory asymmetry: 13B FP16 ~= 26 GB; 70B FP16 ~= 140 GB.
+    - Production traffic: 1,000 QPS served by the existing 13B fleet.
+    - A 70B FP16 shadow replica uses TP=2 on two 80 GB GPUs.
+    - Assume one 70B TP=2 replica can process 4 sampled shadow QPS for the experiment's latency/context mix.
+    - H100 cost example: $4/GPU-hour, so one TP=2 replica costs $8/hour.
 
     **Calculations:**
-
-    - The 70B model requires 4x the GPUs per replica.
-
-    - 100% mirroring to 70B needs ~200 H100s. At $4/hr, that''s ~$168k/week.
-
-    - To detect a 3% improvement with 80% power requires ~3,200 samples per arm.
-
-    - Routing 1 QPS gathers 3,200 samples in <1 hour (3600 seconds).
-
+    - 100% mirroring requires 1,000 QPS / 4 QPS per 70B replica = 250 TP=2 replicas = 500 H100s.
+    - Weekly 100% shadow cost = 500 GPUs * $4/hr * 24 hr/day * 7 days = $336,000/week.
+    - If the experiment needs 3,200 shadow samples, sampling 1 QPS gathers them in 3,200 seconds = 53.3 minutes.
+    - One TP=2 shadow replica for that hour costs 2 GPUs * $4/hr * 0.89 hr = ~$7.10.
+    - Even running the sampled shadow for a full week at 1 QPS costs 2 * $4 * 24 * 7 = $1,344, far below full mirroring.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Routing 1 QPS (0.1% traffic) to a single 70B deployment gathers 3,200 samples in <1 hour
-    for ~$10.**
-
-    '
+    - **Result: Sampled Shadowing Is Statistically Adequate and Infrastructure-Safe.** Route about 0.1% of traffic, or replay logs offline, to a quota-limited 70B pool. Full mirroring provisions hundreds of GPUs to collect redundant samples.
 status: published
 provenance: imported
 requires_explanation: false

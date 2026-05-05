@@ -9,24 +9,29 @@ bloom_level: create
 phase: training
 title: Designing a Gradient Checkpointing Segment Strategy for a 70B Model on A100
 scenario: You are fine-tuning a 70B dense Transformer on 8x A100 GPUs (Tensor Parallelism = 8). Model/optimizer states consume 52 GB per GPU, leaving ~28 GB for activations.
-question: What gradient checkpointing strategy keeps activations under 28 GB per GPU while minimizing recomputation for this fine-tune?
+question: Given a 40 GB/GPU uncheckpointed activation footprint, what gradient-checkpointing strategy keeps activations under 28 GB/GPU while minimizing recomputation for this fine-tune?
 details:
-  realistic_solution: 'Use selective checkpointing: discard and recompute only the attention score tensors, which scale as O(S^2), while keeping MLP activations that scale linearly. This slashes activation memory at long sequences with minimal FLOPs overhead.'
+  realistic_solution: 'Use selective checkpointing: discard and recompute the per-layer attention score/probability tensors, which scale as O(S^2), while keeping MLP and residual activations that scale linearly and are more expensive to regenerate wholesale. Under tensor parallelism, each GPU owns 8 of the 64 heads, so the attention tensor savings are about 12.9 GB per GPU. Starting from a profiled 40 GB activation footprint, this leaves about 27.1 GB per GPU, just under the 28 GB budget with less recompute than full layer checkpointing.'
   common_mistake: |
     **The Pitfall:** Applying uniform layer-level checkpointing.
     **The Rationale:** Candidates fail to recognize that O(S^2) attention tensors dominate memory, while O(S) MLP layers checkpoint much more cheaply.
     **The Consequence:** Unnecessary massive recomputation overhead by throwing away MLP activations.
   napkin_math: |
     **Assumptions & Constraints:**
-    - VRAM budget = 80 - 52.5 = 27.5 GB.
+    - VRAM budget = 80 - 52 = 28 GB for activations.
+    - Profiled uncheckpointed activation footprint = 40 GB per GPU.
     - B=2, S=2048, 8 local heads (TP=8), 96 layers.
+    - Attention score/probability tensors are FP16 and sharded by local attention heads.
 
     **Calculations:**
-    - Attention tensor/layer = 2 * 8 * (2048^2) * 2 bytes = 134.2 MB.
-    - Total saved (96 layers) = 134.2 MB * 96 = ~12.88 GB.
+    - Attention tensor per layer per GPU = B * local_heads * S * S * 2 bytes.
+    - Per-layer attention tensor = 2 * 8 * 2048^2 * 2 = 134,217,728 bytes ≈ 0.125 GiB.
+    - Total attention tensors across 96 layers = 0.125 GiB * 96 = 12.0 GiB, or 12.88 GB decimal.
+    - Remaining activation footprint after selective checkpointing = 40 GB - 12.88 GB = 27.12 GB.
+    - 27.12 GB < 28 GB activation budget, leaving about 0.88 GB headroom.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Mitigation (Recomputing attention saves 12.88 GB, meeting the 28 GB limit).**
+    - **Result:** Selectively recomputing the sharded attention score/probability tensors keeps activations at about 27.1 GB per GPU, satisfying the 28 GB budget while avoiding full-layer recomputation.
 status: published
 provenance: imported
 requires_explanation: true

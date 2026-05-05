@@ -7,11 +7,11 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: create
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Specify Bandwidth SLA for Mobile LLM App Quality'
+title: Mobile LLM Memory Bandwidth QoS for TPOT SLA
 scenario: Specify bandwidth requirements and QoS policies for a mobile LLM app on a device with 77 GB/s memory bandwidth. The app must guarantee TPOT < 25ms P95 for the LLM while maintaining 60fps display and always-on speech recognition.
 question: What bandwidth reservations, priorities, throttles, and fallbacks are needed to keep mobile LLM TPOT under 25ms P95?
 details:
-  realistic_solution: 'Bandwidth reservations: Priority 1 (LLM decode, when active): 72GB/s. Priority 2 (display 60fps): 1.5GB/s. Priority 3 (ASR): 0.01GB/s. Priority 4 (other): 3.49GB/s. Total during LLM: 77GB/s. TPOT guarantee: 1.5GB/(77-1.5-0.01-background)=1.5/74.49=20.1ms < 25ms. Fallback: if background exceeds 3.49GB/s -> accept 25ms+ TPOT and emit warning. Throttle: if TPOT > 30ms for 5 consecutive tokens -> reduce display to 30fps (saves 0.75GB/s) -> release to LLM.'
+  realistic_solution: 'Reserve bandwidth around the SLA, not around best effort. A 3B INT4 decode that streams 1.5GB/token needs at least 1.5GB/0.025s = 60 GB/s to keep TPOT under 25ms in the simplified bandwidth-bound model. Policy: P0 LLM decode reserves 64 GB/s when active, leaving margin for KV/cache traffic; P1 display 60fps reserves 1.5 GB/s; P2 ASR reserves 0.01 GB/s; P3 foreground OS reserves 3.0 GB/s; P4 background/best-effort gets the remaining 8.49 GB/s and is preemptible. Normal total is 64 + 1.5 + 0.01 + 3.0 + 8.49 = 77 GB/s. If measured LLM bandwidth falls below 60 GB/s or P95 TPOT approaches 25ms, first suspend P4 background work, then throttle display effects or refresh to save up to 0.75 GB/s, then reduce LLM context/prefill or switch to a smaller model. The fallback preserves the SLA by degrading nonessential work; it does not accept 25ms+ TPOT as a valid mode.'
   common_mistake: |
     **The Pitfall:** Specifying static bandwidth reservations without a dynamic fallback policy.
     **The Rationale:** Candidates assume peak hardware bandwidth is exclusively available and ignore operating system queuing behaviors under oversubscription.
@@ -19,16 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Memory bandwidth: 77 GB/s.
-    - Required LLM Bandwidth for 20ms TPOT: 1.5 GB / 20ms = 75 GB/s.
-    - Display (60fps) = 1.5 GB/s, ASR = 0.01 GB/s, OS Baseline = 1 GB/s.
+    - SLA: TPOT < 25ms P95.
+    - Simplified decode traffic: 1.5GB per token.
+    - Required LLM bandwidth for SLA: 1.5GB / 25ms = 60 GB/s.
+    - LLM reservation with margin: 64 GB/s.
+    - Display (60fps) = 1.5 GB/s, ASR = 0.01 GB/s, foreground OS = 3.0 GB/s.
 
     **Calculations:**
-    - Total requested: 75 + 1.5 + 0.01 + 1 = 77.51 GB/s (Exceeds 77 GB/s).
-    - Throttle policy (Display to 30fps) saves 0.75 GB/s.
-    - New total: 75 + 0.75 + 0.01 + 1 = 76.76 GB/s.
+    - Guaranteed services: 64 + 1.5 + 0.01 + 3.0 = 68.51 GB/s.
+    - Best-effort background allowance: 77 - 68.51 = 8.49 GB/s.
+    - Implied LLM TPOT at reserved bandwidth: 1.5GB / 64GB/s = 0.0234s = 23.4ms.
+    - If contention pushes LLM below 60 GB/s, preempt up to 8.49 GB/s background first; throttling display from 60fps to 30fps can add another 0.75 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: Fits within 77 GB/s budget, ensuring TPOT stays under 25ms (Bandwidth-Bound).** Dynamic fallback prevents missing SLA under OS load.
+    - **Result: Fits within 77 GB/s while preserving TPOT < 25ms P95.** The policy protects at least 60 GB/s for LLM decode by preempting or degrading lower-priority work before the SLA is missed.
 status: published
 provenance: imported
 requires_explanation: true

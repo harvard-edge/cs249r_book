@@ -8,48 +8,29 @@ competency_area: latency
 bloom_level: create
 phase: inference
 title: Speculative Decoding on Jetson Orin
-scenario: 'You want to use speculative decoding for a 7B target model on Jetson Orin (32GB LPDDR5, 102
-  GB/s, ~2 TFLOPS FP16). Options for draft: (A) 0.5B model, (B) 2-layer early-exit from 7B, (C) n-gram
-  lookup table with no neural compute.'
-question: Which draft strategy for speculative decoding a 7B model on Jetson Orin reduces latency most
-  under the 102GB/s bandwidth limit?
+scenario: 'You want to use speculative decoding for a 7B target model on Jetson Orin (32GB LPDDR5, 102 GB/s, ~2 TFLOPS FP16). Options for draft: (A) 0.5B model, (B) 2-layer early-exit from 7B, (C) n-gram lookup table with no neural compute.'
+question: Which draft strategy for speculative decoding a 7B model on Jetson Orin reduces latency most under the 102GB/s bandwidth limit?
 details:
-  realistic_solution: 'Target decode on Orin: 7B x 2B = 14GB weight read per token at 102 GB/s = 137ms/token
-    (deeply memory-bound: 14 GFLOP / 2 TFLOPS = 7ms compute). (A) 0.5B draft: 1GB read/token at 102 GB/s
-    = 10ms. K=5 draft: 50ms. Verify: 137ms (weights) + K+1 tokens KV cache. Total: 187ms for ~2.5 tokens
-    = 75ms/tok vs 137ms. 1.83x speedup. But draft weights (1GB) compete for 32GB memory with target (14GB)
-    + KV cache. (B) Early-exit (2 layers of 7B): per-layer weight = 7B x 2B / 32 layers = 437MB. 2 layers
-    = 875MB read = 8.6ms/token. No extra memory. K=5: 43ms + 137ms = 180ms for ~2.3 tokens = 78ms. 1.76x.
-    (C) N-gram lookup: 0ms compute, table ~50MB in memory. alpha=0.45 (low). K=8: E[tok] = 1.75. Time:
-    0ms + 137ms = 137ms for 1.75 = 78ms. 1.75x. Surprisingly competitive! But variable alpha makes it
-    unreliable. Winner: (A) 0.5B draft for consistent 1.83x speedup.'
-  common_mistake: '**The Pitfall:** Assuming a neural draft model is always best.
-
-    **The Rationale:** Candidates assume that speculative decoding requires a neural model, forgetting
-    that on Orin, even a tiny draft model competes for the same limited memory bandwidth.
-
-    **The Consequence:** Proposing a solution that fails to improve latency because the draft model starves
-    the target model of bandwidth.'
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Target model: 14GB read at 102 GB/s = 137ms/token.
-
-    - Draft models: 0.5B (1GB read), early-exit, N-gram lookup.
-
+  realistic_solution: 'Target decode on Orin is dominated by weight bandwidth: 14 GB of FP16 target weights / 102 GB/s = about 137 ms per generated token, while the 14 GFLOP compute cost is only about 7 ms at 2 TFLOPS. Use one speculative-decoding model for all options: each round drafts K tokens, then one target pass verifies them; expected emitted tokens are E = 1 + alpha + ... + alpha^K. With K=5, assume alpha=0.70 for the 0.5B neural draft, alpha=0.60 for the 2-layer early exit, and with K=8 assume alpha=0.45 for n-gram lookup. The 0.5B draft costs 1 GB / 102 GB/s = 9.8 ms per draft token, so a round costs 5 * 9.8 + 137 = 186 ms and emits E=2.94 tokens, or 63 ms/token. The early-exit draft costs about 0.875 GB / 102 GB/s = 8.6 ms per draft token, so it reaches about 76 ms/token. The n-gram draft has negligible compute but lower acceptance, giving about 137 / 1.82 = 75 ms/token. Under these explicit assumptions, the 0.5B draft wins on latency, but only if its acceptance rate stays high
+    enough to justify its added bandwidth and memory footprint.'
+  common_mistake: |
+    **The Pitfall:** Assuming a neural draft model is always best.
+    **The Rationale:** Candidates assume that speculative decoding requires a neural model, forgetting that on Orin, even a tiny draft model competes for the same limited memory bandwidth.
+    **The Consequence:** Proposing a solution that fails to improve latency because the draft model starves the target model of bandwidth.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Target model: 14 GB read at 102 GB/s = 137 ms/token.
+    - Speculative model: round time = K * draft_time + target_verify_time.
+    - Expected emitted tokens per round: E = 1 + alpha + ... + alpha^K.
+    - Acceptance assumptions: 0.5B draft alpha=0.70, early-exit alpha=0.60, n-gram alpha=0.45.
 
     **Calculations:**
-
-    - 0.5B draft: 1GB / 102 GB/s = 10ms. K=5 total: 50ms + 137ms = 187ms / 2.5 = 75ms (1.83x speedup).
-
-    - N-gram (free compute): 137ms / 1.75 = 78ms (1.75x speedup).
-
+    - 0.5B draft: 1 GB / 102 GB/s = 9.8 ms. K=5 round time = 5 * 9.8 + 137 = 186 ms. E = (1 - 0.70^6) / (1 - 0.70) = 2.94 tokens. Effective latency = 186 / 2.94 = 63 ms/token.
+    - 2-layer early exit: (14 GB / 32) * 2 / 102 GB/s = 8.6 ms. K=5 round time = 5 * 8.6 + 137 = 180 ms. E = (1 - 0.60^6) / (1 - 0.60) = 2.38 tokens. Effective latency = 180 / 2.38 = 76 ms/token.
+    - N-gram lookup: draft compute is negligible. K=8 round time = 137 ms. E = (1 - 0.45^9) / (1 - 0.45) = 1.82 tokens. Effective latency = 137 / 1.82 = 75 ms/token.
 
     **Conclusion & Interpretation:**
-
-    - **Result: 1.83x speedup (Memory-Bandwidth Bound)**. The 0.5B draft provides the most reliable latency
-    reduction, despite competing for the same limited memory bandwidth.
-
-    '
+    - **Result: ~63 ms/token (Memory-Bandwidth Bound)**. Under the stated acceptance assumptions, the 0.5B draft provides the best latency reduction, about 2.2x over the 137 ms/token target-only baseline.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: 'Your team is deploying an on-premise continuous learning pipeline for
 question: Why does the 7B fine-tune on the edge accelerator OOM despite 7GB weights, and how does gradient checkpointing trade compute for memory?
 details:
   realistic_solution: |
-    The OOM occurs because storing all intermediate layer activations for the backward pass exceeds the remaining memory. By applying gradient checkpointing (e.g., checkpointing every 4th layer), we only store a fraction of the layer boundaries in memory. During the backward pass, intermediate activations are recomputed on the fly. This avoids OOM on the 32GB device by utilizing the accelerator's high INT8 compute capacity to reduce the activation memory footprint.
+    The OOM occurs because storing all intermediate layer activations for the backward pass exceeds the remaining memory, even though the quantized weights are only 7 GB. By applying gradient checkpointing every 4 layers, the forward pass stores only segment boundary activations instead of all 32 layer outputs. During the backward pass, the missing intermediate activations inside each 4-layer segment are recomputed on the fly. This trades extra compute for a much smaller activation footprint and can bring the run back under a 32 GB memory budget.
   common_mistake: |
     **The Pitfall:** Assuming weight size dictates the total memory requirement during training or fine-tuning.
     **The Rationale:** Candidates confuse inference memory footprints with the massive activation buffers required for backpropagation.
@@ -24,14 +24,14 @@ details:
 
     **Calculations:**
     - Free Memory: 32 GB - 7 GB = 25 GB.
-    - Memory per Layer: 16 * 2048 * 4096 * 12 bytes = ~1.61 GB.
-    - Standard Activation Memory: 1.61 GB * 32 = 51.5 GB (> 25 GB = OOM).
-    - Gradient Checkpointing (every 4 layers): Storing 8 boundaries + 4 active = 12 layers.
-    - Checkpointed Memory: 12 * 1.61 GB = 19.3 GB.
-    - Total Memory: 7 GB + 19.3 GB = 26.3 GB.
+    - Memory per Layer: 16 * 2048 * 4096 * 12 bytes = 1,610,612,736 bytes = 1.61 GB decimal, or 1.50 GiB.
+    - Standard Activation Memory: 1.61 GB * 32 = 51.5 GB decimal, or 48.0 GiB (> 25 GB free = OOM).
+    - Gradient Checkpointing every 4 layers stores 8 segment boundaries instead of 32 layer outputs.
+    - Stored Checkpoints: 8 * 1.61 GB = 12.9 GB.
+    - Approximate Total Memory: 7 GB weights + 12.9 GB checkpoints = 19.9 GB, plus temporary recompute/workspace buffers during backward.
 
     **Conclusion & Interpretation:**
-    - **Result: 26.3 GB fits in 32 GB RAM (Activation Memory-Bound)**. Resolved by Checkpointing.
+    - **Result: Standard training OOMs; checkpointing fits with headroom (Activation Memory-Bound)**. The tradeoff is recomputing intermediate activations inside each 4-layer segment during backward.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,21 +12,30 @@ scenario: |
   You are the lead architect for a new Automotive Emergency Braking System (AEBS) running on a Cortex-M7 microcontroller. The system must fuse data from two sensors: a standard camera (8-bit pixel values, 0-255) and a new, low-cost LiDAR sensor whose output represents distance in millimeters (0-65535, i.e., 16-bit). The fusion model has two input branches that meet at a shared 'fusion layer'. Your hard real-time deadline from sensor read to brake signal is 1ms. The MCU's SRAM is 1MB.
 question: 'Propose a quantization strategy for the two branches of the network, and determine what the dominant factor in your energy budget calculation is: compute or memory access?'
 details:
-  realistic_solution: 'The correct architectural decision is to use mixed precision. The camera branch, with its native 8-bit input, is a perfect candidate for full INT8 quantization. Its weights and activations will fit neatly within the 8-bit dynamic range. The LiDAR branch, however, requires its early layers to be kept in FP16 (or at least 16-bit integer) to preserve the high dynamic range of the distance measurements. After several layers of processing where the internal feature maps have been normalized or their range has been reduced (e.g., through activation functions like ReLU6), the LiDAR branch can then be quantized to INT8 before the fusion layer. This hybrid approach prevents overflow on the critical sensor while still reaping most of the benefits of INT8 quantization in the deeper parts of the model and the entire camera branch. You must use a representative calibration dataset that captures the full range of LiDAR values to determine the precise layer to transition from FP16 to INT8. The dominant energy cost will be memory access, not compute, as is typical for memory-bound TinyML systems.'
+  realistic_solution: The correct architectural decision is to use mixed precision. The camera branch, with its native 8-bit input, is a perfect candidate for full INT8 quantization. Its weights and activations will fit neatly within the 8-bit dynamic range. The LiDAR branch, however, requires its early layers to be kept in FP16 (or at least 16-bit integer) to preserve the high dynamic range of the distance measurements. After several layers of processing where the internal feature maps have been normalized or their range has been reduced (e.g., through activation functions like ReLU6), the LiDAR branch can then be quantized to INT8 before the fusion layer. This hybrid approach prevents overflow on the critical sensor while still reaping most of the benefits of INT8 quantization in the deeper parts of the model and the entire camera branch. You must use a representative calibration dataset that captures the full range of LiDAR values to determine the precise layer to transition from FP16
+    to INT8. The dominant energy cost will be memory access, not compute, as is typical for memory-bound TinyML systems.
   common_mistake: |
     **The Pitfall:** Quantizing the entire model, including the LiDAR branch, directly to INT8.
     **The Rationale:** Engineers apply blanket INT8 quantization to maximize speed and minimize memory without profiling the native dynamic range of the sensors.
     **The Consequence:** The 16-bit LiDAR input (0-65535) suffers catastrophic overflow when linearly squeezed into INT8 (-128 to 127), causing the vehicle to misinterpret distant objects as imminent collision threats.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Latency Constraint Check: Cortex-M7 at 480 MHz provides ~960 MFLOPS.
-    - Compute Need: A 250K-parameter fusion model takes ~500 M-ops.
+    - Latency constraint: 1 ms.
+    - Cortex-M7 clock: 480 MHz.
+    - Conservative scalar FP32 throughput: ~1 floating-point operation/cycle = 480 Mops/s.
+    - INT8 DSP throughput assumption: ~4 8-bit operations/cycle = 1.92 Gops/s.
+    - 250K-parameter fusion model: assume roughly 2 operations per parameter per inference = 500K operations.
+    - Approximate SRAM read energy: 20 pJ/byte; approximate MAC energy: 1 pJ/op.
 
     **Calculations:**
-    - FP32 Runtime: 500 M-ops / 960 MFLOPS = 0.52 seconds (520 ms).
+    - FP32 compute runtime: 500K ops / 480 Mops/s = 1.04 ms, already over the 1 ms deadline before sensor I/O and control overhead.
+    - INT8 compute runtime: 500K ops / 1.92 Gops/s = 0.26 ms, leaving room for the real-time pipeline.
+    - FP32 parameter traffic: 250K * 4 bytes = 1.0 MB; memory energy ≈ 1.0 MB * 20 pJ/byte = 20 µJ.
+    - INT8 parameter traffic: 250K * 1 byte = 250 KB; memory energy ≈ 250 KB * 20 pJ/byte = 5 µJ.
+    - Compute energy estimate: 500K ops * 1 pJ/op = 0.5 µJ.
 
     **Conclusion & Interpretation:**
-    - **Result: 520 ms (Compute-Bound)**. Missing the 1 ms deadline by a factor of 520x proves that aggressive hybrid quantization (INT8/FP16) is strictly mandatory.
+    - **Result: FP32 is ~1.04 ms before overhead; INT8 is ~0.26 ms, and memory traffic dominates energy (Memory-Bound)**. Hybrid quantization is justified by both latency headroom and the 4x reduction in parameter traffic, while FP16 or 16-bit handling is reserved for the high-dynamic-range LiDAR front end.
 status: published
 provenance: imported
 requires_explanation: false
@@ -36,7 +45,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- Classification sanity - `reasoning_competency` and `reasoning_mode` are incorrectly set to `None` for a question that clearly tests Quantization, Mixed Precision, and Sensor Fusion.
+  - Classification sanity - `reasoning_competency` and `reasoning_mode` are incorrectly set to `None` for a question that clearly tests Quantization, Mixed Precision, and Sensor Fusion.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

@@ -7,11 +7,12 @@ topic: real-time-deadlines
 competency_area: optimization
 bloom_level: analyze
 phase: inference
-title: Edge New 0014
+title: Orin Robotics CPU vs GPU Image Preprocessing
 scenario: A robotic arm uses Orin. Preprocessing an image takes 5ms on the ARM CPU or 1ms on the GPU. However, transferring the image to the GPU kernel costs 2ms.
 question: For the 60 FPS robotics loop, should image preprocessing stay on the ARM CPU or be offloaded to the GPU?
 details:
-  realistic_solution: Processing on the CPU takes 5ms, avoiding transfer overhead. Offloading to the GPU takes 2ms (transfer) + 1ms (compute) = 3ms. While GPU offloading is technically 2ms faster, it forces the GPU to context switch from the main inference task, potentially starving the AI model. For a 60 FPS loop (16.6ms), a 5ms CPU preprocess comfortably fits in parallel with the previous frame's GPU inference, making CPU the better systemic pipeline choice.
+  realistic_solution: |
+    Keep preprocessing on the ARM CPU if the GPU is already running the main inference stage. The isolated GPU preprocess path is faster at 3ms versus 5ms, but it consumes the same GPU resource needed for inference. At 60 FPS, the 5ms CPU stage can overlap with the previous frame's 10ms GPU inference and still fit within the 16.6ms frame budget. Offloading preprocessing to the GPU serializes 3ms of preprocessing with 10ms of inference on the GPU, reducing scheduling headroom even though single-frame latency may still meet 60 FPS.
   common_mistake: |
     **The Pitfall:** Blindly migrating all mathematical operations to the GPU to lower isolated micro-benchmarks.
     **The Rationale:** Engineers assume "GPU is faster" without accounting for transfer overhead and context switching in a pipelined system.
@@ -23,11 +24,13 @@ details:
     - GPU Inference time: ~10ms.
 
     **Calculations:**
-    - CPU approach latency: Stage 1 (5ms) + Stage 2 (10ms) = 15ms. Pipeline bottleneck = 10ms (100 FPS).
-    - GPU approach latency: Stage 1 (3ms) + Stage 2 (10ms) = 13ms total GPU time. Pipeline bottleneck = 13ms (76 FPS).
+    - CPU approach single-frame latency = 5ms preprocess + 10ms inference = 15ms, within 16.6ms.
+    - CPU pipelined period after fill = max(5ms CPU stage, 10ms GPU stage) = 10ms, if CPU/GPU overlap cleanly.
+    - GPU offload single-frame latency = 3ms preprocess + 10ms inference = 13ms, within 16.6ms.
+    - GPU offload pipelined period = 3ms + 10ms = 13ms on the GPU because both stages contend for the same accelerator.
 
     **Conclusion & Interpretation:**
-    - **Result: CPU offloading yields better hardware concurrency and higher throughput (100 FPS vs 76 FPS).** Pipelining mitigates context-switch overhead.
+    - **Result: keep preprocessing on CPU for better pipeline concurrency.** GPU offload improves the isolated preprocessing stage but lowers accelerator headroom by serializing preprocessing with inference.
 status: published
 provenance: imported
 requires_explanation: false

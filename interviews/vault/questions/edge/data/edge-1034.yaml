@@ -8,48 +8,31 @@ competency_area: data
 bloom_level: apply
 phase: training
 title: 'Dataset Curation: Implement On-Device Data Augmentation Budget for Jetson Orin'
-scenario: Data augmentation for online learning is being implemented on a Jetson Orin. The model trains
-  on 64 images/batch at 224x224. The augmentation pipeline must complete within 10ms per batch to not
-  bottleneck the 100ms training step.
-question: How would you implement augmentation for 64-image batches and verify it stays under the 10 ms
-  budget?
+scenario: Data augmentation for online learning is being implemented on a Jetson Orin. The model trains on 64 images/batch at 224x224. The augmentation pipeline must complete within 10ms per batch to not bottleneck the 100ms training step.
+question: How would you implement augmentation for 64-image batches and verify it stays under the 10 ms budget?
 details:
-  realistic_solution: 'Utilize hardware-accelerated augmentation frameworks like NVIDIA DALI or torchvision
-    with CUDA backends. These bypass the CPU bottleneck by leveraging the Orin''s Ampere GPU to perform
-    vectorized transformations in parallel, easily satisfying the 10 ms batch budget.
-
-    '
-  common_mistake: '**The Pitfall:** Running augmentation on the CPU while the GPU is idle waiting.
-
-    **The Rationale:** Standard tutorials often demonstrate augmentation using CPU libraries (PIL or standard
-    torchvision), which engineers copy-paste without considering edge CPU bottlenecks.
-
-    **The Consequence:** The CPU limits the pipeline well over the 10 ms budget, leaving the powerful
-    GPU starving and stalling overall training.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
+  realistic_solution: |
+    Utilize hardware-accelerated augmentation frameworks like NVIDIA DALI or torchvision with CUDA backends. These bypass the CPU bottleneck by leveraging the Orin's Ampere GPU to perform vectorized transformations in parallel, easily satisfying the 10 ms batch budget.
+  common_mistake: |
+    **The Pitfall:** Running augmentation on the CPU while the GPU is idle waiting.
+    **The Rationale:** Standard tutorials often demonstrate augmentation using CPU libraries (PIL or standard torchvision), which engineers copy-paste without considering edge CPU bottlenecks.
+    **The Consequence:** The CPU limits the pipeline well over the 10 ms budget, leaving the powerful GPU starving and stalling overall training.
+  napkin_math: |
+    **Assumptions & Constraints:**
     - 64 images per batch, 224x224 resolution.
-
     - 10 ms target budget.
-
+    - Augmentation runs entirely on the Orin GPU after the batch is already in unified memory; no PCIe copy is required.
+    - Effective LPDDR5/shared-memory bandwidth for the image read/write path: 68 GB/s.
 
     **Calculations:**
-
-    - CPU Resize: 0.2 ms/image * 64 = 12.8 ms (Fails budget).
-
-    - GPU Transfer: (64 * 224 * 224 * 3 bytes) = 9.63 MB. At 68 GB/s = 0.14 ms.
-
-    - GPU Augmentation Ops: Vectorized transforms ≈ 2 ms.
-
+    - CPU-only resize baseline: 0.2 ms/image * 64 = 12.8 ms, so CPU augmentation fails the 10 ms budget.
+    - Batch tensor size: 64 * 224 * 224 * 3 bytes = 9.63 MB.
+    - GPU memory traffic for one read plus one write: 2 * 9.63 MB / 68 GB/s = 0.28 ms.
+    - GPU augmentation kernels: vectorized crop/color/flip transforms ≈ 2.0 ms.
+    - GPU pipeline total: 0.28 ms memory traffic + 2.0 ms kernels = 2.28 ms.
 
     **Conclusion & Interpretation:**
-
-    - **Result: ~2.1 ms Total Latency (Compute-Bound).** Using GPU-accelerated pipelines brings the total
-    latency comfortably below the 10 ms deadline.
-
-    '
+    - **Result: ~2.3 ms Total Latency (GPU-Pipeline Bound).** The CPU path is excluded because it misses the budget; keeping augmentation on the Orin GPU with shared-memory tensor access stays comfortably below 10 ms.
 status: published
 provenance: imported
 requires_explanation: false

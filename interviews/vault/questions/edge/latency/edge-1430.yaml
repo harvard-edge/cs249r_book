@@ -7,12 +7,12 @@ topic: latency-decomposition
 competency_area: latency
 bloom_level: analyze
 phase: both
-title: 'Edge LLM Latency Breakdown on AI 100'
+title: Edge LLM Latency Breakdown on AI 100
 scenario: You are deploying a 5-billion parameter INT8 autoregressive LLM on an on-premise Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). A local client sends a request with a 500-token prompt and expects a 100-token response. The network round-trip takes 30ms, and CPU tokenization/preprocessing takes 20ms. The accelerator executes the prefill phase (TTFT) at 200 effective TOPS, while the decode phase (TPOT) is strictly bottlenecked by the LPDDR4x memory bandwidth, operating at an effective 50 GB/s.
 question: What is the end-to-end latency for the 500-token prompt and 100-token response, and why does 400 TOPS mainly help prefill?
 details:
   realistic_solution: |
-    The correct approach decomposes the end-to-end latency formula into E2E = Network + Preprocessing + TTFT_compute + (Tokens * TPOT). The analysis should highlight that the 400 TOPS INT8 engines only accelerate the prefill phase, where 500 tokens are processed in parallel via compute-bound matrix-matrix multiplications. During decode (TPOT), the system must load the entire 5 GB model from memory for every single token.
+    The correct approach decomposes the end-to-end latency formula into E2E = Network + Preprocessing + TTFT_compute + (Output tokens * TPOT). Fixed overhead is 30 ms + 20 ms = 50 ms. Prefill for the 500-token prompt requires about 5 TOP at the stated assumptions, so at 200 effective TOPS it takes 25 ms and user-perceived TTFT is 75 ms. During decode, each generated token performs a memory-bound pass that rereads the 5 GB INT8 weights at 50 GB/s, so TPOT is 100 ms. For 100 output tokens, decode takes 10,000 ms and total E2E latency is 10,075 ms. The 400 TOPS peak mainly helps prefill because prefill is compute-bound matrix-matrix work, while autoregressive decode is memory-bound matrix-vector work.
   common_mistake: |
     **The Pitfall:** Dividing total operations for the entire request by 400 TOPS.
     **The Rationale:** Failing to recognize that autoregressive generation is a memory-bound matrix-vector operation.
@@ -28,7 +28,8 @@ details:
     **Calculations:**
     - Prefill Time: 5 TeraOPs / 200 TOPS = 25 ms.
     - User-perceived TTFT: 50 ms + 25 ms = 75 ms.
-    - Time per token (Decode): 5 GB / 50 GB/s = 100 ms per token.
+    - Decode assumption: each generated token rereads the 5 GB INT8 weight set because decode is memory-bandwidth-bound.
+    - Time per token (Decode): 5 GB per token / 50 GB/s = 0.1 s = 100 ms per token.
     - Total Decode Time: 100 tokens * 100 ms = 10,000 ms.
     - End-to-End Latency: 50 ms + 25 ms + 10,000 ms = 10,075 ms.
 

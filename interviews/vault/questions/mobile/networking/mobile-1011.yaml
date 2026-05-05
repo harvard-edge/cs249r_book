@@ -7,11 +7,14 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: evaluate
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Master Full Bandwidth Analysis for Mobile AI System'
+title: Mobile AI Memory Bandwidth Conflicts on Snapdragon 8 Gen 3
 scenario: 'A flagship mobile AI system features a Snapdragon 8 Gen 3 with 16GB LPDDR5X providing 77 GB/s bandwidth. It runs 4 simultaneous AI workloads: a 3B INT4 LLM assistant (on-demand), real-time speech recognition (continuous, 1B INT8, 100 tokens/s), camera scene understanding (YOLOv8-s, 11M INT8, 30fps), and AR depth estimation (MobileNetV3, 5M FP16, 60fps).'
 question: What bandwidth conflicts arise when these workloads run together, and what scheduler changes are needed?
 details:
-  realistic_solution: 'BW requirements: LLM (3B INT4=1.5GB): 76.9GB/s during decode (1 token per 19.5ms). Speech (1B INT8=1GB, 100 tokens/s): 100 tokens/s × 1GB / tokens_per_pass. Speech processes 100ms windows → 10 passes/s: 10×1GB=10GB/s. YOLO-s (11M INT8, 30fps): 11MB×30=330MB/s = 0.33GB/s. Depth (5M FP16=10MB, 60fps): 10MB×60=600MB/s = 0.6GB/s. System: 3GB/s. Non-LLM total: 10+0.33+0.6+3=13.93GB/s. LLM during decode: 76.9GB/s. Conflict: 13.93+76.9=90.83GB/s > 77GB/s. Fix: during LLM decode (19.5ms), suspend depth estimation (saves 0.6GB/s) and reduce speech to 5GB/s. Total: 5+0.33+0+3+76.9=85.2GB/s. Still over! Reduce speech to 0: 80.2GB/s. Still over. LLM must run alone: 76.9+3+0.33=80.2GB/s > 77. At ρ=0.94: accept 5% latency inflation. Practical: LPDDR5X at 77GB/s peak, typical ~65GB/s sustainable. LLM: 76.9×efficiency factor 0.84=64.6GB/s effective needed. TPOT: 1.5/65=23ms.'
+  realistic_solution: |
+    Use one sustained-bandwidth budget and schedule the workloads by priority. The LLM consumes 1.5GB per decode token; at the requested 19.5ms TPOT that is 1.5GB / 0.0195s = 76.9GB/s, which already occupies essentially the full 77GB/s peak bus before system traffic. Speech should be modeled from its actual inference cadence: 100ms audio windows imply 10 full 1B INT8 passes/s, or 10GB/s. YOLO-s adds 11MB × 30fps = 0.33GB/s, depth adds 10MB × 60fps = 0.6GB/s, and the system reserve is 3GB/s. Running all together would demand 90.8GB/s, so it is unschedulable.
+
+    A feasible policy is to give speech a hard real-time slice and run LLM decode in the remaining bandwidth while suspending camera/depth during active assistant turns. With speech plus system reserve active, LLM receives 77 - 10 - 3 = 64GB/s, so LLM TPOT becomes 1.5GB / 64GB/s = 23.4ms. If the assistant must preserve 19.5ms TPOT, the scheduler has to pause speech recognition as well during short decode bursts and run the LLM in an exclusive foreground mode, which still contends with the 3GB/s system reserve and yields about 1.5GB / 74GB/s = 20.3ms. The concrete scheduler change is therefore admission control: camera and depth are disabled during LLM decode, speech is either guaranteed with a slower LLM SLA or paused for an exclusive LLM latency mode.
   common_mistake: |
     **The Pitfall:** Failing to calculate aggregate bandwidth requirements.
     **The Rationale:** Candidates often list bandwidth requirements without checking if their sum exceeds the 77 GB/s system limit, or without designing a concrete scheduling policy.
@@ -29,8 +32,13 @@ details:
     - System baseline: 3 GB/s.
     - Total bandwidth: 76.9 + 10 + 0.33 + 0.6 + 3 = 90.8 GB/s.
 
+    - Feasible speech-preserving policy: suspend YOLO/depth, reserve 10GB/s speech + 3GB/s system, leave 64GB/s for LLM.
+    - LLM TPOT under speech-preserving policy: 1.5GB / 64GB/s = 23.4ms.
+    - Exclusive LLM foreground policy: suspend speech/YOLO/depth, leave 77 - 3 = 74GB/s for LLM.
+    - LLM TPOT under exclusive policy: 1.5GB / 74GB/s = 20.3ms.
+
     **Conclusion & Interpretation:**
-    - **Result: 90.8 GB/s > 77 GB/s (Memory-Bandwidth Bound)**. The scheduler must suspend background tasks during LLM decode and relax TPOT.
+    - **Result: 90.8 GB/s > 77 GB/s (Memory-Bandwidth Bound)**. The scheduler must use admission control: suspend camera/depth during LLM decode, then choose between speech-preserving mode at ~23.4ms TPOT or exclusive LLM mode at ~20.3ms TPOT.
 status: published
 provenance: imported
 requires_explanation: true

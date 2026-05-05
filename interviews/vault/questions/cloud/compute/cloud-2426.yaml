@@ -18,14 +18,15 @@ details:
     **The Consequence:** Misdiagnosing a compute-bound problem as an IO problem, leading to useless network or topology optimizations.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - 70B model on 2x A100 GPUs (4 TB/s aggregate memory bandwidth, 624 TFLOPS FP16 compute).
+       - 70B model on 2x A100 GPUs.
+       - Aggregate HBM bandwidth is roughly 3.2-4.0 TB/s depending on the A100 variant; use 3.2 TB/s as a conservative estimate.
+       - Aggregate FP16 Tensor Core peak is roughly 624 TFLOPS.
     2. **Calculations:**
-       - BS=1 (Memory Bound): FP16 fetch = 140 GB / 4 TB/s = 35 ms. INT4 fetch = 35 GB / 4 TB/s = 8.75 ms.
-       - BS=128 (Compute Bound): FLOPs = 2 * 70B * 128 = 17.9 TFLOPs.
-       - FP16 Compute Time = 17.9 TFLOPs / 624 TFLOPS = 28.7 ms.
-       - W4A16 Overhead: Dequantization inside SMs consumes ALU cycles, adding ~20-30 ms.
+       - BS=1 (mostly memory-bound): FP16 weight traffic is about 140 GB, so 140 GB / 3.2 TB/s = 43.8 ms. INT4 weight traffic is about 35 GB, so 35 GB / 3.2 TB/s = 10.9 ms.
+       - BS=128 decoded-token step: dense transformer GEMMs do about 2 * 70B * 128 = 17.9 TFLOPs of math across the batch.
+       - Ideal FP16 compute time: 17.9 TFLOPs / 624 TFLOPS = 28.7 ms before non-GEMM overheads and parallelism limits.
+       - W4A16 must dequantize INT4 weights into FP16 fragments inside the kernel; at high batch size, that extra integer/unpack/scale work can erase the memory-traffic advantage.
     3. **Conclusion & Interpretation:**
-       - **At BS=128, native FP16 compute is faster because it avoids INT4 dequantization overhead.**
-       - **Result: Compute-Bound**
+       - **Result: bandwidth-to-compute crossover.** INT4 helps at BS=1 because less weight traffic dominates latency. At BS=128 the larger GEMMs reuse weights better, so dequantization overhead and kernel efficiency can make W4A16 slower than optimized FP16 for this workload.
 status: published
 provenance: imported

@@ -11,7 +11,7 @@ title: TinyML Memory Hierarchy Optimization on Nordic nRF5340
 scenario: You are developing a sophisticated keyword spotting application using a small Convolutional Neural Network (CNN) on the Nordic nRF5340, which features 256 KB SRAM and 1 MB flash memory.
 question: How should an nRF5340 place 100 KB CNN weights, 50 KB activations, buffers, and code across flash, SRAM, and registers?
 details:
-  realistic_solution: Utilize nsys profiling or TFLM memory planners. Map program code to flash, heavily accessed model weights and activations to SRAM, and leverage CPU registers. Use 8-bit or 4-bit weight quantization.
+  realistic_solution: Put program code and the constant model image in flash. If the 100 KB weight figure is the original FP32 size, INT8 conversion makes the stored weights about 25 KB; if it is already a deployed byte size, do not shrink it again. Keep activations, input/output tensors, scratch buffers, the TFLM arena, stack, and any staged hot weights in SRAM. Use registers only for loop counters, accumulators, pointers, and tiny temporaries chosen by the compiler. Weights can remain in flash when latency is acceptable, or selected layers can be copied to SRAM when flash stalls dominate.
   common_mistake: |
     **The Pitfall:** Proposing external memory solutions (like HBM/DRAM) for an MCU.
     **The Rationale:** Candidates accustomed to cloud ML hardware fail to understand the architectural impedance mismatch, cost, and power implications for a microcontroller.
@@ -23,11 +23,12 @@ details:
 
     **Calculations:**
     - INT8 Quantization: 100 KB weights -> 25 KB.
-    - SRAM Budget used: 50 KB (activations) + 25 KB (weights if loaded) = 75 KB.
-    - Flash Read Latency (DMA): 25 KB at ~5 MB/s = ~5 ms.
+    - Minimum SRAM for tensors if weights stay in flash: 50 KB activations + tensor arena/scratch/stack overhead.
+    - SRAM if all INT8 weights are staged: 50 KB activations + 25 KB weights = 75 KB, before arena, I/O buffers, and stack.
+    - Remaining SRAM before overhead in that staged case: 256 KB - 75 KB = 181 KB.
 
     **Conclusion & Interpretation:**
-    - **Result: 181 KB SRAM remains (Memory-Footprint-Bound)**. Requires INT8 quantization and Flash execution to fit within the MCU's internal hierarchy.
+    - **Result: 181 KB SRAM remains before runtime overhead if FP32-original weights are quantized to INT8 and staged in SRAM (Memory-Footprint-Bound)**. In practice, code and most constants stay in flash, activations and buffers stay in SRAM, and only small temporaries live in registers.
 status: published
 provenance: imported
 requires_explanation: true

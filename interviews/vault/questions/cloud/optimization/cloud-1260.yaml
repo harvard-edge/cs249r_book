@@ -8,10 +8,10 @@ competency_area: optimization
 bloom_level: analyze
 phase: training
 title: Diagnosing MMD Fairness Bottlenecks
-scenario: 'You are training a 150M parameter fraud detection model on 8 GPUs using PyTorch DDP. To enforce Demographic Parity, you add a Maximum Mean Discrepancy (MMD) fairness penalty to the loss function to penalize distribution differences between demographic groups. With a global batch size of 8192 (1024 per GPU), adding this in-processing constraint causes iteration time to jump from 150ms to 1200ms, and GPU utilization plummets from 95% to 25%.'
+scenario: You are training a 150M parameter fraud detection model on 8 GPUs using PyTorch DDP. To enforce Demographic Parity, you add a Maximum Mean Discrepancy (MMD) fairness penalty to the loss function to penalize distribution differences between demographic groups. The implementation all_gathers per-rank features and materializes one full 8192x8192 FP32 global pairwise distance matrix each step. With a global batch size of 8192 (1024 per GPU), adding this in-processing constraint causes iteration time to jump from 150ms to 1200ms, and GPU utilization plummets from 95% to 25%.
 question: What is causing the 150ms to 1200ms slowdown, and how would you fix it?
 details:
-  realistic_solution: 'The bottleneck is the cross-GPU `all_gather` required to collect features for the global MMD calculation. This creates a severe synchronization barrier that stalls the compute stream and breaks DDP''s gradient communication overlap. The solution is to compute the MMD penalty locally per GPU (N=1024) or use momentum-based running statistics for group distributions to entirely eliminate the forward-pass synchronization barrier.'
+  realistic_solution: The bottleneck is the cross-GPU `all_gather` required to collect features for the global MMD calculation. This creates a severe synchronization barrier that stalls the compute stream and breaks DDP's gradient communication overlap. The solution is to compute the MMD penalty locally per GPU (N=1024) or use momentum-based running statistics for group distributions to entirely eliminate the forward-pass synchronization barrier.
   common_mistake: |
     **The Pitfall:** Assuming the performance drop is purely due to the O(N^2) computational complexity of the MMD penalty.
     **The Rationale:** The bottleneck is actually the cross-GPU `all_gather` required to collect features for the global MMD calculation, which creates a synchronization barrier.
@@ -19,10 +19,10 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Global batch size N=8192 across 8 GPUs.
-    - MMD calculation requires an 8192x8192 distance matrix.
+    - Current implementation all_gathers features and materializes one 8192x8192 FP32 distance matrix per step.
 
     **Calculations:**
-    - Global MMD memory footprint: 8192 * 8192 * 4 bytes = ~268MB FP32.
+    - Global MMD matrix footprint: 8192 * 8192 * 4 bytes = ~268MB FP32 per step.
     - Local MMD footprint (N=1024): 1024 * 1024 * 4 bytes = ~4MB FP32.
     - The cross-GPU all_gather of 8192 features blocks DDP backward pass overlap.
     - Removing the global sync barrier drops iteration time.

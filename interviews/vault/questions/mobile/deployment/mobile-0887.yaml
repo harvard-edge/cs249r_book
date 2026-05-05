@@ -11,7 +11,8 @@ title: Optimizing Retrieval Chunk Size for On-Device RAG on A17 Pro
 scenario: An A17 Pro (8GB, 35 TOPS) RAG app chunks documents into 256-token chunks for retrieval. The LLM context window is 2048 tokens. Retrieval returns top-5 chunks. Currently precision @5=0.74 and generation quality score=0.71. A team proposes increasing chunk size to 512 tokens to improve context coherence.
 question: How would you calculate the memory and latency impact and determine whether the quality improvement justifies the cost?
 details:
-  realistic_solution: 'Impact analysis: FAISS index with 512-token chunks (vs 256): same document count = same index size (embeddings don''t change with chunk content size, only with model output dim). Context consumption: 5 chunks * 512 tokens = 2560 tokens — exceeds 2048 context window! Must reduce to top-3 chunks: 3*512=1536 tokens, leaving 512 tokens for query+response. With 256 tokens: 5*256=1280 tokens, leaving 768 tokens. Precision: larger chunks typically reduce precision as relevant content is buried. Quality model: 256-token chunks with 5 retrieved is often better than 512 with 3. Consider hybrid: 256-token retrieval + re-expand to neighboring chunks for top-2 results only.'
+  realistic_solution: 'Estimate the tradeoff across three budgets: index memory, retrieval latency, and context tokens. If the corpus has 100K tokens, 256-token chunks create about 391 embeddings while 512-token chunks create about 196, so a 768-dim FP16 FAISS index drops from about 0.60MB to 0.30MB before metadata. Retrieval work also falls roughly in half for a flat scan, though end-to-end latency may improve only by a few milliseconds because embedding and LLM prefill dominate. Context is the binding constraint: top-5 at 512 tokens consumes 2560 tokens and cannot fit in a 2048-token window. Reducing to top-3 uses 1536 context tokens, leaving 412 tokens after a 100-token query, compared with 668 tokens for 5x256-token retrieval. Because larger chunks reduce retrieval breadth and often lower precision@5 when relevant text is diluted, approve 512-token chunks only if measured generation quality improves enough under top-3 retrieval to offset the smaller response budget. A safer design is
+    256-token retrieval with neighbor expansion only for the top-1 or top-2 hits.'
   common_mistake: |
     **The Pitfall:** Assuming larger chunks are always better for quality.
     **The Rationale:** Candidates focus on context coherence but ignore precision drop and context window consumption.
@@ -20,16 +21,24 @@ details:
     **Assumptions & Constraints:**
     - LLM Context Window: 2048 tokens.
     - Query Overhead: 100 tokens.
+    - Example corpus: 100,000 tokens.
+    - Embedding index: 768 dimensions stored as FP16 (2 bytes/value), excluding metadata.
+    - Retrieval latency is roughly proportional to number of vectors for a flat/small local index.
 
     **Calculations:**
-    - Baseline (256 tokens): 5 chunks * 256 = 1280 tokens.
-    - Baseline Response Budget: 2048 (window) - 1280 (context) - 100 (query) = 668 tokens.
-    - Proposed (512 tokens): 5 chunks * 512 = 2560 tokens (> 2048 limit).
-    - Fallback (Top-3): 3 chunks * 512 = 1536 tokens.
-    - Fallback Response Budget: 2048 - 1536 - 100 = 412 tokens.
+    - Baseline chunks: ceil(100,000 / 256) = 391 vectors.
+    - Proposed chunks: ceil(100,000 / 512) = 196 vectors.
+    - Baseline index memory: 391 * 768 * 2 bytes = 600,576 bytes ~= 0.57 MiB.
+    - Proposed index memory: 196 * 768 * 2 bytes = 301,056 bytes ~= 0.29 MiB.
+    - Retrieval vector work: 196 / 391 ~= 50% of baseline, before fixed query-embedding overhead.
+    - Baseline context use: 5 chunks * 256 = 1280 tokens.
+    - Baseline response budget: 2048 - 1280 - 100 = 668 tokens.
+    - Proposed top-5 context use: 5 chunks * 512 = 2560 tokens (> 2048 limit).
+    - Proposed fallback top-3 context use: 3 chunks * 512 = 1536 tokens.
+    - Proposed fallback response budget: 2048 - 1536 - 100 = 412 tokens.
 
     **Conclusion & Interpretation:**
-    - **Result: 412 tokens response budget (Context-Bound)**. Using 512-token chunks reduces the response space by 38% and forces retrieving fewer documents, harming breadth.
+    - **Result: 0.29 MiB index, about 50% retrieval-vector work, and 412 tokens response budget (Context-Bound)**. The larger chunks save index memory and some retrieval latency, but force top-3 retrieval and reduce response space by about 38%, so the change needs measured quality gains under the lower-breadth retrieval setting.
 status: published
 provenance: imported
 requires_explanation: false
