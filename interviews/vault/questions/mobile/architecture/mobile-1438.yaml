@@ -23,17 +23,17 @@ details:
     - Precision: 8-bit weights for sizing.
     - Models: 1B encoder-decoder (500M encoder/500M decoder) vs 1.5B decoder-only.
     - Translation request: 80 source tokens, 80 generated target tokens.
-    - Encoder outputs are computed once and reused during decoding; weight traffic estimates below are sizing upper bounds for the active decoder working set if it cannot remain resident near the accelerator.
+    - Weights are resident in shared memory; decode latency depends on the active decoder footprint, KV-cache reads/writes, and cross-attention state, not on a full model-size transfer per token.
 
     **Calculations:**
-    - Decoder-only active decoder working-set upper bound: 1.5B * 1 byte = 1.5 GB/token, or 30 ms/token at 50 GB/s before KV traffic if the working set is streamed.
-    - Encoder-decoder upfront encoder working-set upper bound: 0.5 GB once for the source sentence.
-    - Encoder-decoder active decoder working-set upper bound: 0.5 GB/token, or 10 ms/token at 50 GB/s before decoder KV and cross-attention state reads if the working set is streamed.
-    - Cross-attention state is reused from the encoded source; for 80 source tokens it is bounded by source length and layer width, not by the full decoder parameter count.
-    - For 80 target tokens, pessimistic decoder-only weight traffic is 80 * 1.5 = 120 GB; encoder-decoder is 0.5 GB encoder + 80 * 0.5 GB decoder = 40.5 GB plus state/KV traffic.
+    - Decoder-only resident weight footprint: 1.5B * 1 byte = 1.5 GB.
+    - Encoder-decoder resident footprint: 0.5 GB encoder + 0.5 GB decoder = 1.0 GB, with only the 0.5 GB decoder active on each generated token after the encoder pass.
+    - The encoder pass is paid once for 80 source tokens; its encoded states are cached and reused for all 80 target tokens.
+    - Decode-time KV cache grows with generated target length for both designs; encoder-decoder cross-attention state is bounded by the fixed 80-token source rather than by the full parameter count.
+    - Qualitative bandwidth pressure: decoder-only repeatedly touches a larger active decoder and larger decoder KV path, while encoder-decoder shifts work to one upfront encoder pass and a smaller per-token decoder.
 
     **Conclusion & Interpretation:**
-    - **Result: prefer the encoder-decoder design when quality is comparable.** It trades one upfront encoder pass and bounded cross-attention reads for a much smaller per-token decoder working set; choose decoder-only only if profiling shows its larger decode path still meets the bandwidth and latency target.
+    - **Result: prefer the encoder-decoder design when quality is comparable.** It trades one upfront encoder pass and bounded cross-attention reads for a smaller active decoder footprint; choose decoder-only only if profiling shows its larger decode path, KV cache, and bandwidth demand still meet the latency target.
 status: published
 provenance: imported
 requires_explanation: false

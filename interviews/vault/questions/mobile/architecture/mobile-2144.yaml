@@ -11,7 +11,7 @@ title: 5G Remote KV Prefetching
 scenario: A transformer's KV cache is split between local LPDDR5 and an edge server's NVMe SSD over a 5G mmWave connection (1 Gbps, 15ms ping).
 question: What speculative prefetching mechanism can hide remote KV block fetch latency over 5G?
 details:
-  realistic_solution: The 15ms ping becomes a hard stall if remote KV blocks are fetched reactively. Define each remote block as a 1MB group of compressed KV pages for a known span of layers and recent tokens. At 1 Gbps, transfer is about 8ms, and a realistic request budget is roughly 25-30ms after protocol overhead. With a 50ms/token decoder, the scheduler should predict the next needed block and prefetch it at least one decoding step ahead, keeping a small lookahead window so remote blocks arrive before attention reads them.
+  realistic_solution: The 15ms ping becomes a hard stall if remote KV blocks are fetched reactively. Define each remote block as a 1MB group of compressed KV pages for a known span of layers and recent tokens. The scheduler should track the decode cursor, predict the next block IDs from the attention window, and maintain a two-token lookahead queue of remote fetches. At 1 Gbps, a 1MB transfer is about 8ms and a realistic request budget is roughly 25-30ms after protocol overhead, so one step ahead may work under steady decode, while two steps gives slack for jitter and outstanding requests.
   common_mistake: |
     **The Pitfall:** Using a purely reactive paging strategy.
     **The Rationale:** Candidates often design systems that wait for a cache miss before requesting the remote block, ignoring network latency.
@@ -27,10 +27,12 @@ details:
     **Calculations:**
     - Transfer time for one 1MB KV block = 1MB / 125MB/s = 8ms.
     - Approximate remote fetch budget = 15ms RTT + 8ms transfer + 5ms overhead = 28ms.
-    - One decoding step provides about 50ms of compute time, so prefetching the next required KV block at least one step ahead leaves about 22ms of slack.
+    - One decoding step provides about 50ms of compute time, so prefetching the next required KV block one step ahead leaves about 22ms of nominal slack.
+    - A practical mechanism keeps a two-token lookahead window: predict block IDs for tokens t+1 and t+2, issue asynchronous fetches, cancel or deprioritize wrong-path blocks, and promote arrived blocks into local LPDDR before attention reads them.
+    - Two-step lookahead gives about 100ms of compute window against a 28ms fetch budget, leaving room for queueing variability and multiple outstanding requests.
 
     **Conclusion & Interpretation:**
-    - **Result: about 28ms per 1MB remote KV block fetch**. A speculative scheduler should prefetch block IDs for the likely next attention reads at least one decoding step ahead; the block size is a KV layout choice, not a one-token unit.
+    - **Result: use a speculative two-token lookahead KV prefetch scheduler.** The 28ms remote-block fetch estimate is the constraint that determines the lookahead depth; it supports asynchronous prefetching rather than reactive paging.
 status: published
 provenance: llm-draft
 requires_explanation: true

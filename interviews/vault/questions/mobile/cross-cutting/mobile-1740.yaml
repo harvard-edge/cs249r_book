@@ -12,14 +12,14 @@ scenario: Design a federated learning system for on-device personalization of a 
 question: Detail the system architecture, data flow, and key algorithms, including how you would handle model updates and aggregation, given the constrained mobile environment?
 details:
   realistic_solution: |
-    Keep the frozen base LLM on device and personalize only a small adapter, prompt table, or rank-limited LoRA module. The client collects local text/voice correction signals, trains the adapter only when the device is charging, cool, idle, and on Wi-Fi, then clips and compresses the adapter delta for secure aggregation. Use FedProx or SCAFFOLD to reduce non-IID client drift, robust client selection to avoid low-battery or thermally throttled devices, and server-side aggregation with anomaly filtering before publishing a new global adapter. Treat the mobile NPU as primarily an inference accelerator; local adapter training will usually rely on framework-supported CPU/GPU/DSP paths or limited accelerator kernels, not default INT8 NPU training.
+    Keep the frozen base LLM on device and personalize only a small adapter, prompt table, or rank-limited LoRA module. Use the Snapdragon NPU primarily for efficient INT8 inference, candidate scoring, and teacher/student evaluation during personalization; do not assume general-purpose INT8 backpropagation runs on the NPU. Local adapter training should run only when charging, cool, idle, and on Wi-Fi, using framework-supported CPU/GPU/DSP kernels or any verified accelerator kernels for adapter matmuls. The client clips, sparsifies, quantizes, and encrypts adapter deltas for secure aggregation. Use FedProx or SCAFFOLD to reduce non-IID client drift, robust client selection to avoid low-battery or thermally throttled devices, and server-side aggregation with anomaly filtering before publishing a new global adapter back to the on-device NPU inference path.
   common_mistake: |
     **The Pitfall:** Proposing standard FedAvg with full-precision model updates.
     **The Rationale:** Candidates overlook mobile hardware constraints and assume homogeneous data distributions and unlimited network bandwidth.
     **The Consequence:** The system incurs massive cellular data costs, fails to converge due to non-IID client drift, and causes OOM crashes on older devices.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Base LLM: compressed/quantized 3B-class model or shared foundation model stored on device, not uploaded each round.
+    - Base LLM: compressed/quantized shared foundation model stored on device, not uploaded each round.
     - Federated update type: compressed LoRA adapter delta.
     - Trainable adapter parameters: 20M.
     - Update precision after quantization and metadata: 1 byte/parameter.
@@ -27,14 +27,13 @@ details:
     - Aggregation cohort: 1,000 clients per round.
 
     **Calculations:**
-    - Example base footprint: 3B parameters at about 4 bits/parameter plus scales/metadata is roughly 1.5-2.0 GB on device.
     - Per-client update payload: 20M x 1 byte = 20 MB before transport compression.
     - With 4:1 sparsity/compression, uploaded payload ≈ 5 MB.
     - Upload time per client: 5 MB / 6.25 MB/s = 0.8 seconds under good uplink conditions.
-    - Server aggregation load: 1,000 clients x 5 MB = 5 GB of update payload per round.
+    - Server aggregation payload before protocol overhead: 1,000 clients x 5 MB = 5 GB per round.
 
     **Conclusion & Interpretation:**
-    - **Result: Adapter-update communication is feasible only with compression and scheduled rounds.** Clients upload small adapter deltas rather than full-model gradients, while the server must provision for multi-GB secure aggregation per round.
+    - **Result: Adapter-update communication is feasible only with compression and scheduled rounds.** Clients upload small adapter deltas rather than full-model gradients, while secure aggregation capacity planning must include the 5 GB payload plus masking, retries, dropout handling, and round-window latency overhead.
 status: published
 provenance: imported
 requires_explanation: true

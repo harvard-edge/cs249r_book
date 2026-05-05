@@ -12,7 +12,7 @@ scenario: You are designing an acoustic monitoring wearable for hospital staff u
 question: How should Corstone-300 detect and redact spoken PII on-device while fitting DSP, CNN, and buffers in 512 KB SRAM?
 details:
   realistic_solution: |
-    Implement an owned-buffer pipeline rather than logging directly from the live DMA ring. The M7 writes audio into a double buffer, extracts Mel features into a separate scratch region, and invokes the Ethos-U55 on an INT8 PII-spotting CNN. Audio windows remain in a pending queue and are not persisted until the classifier result is known. If PII is flagged, the M7 overwrites the pending raw samples with irreversible redacted content, such as silence, deterministic tone masking, or a stored feature-only summary, then flushes the cache before any logging task can read the buffer. Buffer ownership must be explicit: DMA owns the capture buffer, DSP/NPU owns the feature buffer, and the logger only receives already-approved or already-redacted windows.
+    Implement an owned-buffer pipeline rather than logging directly from the live DMA ring. The M7 writes audio into a 32 KB double buffer, extracts Mel features in a bounded DSP scratch region, and invokes the Ethos-U55 on an INT8 PII-spotting CNN whose live tensor arena fits the remaining SRAM through tiling or compression. Audio windows remain in a pending queue and are not persisted until the classifier result is known. If PII is flagged, the M7 overwrites the pending raw samples with irreversible redacted content, such as silence, deterministic tone masking, or a stored feature-only summary, then flushes the cache before any logging task can read the buffer. Buffer ownership must be explicit: DMA owns the capture buffer, DSP/NPU owns the feature buffer, and the logger only receives already-approved or already-redacted windows.
   common_mistake: |
     **The Pitfall:** Proposing complex transformer-based redaction models and ignoring shared memory contention.
     **The Rationale:** Candidates ignore the lack of external memory on typical microcontroller profiles and forget that the Cortex-M7 and Ethos-U55 share the same SRAM.
@@ -33,11 +33,12 @@ details:
     - SRAM left for CNN weights, activations, and tensor arena: 512 KB - 256 KB = 256 KB.
     - Untiled CNN peak: 250 KB weights + 50 KB activations = 300 KB.
     - CNN exceeds the remaining SRAM by 300 KB - 256 KB = 44 KB before alignment, stack growth, and guard space.
-    - Required fix: tile or stream weights, compress the CNN, or reduce activation peak by more than 44 KB plus guard space.
-    - Inference Latency at 20 GMAC/s sustained: 20M MACs / 20,000M MAC/s = 1 ms before scheduling overhead.
+    - Concrete feasible layout target: keep fixed reservations at 256 KB, limit the live CNN arena to <=224 KB, and leave about 32 KB guard/alignment margin.
+    - Required CNN reduction: 300 KB untiled peak - 224 KB target = at least 76 KB via weight tiling/streaming, compression, or activation reuse.
+    - Inference latency at 20 GMAC/s sustained, counting one MAC as one multiply-accumulate rather than two FLOPs: 20M MACs / 20,000M MAC/s = 1 ms before scheduling overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: memory plan is the binding constraint, not peak compute**. The PII guardrail is feasible only if raw audio is withheld from persistence until classification completes and the CNN is tiled or compressed to coexist with DSP and redaction buffers in 512 KB SRAM.
+    - **Result: memory plan is the binding constraint, not peak compute**. The PII guardrail is feasible only if raw audio is withheld from persistence until classification completes and the CNN live arena is reduced to about 224 KB so it coexists with DSP, audio, redaction staging, RTOS, and guard space inside 512 KB SRAM.
 status: published
 provenance: imported
 requires_explanation: true

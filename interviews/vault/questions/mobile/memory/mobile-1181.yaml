@@ -17,17 +17,22 @@ details:
     **The Rationale:** Candidates do not account for the A17 Pro's unified memory architecture where the OS can forcefully reclaim memory, incorrectly assuming the entire 8 GB is available for the LLM.
     **The Consequence:** The system crashes due to out-of-memory errors because it ignores the memory footprint of the OS, display buffers, and background apps.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 7B model (4-bit quantization) needs ~3.5 GiB of unified memory.
-       - iOS and background apps reserve ~3 GiB.
-       - Architecture has 32 layers and 4096 hidden dimension.
-    2. **Calculations:**
-       - Approximate available memory for KV cache = 8 GiB - 3.5 GiB - 3 GiB = 1.5 GiB.
-       - FP16 KV cache per token = 2 (K&V) * 2 bytes * 32 * 4096 = 524,288 bytes = 512 KiB.
-       - Max context length in 1.5 GiB = 1.5 * 1024 MiB / 0.5 MiB = 3072 tokens before allocator and metadata overhead.
-       - FP16 KV cache for 8K context = 8192 tokens * 0.5 MiB/token = 4096 MiB = 4 GiB.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bound. An 8K context needs roughly 4 GiB of FP16 KV cache, so the design must use semantic eviction, paging, or a specified KV quantization scheme whose metadata and scale overhead still fit within the app's real memory budget.**
+    **Assumptions & Constraints:**
+    - Device memory example: 8 GiB unified memory.
+    - 7B model at 4-bit quantization needs ~3.5 GiB resident for weights and runtime buffers.
+    - iOS, display, and background apps reserve ~3 GiB.
+    - Reserve ~0.25 GiB for allocator fragmentation, page tables, metadata, and prefetch slack.
+    - Architecture has 32 layers and 4096 hidden dimension.
+
+    **Calculations:**
+    - Raw remaining memory = 8 GiB - 3.5 GiB - 3 GiB = 1.5 GiB.
+    - Practical KV budget after overhead = 1.5 GiB - 0.25 GiB = 1.25 GiB.
+    - FP16 KV cache per token = 2 (K&V) * 2 bytes * 32 * 4096 = 524,288 bytes = 512 KiB = 0.5 MiB.
+    - Resident FP16 context in 1.25 GiB = 1.25 * 1024 MiB / 0.5 MiB = 2560 tokens.
+    - FP16 KV cache for 8K context = 8192 tokens * 0.5 MiB/token = 4096 MiB = 4 GiB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-Bound.** An 8K FP16 KV cache needs roughly 4 GiB, far above a practical ~1.25 GiB resident KV budget. Fixed-size pages, hot-window residency, quantized cold pages, and prefetch outside the decode path preserve Neural Engine utilization by avoiding page faults and buffer churn during token generation.
 status: published
 provenance: imported
 requires_explanation: true

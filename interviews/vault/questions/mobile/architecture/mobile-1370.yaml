@@ -11,20 +11,20 @@ title: Designing a 32K Context Window for Google Tensor G3
 scenario: You are designing an on-device document summarization feature for a Pixel device powered by the Google Tensor G3. The feature needs to handle a 32,768 (32K) token context window locally using an optimized LLM (like Gemini Nano). However, the device's 12 GB LPDDR5X RAM is heavily shared with the OS, leaving a strict 2 GB budget for the KV cache.
 question: How would you design a novel attention architecture and memory management strategy that fits a 32K context window within a 2 GB budget while maximizing TPU utilization?
 details:
-  realistic_solution: Use a GQA transformer with 16 query heads but only 2 KV heads, so each layer stores 256 KV channels instead of 2048. Keep the full 32K KV cache in a paged 2-byte KV arena of about 512 MiB, reserve memory for allocator metadata and scratch buffers, and use dense blockwise attention over 1K-2K tiles so the TPU sees regular matrix kernels while only the current Q tile and a small KV page set are active at once. For streaming sessions, keep attention-sink tokens plus the most recent sliding window hot, evict or summarize cold pages, and prefetch KV pages with fixed QoS so camera and UI traffic are not starved.
+  realistic_solution: Use a GQA transformer with 16 query heads but only 2 KV heads. With d_model=2048 and 16 query heads, head_dim is 128, so each layer stores 2 KV heads * 128 = 256 KV channels instead of 2048. Keep the full 32K KV cache in a paged 2-byte KV arena of about 512 MiB, reserve memory for allocator metadata and scratch buffers, and use dense blockwise attention over 1K-2K tiles so the TPU sees regular matrix kernels while only the current Q tile and a small KV page set are active at once. For streaming sessions, keep attention-sink tokens plus the most recent sliding window hot, evict or summarize cold pages, and prefetch KV pages with fixed QoS so camera and UI traffic are not starved.
   common_mistake: |
     **The Pitfall:** Suggesting standard Multi-Query Attention (MQA) without doing the math, or proposing sparse attention patterns.
     **The Rationale:** Candidates throw out buzzwords without verifying if MQA actually brings the 32K context below the strict 2 GB threshold, or they forget that sparse patterns run terribly on dense accelerators.
     **The Consequence:** The model either OOMs the device or the inference latency spikes drastically due to poor TPU compilation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Baseline constraints: 16 layers, d_model=2048, 16 Q-heads, 2-byte KV cache values, 32,768 tokens.
-    - Proposed attention: GQA with 2 KV heads, so KV channels per layer = 2048 * (2 / 16) = 256.
+    - Baseline constraints: 16 layers, d_model=2048, 16 Q-heads, head_dim=2048/16=128, 2-byte KV cache values, 32,768 tokens.
+    - Proposed attention: GQA with 2 KV heads, so KV channels per layer = 2 KV heads * 128 head_dim = 256.
 
     **Calculations:**
-    - Standard MHA KV per layer = 2 (K,V) * 32,768 tokens * 2048 channels * 2 bytes = 268,435,456 bytes = 256 MiB.
+    - Standard MHA KV per layer = 2 (K,V) * 32,768 tokens * 16 KV heads * 128 head_dim * 2 bytes = 268,435,456 bytes = 256 MiB.
     - Standard MHA total KV = 256 MiB/layer * 16 layers = 4096 MiB = 4.0 GiB, which exceeds the 2 GB budget.
-    - GQA KV per layer = 2 * 32,768 * 256 * 2 bytes = 33,554,432 bytes = 32 MiB.
+    - GQA KV per layer = 2 * 32,768 tokens * 2 KV heads * 128 head_dim * 2 bytes = 33,554,432 bytes = 32 MiB.
     - GQA total KV = 32 MiB/layer * 16 layers = 512 MiB.
     - With a 1.5x allowance for page tables, alignment, sink tokens, and scratch space, KV-related memory is about 768 MiB.
 

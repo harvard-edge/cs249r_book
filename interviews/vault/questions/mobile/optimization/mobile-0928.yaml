@@ -12,7 +12,7 @@ scenario: 'You are evaluating two attention implementations for a 3B LLM on an A
 question: How do FP16 unfused attention and INT8 fused attention compare for memory, latency, and accuracy?
 details:
   realistic_solution: |
-    FP16 unfused attention materializes larger Q, K, V, score, and output tensors, so it uses more memory traffic and may pay extra launch or graph-boundary overhead. INT8 fused attention reduces Q/K/V bytes and avoids writing the full QK^T score matrix to unified memory, so latency should usually improve, especially when attention is memory-bound. The tradeoff is numerical: INT8 attention can change softmax scores and value accumulation, so it needs quality checks such as perplexity, task accuracy, and regression tests for long-context behavior before release.
+    FP16 unfused attention materializes larger Q, K, V, score, and output tensors, so it uses more memory traffic and may pay extra launch or graph-boundary overhead. INT8 fused attention reduces Q/K/V bytes and avoids writing the full QK^T score matrix to unified memory, so latency should usually improve when attention is memory-bound; the release decision should be based on measured p50/p95 latency for the same sequence length, not TOPS alone. The tradeoff is numerical: INT8 attention can change softmax scores and value accumulation, so accept it only if perplexity, task accuracy, and long-context regression tests stay within the product's quality budget.
   common_mistake: |
     **The Pitfall:** Assuming INT8 attention merely provides a 2x compute speedup over FP16.
     **The Rationale:** Engineers scale TOPS linearly with precision without analyzing the memory bandwidth bottlenecks of the attention matrix.
@@ -29,9 +29,10 @@ details:
        - FP16 score matrix write + read if materialized: 8,388,608 * 2 bytes * 2 = ~33.6 MB.
        - FP16 output write: 512 * 32 * 128 * 2 = ~4.2 MB.
        - Approximate FP16 unfused traffic for these tensors: 12.6 + 33.6 + 4.2 = ~50.4 MB/layer, excluding cache effects and other reads.
-       - INT8 fused attention can read Q/K/V at roughly half the bytes for quantized tensors and avoid materializing the score matrix, but it may still need scales, dequantization, and higher-precision accumulation.
+       - INT8 fused attention can read Q/K/V at roughly half the bytes for quantized tensors and avoid materializing the 33.6 MB score read/write path, but it may still need scales, dequantization, and higher-precision accumulation.
+       - Decision criterion: choose INT8 fused attention only if measured latency improves at seq=512 and quality regression is within the model release threshold.
     3. **Conclusion & Interpretation:**
-       - **Result: Lower Memory Traffic With Accuracy Risk.** INT8 fused attention should reduce memory footprint and likely latency, but exact speedup must be measured on the target runtime. Accuracy can regress because attention scores and softmax behavior are more sensitive to quantization than simple linear layers.
+       - **Result: Lower Memory Traffic, Likely Lower Latency, Accuracy Risk.** INT8 fused attention removes the largest materialized attention buffer in this estimate and should reduce latency on a memory-bound mobile runtime, but it ships only if measured latency improves and attention-quality regressions stay within tolerance.
 status: published
 provenance: imported
 requires_explanation: false

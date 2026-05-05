@@ -12,7 +12,7 @@ scenario: Your keyboard app fine-tunes a next-word prediction model (50M params,
 question: Where did the 4.2 GB of storage use come from during on-device fine-tuning?
 details:
   realistic_solution: |
-    On-device training generates hidden storage through optimizer snapshots, rolling checkpoints, and cached training batches. The 100 MB model is only the deployed FP16 weights. Adam keeps two per-parameter state tensors; if those states are stored as FP16 on disk, each rolling checkpoint is a self-contained 300 MB snapshot: 100 MB of model weights plus 200 MB of optimizer state. In addition to those ten historical checkpoints, the trainer may keep one active optimizer-state copy and a retained local cache for recent examples, tokenized batches, telemetry logs, and crash recovery. Those categories account for the observed 4.2 GB.
+    On-device training generates hidden storage through optimizer snapshots, rolling checkpoints, and cached training batches. The 100 MB model is only the deployed FP16 weights. Adam keeps two per-parameter state tensors; if those states are stored as FP16 on disk, each rolling checkpoint is a self-contained 300 MB snapshot: 100 MB of model weights plus 200 MB of optimizer state. In addition to ten historical checkpoints, the trainer may keep one active optimizer-state copy, a staging copy for crash-safe checkpoint writes, and retained caches for recent examples, tokenized batches, logs, and telemetry. Those explicit categories account for the observed 4.2 GB.
   common_mistake: |
     **The Pitfall:** Blaming user typing data accumulation.
     **The Rationale:** Candidates assume the raw data inputs are bloated, ignoring the massive size of intermediate training tensors.
@@ -22,15 +22,19 @@ details:
     - Model size: 100 MB (FP16).
     - Optimizer: Adam has two state tensors; assume FP32 in RAM and FP16 when checkpointed to disk.
     - Rolling checkpoints kept: 10.
+    - Training cache components are retained for crash recovery and offline replay.
 
     **Calculations:**
     - Disk optimizer state per checkpoint = 2 states * 50M params * 2 bytes = 200 MB.
     - One checkpoint = 100 MB model weights + 200 MB optimizer state = 300 MB.
     - Rolling checkpoint storage = 10 * 300 MB = 3000 MB.
-    - Active on-disk optimizer state = 200 MB.
-    - Current deployed/training model copy = 100 MB.
-    - Retained training/cache storage = 900 MB, covering recent typed-example shards, tokenized batch cache, logs, and crash-recovery staging.
-    - Total disk usage = 3000 MB + 200 MB + 100 MB + 900 MB = 4200 MB = 4.2 GB.
+    - Active on-disk optimizer state outside the checkpoint ring = 200 MB.
+    - Current deployed/training model copy outside the checkpoint ring = 100 MB.
+    - Crash-safe staging area for the next checkpoint = 300 MB.
+    - Recent typed-example shards = 250 MB.
+    - Tokenized batch and feature cache = 250 MB.
+    - Logs, telemetry, and retry metadata = 100 MB.
+    - Total disk usage = 3000 MB + 200 MB + 100 MB + 300 MB + 250 MB + 250 MB + 100 MB = 4200 MB = 4.2 GB.
 
     **Conclusion & Interpretation:**
     - **Result: Optimizer State and Checkpoint Bloat.** The 4.2 GB comes primarily from ten 300 MB checkpoints, plus active optimizer state and cached training data; the 100 MB model is only a small part of the storage footprint.

@@ -18,19 +18,21 @@ details:
     **The Consequence:** The fundamental scheduling deadlock caused by piecemeal pod allocation remains unresolved, leading to continued cluster freezing as new jobs enter the queue.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Scheduler: Default K8s (Greedy).
-    - Workloads: PyTorch DDP requires all nodes to init NCCL before computation begins.
-    - Scenario: 64 available GPUs, 10 jobs arrive requiring 8 GPUs each.
+    - Cluster: 500 GPUs.
+    - Observed allocation: 85%, or about 425 GPUs reserved.
+    - Workloads: PyTorch DDP jobs request 8 workers and require all workers before NCCL initialization can complete.
+    - Observed state: many jobs have only 6 of 8 workers running.
 
     **Calculations:**
-    - Greedy allocation: scheduler gives 6 GPUs to each of 10 jobs, so 60/64 GPUs are reserved (93.75% allocation).
-    - Useful training jobs under greedy allocation: 0, because every DDP job is missing 2 of its 8 required workers and waits in NCCL init.
-    - Useful GPU compute utilization on those reserved GPUs: 0%, even though allocation metrics look high.
-    - Gang scheduling allocation: scheduler admits 8 complete jobs with 8 GPUs each, so 64/64 GPUs are allocated to 8 running jobs.
-    - Remaining demand: 2 complete jobs stay queued until another 16 GPUs are available.
+    - 85% of 500 GPUs = 425 allocated GPUs.
+    - A representative partial-allocation state is about 70 jobs with 6 workers each: 70 * 6 = 420 GPUs reserved, close to the observed 85%.
+    - Those 70 jobs collectively need 70 * 2 = 140 more workers to reach their requested 8-worker gang size.
+    - Available unallocated GPUs are only about 500 - 425 = 75, so no collection of partial jobs can all complete under greedy piecemeal allocation.
+    - Useful training jobs in this partial state: 0 for the affected DDP jobs, because each waits for the full NCCL communicator.
+    - With gang scheduling, the scheduler admits only complete 8-worker groups and leaves incomplete jobs queued rather than reserving GPUs.
 
     **Conclusion & Interpretation:**
-    - **Result: High Allocation, 0% Useful Progress.** Partial allocation can reserve most GPUs while producing no training progress; gang scheduling converts the same 64 GPUs into 8 complete running jobs and 2 queued jobs.
+    - **Result: High Allocation, 0% Useful Progress.** Partial allocation can reserve roughly 425 GPUs while producing no training progress for the affected jobs; gang scheduling prevents this by admitting complete DDP jobs atomically and keeping the rest queued.
 status: published
 provenance: imported
 requires_explanation: false

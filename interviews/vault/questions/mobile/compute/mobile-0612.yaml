@@ -11,7 +11,7 @@ title: Heterogeneous CPU NPU GPU Scheduling for an AR Pipeline Under 2W
 scenario: You are designing an on-device ML pipeline for an augmented reality application. The pipeline involves pre-processing (CPU), a light-weight pose estimation model (NPU-preferred), and a heavy visual effects rendering step (GPU). Your goal is to achieve minimal end-to-end latency while adhering to a strict 2W average power budget for the entire pipeline.
 question: How would you approach scheduling and resource allocation across these different compute units?
 details:
-  realistic_solution: Implement a heterogeneous task scheduler aware of device-specific power profiles, latency characteristics, and inter-processor communication (IPC) costs. Model the pipeline as a DAG where nodes are tasks and edges are data dependencies. Use DVFS to dynamically adjust clock frequencies based on workload. Prioritize latency-critical tasks and exploit parallelism where dependencies permit. For this sequential CPU->NPU->GPU chain, pipelining frames maximizes throughput while keeping power under budget.
+  realistic_solution: Implement a heterogeneous task scheduler aware of device-specific power profiles, latency characteristics, and inter-processor communication (IPC) costs. Model the pipeline as a DAG where nodes are tasks and edges are data dependencies. Use DVFS to dynamically adjust clock frequencies based on workload. For this sequential CPU->NPU->GPU chain, a single frame still has about 30ms end-to-end latency, but pipelining different frames can make steady-state throughput limited by the 15ms GPU stage. The scheduler should admit frames only when the duty-cycle power estimate stays under 2W and should reduce rate, quality, or clocks if measured power exceeds the budget.
   common_mistake: |
     **The Pitfall:** Run everything in parallel on its preferred hardware.
     **The Rationale:** Candidates assume maximal parallelism is always best without analyzing power constraints and IPC costs.
@@ -24,13 +24,14 @@ details:
     - Power Budget: 2W.
 
     **Calculations:**
-    - Sequential Baseline Latency: 5ms + 10ms + 15ms = 30 ms.
-    - Throughput bottleneck (Pipelined): 15ms GPU = 66 FPS.
-    - Concurrent Average Power: CPU (166.7 mW) + NPU (533.3 mW) + GPU (1200 mW).
-    - Total Pipelined Power: 166.7 + 533.3 + 1200 = 1900 mW.
+    - Per-frame end-to-end latency for the sequential dependency chain: 5ms + 10ms + 15ms = 30 ms.
+    - Steady-state pipelined throughput after fill: bottleneck stage is the 15ms GPU stage, so the upper bound is 1000 / 15 = about 66 FPS.
+    - At that maximum pipelined rate, one frame starts every 15ms. Approximate duty cycles: CPU 5/15, NPU 10/15, GPU 15/15.
+    - Duty-cycle power estimate: (500mW * 5/15) + (800mW * 10/15) + (1200mW * 15/15) = about 1900mW.
+    - If the target frame rate is lower than 66 FPS or DVFS reduces clocks, average power falls; IPC overhead and overlap inefficiency can push it higher.
 
     **Conclusion & Interpretation:**
-    - **Result: 1900 mW (Thermal-Bound)**. 1900 mW < 2000 mW (2W) budget. We achieve 66 FPS while maintaining thermal limits.
+    - **Result: Pipelined schedule under budget if overhead is controlled.** The frame latency remains about 30ms, while steady-state throughput can approach 66 FPS after pipeline fill. The 1900mW figure is a duty-cycle estimate at maximum throughput, so the scheduler must monitor real power and adapt rate or quality to preserve the 2W budget.
 status: published
 provenance: imported
 requires_explanation: true

@@ -13,10 +13,10 @@ question: How would you improve HBM memory utilization for the 128-expert 800B M
 details:
   realistic_solution: |
     Deploy an expert-caching and quantization hierarchy.
-    1. Speculative Expert Caching: Leverage the router's output to pre-fetch experts for the next token.
-    2. Zipfian Popularity Caching: Pin the top-K most frequently accessed experts (typically covering 60%+ of routes) in GPU HBM in BF16/FP8.
-    3. Cold Expert Quantization: Aggressively quantize the long-tail cold experts to INT4 to slash capacity requirements.
-    4. Capacity-Aware Placement: Co-locate hot expert replicas with the serving GPUs that need them and keep cold experts compressed in HBM, avoiding CPU/PCIe offload on the latency-critical path. Use expert-parallel routing only if measured RDMA latency and batching still meet the token latency target.
+    1. Hot Expert Caching: Pin the most frequently routed experts in GPU HBM in BF16 or FP8 so common paths do not pay extra latency.
+    2. Cold Expert Quantization: Store long-tail experts in INT8 or INT4 after per-expert quality checks, reducing resident HBM footprint without changing the routing semantics.
+    3. Capacity-Aware Placement: Place hot replicas near the serving workers that use them most and keep cold experts compressed on the GPU path; do not depend on CPU/PCIe offload for latency-critical tokens.
+    4. Measurement Gate: Tune the hot set from router traces and promote experts when route frequency or tail latency changes. The strategy reduces HBM pressure while keeping latency safe because the fast path remains resident and high precision.
   common_mistake: |
     **The Pitfall:** Suggesting straightforward CPU offloading for the cold experts.
     **The Rationale:** CPU offloading is a standard technique for memory-constrained training, leading engineers to incorrectly assume it applies perfectly to real-time generative inference.
@@ -26,18 +26,17 @@ details:
     - Model: 128-expert MoE (800B total parameters).
     - Precision: BF16 at 2 bytes/parameter, so 800B parameters require 1.6 TB total weights.
     - Routing: Top-2 experts per token.
-    - H100 capacity assumption: 80 GB HBM, with roughly 20% reserved for runtime headroom, so about 64 GB usable for resident weights per GPU.
 
     **Calculations:**
     - Active Utilization: 2 / 128 = 1.56% of parameters active per token.
     - Per-expert BF16 weight size: 1.6 TB / 128 = 12.5 GB.
-    - Zipfian Cache Optimization: the top-16 experts require 16 * 12.5 GB = 200 GB; at 64 GB usable/GPU, that needs ceil(200 / 64) = 4 H100s.
-    - Cold Quantization: the remaining 112 experts are 112 * 12.5 GB = 1.4 TB in BF16. INT4 is roughly 1/4 of BF16 storage, so the cold set is ~350 GB and fits on about 6 H100s with headroom.
-    - Cold placement: at 64 GB usable/GPU, ceil(350 / 64) = 6 H100s if cold experts remain sharded and compressed in GPU HBM rather than replicated everywhere.
-    - Total resident placement example: 4 H100s for the hot BF16/FP8 cache plus 6 H100s for the compressed cold shard pool = about 10 H100s, before any extra hot-expert replication for load balance.
+    - Example hot set: top-16 experts in BF16 require 16 * 12.5 GB = 200 GB.
+    - Cold set: remaining 112 experts require 112 * 12.5 GB = 1.4 TB in BF16.
+    - INT4 cold storage is roughly one quarter of BF16 storage, so the cold set drops from ~1.4 TB to ~350 GB before metadata and scale overhead.
+    - Total illustrative resident weight footprint becomes ~200 GB hot + ~350 GB cold = ~550 GB, before replication for load balance, instead of 1.6 TB fully BF16.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory Capacity-Bound.** Naively storing all experts in BF16 requires 1.6 TB / 80 GB = 20 H100s by raw capacity, or 1.6 TB / 64 GB = 25 H100s with 20% headroom, while only 1.56% of weights are active per token. Caching hot experts and quantizing cold experts reduces the resident footprint to about 10 H100s with headroom, roughly a 2x-2.5x capacity reduction without relying on PCIe offload latency.
+    - **Result: Memory Capacity-Bound.** Only 1.56% of experts are active per token, so the latency-safe reduction is to keep hot experts resident and high precision while compressing cold experts that are rarely routed. The exact GPU count depends on replication, topology, and measured hotness, but the footprint reduction is grounded in quantizing the cold expert weights rather than in CPU offload.
 status: published
 provenance: imported
 requires_explanation: true

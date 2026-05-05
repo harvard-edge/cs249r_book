@@ -8,20 +8,20 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Tensor G3 On-Device ML Compiler Design for Real-time Vision
-scenario: Your team is tasked with deploying a TensorFlow real-time object detection model onto Android smartphones powered by Google Tensor G3. The model must sustain 60 FPS with minimal power, and the target build should use a TFLite INT8 path whose ops are supported by the Tensor G3 TPU delegate or an Android NNAPI delegate without CPU fallback.
-question: How would you compile and optimize a TensorFlow object detector for TFLite/TPU on Tensor G3 to sustain 60 FPS?
+scenario: Your team is tasked with deploying a TensorFlow real-time object detection model onto Android smartphones powered by Google Tensor G3. The model must sustain 60 FPS with minimal power, and the target build should use a TFLite INT8 path whose ops are supported by Android NNAPI or a mobile GPU delegate without CPU fallback.
+question: How would you compile and optimize a TensorFlow object detector for TFLite on Tensor G3 to sustain 60 FPS?
 details:
   realistic_solution: |
-    Convert the TensorFlow graph to a fully quantized TFLite INT8 flatbuffer with static input shapes and a representative calibration set, then inspect delegate placement before optimizing. The key release gate is that convolution, depthwise convolution, detection head, resize, NMS, and activation ops are either supported by the Tensor G3 TPU/NNAPI delegate or intentionally fused/replaced so they do not fall back to CPU in the 16.67ms frame budget. Use NHWC layouts, operator fusion, constant folding, buffer reuse, preallocated tensors, and camera/inference pipelining. Profile on device with Android tracing and TFLite benchmark tools to confirm per-op latency, delegate coverage, thermal behavior, and sustained 60 FPS rather than relying on peak TOPS.
+    Convert the TensorFlow graph to a fully quantized TFLite INT8 flatbuffer with static input shapes and a representative calibration set, then inspect delegate placement before optimizing. The key release gate is that convolutions, depthwise convolutions, detection heads, resize, activations, and post-processing either map to supported NNAPI/mobile GPU delegate kernels or are fused/replaced so they do not fall back to CPU in the 16.67 ms frame budget. Treat NMS as a common failure point: use a delegate-supported TFLite detection postprocess op, move NMS into a lightweight bounded CPU stage with measured latency, or replace it with a model head that avoids expensive per-frame CPU NMS. Use NHWC layouts, operator fusion, constant folding, buffer reuse, preallocated tensors, and camera/inference pipelining. Profile on device with Android tracing and TFLite benchmark tools to confirm per-op latency, delegate coverage, thermal behavior, and sustained 60 FPS rather than relying on peak TOPS.
   common_mistake: |
-    **The Pitfall:** Failing to deeply integrate with the TPU architecture and defaulting to CPU fallback.
-    **The Rationale:** Overlooking aggressive quantization (e.g., INT8) or dynamic shape optimization.
+    **The Pitfall:** Assuming Tensor G3 has a dedicated TFLite TPU delegate path and missing CPU fallback.
+    **The Rationale:** Overlooking INT8 conversion, static shapes, delegate operator coverage, and mobile post-processing gaps such as NMS.
     **The Consequence:** The model falls back to generic CPU execution, utterly failing the 16.67 ms real-time latency target and draining the battery.
   napkin_math: |
     **Assumptions & Constraints:**
     - Target frame rate: 60 FPS (<= 16.67 ms per frame).
     - Frame budget: 16.67 ms, including pre/post-processing and synchronization.
-    - Example detector compute: 100 GOP per inference if all heavy ops stay on the accelerated delegate.
+    - Example detector compute: 100 GOP per inference if all heavy ops stay on accelerated NNAPI/mobile GPU delegate paths.
 
     **Calculations:**
     - Sustained work rate for the example detector = 100 GOP * 60 FPS = 6,000 GOP/s = 6 TOPS-equivalent.

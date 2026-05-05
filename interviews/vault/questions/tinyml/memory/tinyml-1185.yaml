@@ -11,7 +11,7 @@ title: Continuous DMA Ingestion and Bus Contention
 scenario: You are designing a continuous vibration anomaly detection pipeline on an ARM Cortex-M4 (STM32F4) running at 168 MHz with 256 KB SRAM, 1 MB flash, and no FPU. A sensor streams 16-bit data at 32 kHz over SPI via DMA. Your INT8 model requires 120 KB of SRAM for activations and 800 KB of Flash for weights, executing 15 million MACs per inference using CMSIS-NN.
 question: How would you design the memory architecture and data movement strategy to guarantee zero-copy ingestion, zero data loss, and minimal memory bus contention between the DMA controller and the CPU?
 details:
-  realistic_solution: Implement a zero-copy ping-pong buffering strategy where the SPI DMA controller alternates between two DMA-accessible SRAM buffers. Do not place those DMA buffers in CCM on STM32F4, because CCM is CPU-only and not visible to DMA. To reduce contention, keep the DMA buffers in main SRAM or another DMA-accessible SRAM region, and place the 120 KB NN activations and CPU-only scratch in CCM or a separate SRAM bank when available. The CPU processes the completed half-buffer in place while DMA fills the other half.
+  realistic_solution: Implement a zero-copy ping-pong buffering strategy where the SPI DMA controller alternates between two DMA-accessible SRAM buffers. Do not place DMA buffers in CCM on STM32F4 variants that have it, because CCM is CPU-only and not visible to DMA. To reduce contention without assuming a CCM-capable part, keep the DMA buffers in main DMA-visible SRAM and place the 120 KB NN activations in a separate SRAM bank or non-DMA-contended main-SRAM region when available. CPU-only scratch may use CCM only on variants that explicitly provide it. The CPU processes the completed half-buffer in place while DMA fills the other half.
   common_mistake: |
     **The Pitfall:** Proposing single-buffer DMA with CPU copying or ignoring ARM bus matrix contention.
     **The Rationale:** Candidates overlook that CPU fetches and DMA writes to the same SRAM bank cause pipeline stalls, degrading INT8 MAC throughput.
@@ -29,7 +29,7 @@ details:
     - DMA write bandwidth needed is only 64 KB/s, so correctness depends more on zero-copy buffer ownership and SRAM bank placement than on raw bus bandwidth.
 
     **Conclusion & Interpretation:**
-    - **Result: 64 KB DMA-accessible buffering plus SRAM bank separation.** Ping-pong buffers absorb the 32 kHz stream while the CPU runs a 44.6 ms inference. Place DMA buffers only in DMA-visible SRAM, and place NN activations in CCM or a separate SRAM bank when possible to minimize contention.
+    - **Result: 64 KB DMA-accessible buffering plus SRAM bank separation.** Ping-pong buffers absorb the 32 kHz stream while the CPU runs a 44.6 ms inference. Place DMA buffers only in DMA-visible SRAM, and place NN activations in a separate SRAM bank or non-DMA-contended main-SRAM region when possible; use CCM only for CPU-only data on STM32F4 variants that actually provide it.
 status: published
 provenance: imported
 requires_explanation: true

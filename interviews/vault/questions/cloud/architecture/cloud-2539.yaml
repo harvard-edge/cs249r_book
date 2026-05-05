@@ -12,7 +12,9 @@ scenario: Your startup must choose between a 16-GPU cluster ($400K) and 1 Wafer-
 question: For 10M daily 200-token requests on a 13B model, should the startup choose the GPUs or the WSE, and why?
 details:
   realistic_solution: |
-    GPU cluster: 13B FP16 = 26 GB, fits on 1 GPU. Decode at batch=1: 26 GB / 3.35 TB/s = 7.76 ms/tok. At batch=32: amortized ~0.5 ms/tok. 16 GPUs, throughput: 16 / 0.5ms = 32,000 tok/s. 10M requests x 200 tok = 2B tok/day / 86400s = 23,148 tok/s — easily handled. WSE: 26 GB in SRAM, decode effectively instant at us-level latency. Throughput exceeds GPUs for small batches. But: $2M vs $400K, 5x cost. GPUs handle the load with room to spare. WSE wins only if ultra-low latency (<1 ms per token) is the SLA, not throughput.
+    Choose the 16-GPU cluster unless the product has a separate ultra-low-latency SLA that the GPUs cannot meet in benchmark. The stated workload is a sustained throughput problem: 10M requests/day at 200 tokens each is about 23k output tokens/s on average. A 13B FP16 model has about 26GB of weights, but serving also needs KV cache, runtime memory, and batching headroom, so capacity should be planned from measured tokens/s at the target batch size rather than from weights divided by memory bandwidth.
+
+    The 16-GPU option needs roughly 1.45k tokens/s per GPU on average before headroom. If benchmarked continuous batching meets that target with acceptable p95 latency and KV-cache memory, the GPU cluster is the lower-cost choice. The WSE may be valuable for very low batch, very tight latency, or specialized compiler/runtime requirements, but the prompt gives no such SLA; paying 5x the capital cost for unneeded latency is not justified by the throughput workload alone.
   common_mistake: |
     **The Pitfall:** Choosing the WSE for throughput workloads where batching on GPUs is sufficient.
     **The Rationale:** The WSE excels at latency-sensitive, small-batch inference. Bulk throughput amortizes memory access cost on GPUs.
@@ -22,15 +24,20 @@ details:
     - Load: 10M requests/day, 200 tokens each.
     - GPUs: 16 units, $400K total.
     - WSE: $2M total.
+    - Compare the same utilization window and a 3-year useful life for capital amortization.
+    - GPU serving decision requires measured per-GPU throughput at the chosen batch size; do not estimate decode time as model bytes divided by HBM bandwidth.
 
     **Calculations:**
-    - Daily Load: 10M × 200 = 2B tokens/day = 23,148 tokens/s.
-    - GPU Capacity: At batch=32, amortized 0.5ms/tok = 32,000 tokens/s (72% util).
-    - GPU Cost/tok: $400K / (2B × 365) = $0.0000005.
-    - WSE Cost/tok: $2M / (2B × 365) = $0.0000027.
+    - Daily load: 10M * 200 = 2B tokens/day.
+    - Average throughput required: 2B / 86,400 = 23,148 tokens/s.
+    - Required average per GPU on a 16-GPU cluster: 23,148 / 16 = 1,447 tokens/s before redundancy and peak headroom.
+    - 13B FP16 weights: 13B parameters * 2 bytes = 26GB; KV cache and batching consume additional memory, so the serving benchmark must include the target context and batch mix.
+    - 3-year amortized GPU capex: $400K / (3 * 365 * 24) = $15.22/hr.
+    - 3-year amortized WSE capex: $2M / (3 * 365 * 24) = $76.10/hr.
+    - At the same 2B tokens/day, WSE capex per served token is 5x the GPU option before power, hosting, and utilization effects.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound**. The 16-GPU cluster easily handles the required throughput at 1/5th the cost.
+    - **Result: choose GPUs for the stated throughput workload.** The GPU cluster is the cheaper architecture if it benchmarks at roughly 1.45k tokens/s/GPU plus headroom; the WSE is only justified by an additional latency or utilization requirement not given in the prompt.
 status: published
 provenance: imported
 requires_explanation: false

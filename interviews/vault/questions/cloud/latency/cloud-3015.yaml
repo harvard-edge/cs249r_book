@@ -8,11 +8,11 @@ competency_area: latency
 bloom_level: evaluate
 phase: both
 title: 'Latency Decomposition: Compare KV-Cache vs. No-Cache Decode Latency on H100'
-scenario: A serving team debates whether to enable KV-cache for a 7B-parameter model on H100. With KV-cache, each decode step reads model weights plus KV entries. Without KV-cache, the full attention recomputes over the sequence.
+scenario: A serving team debates whether to enable KV-cache for a 7B-parameter model on H100. With KV-cache, weights stay resident and each decode step reads cached K/V state. Without KV-cache, the full prefix is recomputed.
 question: At sequence length 1024, how does per-token decode latency compare with and without a KV cache for the 7B model?
 details:
   realistic_solution: |
-    With KV-cache at batch=1, decode is roughly memory-bandwidth bound: the step streams about 14GB of weights plus about 512MiB of cached K/V state, giving a lower bound around 4.3ms/token on a 3.35TB/s H100. Without KV cache, generating the next token requires recomputing the full 1024-token prefix through the model; the ideal compute lower bound is about 14-15ms before utilization and memory effects, so practical latency is much higher. KV-cache is therefore the correct long-context decode path.
+    With KV-cache, the model weights are already resident; the per-token incremental traffic is dominated by reading cached K/V state plus the current-token forward pass. For a 1024-token prefix, the KV read is about 512MiB, a bandwidth lower bound of roughly 0.16ms on a 3.35TB/s H100, with practical latency landing in the low-millisecond range after compute, kernels, and scheduling. If the implementation streams all 14GB of weights every step, that gives a pessimistic bandwidth bound around 4.3ms, not the algorithmic reason to avoid caching. Without KV cache, generating the next token requires recomputing the full 1024-token prefix through the model; the ideal compute lower bound is about 14-15ms before utilization and memory effects, so practical latency is much higher. KV-cache is therefore the correct long-context decode path.
   common_mistake: |
     **The Pitfall:** Forgetting that without KV-cache, attention cost scales quadratically.
     **The Rationale:** Candidates fail to internalize the asymptotic complexity of self-attention during generation.
@@ -22,15 +22,16 @@ details:
     - 7B params (14 GB at FP16).
     - H100: 3.35 TB/s bandwidth, 989 TFLOPS.
     - Sequence: 1024 tokens. Approximate 7B layout: 32 layers, 4096 hidden dim, FP16 KV.
-    - Batch size = 1, so there is no cross-request weight-read amortization.
+    - Weights are resident after model load; count per-token KV traffic separately from a pessimistic full-weight streaming bound.
 
     **Calculations:**
     - KV cache read for existing tokens: 32 layers × 1024 tokens × 2 (K,V) × 4096 dim × 2 bytes = 536,870,912 bytes = 512 MiB.
-    - With cache lower bound: read 14 GB weights + ~0.54 GB KV = ~14.5 GB/step. Time = 14.5 GB / 3.35 TB/s = ~4.3 ms/token.
+    - With-cache KV-traffic lower bound: 0.54 GB / 3.35 TB/s = ~0.16 ms/token, before current-token compute and kernel overhead.
+    - Pessimistic with-cache streaming bound if weights are reread from HBM every step: (14 GB weights + ~0.54 GB KV) / 3.35 TB/s = ~4.3 ms/token.
     - Without cache lower bound: recompute the 1024-token prefix through the 7B model, roughly 2 × 7B × 1024 = 14.3 TFLOPs.
     - Ideal compute-only time = 14.3 TFLOPs / 989 TFLOPS = ~14.5 ms; at 30% effective utilization this is ~48 ms before extra memory traffic.
 
     **Conclusion & Interpretation:**
-    - **Result: KV-cache decode is roughly 4.3 ms/token lower bound, while no-cache decode is at least ~14.5 ms/token and often tens of milliseconds in practice**. KV cache wins by avoiding full-prefix recomputation.
+    - **Result: KV-cache decode has a sub-millisecond KV-traffic lower bound and practical low-millisecond latency, while no-cache decode is at least ~14.5 ms/token and often tens of milliseconds in practice**. KV cache wins by avoiding full-prefix recomputation.
 status: published
 provenance: imported

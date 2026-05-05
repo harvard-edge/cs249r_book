@@ -12,8 +12,8 @@ scenario: Your team is deploying a 70B model with 128K context on 8x H100s. Opti
 question: For 128K context on 8 H100s, how do FlashAttention-2 with Ulysses and Ring Attention compare in communication, memory, and latency?
 details:
   realistic_solution: |
-    For one layer, one K or V tensor for one head over 128K tokens is 128K x 128 x 2B = 32 MiB. K+V for 64 heads is therefore 2 x 32 MiB x 64 = 4 GiB per layer. Ring Attention shards the sequence, so each of 8 GPUs owns 16K tokens and a 4 GiB / 8 = 512 MiB K+V block per layer. Each rank sends that block around the ring for 7 neighbor steps, for about 7 x 512 MiB = 3.5 GiB communicated per rank per layer. A 512 MiB transfer at 900 GB/s is about 0.57 ms per step; if the local attention compute per step is about 0.8 ms, much of the transfer can be hidden, but the communication is still real. Ulysses uses all-to-all style sequence/head exchanges rather than neighbor ring sends; it can have comparable byte volume but different synchronization, memory layout, and overlap behavior. Ring Attention is attractive for very long context because its communication pattern pipelines naturally with blockwise attention compute.
-    Ulysses first redistributes sequence/head partitions with all-to-all collectives so each GPU can run FlashAttention-2 over its assigned heads; this is efficient when the collective is fast, but it introduces global synchronization and may materialize exchanged Q/K/V shards around the attention call. Ring Attention keeps the 16K-token sequence shard resident and streams remote K/V blocks through nearest-neighbor sends, trading simpler memory residency for 7 pipelined communication steps. For 128K context, both schemes move GiB-scale tensors per layer; the main decision is whether collective all-to-all latency or ring pipeline overlap is better on the target interconnect.
+    For one layer, one K or V tensor for one head over 128K tokens is 128K x 128 x 2B = 32 MiB. A K+V pair for 64 heads is therefore 2 x 32 MiB x 64 = 4 GiB per layer across the full sequence and all heads. With Ring Attention sequence-sharded over 8 GPUs, each GPU owns 16K tokens, so its local K+V shard is 4 GiB / 8 = 512 MiB per layer. Each rank streams the other 7 shards around the ring, for 7 x 512 MiB = 3.5 GiB communicated per rank per layer. At 900 GB/s, a single 512 MiB neighbor transfer has a bandwidth lower bound of about 0.57 ms, before protocol overhead and contention.
+    Ulysses instead uses all-to-all sequence/head redistribution so each GPU can run FlashAttention-2 on its local partition. From the stated numbers alone, both approaches move GiB-scale tensors per layer; the difference is communication structure. Ulysses pays collective synchronization and layout-exchange costs, while Ring Attention pays 7 ordered neighbor-exchange steps that may overlap with blockwise attention compute depending on the kernel and interconnect. The safer conclusion is not that one is universally lower latency, but that Ring Attention gives a pipeline-friendly communication pattern for very long contexts, while Ulysses can be preferable when all-to-all collectives are highly optimized on the target cluster.
   common_mistake: |
     **The Pitfall:** Thinking Ring Attention fundamentally eliminates communication volume.
     **The Rationale:** Candidates misunderstand that Ring Attention merely shifts communication to perfectly overlap with compute.
@@ -29,14 +29,13 @@ details:
     - Full K+V per layer across 64 heads: 2 * 32 MiB * 64 = 4 GiB.
     - Ring shard per rank: 4 GiB / 8 = 512 MiB.
     - Ring per-rank communication over 7 peer steps: 512 MiB * 7 = 3.5 GiB per layer.
-    - Per-step NVLink transfer: 512 MiB / 900 GB/s = about 0.57 ms.
-    - Compute per step (FlashAttention 16K x 16K): ~0.8ms.
-    - Ulysses communication: all-to-all redistributes sequence/head shards before and after local FA-2, with comparable GiB-scale per-layer traffic but global collective synchronization.
-    - Ulysses memory: exchanged Q/K/V shards may be materialized around the local FA-2 call; Ring memory stays closer to one resident 512 MiB local K+V shard plus streamed remote blocks.
-    - Ring latency: 7 neighbor steps can pipeline 0.57 ms transfers under local block attention; Ulysses latency depends on all-to-all scheduling and is harder to hide completely.
+    - Per-step NVLink bandwidth lower bound: 512 MiB / 900 GB/s = about 0.57 ms before overhead.
+    - Ring latency model: 7 ordered neighbor steps per layer; whether 0.57 ms/step is hidden depends on local block-attention compute and kernel overlap.
+    - Ulysses communication model: all-to-all redistributes sequence/head shards before and after local FA-2; the exact byte volume and temporary buffers depend on the implementation's partition layout.
+    - Memory comparison: Ring keeps one local 512 MiB K+V shard resident and streams remote shards; Ulysses may need temporary exchange buffers for redistributed Q/K/V shards, but this cannot be quantified further from the prompt.
 
     **Conclusion & Interpretation:**
-    - **Result: Communication-Overlap Tradeoff.** Ring Attention still communicates about 3.5 GiB per rank per layer, but its 0.57 ms transfer steps can be mostly hidden under ~0.8 ms compute steps; Ulysses uses collective all-to-all exchanges with comparable memory traffic but more global synchronization.
+    - **Result: Communication-Overlap Tradeoff.** Ring Attention still communicates about 3.5 GiB per rank per layer, with a 0.57 ms bandwidth lower bound per neighbor step; Ulysses uses collective all-to-all exchanges with implementation-dependent temporary memory and latency.
 status: published
 provenance: imported
 requires_explanation: false

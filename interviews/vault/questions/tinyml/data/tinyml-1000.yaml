@@ -11,7 +11,10 @@ title: Real-Time Vibration Ingestion Pipeline with Ethos-U55
 scenario: You are designing a real-time predictive maintenance system for industrial motors using an ARM Cortex-M-class host CPU with an Ethos-U55 NPU and shared 512 KB SRAM. The system ingests 3-axis vibration data at 16 kHz (16-bit resolution) and must continuously extract spectrogram features on a 480 MHz host CPU before passing them to the Ethos-U55 for inference.
 question: How would you architect the streaming ingestion (DMA buffering, feature-compute overlap, memory partitioning) to minimize dropped-frame risk under the stated SRAM and compute budgets?
 details:
-  realistic_solution: 'A robust design uses a DMA ping-pong (double) buffer to ingest raw sensor data asynchronously. While DMA fills one half, the Cortex-M7 processes the other half into spectrogram features, storing them in a dedicated ring buffer. To handle the shared 512 KB SRAM, memory must be strictly partitioned to prevent overlap: reserving sufficient space for the DMA buffers, M7 DSP workspace, and the Ethos-U55 model and activations.'
+  realistic_solution: |
+    Use a DMA ping-pong buffer with two 48 KB raw halves. While DMA fills half A with the next 500 ms of 3-axis samples, the Cortex-M7 consumes half B, runs the FFT/spectrogram pipeline, and writes compact feature frames into a small ring buffer owned by the Ethos-U55 handoff. On each half-buffer interrupt, swap roles only after the DSP job has released its input half; if the DSP falls behind, drop or compress derived features rather than blocking DMA ingestion.
+
+    Partition SRAM explicitly: about 96 KB for raw DMA buffers, 128 KB for FFT/window/spectrogram scratch, a bounded feature ring sized for at least two inference windows, and the remaining roughly 288 KB for the Ethos-U55 model arena and activations. Schedule M7 feature extraction and U55 inference as separate producer/consumer tasks so DMA never waits on inference, and use cache clean/invalidate or non-cacheable buffer placement around shared SRAM regions to avoid stale feature frames.
   common_mistake: |
     **The Pitfall:** Proposing a naive single-buffer approach that blocks ingestion during feature computation.
     **The Rationale:** Candidates fail to account for the shared memory architecture and over-allocate SRAM to the model without leaving scratchpad memory for the DSP.

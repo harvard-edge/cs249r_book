@@ -11,7 +11,7 @@ title: Design Fault Tolerance for a 500B Model on 2,048 GPUs
 scenario: You are responsible for reliability engineering for a 3-month training run of a 500B parameter model on 2,048 GPUs. Each GPU has an expected failure rate of 1 per 150 GPU-years.
 question: What fault-tolerance architecture for checkpointing, detection, recovery, and spares will keep the 500B, 2,048-GPU run above 95% uptime?
 details:
-  realistic_solution: Design a full architecture including async sharded checkpointing, frequent health monitoring, a hot standby pool, automatic worker replacement, and proactive replacement based on ECC precursors. Keep checkpoints frequent enough that expected lost work plus restart is well below the 5% downtime budget, and size spares for concurrent failures and repair lag rather than only the mean failure count.
+  realistic_solution: Use async sharded checkpoints every 30 minutes to a durable store, with a local burst buffer so checkpoint writes do not stop the training step. Run GPU health agents that report XID errors, ECC trends, NVLink/NIC failures, and heartbeat loss within 1-2 minutes, then have the scheduler automatically evict the bad rank, allocate a hot spare, reload the latest checkpoint, and rejoin or restart the job within a 10-minute recovery objective. Keep at least 2-4 spare 8-GPU nodes online for a 2,048-GPU job so a single node failure, repair lag, or one correlated tail event does not block recovery. Proactively drain GPUs with rising ECC or fabric errors during checkpoint boundaries. This keeps expected lost work plus restart far below the 4.5-day downtime budget for 95% uptime.
   common_mistake: |
     **The Pitfall:** Treating fault tolerance exclusively as a checkpointing problem.
     **The Rationale:** Candidates focus on saving state but fail to design automated recovery mechanisms and spare node provisioning.
@@ -30,7 +30,7 @@ details:
        - Expected downtime: 1.0 * 25 min = 25 min = 0.017 days.
        - Uptime from expected disruptive events: (90 - 0.017) / 90 = 99.98%, comfortably above 95%.
        - Even if all 3.4 expected failures are disruptive, downtime is 3.4 * 25 min = 85 min = 0.059 days, still far below the 4.5-day budget if recovery is automated.
-       - Hot-spare pool sizing: keep 8-16 spare GPUs or nodes to cover tail events, correlated faults, and repair logistics instead of sizing only to the mean.
+       - Hot-spare pool sizing: keep 2-4 spare 8-GPU nodes (16-32 GPUs) online to cover node-granularity replacement, repair lag, and correlated tail events instead of sizing only to the mean GPU-failure count.
     3. **Conclusion & Interpretation:**
        **Result: Reliability Bound. With 30-minute checkpoints, automated recovery, proactive replacement, and hot spares, expected interruption is measured in minutes against a 4.5-day 95%-uptime budget. The spare pool is driven by tail risk and repair logistics rather than the mean failure count.**
 status: published

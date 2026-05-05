@@ -11,7 +11,7 @@ title: 'Mastery: Activation Memory Analysis for Recurrent Models on Ultra-Low-Po
 scenario: You are deploying a temporal state-space model (Mamba-130M) on an edge accelerator with ~6 MB SRAM for audio keyword spotting. Unlike Transformers, Mamba's recurrent inference requires only O(1) activation memory per step. However, the team wants to also support training on-chip with BPTT (backpropagation through time) across T=100 time steps.
 question: Does BPTT for Mamba-130M over T=100 fit in 6 MB SRAM, and what should you use if it does not?
 details:
-  realistic_solution: If the 6 MB SRAM budget must include model weights, on-chip BPTT training is impossible before considering activations because Mamba-130M weights are about 520 MB in fp32. If weights are stored off-chip and SRAM is only the activation/state scratchpad, the simplified per-step SSM state estimate is 768 * 16 * 4 B = 49,152 B, about 48 KB. BPTT over T=100 would store about 4.8 MB of these states, leaving only about 1.2 MB for other activations, gradients, caches, and runtime buffers, so it is still not a robust SRAM-only training design. Use truncated BPTT with a much smaller horizon only when weights and optimizer state live off-chip, or offload training to a host and keep the edge accelerator for inference.
+  realistic_solution: If the 6 MB SRAM budget must include model weights, on-chip BPTT training is impossible before considering activations because Mamba-130M weights are about 520 MB in fp32. If weights are stored off-chip and SRAM is only the activation/state scratchpad, the simplified per-step SSM state estimate is 768 * 16 * 4 B = 49,152 B, about 48 KB. BPTT over T=100 would store about 4.8 MB of recurrent states alone, which is only a lower bound because training also saves activations, intermediates, gradients, caches, and runtime buffers. Therefore full T=100 BPTT does not fit in 6 MB SRAM. Use truncated BPTT with a much smaller horizon only when weights and optimizer state live off-chip, or offload training to a host and keep the edge accelerator for inference.
   common_mistake: |
     **The Pitfall:** Assuming O(1) recurrent inference state implies O(1) activation memory during training.
     **The Rationale:** Candidates conflate inference memory requirements with training memory, forgetting that backpropagation requires storing intermediate activations for every unrolled time step.
@@ -27,12 +27,13 @@ details:
     - If weights must be on-chip: 520 MB > 6 MB, so training does not fit regardless of BPTT horizon.
     - If weights are off-chip and SRAM is only for activation/state scratchpad:
     - Per-step state: 768 * 16 * 4 B = 49,152 B \u2248 48 KB.
-    - T=100 BPTT activation memory = 100 * 48 KB = 4.8 MB.
-    - Remaining SRAM for all other training buffers = 6 MB - 4.8 MB = 1.2 MB.
+    - T=100 recurrent-state memory lower bound = 100 * 48 KB = 4.8 MB.
+    - Remaining SRAM after recurrent states alone = 6 MB - 4.8 MB = 1.2 MB.
+    - Actual BPTT training memory is higher because backward pass needs saved activations/intermediates plus gradients and runtime buffers, not only the recurrent state.
     - T=10 truncated BPTT state memory = 10 * 48 KB = 480 KB, but weights and optimizer state still need off-chip storage.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory Capacity Bound (OOM on SRAM)**. Full on-chip training is infeasible if weights count against SRAM; with off-chip weights, full T=100 BPTT still leaves too little SRAM headroom, so use truncated BPTT or host-side training.
+    - **Result: Memory Capacity Bound (OOM on SRAM)**. Full on-chip training is infeasible if weights count against SRAM; with off-chip weights, T=100 BPTT exceeds the 6 MB SRAM budget once real training activations and buffers are included, so use truncated BPTT or host-side training.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: MI300X LLM Serving Latency Spikes in Staging
 scenario: You are deploying an LLM on AMD MI300X accelerators (192 GB HBM3, 1,307 TFLOPS FP16, 5.3 TB/s). During staging load testing, you observe frequent, unpredictable latency spikes and inconsistent throughput that did not appear in development.
 question: Why might MI300X LLM inference show staging-only latency spikes despite strong hardware, and how would you diagnose and fix the bottlenecks?
 details:
-  realistic_solution: A realistic solution involves deep performance profiling using tools like AMD's ROCm profilers to identify bottlenecks in memory transfers (host-to-device, HBM3 access patterns), kernel execution, and inter-accelerator communication. Implement intelligent model loading strategies, such as lazy loading of layers or pre-warming KV caches. The CI/CD pipeline should integrate rigorous load testing with representative production data and traffic patterns, specifically designed to stress memory bandwidth and inter-process communication. Leverage the MI300X's 192 GB HBM3 for larger batch sizes or extended context windows, but ensure that data movement optimizations (e.g., fused operations, reduced precision quantization for deployment) are applied to fully utilize the 5.3 TB/s bandwidth.
+  realistic_solution: A realistic solution should focus on serving-shape effects that appear only under staging load. Profile ROCm timelines, allocator traces, KV-cache block allocation, H2D copies, batch composition, context-length distribution, and inter-process communication while replaying representative traffic. The likely causes are KV-cache headroom pressure, allocator fragmentation, and request-shape dispersion that prevents stable batch packing. Fixes include fixed-size or paged KV-cache blocks, admission control by token budget, tighter max-context and max-concurrency limits, request bucketing, warm pools for common shapes, and load tests that preserve production concurrency and sequence-length mix. Quantization or fused kernels can help, but peak TFLOPS and HBM bandwidth alone do not explain staging-only spikes.
   common_mistake: |
     **The Pitfall:** Assuming high TFLOPS guarantees high serving performance.
     **The Rationale:** Peak compute is the most heavily advertised spec for AI accelerators.
@@ -25,7 +25,7 @@ details:
 
     **Calculations:**
     - If each active request needs 0.5 GB of KV cache, demand is 100 * 0.5 GB = 50 GB.
-    - 50 GB KV demand exceeds the rough 40 GB headroom, causing paging, eviction, smaller batches, or allocation stalls.
+    - 50 GB KV demand exceeds the rough 40 GB headroom, forcing admission control, queueing, smaller batches, lower packing efficiency, or allocation stalls.
     - Even when it fits, fragmented KV blocks and host-device transfers can add latency spikes that peak HBM bandwidth alone does not predict.
 
     **Conclusion & Interpretation:**

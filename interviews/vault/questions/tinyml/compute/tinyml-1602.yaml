@@ -7,11 +7,11 @@ topic: compute-cost-estimation
 competency_area: compute
 bloom_level: create
 phase: both
-title: MCU Convolution Cycle Cost
+title: Depthwise Conv Cycle Cost on Cortex-M4
 scenario: Writing a custom INT8 convolution kernel for a hearing aid on a Cortex-M4 running at 100 MHz.
 question: Implement an analytical model to estimate the cycle count of a 3x3 depthwise convolution output pixel with 16 channels, considering MAC instructions and SRAM load/store overheads?
 details:
-  realistic_solution: For a 3x3 depthwise patch, each channel performs 9 multiplies and 8 accumulations. On a conservative Cortex-M4 scalar model, count one cycle per multiply-accumulate step after the accumulator is initialized, rather than assuming a dual-MAC SIMD instruction. Add about 4 cycles per channel for SRAM activation and weight loads. That gives roughly 9 + 4 = 13 cycles per channel. For 16 channels, the estimate is 16 * 13 = 208 cycles per output pixel before loop-control, boundary handling, output store, and pipeline stall overheads. This is a defensible lower-bound planning estimate, not an exact cycle count.
+  realistic_solution: For a 3x3 depthwise patch, each channel performs 9 multiply-accumulate steps. On a conservative Cortex-M4 scalar model, count one cycle per scheduled MAC and assume activation/weight loads are partly overlapped but still add about 4 exposed SRAM cycles per channel. Add one output store and about 2 cycles of loop/control overhead per channel. That gives roughly 9 + 4 + 1 + 2 = 16 cycles per channel. For 16 channels, the estimate is 16 * 16 = 256 cycles per output pixel before boundary handling, cacheless bus stalls, and compiler effects. If the store/control terms are ignored, the older 208-cycle figure is only a lower-bound sizing estimate, not a complete analytical model.
   common_mistake: |
     **The Pitfall:** Assuming every MAC operation executes perfectly in 1 cycle without pipeline stalls.
     **The Rationale:** Engineers blindly quote hardware specification peaks without analyzing memory fetch overhead or register starvation.
@@ -19,17 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target: Cortex-M4 with conservative scalar MAC accounting.
-    - Depthwise patch: 9 multiplies and 8 adds per channel.
-    - Memory model: about 4 SRAM load cycles per channel.
+    - Depthwise patch: 9 MAC steps per channel.
+    - Memory model: about 4 exposed SRAM load cycles per channel after limited scheduling overlap.
+    - Store/control model: 1 output store cycle plus about 2 loop/control cycles per channel.
 
     **Calculations:**
-    - Scalar compute per channel: 9 MAC steps, approximated as 9 cycles.
+    - Scalar compute per channel: 9 MAC steps, approximated as 9 cycles with single-cycle MAC availability.
     - Activation/weight load overhead per channel: ~4 cycles.
-    - Compute + load per channel: 9 + 4 = ~13 cycles.
-    - Across a 16-channel output pixel: 16 channels * ~13 cycles/channel = ~208 cycles.
+    - Output store and loop/control overhead per channel: 1 + 2 = ~3 cycles.
+    - Complete lower-level estimate per channel: 9 + 4 + 3 = ~16 cycles.
+    - Across a 16-channel output pixel: 16 channels * ~16 cycles/channel = ~256 cycles.
+    - If store/control overhead is omitted: 16 * (9 + 4) = ~208 cycles, a lower bound only.
 
     **Conclusion & Interpretation:**
-    - **Result: ~208 cycles per output pixel (Compute/Memory Estimate)**. This avoids assuming dual-MAC throughput that may not exist on the target and should be treated as a sizing estimate before cycle-accurate measurement.
+    - **Result: ~256 cycles per output pixel (Compute/Memory Estimate)**. This states the instruction and memory-overlap assumptions explicitly; ~208 cycles is only the optimistic lower bound before output-store and loop overhead.
 status: published
 provenance: llm-draft
 requires_explanation: true

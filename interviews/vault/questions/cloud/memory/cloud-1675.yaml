@@ -17,20 +17,23 @@ details:
     **The Rationale:** A block size of 1 minimizes tail-token waste but ignores page-table and memory-access overhead.
     **The Consequence:** This ignores the catastrophic degradation in GPU attention kernel throughput due to non-contiguous memory accesses and severe page table lookup overhead.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Max Context = 4,096 tokens.
-       - KV Cache = 320 KB/token.
-       - Average Sequence = 512 tokens.
-       - Total Available KV Cache = 160 GiB (163,840 MiB).
-    2. **Calculations:**
-       - Max Context Memory: 4,096 * 320 KB = 1,280 MiB.
-       - Pre-allocation Max Batch: 163,840 MiB / 1,280 MiB = 128 requests.
-       - For an average 512-token sequence, 1-token blocks use 512 pages/request and have no tail-token waste, but the highest page-table and lookup overhead.
-       - For an average 512-token sequence, 16-token blocks use ceil(512 / 16) = 32 pages/request; worst-case tail waste is 15 * 320 KB = 4,800 KB (~4.7 MiB).
-       - For an average 512-token sequence, 256-token blocks use ceil(512 / 256) = 2 pages/request; worst-case tail waste is 255 * 320 KB = 81,600 KB (~79.7 MiB).
-       - Block size trades tail waste against metadata and memory-access overhead; it does not change the 320 KB/token KV footprint for tokens actually stored.
-    3. **Conclusion & Interpretation:**
-       - **Result: choose 16-token blocks.** This is the best trade-off among 1, 16, and 256 because it keeps fragmentation below ~5 MiB/request without the metadata and memory-access costs of 1-token pages or the large tail waste of 256-token pages.
+    **Assumptions & Constraints:**
+    - Max Context = 4,096 tokens.
+    - KV Cache = 320 KB/token = 0.3125 MiB/token.
+    - Average Sequence = 512 tokens.
+    - Total Available KV Cache = 160 GiB (163,840 MiB).
+    - Objective: balance tail-token fragmentation against page-table entries and scattered memory reads.
+
+    **Calculations:**
+    - Max Context Memory: 4,096 * 0.3125 MiB = 1,280 MiB.
+    - Pre-allocation Max Batch: 163,840 MiB / 1,280 MiB = 128 requests.
+    - 1-token blocks: 512 pages/request and 0 MiB tail waste, but the most page-table metadata and lookup/scatter overhead.
+    - 16-token blocks: ceil(512 / 16) = 32 pages/request; worst-case tail waste is 15 * 0.3125 MiB = 4.69 MiB.
+    - 256-token blocks: ceil(512 / 256) = 2 pages/request; worst-case tail waste is 255 * 0.3125 MiB = 79.69 MiB.
+    - Moving from 1 to 16 tokens cuts page entries by 16x while adding less than 5 MiB worst-case waste; moving from 16 to 256 cuts entries another 16x but adds about 75 MiB more worst-case waste.
+
+    **Conclusion & Interpretation:**
+    - **Result: choose 16-token blocks.** This keeps fragmentation below ~5 MiB/request while avoiding the metadata and memory-access costs of 1-token pages and the large tail waste of 256-token pages.
 status: published
 provenance: imported
 requires_explanation: true

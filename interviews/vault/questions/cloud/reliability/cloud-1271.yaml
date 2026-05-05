@@ -11,7 +11,7 @@ title: Diagnosing Deadlocks During Simulated GPU Fault Injection
 scenario: You inject an uncorrectable ECC memory error on a single GPU to validate fault tolerance for a 1024-GPU LLM training pipeline. The node health agent cordons the affected node, but instead of cleanly aborting and resuming from the last checkpoint, the entire cluster hangs indefinitely at 0% utilization.
 question: Why does the 1024-GPU job hang after the injected Xid 48 failure, and what NCCL logs and settings are needed to test recovery?
 details:
-  realistic_solution: The root cause is a NCCL communicator deadlock. When one rank abruptly dies during an All-Reduce, the remaining 1023 ranks wait indefinitely at the synchronization barrier. To properly test fault injection, enable asynchronous error handling and set an explicit collective timeout.
+  realistic_solution: The root cause is a fault-induced NCCL communicator deadlock. When one rank abruptly dies during an All-Reduce, the remaining 1023 ranks wait indefinitely at the synchronization barrier unless the error is surfaced. To test recovery, collect `NCCL_DEBUG=INFO` or `NCCL_DEBUG=WARN` logs with `NCCL_DEBUG_SUBSYS=INIT,COLL,NET`, correlate them with Xid 48 and rank/node health logs, and enable async error handling plus explicit collective timeouts so the job aborts and restarts from checkpoint instead of hanging.
   common_mistake: |
     **The Pitfall:** Blaming the cluster orchestrator or the checkpointing storage layer for the hang.
     **The Rationale:** Candidates observe a system-wide lockup and assume the highest-level control plane (like Kubernetes) failed to propagate the fault.
@@ -26,7 +26,7 @@ details:
        - Cost of deadlock = 1023 GPUs * $2/hour * 4 hours.
        - Total wasted compute cost = $8,184.
     **Conclusion & Interpretation:**
-       - **Result: Communication-Bound (Deadlock).** Synchronous NCCL collectives block indefinitely without an explicit timeout, costing thousands of dollars in idle compute. Asynchronous error handling must be enabled.
+       - **Result: Fault-Induced Synchronization Deadlock.** Synchronous NCCL collectives can block indefinitely after a rank failure, costing thousands of dollars in idle compute. Async error handling, NCCL debug logs, and explicit collective timeouts are needed to verify recovery.
 status: published
 provenance: imported
 requires_explanation: false

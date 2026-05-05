@@ -19,18 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Dataset: 1.2M images, 1,000 classes, 2048 dims.
-    - Hardware: NVIDIA T4 (8.1 TFLOPS).
+    - Average per-class count: 1,200 embeddings.
+    - Spectral Signatures needs class-wise centered embeddings and a leading direction from each class covariance, not a global SVD over all 1.2M rows.
+    - Hardware peak: NVIDIA T4 FP32 peak is about 8.1 TFLOPS, but dense linear algebra and eigensolvers will sustain less.
 
     **Calculations:**
-    *   **Per-class samples:** 1,200,000 / 1,000 = 1,200 ($N_c$).
-    *   **Forming covariance matrix ($X^T X$):** 2 × 1,200 × 2048^2 ≈ 10 GFLOPs per class.
-    *   **SVD of $d \times d$ matrix (2048x2048):** $O(d^3) \approx 2048^3 \approx$ 8.5 GFLOPs per class.
-    *   **Compute per class:** ~18.5 GFLOPs.
-    *   **Total compute (1,000 classes):** ~18.5 TFLOPs.
-    *   **Peak-only lower bound:** 18.5 TFLOPs / 8.1 TFLOPS ≈ 2.3 seconds, before memory movement, per-class launches, centering, and non-peak SVD efficiency.
+    - Per-class samples: 1,200,000 / 1,000 = 1,200.
+    - Centered class matrix size: 1,200 x 2,048, which fits easily in memory.
+    - Forming a class covariance X^T X costs about 2 * 1,200 * 2,048^2 = 10.1 GFLOPs per class.
+    - Extracting the top eigenvector of the 2,048 x 2,048 covariance can be done with an iterative or partial eigensolver; a dense full SVD is an avoidable upper-bound style computation for this use case.
+    - Across 1,000 classes, covariance formation alone is about 10 TFLOPs, plus top-eigenvector work, memory movement, centering, and per-class scheduling overhead.
+    - A peak-only lower bound for the covariance work is 10 TFLOPs / 8.1 TFLOPS ~= 1.2 seconds, but sustained wall-clock time will be much higher and must be benchmarked.
 
     **Conclusion & Interpretation:**
-    - The compute overhead is practical for a daily pipeline, not a prohibitive global SVD. Treat the seconds-level peak estimate as a lower bound, not a wall-clock guarantee.
+    - **Result: Per-Class Spectral Computation**. The infrastructure team's global 1.2M-vector SVD is the wrong computation; the practical workload is class-wise covariance plus leading-direction extraction, which is reasonable for a daily pipeline but not guaranteed to be seconds-level wall-clock.
 status: published
 provenance: imported
 requires_explanation: false

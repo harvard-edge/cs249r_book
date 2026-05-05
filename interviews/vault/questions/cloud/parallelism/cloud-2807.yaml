@@ -19,14 +19,15 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 13B params, BF16 = 26 GB gradient.
+    - The topology has two partitions of 64 GPUs each: an IB island and an Ethernet half.
     - Gateway: two 100 Gbps links if both gateway switches can be used, for 25 GB/s aggregate; one gateway is 12.5 GB/s.
-    - IB sub-rings: 8 nodes, ~25 GB/s.
+    - Exact DP averaging requires the two 64-GPU partitions to exchange their reduced gradient information every step.
 
     **Calculations:**
     - BF16 gradient payload: 13B params * 2 bytes = 26 GB, not 52 GB.
-    - Flat 128-rank ring over a 12.5 GB/s bottleneck moves about 2*(127/128)*26 GB ≈ 51.6 GB across the bottleneck, taking 51.6 GB / 12.5 GB/s ≈ 4.1 s.
-    - Hierarchical cross-partition exchange still has to move about 26 GB across the IB/Ethernet boundary for exact averaging.
-    - With one 100 Gbps gateway: 26 GB / 12.5 GB/s ≈ 2.08 s. With two active gateways: 26 GB / 25 GB/s ≈ 1.04 s.
+    - A flat 128-rank ring is bottlenecked by the 100 Gbps boundary and requires roughly 2*(127/128)*26 GB ≈ 51.6 GB of per-rank ring traffic, so a boundary rank can be exposed to seconds of service time at 12.5 GB/s.
+    - In the hierarchical design, first reduce within each 64-GPU partition, then exchange the already-reduced full 26 GB gradient across the IB/Ethernet boundary once for exact cross-partition averaging.
+    - Gateway service time for that boundary exchange is 26 GB / 12.5 GB/s ≈ 2.08 s with one gateway, or 26 GB / 25 GB/s ≈ 1.04 s with two active gateways.
     - Backward overlap can hide at most 0.38 s of that service time, leaving at least 1.04 s - 0.38 s ≈ 0.66 s exposed even in the two-gateway case.
 
     **Conclusion & Interpretation:**

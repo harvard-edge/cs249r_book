@@ -12,7 +12,7 @@ scenario: A 6-layer BERT-tiny (4.4M params) inference runs on a Jetson Orin (32G
 question: For 6-layer BERT-tiny at batch 4 and sequence 128 on Jetson Orin, how do unfused and fused kernels differ in bandwidth needs and speedup?
 details:
   realistic_solution: |
-    BERT-tiny with batch=4 and sequence length 128 has small activation tensors, so fusion helps more by reducing kernel launches than by saving DRAM bandwidth. For an explicit estimate, a 4x128x128 INT8 activation is 65,536 bytes. If each layer has about six unfused elementwise read/write passes and fusion reduces that to one read/write pass, activation traffic falls from about 4.5 MiB to 0.75 MiB across 6 layers. If launches fall from 120 to 24 at 5us each, launch overhead drops by 0.48ms, which dominates the bandwidth saving.
+    BERT-tiny with batch=4 and sequence length 128 has small activation tensors, so fusion helps more by reducing kernel launches than by saving DRAM bandwidth. For an explicit quantized-activation estimate, a 4x128x128 INT8 activation is 65,536 bytes; FP16 would double the traffic but not change the conclusion. If each layer has about six unfused elementwise read/write passes and fusion reduces that to one read/write pass, activation traffic falls from about 4.5 MiB to 0.75 MiB across 6 layers. If launches fall from 120 to 24 at 5us each, launch overhead drops by 0.48ms, which dominates the bandwidth saving.
   common_mistake: |
     **The Pitfall:** Not accounting for the relatively small model size and batch dimension.
     **The Rationale:** Applying large-model intuition (where memory bandwidth always dominates) to a tiny model that easily fits in cache.
@@ -21,9 +21,9 @@ details:
     **Assumptions & Constraints:**
     - 6-layer BERT-tiny on Jetson Orin (275 TOPS INT8, 200 GB/s-class LPDDR5 bandwidth).
     - Batch size 4, Sequence length 128, Dim 128.
-    - Elementwise tensor: 4 * 128 * 128 * 1B = 65,536 bytes = 64 KiB.
+    - Assume quantized INT8 activations for this estimate: elementwise tensor = 4 * 128 * 128 * 1B = 65,536 bytes = 64 KiB. FP16 would double these traffic numbers.
     - Kernel launch overhead: 5 µs per launch.
-    - For this estimate, unfused elementwise work uses six read/write passes per layer; fused work uses one read/write pass per layer.
+    - For this estimate, unfused elementwise work uses six read/write passes per layer (for operations such as bias, residual add, activation, dropout/mask, normalization, and scaling); fused work uses one read/write pass per layer.
 
     **Calculations:**
     - Unfused memory traffic: 6 * 65,536 * 2 * 6 = 4,718,592 bytes = 4.5 MiB. Bandwidth lower bound: about 0.024ms.
@@ -32,10 +32,10 @@ details:
     - Unfused launches: 120 * 5us = 0.60ms.
     - Fused launches: 24 * 5us = 0.12ms.
     - Launch time saved: 0.48ms.
-    - If the non-elementwise work is about 1.35ms, total time moves from 1.35 + 0.024 + 0.60 = 1.974ms to 1.35 + 0.004 + 0.12 = 1.474ms, a 1.34x speedup or about 25% lower latency.
+    - Illustrative latency estimate: if the non-elementwise work is about 1.35ms, total time moves from 1.35 + 0.024 + 0.60 = 1.974ms to 1.35 + 0.004 + 0.12 = 1.474ms, a 1.34x speedup or about 25% lower latency.
 
     **Conclusion & Interpretation:**
-    - **Result: about 25% lower latency under this launch-overhead model (Kernel-Launch-Bound).** Fusion reduces activation traffic 6x, but the practical gain for BERT-tiny is dominated by fewer launches rather than raw bandwidth.
+    - **Result: about 25% lower latency under this illustrative launch-overhead model (Kernel-Launch-Bound).** Fusion reduces activation traffic 6x, but the practical gain for BERT-tiny is dominated by fewer launches rather than raw bandwidth.
 status: published
 provenance: imported
 requires_explanation: false

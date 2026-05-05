@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: inference
 title: Conv-BN-ReLU Fusion on Cortex-M7 for SRAM Reduction
 scenario: 'Your MobileNet-based gesture model on a Cortex-M7 (480 MHz, 512 KB SRAM) has a recurring pattern: Conv2D (32 output channels, 3x3, 16x16 input) -> Batch Normalization -> ReLU. The unfused execution materializes three intermediate tensors. Your runtime engineer proposes fusing all three into a single kernel.'
-question: How much SRAM and latency can fusing Conv2D, BatchNorm, and ReLU save on a Cortex-M7 MobileNet block?
+question: How much SRAM and SRAM traffic can fusing Conv2D, BatchNorm, and ReLU save on a Cortex-M7 MobileNet block?
 details:
-  realistic_solution: 'Trace the memory through the given 16x16x32 block: the feature map is 16x16x32 = 8,192 bytes, or about 8 KB. In the unfused pipeline, Conv2D materializes an INT32 output (~32 KB), BatchNorm materializes an INT8 output (~8 KB), and ReLU keeps that same output live, so the peak reaches about 40 KB for the block. With fusion, the runtime keeps only the input and final output live, for a peak of about 16 KB. That saves about 24 KB of SRAM per block and removes roughly two full write/read passes over the 8 KB feature map, or about 32 KB of avoidable SRAM traffic. On a Cortex-M7 this is a modest latency win from reduced memory traffic, not from function-call overhead.'
+  realistic_solution: 'Trace the memory through the given 16x16x32 block: the INT8 feature map is 16x16x32 = 8,192 bytes, or about 8 KB. In the unfused pipeline, Conv2D materializes an INT32 output (~32 KB), BatchNorm materializes an INT8 output (~8 KB), and ReLU writes the final INT8 output. The peak live storage is about 40 KB when the 8 KB input and 32 KB Conv2D output overlap. With fusion, the runtime keeps only the input and final output live, for a peak of about 16 KB. That saves about 24 KB of SRAM per block. It also avoids materializing the 32 KB Conv2D output and the 8 KB BN output, saving about 80 KB of SRAM traffic from one write and one later read of each intermediate. On a Cortex-M7 this is a modest latency win from reduced memory traffic, not from function-call overhead.'
   common_mistake: |
     **The Pitfall:** Believing operator fusion primarily optimizes compute latency by saving function call overhead.
     **The Rationale:** In standard cloud deployments, fusion reduces kernel launch overhead. On microcontrollers, the primary benefit is entirely different.
@@ -24,14 +24,14 @@ details:
        - Feature map size: 16x16x32 = 8,192 bytes.
        - Unfused: Stores both INT32 Conv2D output and INT8 BN/ReLU output simultaneously.
        - Fused: Directly writes INT8 output.
-       - Avoided traffic estimate: two extra materializations of the 8 KB feature map, each written and read once.
+       - Avoided traffic estimate: unfused Conv2D INT32 output and BN INT8 output are each written once and read once before producing the final ReLU output.
     2. **Calculations:**
        - Unfused Peak: 8 KB input + 32 KB Conv2D INT32 output live before BN/ReLU finishes, so peak live storage is about 40 KB.
        - Fused Peak: 8 KB input + 8 KB output = 16 KB.
        - SRAM Savings: 40 KB - 16 KB = 24 KB.
-       - Avoided SRAM traffic: 2 materializations * 8 KB * 2 passes = 32 KB less read/write traffic.
+       - Avoided SRAM traffic: Conv2D output 32 KB write + 32 KB read, plus BN output 8 KB write + 8 KB read = 80 KB less read/write traffic.
     3. **Conclusion & Interpretation:**
-       - **Result: fusion saves about 24 KB of SRAM per block and avoids about 32 KB of SRAM traffic, giving a modest latency reduction for this memory-bound block.** **Result: Memory-Bound Optimization.**
+       - **Result: fusion saves about 24 KB of peak SRAM per block and avoids about 80 KB of SRAM traffic, giving a modest latency reduction for this memory-bound block.** **Result: Memory-Bound Optimization.**
 status: published
 provenance: imported
 requires_explanation: false

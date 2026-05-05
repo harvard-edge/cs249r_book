@@ -11,7 +11,7 @@ title: Diagnose KV-Cache Memory Leak on H100 Serving System
 scenario: A production LLM serving system (13B model, H100 80GB) shows memory usage growing from 35GB to 78GB over 4 hours under constant load (100 req/min, avg 512 token context, 128 token output). No OOM yet but the team expects failure.
 question: What is causing memory to grow from 35GB to 78GB over 4 hours, and how long until the 80GB H100 OOMs?
 details:
-  realistic_solution: 'Likely root cause: KV-cache retention leak or unreleased per-request allocation. If KV blocks were freed correctly, memory would stay roughly constant after requests finish. The observed growth is 78GB - 35GB = 43GB over 4 hours = 10.75GB/hr. At 100 req/min, that is 6000 req/hr, so the leak is 10.75GB / 6000 = about 1.8MB per completed request. A full request with 512 prompt tokens plus 128 generated tokens touches 640 tokens x 800KB/token = 512,000KB, about 500MiB or 512MB decimal, of KV-cache over its lifetime. The retained amount is therefore far smaller than the full per-request KV footprint. At the current 78GB, an 80GB H100 has about 2GB left: 2GB / 10.75GB/hr = 0.186 hr, or about 11 minutes until OOM if load and leak rate stay constant. Fix: audit KV-cache eviction and reference counting; some small KV blocks or metadata-backed allocations are likely not returned to the pool.'
+  realistic_solution: 'Likely root cause: KV-cache retention leak or unreleased per-request allocation. If KV blocks were freed correctly, memory would stay roughly constant after requests finish. The observed growth is 78GB - 35GB = 43GB over 4 hours = 10.75GB/hr. At 100 req/min, that is 6000 req/hr, so the leak is 10.75GB / 6000 = about 1.8MB per completed request. A full request with 512 prompt tokens plus 128 generated tokens touches 640 tokens x 800KB/token = 512,000KB = 512MB decimal, or about 488MiB, of KV-cache over its lifetime. The retained amount is therefore about 1.8MB / 512MB = 0.35% of the full per-request KV footprint. At the current 78GB, an 80GB H100 has about 2GB left: 2GB / 10.75GB/hr = 0.186 hr, or about 11 minutes until OOM if load and leak rate stay constant. Fix: audit KV-cache eviction and reference counting; some small KV blocks or metadata-backed allocations are likely not returned to the pool.'
   common_mistake: |
     **The Pitfall:** Blaming model weight memory for the steady growth.
     **The Rationale:** Engineers may be unfamiliar with the dynamic memory footprint of autoregressive decoding.
@@ -24,8 +24,8 @@ details:
     **Calculations:**
     - Leak Rate: Growth is $78 - 35 = 43\text{GB}$ over 4 hours, which is $10.75 \text{ GB/hr}$.
     - Per Request: At 100 req/min (6000 req/hr), leak is $10.75 \text{ GB} / 6000 \text{ reqs} \approx 1.8 \text{ MB leaked per request}$.
-    - Full request KV touched over its lifetime: $(512 \text{ prompt} + 128 \text{ output}) \times 800\text{KB} = 512{,}000\text{KB}$, about 500MiB or 512MB decimal per request.
-    - Leak fraction: about $1.8\text{MB} / 512\text{MB} \approx 0.35\%$ of the per-request KV footprint is retained after completion.
+    - Full request KV touched over its lifetime: $(512 \text{ prompt} + 128 \text{ output}) \times 800\text{KB} = 512{,}000\text{KB} = 512\text{MB}$ decimal, or about 488MiB per request.
+    - Leak fraction using decimal units consistently: about $1.8\text{MB} / 512\text{MB} \approx 0.35\%$ of the per-request KV footprint is retained after completion.
     - Time to OOM: Current headroom is $80 - 78 = 2\text{GB}$. At $10.75\text{GB/hr}$, time remaining is $2 / 10.75 = 0.186\text{hr} \approx 11$ minutes.
 
     **Conclusion & Interpretation:**

@@ -11,7 +11,8 @@ title: Mixed-Precision Inference Architecture on A17 Pro
 scenario: You are designing the deployment architecture for a real-time video segmentation model on an Apple A17 Pro. The application demands 60 FPS processing while staying within the ~5W power envelope to prevent thermal throttling.
 question: How should a 60 FPS A17 Pro segmentation model partition INT8 and FP16 work to balance speed, bandwidth, and accuracy?
 details:
-  realistic_solution: The practical Core ML design keeps supported dense backbone or encoder blocks in INT8, or FP16 when INT8 kernels are not available, and lets the runtime place those blocks on the Apple Neural Engine where supported. Accuracy-sensitive decoder, upsampling, and segmentation-head operations should remain FP16 and may run on the GPU if the Neural Engine does not support the exact graph efficiently. The key is to minimize graph partitions and tensor format conversions across ANE/GPU boundaries, profile activation traffic, and avoid assuming arbitrary runtime precision fusion or explicit CPU round-trips that the platform does not guarantee.
+  realistic_solution: |
+    Use INT8 for the dense encoder/backbone blocks because they dominate the 3 TOPS compute load and reduce the weight footprint to about 36 MB in the proposed split. Keep the accuracy-sensitive decoder, upsampling, boundary refinement, and segmentation head in FP16 because those layers preserve spatial detail and represent only the smaller 20% precision-sensitive portion. Since the modeled traffic is already about 9.36 GB/s before partition copies, avoid extra ANE/GPU boundaries: keep supported INT8 backbone work on the Neural Engine, place unsupported FP16 head work on the most efficient supported unit, and fuse boundaries so activation tensors are not repeatedly reformatted or copied.
   common_mistake: |
     **The Pitfall:** Suggesting naive post-training quantization to INT8 for the entire model.
     **The Rationale:** Candidates fail to recognize that segmentation output heads lose critical spatial resolution at lower precisions, and overlook the unified memory bottleneck.
@@ -32,7 +33,7 @@ details:
     - Estimated model DRAM traffic: 2.16 GB/s + 7.2 GB/s = 9.36 GB/s before extra graph-partition copies.
 
     **Conclusion & Interpretation:**
-    - **Result: 3 TOPS compute and roughly 9.36 GB/s modeled DRAM traffic.** The weight footprint alone is not the bottleneck; activation traffic and ANE/GPU partition boundaries determine whether the mixed-precision split stays within the 60 FPS power budget.
+    - **Result: 3 TOPS compute and roughly 9.36 GB/s modeled DRAM traffic.** INT8 belongs in the high-compute backbone, while FP16 should be reserved for the decoder/head where accuracy is most sensitive; extra graph-partition copies can make the activation traffic, not compute, the limiting factor.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,11 +11,11 @@ title: Exporting a model with custom autograd to TensorRT for Jetson Orin deploy
 scenario: You have trained a 50M parameter object detection model on H100 with a custom non-maximum suppression (NMS) operation implemented as a torch.autograd.Function. You need to deploy it to Jetson AGX Orin. TensorRT export via torch.onnx.export fails because the custom autograd function has no ONNX equivalent.
 question: How do you export custom autograd NMS to TensorRT, and what is the theoretical latency for a 4 GOP INT8 model on a 275 TOPS Orin engine?
 details:
-  realistic_solution: To resolve the export failure, define a custom ONNX symbolic function using `@staticmethod def symbolic(g, ...)` within the `torch.autograd.Function`, or replace NMS with a supported ONNX/TensorRT plugin path. The exporter only needs the forward graph, so mapping the custom NMS to supported forward operators or a plugin lets TensorRT compile the model. If the deployed INT8 convolution/backbone graph requires 4 GOPs and can use a 275 TOPS engine perfectly, the theoretical compute-only lower bound is 0.0145 ms; end-to-end detector latency must add memory movement, kernel launch, decode, and NMS/plugin overhead.
+  realistic_solution: TensorRT cannot consume arbitrary `torch.autograd.Function` code. For deployment, remove the custom autograd NMS from the exported graph by replacing it with supported ONNX operators when the semantics are representable, or route it to a TensorRT NMS/plugin implementation with matching decode, score filtering, and suppression behavior. A custom ONNX symbolic can be useful only as a forward-graph stub that emits supported ops or a plugin node; a symbolic registration by itself does not implement true NMS semantics inside TensorRT. If the deployed INT8 convolution/backbone graph requires 4 GOPs and can use a 275 TOPS engine perfectly, the theoretical compute-only lower bound is 0.0145 ms; end-to-end detector latency must add memory movement, kernel launch, decode, and NMS/plugin overhead.
   common_mistake: |
-    **The Pitfall:** Trying to export the custom autograd function directly to ONNX without a symbolic function, and mixing up TOPS and GOPS.
-    **The Rationale:** Engineers forget that ONNX export only traces the forward pass and requires explicit symbolic (forward-only) registration, and incorrectly use GOPS instead of TOPS for latency calculation.
-    **The Consequence:** The model fails to compile for TensorRT, and performance predictions are off by three orders of magnitude.
+    **The Pitfall:** Expecting TensorRT to run arbitrary PyTorch autograd NMS after ONNX export, or treating a symbolic stub as the deployed implementation.
+    **The Rationale:** Engineers forget that ONNX export only captures the forward graph and TensorRT needs supported operators or plugins with real runtime implementations.
+    **The Consequence:** The model either fails to compile, silently changes NMS behavior, or produces latency estimates that ignore the postprocessing path.
   napkin_math: |
     **Assumptions & Constraints:**
     - Jetson Orin: 275 TOPS INT8.

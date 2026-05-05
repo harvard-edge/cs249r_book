@@ -11,7 +11,8 @@ title: Analyze Checkpoint Overhead in Energy-Harvesting MCUs
 scenario: A Cortex-M4 relies on intermittent solar energy, causing frequent power losses. It saves neural network state to non-volatile FRAM (2ms overhead per save) to guarantee progress on a 50ms inference task.
 question: How does varying the checkpoint frequency impact the total expected inference time under an unstable power environment?
 details:
-  realistic_solution: Checkpoints provide a floor to progress but cost 2ms each. If checkpoints are too frequent, the deterministic overhead dominates; for example, checkpointing every 5ms during a 50ms inference needs 9 intermediate saves, adding 18ms before the final result. If checkpoints are too infrequent, a power loss near the 45ms mark can force discarding a large amount of compute. The optimal checkpoint interval balances the expected lost work against the fixed 2ms I/O cost.
+  realistic_solution: |
+    Checkpoints provide a floor to progress but cost 2ms each. A useful expected-time model is baseline compute plus checkpoint overhead plus expected recompute from failures: E[T] ~= 50 ms + 2 ms * (ceil(50/I) - 1) + F * I/2, where I is the compute interval between checkpoints and F is the expected number of failures during the inference attempt. If checkpoints are too frequent, the deterministic overhead dominates; for example, checkpointing every 5ms during a 50ms inference needs 9 intermediate saves, adding 18ms before any recompute. If checkpoints are too infrequent, each failure loses more work. The optimal checkpoint interval balances expected lost work against the fixed 2ms I/O cost.
   common_mistake: |
     **The Pitfall:** Assuming maximum checkpoint frequency is always the safest and optimal strategy.
     **The Rationale:** The fear of losing progress drives developers to checkpoint as often as possible.
@@ -21,18 +22,20 @@ details:
     - Inference Compute Time: 50 ms.
     - Checkpoint Overhead: 2 ms per save.
     - Let interval I be the compute time between checkpoints.
+    - Let F be the expected number of failures during the inference attempt.
     - If failures are roughly uniform within an interval, expected recompute after a failure is about I / 2.
 
     **Calculations:**
     - Number of checkpoints: ceil(50 / I) - 1.
     - Deterministic save overhead: 2 ms * (ceil(50 / I) - 1).
     - Expected lost work per failure: about I / 2.
-    - Example I = 5 ms: checkpoints = 9, overhead = 18 ms, expected lost work per failure ~= 2.5 ms.
-    - Example I = 10 ms: checkpoints = 4, overhead = 8 ms, expected lost work per failure ~= 5 ms.
-    - Example I = 25 ms: checkpoints = 1, overhead = 2 ms, expected lost work per failure ~= 12.5 ms.
+    - Total expected inference time: E[T] ~= 50 ms + 2 ms * (ceil(50 / I) - 1) + F * I / 2.
+    - Example I = 5 ms: checkpoints = 9, overhead = 18 ms, E[T] ~= 68 ms + 2.5F ms.
+    - Example I = 10 ms: checkpoints = 4, overhead = 8 ms, E[T] ~= 58 ms + 5F ms.
+    - Example I = 25 ms: checkpoints = 1, overhead = 2 ms, E[T] ~= 52 ms + 12.5F ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Checkpoint-Interval Trade-off (Reliability-Bound)**. Higher frequency reduces recomputation after a failure but increases fixed FRAM write overhead; lower frequency saves I/O time but risks losing more compute progress.
+    - **Result: E[T] ~= 50 ms + checkpoint overhead + expected recompute (Reliability-Bound)**. Higher frequency reduces recomputation after a failure but increases fixed FRAM write overhead; lower frequency saves I/O time but risks losing more compute progress.
 status: published
 provenance: llm-draft
 requires_explanation: true

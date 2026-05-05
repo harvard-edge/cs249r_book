@@ -18,21 +18,19 @@ details:
     **The Consequence:** Masking the root cause (dynamic range clipping) and undertaking weeks of expensive infrastructure work instead of correctly diagnosing and resolving the numeric saturation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - FP16 peak: ~137 TOPS-equivalent for this lower-bound estimate.
-    - INT8 peak: ~275 TOPS.
-    - Per-inference work after deployment optimization: 5 trillion operations.
+    - The 33ms budget is an end-to-end perception-stage budget on Orin, including TensorRT execution, memory traffic, and pre/post-processing.
+    - INT8 is materially faster than FP16 on Orin, but glare-sensitive layers lose accuracy when quantized from an unrepresentative calibration set.
+    - Profiling identifies a small set of saturated operators in the input stem, normalization/fusion path, or detection head.
     - Latency budget: 33ms per frame.
-    - Let f be the profiled fraction of operations kept in FP16 for glare-sensitive layers.
 
     **Calculations:**
-    - Pure FP16 lower-bound time: 5 TOP / 137 TOPS = 36.5ms, which already misses 33ms before runtime overhead.
-    - Pure INT8 lower-bound time: 5 TOP / 275 TOPS = 18.2ms, but the saturated glare-sensitive layers fail accuracy.
-    - Mixed-precision lower bound = 5 TOP * ((1 - f) / 275 TOPS + f / 137 TOPS).
-    - To fit 33ms before overhead: 18.2ms + f * (36.5ms - 18.2ms) <= 33ms, so f <= about 0.81.
-    - Because runtime overhead and memory movement are not captured by the peak bound, the profiled FP16 island should be much smaller than 81% and must be verified end to end on the Orin TensorRT engine.
+    - A pure INT8 engine is the latency starting point but fails night/glare accuracy because saturated activations are clipped.
+    - Moving only the profiled saturation-prone operators to FP16 adds latency on those operators and may add format-conversion or memory-traffic overhead.
+    - The candidate mixed engine is acceptable only if measured end-to-end latency remains <= 33ms after these FP16 islands and any conversion overhead.
+    - If profiling shows the FP16 islands consume too much latency headroom, reduce the island to the specific offending operators or recalibrate/QAT those layers instead of keeping broad regions in FP16.
 
     **Conclusion & Interpretation:**
-    - **Result: mixed precision is plausible but must be profiled.** Keeping a small saturation-prone subset in FP16 can restore dynamic range while the INT8 backbone preserves latency headroom; the release gate is measured end-to-end latency under 33ms with night/glare accuracy restored.
+    - **Result: mixed precision is a profiling-gated fix, not a peak-TOPS proof.** Keeping only the saturation-prone layers in FP16 can restore dynamic range while the INT8 backbone preserves latency headroom; the release gate is measured end-to-end latency under 33ms with night/glare accuracy restored.
 status: published
 provenance: imported
 requires_explanation: true

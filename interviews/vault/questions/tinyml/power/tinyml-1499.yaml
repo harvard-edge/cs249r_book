@@ -12,7 +12,7 @@ scenario: 'A predictive maintenance system for industrial motors uses a sensor n
 question: How would you specify a predictive maintenance system for industrial motors using a sensor node with Cortex-M7+Ethos-U55?
 details:
   realistic_solution: |
-    Specify the node as an always-listening, event-gated vibration monitor rather than a continuously inferencing system. Use a low-power 3-axis accelerometer with FIFO and embedded threshold/RMS logic sampling at 25 kHz. The sensor computes short-window energy or bandpower triggers and wakes the MCU only when vibration exceeds a conservative threshold. The Cortex-M7 then runs preprocessing (windowing plus FFT or filterbank features) and invokes the Ethos-U55-backed CNN only for candidate events. Keep the wake threshold biased toward high recall, then use the CNN threshold and temporal confirmation over adjacent windows to drive <1% false positives while preserving 99% recall.
+    Specify the node as an always-listening, event-gated vibration monitor rather than a continuously inferencing system. Use a low-power 3-axis accelerometer with FIFO and embedded threshold/RMS logic sampling at 25 kHz. The sensor computes short-window energy or bandpower triggers and wakes the MCU only when vibration exceeds a conservative threshold. The Cortex-M7 processes candidate 1024-sample windows per axis, about 41 ms of data at 25 kHz, using a fixed-point FFT or filterbank; budget this preprocessing at <=5 ms before invoking the Ethos-U55-backed CNN for a <=50 ms total event path. Keep the wake threshold biased toward high recall, then use the CNN threshold and temporal confirmation over adjacent windows to drive <1% false positives while preserving 99% recall.
 
     Power budget: 10,000 mAh at 6 V = 60 Wh = 216 kJ. Over 2 years (about 63.1M seconds), the node has about 3.4 mW average power. A plausible budget is sensor/FIFO always on at 1.2 mW, MCU stop mode and periodic FIFO checks at 0.6 mW, NPU domain off or power-gated between events at roughly 0.01 mW, and event inference at 50 mW for 50 ms. If candidate events occur at 0.01 Hz, the event energy is 2.5 mJ/event and average event power is 2.5 mJ × 0.01/s = 0.025 mW. Total average is about 1.2 + 0.6 + 0.01 + 0.025 = 1.835 mW, leaving about 1.6 mW for sensor variation, battery derating, logging, and radio reports. The specification should include validation on motor fault data, threshold calibration for 99% recall, and a field false-positive budget measured per motor-day.
   common_mistake: |
@@ -24,7 +24,7 @@ details:
     - Battery: 10,000 mAh at 6V (60 Wh).
     - Lifetime: 2 years.
     - Candidate event rate after sensor threshold: 0.01 Hz.
-    - Event inference: 50 ms at 50 mW.
+    - Event path: 1024-sample windows per axis at 25 kHz, <=5 ms preprocessing plus <=45 ms CNN, averaging 50 mW while active.
 
     **Calculations:**
     - Battery energy: 10 Ah * 6 V = 60 Wh = 216,000 J.
@@ -33,12 +33,13 @@ details:
     - Sensor FIFO: 1.2 mW.
     - MCU sleep: 0.6 mW.
     - NPU power-gated leakage allowance: 0.01 mW.
-    - Event energy: 50 mW * 50 ms = 2.5 mJ.
+    - 1024 samples at 25 kHz cover 1024 / 25,000 = 0.04096 s (~41 ms), enough for short-window vibration features.
+    - Event energy: 50 mW * 50 ms = 2.5 mJ, including Cortex-M7 preprocessing and Ethos-U55 inference.
     - Event average power at 0.01 Hz: 2.5 mJ/event * 0.01 events/s = 0.025 mW.
     - Total average power: 1.2 + 0.6 + 0.01 + 0.025 = 1.835 mW.
 
     **Conclusion & Interpretation:**
-    - **Result: ~1.84 mW average (Energy-Bound)**. The system fits the 3.42 mW battery budget only if inference is event-gated; continuous 25 kHz inference would exceed the lifetime target.
+    - **Result: ~1.84 mW average (Energy-Bound)**. The system fits the 3.42 mW battery budget only if the 25 kHz path is mostly handled by sensor FIFO/offload and the MCU/NPU wake for bounded candidate windows.
 status: published
 provenance: imported
 requires_explanation: true

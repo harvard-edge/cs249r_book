@@ -8,11 +8,11 @@ competency_area: cross-cutting
 bloom_level: evaluate
 phase: both
 title: Logical Ring on Physical Daisy-Chain
-scenario: An industrial pipe-monitoring sensor array uses 4 microcontrollers physically wired in a linear daisy-chain (Node 1-2-3-4) via SPI at 10 MHz. They must synchronize 1 KB of INT8 activations.
+scenario: An industrial pipe-monitoring sensor array uses 4 microcontrollers physically wired in a linear daisy-chain (Node 1-2-3-4) via SPI at 10 MHz, with one serialized neighbor transfer active at a time. They must synchronize 1 KB of INT8 activations.
 question: Evaluate the synchronization stall time of a logical Ring AllReduce versus a bidirectional line-accumulator (Tree), accounting for a 10 microsecond SPI interrupt latency per step?
 details:
   realistic_solution: |
-    SPI at 10 MHz transfers at 1.25 MB/s, or 0.8 us/byte. A line accumulator that reduces 1KB to one end of the chain and broadcasts the result back uses 3 neighbor hops each way, so its serialized stall time is 6 * (1024 * 0.8 us + 10 us) = 4.9752 ms, about 4.98 ms. A 4-node Ring AllReduce has 6 logical steps, but each step sends a 1KB/4 = 256B chunk, not the full activation buffer. On the physical line, one logical step maps to 1->2, 2->3, 3->4, and a 4->1 wraparound that traverses 3 neighbor hops, for 6 serialized 256B hop transactions per step. The ring stall is 6 * 6 * (256 * 0.8 us + 10 us) = 7.7328 ms. The line accumulator remains the better fit for this physical daisy-chain, but the gap is about 4.98 ms versus 7.73 ms, not 29.85 ms.
+    SPI at 10 MHz transfers at 1.25 MB/s, or 0.8 us/byte. With the stated serialized-link model, a line accumulator that reduces 1KB to one end of the chain and broadcasts the result back uses 3 neighbor hops each way, so its stall time is 6 * (1024 * 0.8 us + 10 us) = 4.9752 ms, about 4.98 ms. A 4-node Ring AllReduce has 6 logical steps, but each step sends a 1KB/4 = 256B chunk, not the full activation buffer. On the physical line, each logical ring step requires three adjacent sends plus the logical 4->1 wraparound routed as 4->3->2->1, for 6 serialized 256B neighbor transactions. The ring stall is 6 * 6 * (256 * 0.8 us + 10 us) = 7.7328 ms. The line accumulator remains the better fit under this serialized daisy-chain assumption, with a gap of about 2.76 ms.
   common_mistake: |
     **The Pitfall:** Applying theoretical datacenter communication formulas to physical embedded topologies.
     **The Rationale:** Engineers assume logical algorithms like Ring AllReduce guarantee optimal performance regardless of hardware wiring.
@@ -28,11 +28,12 @@ details:
     - Line Tree Time: 6 total full-buffer neighbor hops (3 reduce, 3 broadcast) * 829.2 us = 4975.2 us = 4.9752 ms (~4.98 ms).
     - Ring chunk size: 1024 bytes / 4 nodes = 256 bytes.
     - Ring chunk hop transaction: 256 bytes * 0.8 us/byte + 10 us = 204.8 us + 10 us = 214.8 us.
-    - Logical Ring per step on a physical line: 1->2 is 1 hop, 2->3 is 1 hop, 3->4 is 1 hop, and 4->1 wraparound is 3 physical hops, for 6 serialized chunk-hop transactions per logical step.
+    - Serialized physical-line model: only one neighbor transaction is counted at a time.
+    - Logical Ring per step on the physical line: 1->2 is 1 hop, 2->3 is 1 hop, 3->4 is 1 hop, and 4->1 wraparound routes as 4->3->2->1 for 3 more hops, so each logical step is 6 serialized chunk-hop transactions.
     - Ring AllReduce Time: 6 logical steps * 6 chunk hops/step * 214.8 us = 7732.8 us = 7.7328 ms (~7.73 ms).
 
     **Conclusion & Interpretation:**
-    - **Result: Line Tree ~4.98 ms vs Ring ~7.73 ms**. The Ring is slower on the daisy-chain because each logical wraparound step still traverses intermediate nodes, even though standard Ring AllReduce sends 256B chunks rather than the full 1KB payload per hop.
+    - **Result: Line Tree ~4.98 ms vs Ring ~7.73 ms**. Under the serialized neighbor-transfer assumption, the Ring is slower on the daisy-chain because each logical wraparound step traverses intermediate nodes, even though standard Ring AllReduce sends 256B chunks rather than the full 1KB payload per hop.
 status: published
 provenance: llm-draft
 requires_explanation: true

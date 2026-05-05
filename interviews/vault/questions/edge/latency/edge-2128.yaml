@@ -18,18 +18,19 @@ details:
     **The Consequence:** Wasted profiling effort and failure to address the memory bandwidth throttling that actually causes the latency spike.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Jetson Orin thermal limits trigger at ~95°C junction temp.
-    - Environment: 40°C ambient, 60W TDP, 0.9°C/W passive thermal resistance.
-    - Throttling reduces TOPS by ~50% (275 to ~137 TOPS) and memory bandwidth is halved.
-    - YOLOv8n INT8 needs ~8.7 GOPS.
+    - Jetson AGX Orin at a sustained 60W power mode in a 40°C enclosure has much less thermal headroom than in a 25°C lab.
+    - The exact junction temperature depends on the carrier, heatsink, fan curve, enclosure airflow, and dust/loading; tegrastats is the source of truth.
+    - A throttle event can reduce GPU/CPU clocks and EMC memory frequency at the same time.
+    - YOLOv8n INT8 is light on raw TOPS, so memory movement, preprocessing, and queued frames can dominate P99 latency.
 
     **Calculations:**
-    - Estimated junction temp = 40°C + (60W * 0.9°C/W) = 40°C + 54°C = 94°C, which is near the ~95°C throttle threshold.
-       - Convert units: 137 TOPS = 137,000 GOPS, which is far above an 8.7 GOPS lightweight detector estimate, so raw INT8 compute is unlikely to be the only bottleneck.
-       - A 95ms / 28ms tail-latency jump is about 3.4x. A 2x EMC drop alone explains only part of that, but combined memory stalls, queued frames, and lower CPU/GPU clocks can amplify P99 latency.
+    - Observed P99 increase = 95ms / 28ms = 3.4x.
+    - If throttling cuts EMC bandwidth by about 2x, memory-bound preprocessing, tensor copies, and postprocessing can roughly double their service time even when INT8 compute capacity remains adequate.
+    - At 30 FPS, frames arrive every 33.3ms. A throttled service interval near or above one frame period can build a queue; queued frames then turn a partial service-time slowdown into much larger P99 spikes.
+    - Because the detector's raw compute demand is small relative to Orin INT8 capability, comparing TOPS alone does not explain the 95ms tail. Correlating P99 samples with EMC/GPU/CPU clock drops does.
 
     **Conclusion & Interpretation:**
-       - **Result: thermal throttling with likely EMC impact (Thermal/Memory-Bound).** The simplified thermal model puts 60W at 40°C near the throttle point; tegrastats should verify clock drops, and mitigation should target sustained power and cooling rather than assuming a pure TOPS shortage.
+       - **Result: thermal throttling with likely EMC impact (Thermal/Memory-Bound).** The 3.4x P99 jump is plausible when throttled EMC and lower clocks push service time toward the 33ms frame interval and create queueing tails. Verify with tegrastats, then reduce sustained power, improve active cooling, or shed frames.
 status: published
 provenance: imported
 requires_explanation: false

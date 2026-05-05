@@ -11,7 +11,8 @@ title: LLM Memory Co-Design on Exynos 2400 NPU
 scenario: You are leading the deployment of a 4B parameter local LLM on the Samsung Exynos 2400 NPU for real-time live captioning. During concurrent 4K video recording, the ISP and GPU consume massive bandwidth, causing severe memory starvation and high latency during the LLM's autoregressive generation phase.
 question: How do you design a memory hierarchy and execution architecture to guarantee 20 tokens/s generation without dropping camera frames?
 details:
-  realistic_solution: A robust design treats 20 tokens/s as a shared-memory scheduling problem. Use a 4B-class INT4 model with GQA to keep KV traffic small, a paged KV cache with only the current tile staged in accelerator scratch, and QoS limits that reserve ISP/GPU bandwidth before LLM decode starts. To reduce weight traffic, use a small draft model for speculative decoding so each accepted main-model pass emits several tokens, or use an equivalent batching scheme that amortizes main-model weight reads. The runtime should prefetch model pages asynchronously, pace decode around camera frame deadlines, and degrade to a smaller draft/assistant mode if acceptance rate or bandwidth headroom drops.
+  realistic_solution: |
+    A robust design treats 20 tokens/s as a shared-memory scheduling problem. Use a 4B-class INT4 model with GQA to keep KV traffic small, a paged KV cache with only the current tile staged in accelerator scratch, and QoS limits that reserve ISP/GPU bandwidth before LLM decode starts. To reduce weight traffic, use a small resident draft model for speculative decoding so each main-model verification pass emits several accepted tokens, or use an equivalent batching scheme that amortizes main-model weight reads. The guarantee is conditional: admission control must prove the measured main-weight, KV, activation, and draft traffic stays inside the reserved LLM bandwidth before camera recording and decode run together. The runtime should prefetch model pages asynchronously, pace decode around camera frame deadlines, and degrade to a smaller model or lower token rate if acceptance rate or bandwidth headroom drops.
   common_mistake: |
     **The Pitfall:** Treating the device's RAM as dedicated NPU memory and focusing solely on compute limits.
     **The Rationale:** Candidates forget that mobile architectures use shared memory pools, where the ISP and GPU compete fiercely for bandwidth during multitasking.
@@ -22,22 +23,22 @@ details:
     - Target rate: 20 tokens/sec.
     - LPDDR5X peak bandwidth: ~68 GB/s.
     - ISP/GPU concurrent bandwidth requirement: 35 GB/s.
-    - Draft model: 50 MB, streamed once per emitted token as an illustrative planning estimate.
-    - Speculative acceptance: 4 accepted tokens per main-model verification pass, where one pass rereads the main model once to verify a draft block.
-    - KV/activation traffic allowance: about 0.1 GB per emitted token for this sequence length; this must be measured on the deployed graph.
+    - Reserve 10 GB/s as guard bandwidth for OS, display, CPU/GPU bursts, and controller overhead.
+    - Available LLM bandwidth while camera is active: 68 - 35 - 10 = 23 GB/s.
+    - Speculative acceptance target: 4 accepted tokens per main-model verification pass, where one pass rereads the main model once to verify a draft block.
 
     **Calculations:**
+    - Per-token LLM bandwidth budget at 20 tokens/s: 23 GB/s / 20 tokens/s = 1.15 GB/token.
     - Naive main-model bandwidth if weights are streamed once per output token: 2 GB/token * 20 tokens/s = 40 GB/s.
-    - Total system bandwidth: 40 + 35 = 75 GB/s (Exceeds 68 GB/s).
+    - Naive total bandwidth before KV/activation traffic: 40 + 35 + 10 = 85 GB/s (exceeds 68 GB/s).
     - Speculative main-model passes = 20 tokens/s / 4 tokens/pass = 5 passes/s.
     - Main-model bandwidth with speculation = 2 GB/pass * 5 passes/s = 10 GB/s.
-    - Draft bandwidth = 50 MB/token * 20 tokens/s = 1 GB/s.
-    - Illustrative KV/activation bandwidth = 0.1 GB/token * 20 tokens/s = 2 GB/s.
-    - Total LLM bandwidth = 10 + 1 + 2 = 13 GB/s.
-    - System bandwidth with camera active = 35 + 13 = 48 GB/s, leaving about 20 GB/s headroom below the 68 GB/s peak.
+    - Weight traffic per emitted token after speculation = 10 GB/s / 20 tokens/s = 0.5 GB/token.
+    - Remaining LLM budget for draft, KV, activations, and page misses = 23 - 10 = 13 GB/s, or 0.65 GB/token.
+    - System bandwidth if measured non-weight LLM traffic stays within that allowance = 35 + 10 + 23 = 68 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: illustrative estimate of about 13 GB/s LLM bandwidth and 48 GB/s total system bandwidth.** The 20 tokens/s target is plausible only with bandwidth reservation, measured KV/activation traffic near this allowance, and a high speculative acceptance rate; without amortizing main-model weight reads, camera traffic would exceed the shared-memory budget.
+    - **Result: 20 tokens/s requires an LLM budget of at most 23 GB/s, with non-weight traffic capped near 13 GB/s after speculative amortization.** The target is defensible only if profiling confirms draft, KV, activation, and page-miss traffic fits that allowance; without amortizing main-model weight reads, camera traffic exceeds the shared-memory budget.
 status: published
 provenance: imported
 requires_explanation: true

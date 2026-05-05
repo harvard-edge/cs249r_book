@@ -11,25 +11,24 @@ title: FP8 E4M3 Gradient Underflow in Transformer Training
 scenario: You are migrating a large transformer model from FP16 to FP8 (E4M3 format) for training on H100 GPUs. The model runs twice as fast, but after 500 steps, the gradients vanish entirely, and the model's loss plateaus. The learning rate is verified to be correct.
 question: What numerical physics destroyed your training?
 details:
-  realistic_solution: You suffered catastrophic underflow from storing gradients or gradient-like tensors directly in FP8 E4M3 without adequate scaling. E4M3 has far less dynamic range and precision than FP16/BF16. With the common E4M3 layout, the smallest normal value is 2^-6 = 0.015625 and subnormals extend only to about 2^-9 = 0.001953. Typical deep-network gradients can be much smaller than that, so unscaled values round or flush to 0.0 when represented in FP8. The fix is to keep gradients, optimizer state, reductions, and loss scaling in BF16/FP32, and use FP8 mainly for scaled GEMM inputs with amax tracking.
+  realistic_solution: You suffered catastrophic underflow and precision loss from storing gradients or gradient-like tensors directly in FP8 E4M3 without adequate scaling. E4M3 has far less dynamic range and precision than FP16/BF16, and exact tiny-value thresholds vary by implementation and subnormal/flush behavior. Typical deep-network gradients can be far below the reliably representable FP8 range, so unscaled values round or flush to 0.0. The fix is to keep gradients, optimizer state, reductions, and loss scaling in BF16/FP32, and use FP8 mainly for scaled GEMM inputs with amax tracking.
   common_mistake: |
     **The Pitfall:** Assuming FP8 is just a smaller FP16 and that standard gradient scaling will handle the precision drop.
     **The Rationale:** FP8 E4M3 has a much narrower dynamic range than FP16 and cannot represent typical small gradient values natively.
     **The Consequence:** Gradients underflow and are flushed to exactly 0.0, permanently halting model learning.
   napkin_math: |
     **Assumptions & Constraints:**
-    - FP8 E4M3 format with exponent bias 7.
+    - FP8 E4M3 has a narrow exponent range and only 3 explicit mantissa bits; exact minimum values depend on the implementation's E4M3 variant and subnormal/flush behavior.
     - Deep gradient typical magnitude: ~0.00045.
     - Assume gradients are stored unscaled in E4M3 or the implementation flushes unsupported tiny values to zero.
 
     **Calculations:**
-    - E4M3 minimum normal: 2^-6 = 0.015625.
-    - E4M3 subnormal spacing near zero: 2^-9 = 0.001953.
-    - Smallest positive subnormal: about 0.001953.
-    - Underflow condition for the example gradient: 0.00045 < 0.001953.
+    - A representative E4M3 implementation may have normal values only down to roughly 10^-2 scale, with limited or implementation-dependent support below that.
+    - The example gradient, 4.5e-4, is below that reliable unscaled range and may round or flush to zero depending on the exact FP8 path.
+    - Loss scaling and amax tracking move tensors into the representable FP8 range; BF16/FP32 gradient, reduction, and optimizer paths avoid losing small updates.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.0 Flush or Rounding to Zero (Precision-Bound)**. The example gradient is below the smallest E4M3 subnormal, so it cannot be represented without scaling. FP8 training must scale tensors and keep sensitive gradient/optimizer paths in higher precision.
+    - **Result: Underflow or Rounding to Zero (Precision-Bound)**. The example gradient is too small to store reliably in unscaled E4M3 across implementations. FP8 training must scale tensors and keep sensitive gradient/optimizer paths in higher precision.
 status: published
 provenance: imported
 requires_explanation: false
