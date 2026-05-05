@@ -497,7 +497,7 @@ The scale of these computations becomes concrete in the *GPT-2 attention layer c
 
 ::: {.callout-notebook title="GPT-2 Attention Layer Computation"}
 
-Each GPT-2 layer performs attention computations that exemplify dense matrix multiplication demands. For a single attention head with batch_size = `{python} GPT2Compute.batch_str`, sequence_length = `{python} GPT2Compute.seq_len_str`, hidden_dim = `{python} GPT2Compute.hidden_str`:
+Each GPT-2 layer performs attention computations that exemplify dense matrix multiplication demands. For one GPT-2 transformer layer (all heads combined) with batch_size = `{python} GPT2Compute.batch_str`, sequence_length = `{python} GPT2Compute.seq_len_str`, hidden_dim = `{python} GPT2Compute.hidden_str`:
 
 **Query, Key, Value Projections** (the three linear transformations that create attention inputs—3 separate matrix multiplications):
 $$
@@ -4100,14 +4100,14 @@ The computational advantage of Tensor Cores becomes apparent when comparing theo
 - **BF16 Tensor Core throughput**: `{python} AcceleratorSpecs.a100_tflops_fp16_str` TFLOPS (same as FP16)
 - **FP8 Tensor Core throughput** (H100 SXM): `{python} AcceleratorSpecs.h100_tflops_fp8_str` TFLOPS without sparsity (approximately 100$\times$ speedup over FP32)
 
-This 16$\times$ theoretical speedup for FP16 materializes in practice because matrix multiplications, the dominant operation in neural network training, map naturally to Tensor Core operations. A transformer's attention mechanism computing $QK^T$ for a $(B, H, N, D)$ tensor requires $2 \times B \times H \times N^2 \times D$ FLOPs. On Tensor Cores, this executes 16$\times$ faster than on CUDA cores, directly translating to wall-clock speedups.
+This 16$\times$ theoretical speedup for FP16 materializes in practice because matrix multiplications, the dominant operation in neural network training, map naturally to Tensor Core operations. A transformer's attention mechanism computing $QK^T$ for a $(B, H, N, D)$ tensor requires $2 \times B \times H \times N^2 \times D$ FLOPs. On Tensor Cores, this can execute much faster than on CUDA cores and materially improve wall-clock speedups.
 
 ##### BF16 hardware implementation {#sec-model-training-bf16-hardware-implementation-78f3}
 
 \index{BF16!dynamic range preservation}\index{BF16!hardware support}
 Brain Float 16 (BF16) maintains FP32's 8-bit exponent while reducing the mantissa to 7 bits. This design choice prioritizes dynamic range preservation over precision, which matters for gradient-based learning where values span many orders of magnitude. Google's TPUs natively support BF16, while NVIDIA's Ampere architecture (A100) and newer provide full hardware support.
 
-The hardware advantage of BF16 over FP16 emerges in gradient accumulation scenarios. Consider summing 1000 gradients with values around $10^{-4}$. FP16's smallest positive subnormal value is approximately $6 \times 10^{-8}$, but the smallest normal value is $6.1 \times 10^{-5}$.[^fn-fp16-subnormal] In practice, gradients below approximately $10^{-7}$ may underflow to zero depending on hardware behavior. BF16's smallest representable value matches FP32 at approximately $10^{-45}$, so no underflow occurs. FP32 has full range but computes 2$\times$ slower.
+The hardware advantage of BF16 over FP16 emerges in gradient accumulation scenarios. Consider summing 1000 gradients with values around $10^{-4}$. FP16's smallest positive subnormal value is approximately $6 \times 10^{-8}$, but the smallest normal value is $6.1 \times 10^{-5}$.[^fn-fp16-subnormal] In practice, gradients below approximately $10^{-7}$ may underflow to zero depending on hardware behavior. BF16's smallest positive normal value is approximately $10^{-38}$, matching FP32's normal exponent range, so no underflow occurs in the regime where FP16 would already have lost those values. FP32 has full range but computes 2$\times$ slower.
 
 [^fn-fp16-subnormal]: **FP16 Subnormal Flushing**: To accelerate computation, hardware often flushes any FP16 value smaller than the minimum normal value ($6.1 \times 10^{-5}$) to zero. This flushing is the direct cause of the underflow described in the gradient accumulation scenario, as any gradient between the hardware floor and the theoretical limit of $6 \times 10^{-8}$ is discarded. This creates a practical precision gap where values are abruptly lost, a gap that does not exist for the BF16 format. \index{FP16!subnormal flushing}
 
@@ -4386,7 +4386,7 @@ Standard attention performs:
 
 Flash Attention performs different memory operations. In the forward pass, it reads $Q$, $K$, $V$ once and writes $O$ once, requiring $O(n \cdot d)$ bytes. In the backward pass, it recomputes $S$, $P$ in SRAM from $Q$, $K$, $V$ and writes $dQ$, $dK$, $dV$, again requiring $O(n \cdot d)$ bytes. Total HBM accesses are $O(n \cdot d)$.
 
-For large sequence lengths where $n \gg d$, Flash Attention reduces memory traffic by a factor of $n$. With $n = 4096$ and $d = 64$, this represents a **64$\times$ reduction** in memory bandwidth consumption.
+For large sequence lengths where $n \gg d$, Flash Attention reduces memory traffic by a factor of approximately $n/d$ under this simplified accounting. With $n = 4096$ and $d = 64$, this represents a **64$\times$ reduction** in memory bandwidth consumption.
 
 ##### Computational complexity {#sec-model-training-computational-complexity-7d3b}
 
@@ -4720,7 +4720,7 @@ For a network with $L$ layers, each storing A bytes of activations, @tbl-checkpo
 
 Sub-linear checkpointing strategies can reduce memory consumption from $O(L)$ to $O(\sqrt{L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.
 
-Setting the derivative of total memory cost $(k \times A + (L/k)\times A)$ to zero yields k_optimal = sqrt(L). This minimizes total memory while bounding recomputation overhead to approximately 33 percent additional forward time. For GPT-2 with forty-eight transformer layers, the contrast is stark: without checkpointing, memory equals $48\times A$ (full activation storage). Optimal checkpointing (sqrt(48) approximately equals seven checkpoints) requires memory of $7\times A + (48/7)\times A$ approximately equals $14\times A$, achieving 71 percent memory savings with approximately 33 percent compute overhead.
+Setting the derivative of total memory cost $(k \times A + (L/k)\times A)$ to zero yields k_optimal = sqrt(L). In the common sqrt(L) checkpointing scheme, this gives roughly one-third extra forward compute in exchange for the minimum memory footprint under this simplified model. For GPT-2 with forty-eight transformer layers, the contrast is stark: without checkpointing, memory equals $48\times A$ (full activation storage). Optimal checkpointing (sqrt(48) approximately equals seven checkpoints) requires memory of $7\times A + (48/7)\times A$ approximately equals $14\times A$, achieving 71 percent memory savings with approximately 33 percent compute overhead.
 
 | **Strategy**               | **Memory Cost**             | **Recompute Cost**  |
 |:---------------------------|:----------------------------|:--------------------|
@@ -6131,7 +6131,7 @@ With this vocabulary of parallelism strategies (data, model, pipeline, tensor, a
 Only when profiling reveals persistent bottlenecks despite these optimizations should multi-device approaches be considered. Every hardware device has a **physical ceiling**---for models like Llama-3 or GPT-4, even a fully optimized H100 GPU would take decades to complete training. The transition to multi-device training becomes necessary when one of three hard limits is reached:
 
 1. **Memory Exhaustion**: The model weights, gradients, and optimizer states exceed the VRAM of a single GPU, even with four-bit quantization. A 70B parameter model requires approximately 140 GB in FP16 for weights alone, far exceeding the 80 GB available on the largest single GPUs.
-2. **Training Wall-Clock Time**: The estimated time to convergence on a single device exceeds the project's timeline (typically > two weeks). At 1e15 FLOPs/day on an H100, a model requiring 1e24 FLOPs would take nearly 3,000 years on one GPU.
+2. **Training Wall-Clock Time**: The estimated time to convergence on a single device exceeds the project's timeline (typically > two weeks). At 1e15 FLOPs/day on an H100, a model requiring 1e24 FLOPs would take nearly 3 million years on one GPU.
 3. **Dataset Scale**: The time required to stream the dataset from storage to a single node creates an insurmountable IO bottleneck. Training on petabyte-scale datasets requires distributed storage systems with aggregate bandwidth exceeding any single node's capacity.
 
 The parallelism strategies introduced in this section (data parallelism for throughput, model parallelism for memory, pipeline parallelism for efficiency, and tensor parallelism for massive layers) provide the conceptual foundation for understanding how production training systems train trillion-parameter models in weeks rather than millennia. The implementation details of multi-node distributed training, including collective communication primitives, fault tolerance mechanisms, and elastic scheduling, build directly on the single-machine principles covered throughout this chapter and are treated in depth in advanced distributed systems texts.
