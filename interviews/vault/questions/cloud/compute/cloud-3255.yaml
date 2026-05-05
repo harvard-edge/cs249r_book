@@ -18,20 +18,24 @@ details:
     **The Rationale:** Candidates focus heavily on the massive PFLOPS numbers advertised by hardware vendors.
     **The Consequence:** They design dataflows that leave the ALUs starved for data, resulting in highly inefficient memory movement and poor hardware utilization.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Llama 3 70B FFN uses hidden size 8192 and intermediate size 28672.
-       - Dense FP16 compute: about 1.3 PFLOPS peak.
-       - Memory Bandwidth: 5.3 TB/s.
-       - Analyze one token for batch-1 decode; larger prefill batches improve weight reuse.
-    2. **Calculations:**
-       - One up or gate projection: 2 * 1 * 8192 * 28672 ≈ 470 MFLOPs.
-       - Up + gate + down FFN work per token: 3 * 470 MFLOPs ≈ 1.41 GFLOPs.
-       - Dense peak compute time: 1.41e9 / 1.3e15 ≈ 1.1 microseconds before utilization losses.
-       - FFN weight bytes per layer: 3 * 8192 * 28672 * 2 bytes ≈ 1.41 GB.
-       - Ideal HBM fetch time for those weights: 1.41 GB / 5300 GB/s ≈ 0.27 ms.
-       - A 2:4 structured sparse FFN could roughly halve dense weight and MAC work if the model preserves quality and the hardware/runtime exploits the sparse format, but metadata and load balance reduce the ideal gain.
-    3. **Conclusion & Interpretation:**
-       - **Result: Batch-1 FFN decode is weight-bandwidth dominated, so weight-stationary tiling is the right default.** For prefill or larger batches, reuse across the token tile can move the GEMM toward compute-bound behavior, and structured sparsity should be used only when the model and accelerator support the exact sparse pattern.
+    **Assumptions & Constraints:**
+    - Llama 3 70B FFN uses hidden size 8192 and intermediate size 28672.
+    - Dense FP16 compute: about 1.3 PFLOPS peak.
+    - Memory Bandwidth: 5.3 TB/s.
+    - Analyze one token for batch-1 decode; larger prefill batches improve weight reuse.
+
+    **Calculations:**
+    - One projection matrix (up, gate, or down) has 8192 * 28672 ≈ 235M weights, or about 470 MB at FP16.
+    - One up or gate projection for one token: 2 * 1 * 8192 * 28672 ≈ 470 MFLOPs.
+    - The gated FFN block has three such dense projections: up, gate, and down.
+    - Up + gate + down FFN work per token: 3 * 470 MFLOPs ≈ 1.41 GFLOPs.
+    - Dense peak compute time: 1.41e9 / 1.3e15 ≈ 1.1 microseconds before utilization losses.
+    - Full FFN weight bytes for one layer: 3 * 8192 * 28672 * 2 bytes ≈ 1.41 GB.
+    - Ideal HBM fetch time for the full FFN block's weights at batch 1: 1.41 GB / 5300 GB/s ≈ 0.27 ms.
+    - A 2:4 structured sparse FFN could roughly halve dense weight and MAC work if the model preserves quality and the hardware/runtime exploits the sparse format, but metadata and load balance reduce the ideal gain.
+
+    **Conclusion & Interpretation:**
+    - **Result: Batch-1 FFN decode is weight-bandwidth dominated, so weight-stationary tiling is the right default.** For prefill or larger batches, reuse across the token tile can move the GEMM toward compute-bound behavior, and structured sparsity should be used only when the model and accelerator support the exact sparse pattern.
 status: published
 provenance: imported
 requires_explanation: true

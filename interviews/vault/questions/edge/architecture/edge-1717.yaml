@@ -11,7 +11,7 @@ title: Optimizing KV Cache for Long-Context on Orin
 scenario: We are deploying a 7B parameter Transformer model on an NVIDIA Jetson Orin for a local long-document summarization task. As the context length approaches 8,192 tokens during autoregressive generation, the time to first token is acceptable, but the decoding latency per token spikes severely and we observe heavy memory bandwidth utilization.
 question: Diagnose the architectural bottleneck causing this degradation and quantify the optimization impact of using Grouped-Query Attention (GQA) and INT8 KV-cache quantization?
 details:
-  realistic_solution: Autoregressive decoding is memory-bandwidth bound because each new token attends over the accumulated KV cache. At 8K context, a 32-layer, d_model=4096 FP16 cache is about 4.29 GB before head sharing, so repeatedly reading it stresses Orin LPDDR5 even when compute utilization is low. GQA reduces the stored K/V heads, and INT8 KV-cache quantization halves bytes per element; together they reduce cache traffic from about 4.29 GB to about 537 MB under a 4:1 GQA ratio.
+  realistic_solution: Autoregressive decoding is memory-bandwidth bound because each new token attends over the accumulated KV cache. At 8K context, a 32-layer, d_model=4096 FP16 multi-head cache is about 4.29 GB when 4096 represents all query heads per layer, so repeatedly reading it stresses Orin LPDDR5 even when compute utilization is low. GQA stores fewer K/V heads than query heads, and INT8 KV-cache quantization halves bytes per element; applying a 4:1 GQA ratio and INT8 directly to the per-token cache formula reduces cache traffic from about 4.29 GB to about 537 MB.
   common_mistake: |
     **The Pitfall:** Assuming the bottleneck is compute capacity.
     **The Rationale:** Candidates often assume the 275 TOPS INT8 compute capacity is the bottleneck and suggest weight pruning or migrating layers to the DLA accelerator.
@@ -19,6 +19,7 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 7B model: 32 layers, d_model=4096.
+    - Baseline attention uses full multi-head KV storage, with 4096 total K elements and 4096 total V elements per layer per token across all heads.
     - Baseline KV precision: FP16, 2 bytes per element.
     - Context length: 8,192 tokens.
     - GQA stores 1 KV head group for each 4 query-head groups, so K/V storage is reduced 4:1.
@@ -26,12 +27,12 @@ details:
     **Calculations:**
     - Baseline FP16 KV per token = 2 tensors (K and V) * 32 layers * 4096 elements * 2 bytes = 524,288 bytes = 512 KiB.
     - Baseline FP16 KV at 8,192 tokens = 512 KiB * 8,192 = 4 GiB, about 4.29 GB.
-    - INT8-only KV cache = 4.29 GB / 2 = about 2.15 GB.
-    - GQA-only KV cache at 4:1 = 4.29 GB / 4 = about 1.07 GB.
-    - Combined INT8 + 4:1 GQA = 4.29 GB / 8 = about 537 MB.
+    - Combined GQA + INT8 per token = 2 tensors * 32 layers * (4096 / 4) elements * 1 byte = 65,536 bytes = 64 KiB.
+    - Combined GQA + INT8 cache at 8,192 tokens = 64 KiB * 8,192 = 512 MiB, about 537 MB.
+    - Reduction factor = 512 KiB baseline per token / 64 KiB optimized per token = 8x.
 
     **Conclusion & Interpretation:**
-    - **Result: 8x reduction to ~537 MB (Memory Bandwidth Bound)**. The final compressed KV cache is one eighth of the FP16 non-GQA baseline; INT8 alone gives 2x, GQA alone gives 4x, and combining them gives 8x.
+    - **Result: 8x reduction to ~537 MB (Memory Bandwidth Bound)**. The bottleneck is repeated KV-cache traffic during decoding, and applying 4:1 GQA plus INT8 directly to the cache formula cuts the FP16 non-GQA cache from about 4.29 GB to about 537 MB.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,7 @@ title: Optimizing Transformer Inference on Jetson Orin
 scenario: You are architecting a smart city intersection camera system using the NVIDIA Jetson Orin (32 GB LPDDR5, 275 TOPS INT8, 60W TDP). The system runs a 2.5 billion parameter transformer model for multi-object tracking. In FP16, the model requires 5 TFLOPs per frame and processes 12 FPS, but hits the 60W TDP limit, causing thermal throttling.
 question: How would INT8 quantization and DLA utilization change the compute, memory, and power profile of the 2.5B tracking transformer?
 details:
-  realistic_solution: The FP16 baseline needs 5 TFLOPs per frame and reaches only 12 FPS before hitting the 60W thermal limit, so it cannot sustain a 30 FPS target. Quantizing to INT8 keeps the 2.5B-parameter model at about 2.5 GB and makes the 30 FPS compute target about 150 TOPS, or roughly 55% of the Jetson Orin INT8 peak. Use TensorRT to place supported INT8 subgraphs on DLA when possible and leave unsupported transformer operations, memory-bound layers, and layout conversions on the GPU. DLA helps only for supported ops; the release-quality claim is that the quantized mixed DLA/GPU path has a plausible compute and power budget under 60W, not that DLA alone guarantees 30 FPS.
+  realistic_solution: The FP16 baseline needs 5 TFLOPs per frame and reaches only 12 FPS before hitting the 60W thermal limit, so it cannot sustain a 30 FPS target. Quantizing to INT8 keeps the 2.5B-parameter model at about 2.5 GB and makes the 30 FPS compute target about 150 TOPS, treating the FP16 FLOP count as an approximate same-op INT8 graph cost after conversion. Use TensorRT to place supported INT8 subgraphs on DLA when possible and leave unsupported transformer operations, memory-bound layers, and layout conversions on the GPU. DLA helps only for supported ops; the release-quality claim is that the quantized mixed DLA/GPU path is plausible only if measured end-to-end latency and power stay inside the 30 FPS and 60W budgets.
   common_mistake: |
     **The Pitfall:** Focusing only on the memory bandwidth savings of INT8 without calculating the actual TOPS utilization or the proportional power reduction.
     **The Rationale:** Candidates often forget that the Orin's 275 TOPS rating specifically assumes INT8 execution, leading to incorrect assumptions about FP16 capabilities and thermal scaling.
@@ -21,7 +21,7 @@ details:
     - Original model: 2.5 billion parameters (FP16).
     - Target frame rate: 30 FPS.
     - Jetson Orin capacity: 32 GB LPDDR5, 275 TOPS INT8, 60W TDP.
-    - INT8 compute requirement after quantization: 5 TOP per frame, matching the 5 TFLOPs/frame work estimate after converting the graph to INT8 operations.
+    - INT8 compute requirement after quantization: about 5 TOP per frame, using the FP16 5 TFLOPs/frame as a same-operator-count estimate once the graph is converted to INT8.
     - FP16 baseline throughput: 12 FPS at the 60W TDP limit.
 
     **Calculations:**
@@ -29,11 +29,11 @@ details:
     - FP16 baseline compute at 12 FPS: 12 FPS * 5 TFLOPs/frame = 60 TFLOP/s while already power-limited.
     - Compute required for 30 FPS: 30 frames/s * 5 TOP/frame = 150 TOP/s.
     - Compute utilization: 150 TOPS / 275 TOPS = 54.5%.
-    - Peak power efficiency: 275 TOPS / 60W = 4.58 TOPS/W.
-    - Idealized INT8 accelerator power: 150 TOPS / 4.58 TOPS/W = 32.7W before GPU fallback, memory traffic, and conversion overheads.
+    - Peak INT8 efficiency proxy: 275 TOPS / 60W = 4.58 TOPS/W.
+    - Idealized lower-bound accelerator power: 150 TOPS / 4.58 TOPS/W = 32.7W before GPU fallback, memory traffic, DLA/GPU transfers, and conversion overheads.
 
     **Conclusion & Interpretation:**
-    - **Result: feasible 30 FPS target if the INT8 graph compiles efficiently**. The math shows the 150 TOPS target is below peak INT8 capacity and has an idealized power estimate under 60W, but DLA utilization must be validated per layer because unsupported transformer ops will still run on the GPU.
+    - **Result: conditionally plausible 30 FPS target**. The math shows the 150 TOPS target is below peak INT8 capacity and has an idealized lower-bound power estimate under 60W, but feasibility depends on supported ops mapping well to DLA/GPU and measured full-pipeline latency and power staying within budget.
 status: published
 provenance: imported
 requires_explanation: false

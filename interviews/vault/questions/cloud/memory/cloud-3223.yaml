@@ -11,14 +11,15 @@ title: GQA vs MQA vs MHA KV-Cache Tradeoff
 scenario: 'You are choosing the attention variant for a 30B model (head_dim=128, 60 layers) targeting an 80GB GPU. Options: MHA, GQA-8, GQA-4, or MQA.'
 question: Which attention variants are memory-feasible for batch=16 at 128K context on one GPU, and what changes if none fit?
 details:
-  realistic_solution: 'Model: 30B params, head_dim=128, 60 layers. Weights: 30B × 2B = 60 GB, leaving about 20 GB for KV-cache on an 80 GB GPU before runtime overhead. KV-cache per token per layer: 2 × KV_heads × 128 × 2B. For batch=16 and 128K tokens, MHA (32 KV heads) needs about 2.06 TB, GQA-8 needs about 515 GB, GQA-4 needs about 258 GB, and MQA (1 KV head) needs about 64.4 GB decimal (60 GiB). Even the smallest KV variant exceeds the 20 GB one-GPU KV budget, so no listed variant is feasible at batch=16 and 128K on one 80 GB GPU. If none fit, reduce batch size/context length, use a smaller model or quantized/offloaded KV, or shard the model and KV-cache across multiple GPUs with tensor/pipeline parallelism. The prompt does not provide enough sizing constraints to choose a specific multi-GPU configuration.'
+  realistic_solution: 'Model: 30B params, head_dim=128, 60 layers. Weights: 30B × 2B = 60 GB. On an 80 GB GPU, that leaves at most 20 GB for KV-cache before allocator, activation, workspace, and fragmentation overhead, so 20 GB is an optimistic upper bound and the real KV budget is smaller. KV-cache per token per layer: 2 × KV_heads × 128 × 2B. For batch=16 and 128K tokens, MHA (32 KV heads) needs about 2.06 TB, GQA-8 needs about 515 GB, GQA-4 needs about 258 GB, and MQA (1 KV head) needs about 64.4 GB decimal. Even the smallest KV variant exceeds the optimistic 20 GB one-GPU KV budget, so no listed variant is feasible at batch=16 and 128K on one 80 GB GPU. If none fit, reduce batch size/context length, use a smaller model or quantized/offloaded KV, or shard the model and KV-cache across multiple GPUs with tensor/pipeline parallelism. The prompt does not provide enough sizing constraints to choose a specific multi-GPU configuration.'
   common_mistake: |
     **The Pitfall:** Choosing MQA for maximum memory savings without considering quality degradation.
     **The Rationale:** Optimizing solely for KV cache size to fit larger batches.
     **The Consequence:** MQA with 1 KV head significantly reduces model expressiveness for long-context tasks requiring diverse attention patterns.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 30B model (60 GB weights). Available VRAM: 20 GB.
+    - 30B model weights: 30B * 2 bytes = 60 GB decimal.
+    - Optimistic KV-cache budget: 80 GB VRAM - 60 GB weights = 20 GB before runtime overhead; actual usable KV budget is lower.
     - Config: batch=16, 128K context, 60 layers, head_dim=128.
 
     **Calculations:**
@@ -26,7 +27,7 @@ details:
     - MHA (32 heads): 16 KB/tok/layer. Total = 16 * 128K * 16 KB * 60 ≈ 2.06 TB decimal.
     - GQA-8 (8 heads): 4 KB/tok/layer. Total ≈ 515 GB decimal.
     - GQA-4 (4 heads): 2 KB/tok/layer. Total ≈ 258 GB decimal.
-    - MQA (1 head): 512 B/tok/layer. Total ≈ 64.4 GB decimal (60 GiB).
+    - MQA (1 head): 512 B/tok/layer. Total ≈ 64.4 GB decimal.
 
     **Conclusion & Interpretation:**
     - **Result: Memory-Capacity Bound.** None fit the 20 GB budget; you must reduce batch size or use tensor parallelism across multiple GPUs.

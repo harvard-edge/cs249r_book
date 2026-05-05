@@ -11,7 +11,7 @@ title: Evaluating Massive Pinned Memory Allocations
 scenario: Your team is deploying a high-throughput recommendation model on a dual-socket server with 8x GPUs and 1TB of system RAM. The model uses a 400GB embedding table that exceeds GPU VRAM, requiring streaming lookups over PCIe Gen4 x16. An engineer proposes pinning the entire 400GB embedding table in host CPU memory to enable direct DMA transfers and maximize bandwidth.
 question: Should you pin the entire 400GB embedding table in host memory, and what architecture would you use instead?
 details:
-  realistic_solution: Reject the proposal to pin the entire 400GB table. Instead, implement a zero-copy strategy using Unified Virtual Memory (UVM) with demand paging, or manually allocate small (e.g., 4GB per GPU) pinned staging buffers to asynchronously pipeline only the activated embedding vectors, preserving host memory for the OS and data pipeline.
+  realistic_solution: Reject the proposal to pin the entire 400GB table. Keep the embedding table in pageable host RAM and pin only bounded per-GPU staging buffers or prefetch windows. The serving path should gather the touched embedding rows, asynchronously copy them through small pinned buffers over PCIe, and optionally cache hot rows or shard by NUMA/GPU locality. Pinning the full table is unnecessary because each request accesses only a sparse subset of rows; UVM demand paging can be a fallback for simpler implementations, but it is not the default recommendation because page faults and oversubscription can make latency unpredictable.
   common_mistake: |
     **The Pitfall:** Assuming that pinning memory is strictly a net-positive.
     **The Rationale:** It avoids the CPU-side copy and enables DMA, but ignores the system-wide impact.

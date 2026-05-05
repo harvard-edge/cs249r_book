@@ -8,10 +8,10 @@ competency_area: parallelism
 bloom_level: apply
 phase: training
 title: TP Memory Savings Calculation
-scenario: A 30B parameter model uses BF16 weights (60 GB total). You apply TP=4 across four A100-80GB GPUs. How much weight memory does each GPU hold? What about optimizer states during training with AdamW in mixed precision?
+scenario: A 30B parameter model uses BF16 weights (60 GB total). Assume TP=4 fully shards the parameters across four A100-80GB GPUs, with negligible replicated parameters, and AdamW states are kept per local shard.
 question: With a 30B BF16 model and TP=4 on A100-80GB GPUs, how much weight and AdamW optimizer-state memory does each GPU hold?
 details:
-  realistic_solution: 'Weight memory per GPU: ~60 GB / 4 = 15 GB (BF16 weights split across TP ranks). Small components like positional embeddings and final LayerNorm are replicated but negligible (<100 MB). AdamW optimizer-state memory per local parameter is FP32 master weight (4B) + FP32 momentum (4B) + FP32 variance (4B) = 12B. With 30B/4 = 7.5B params per GPU, optimizer states alone are 7.5B × 12B = 90 GB per GPU. BF16 gradients add another 15 GB if resident, so weights + AdamW states + gradients are about 120 GB per GPU. The direct answer is 15 GB of weights and 90 GB of AdamW optimizer states; the full training state exceeds A100-80GB, so ZeRO or another sharding strategy is needed.'
+  realistic_solution: Under the stated full-sharding assumption, weight memory per GPU is ~60 GB / 4 = 15 GB. Small components like positional embeddings and final LayerNorm may be replicated in real models, but they are excluded here. AdamW optimizer-state memory per local parameter is FP32 master weight (4B) + FP32 momentum (4B) + FP32 variance (4B) = 12B, assuming those states are resident for the local TP shard rather than additionally sharded by ZeRO/FSDP. With 30B/4 = 7.5B params per GPU, optimizer states alone are 7.5B × 12B = 90 GB per GPU. BF16 gradients add another 15 GB if resident, so weights + AdamW states + gradients are about 120 GB per GPU. The direct answer is 15 GB of weights and 90 GB of AdamW optimizer states under this local-shard accounting; the full training state exceeds A100-80GB without additional optimizer sharding.
   common_mistake: |
     **The Pitfall:** Assuming TP=4 means each GPU holds exactly 1/4 of everything.
     **The Rationale:** Engineers overlook that some parameters like embedding tables and final LayerNorms may be replicated, and optimizer states scale with the local parameter count.
@@ -19,6 +19,8 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 30B parameter model in BF16, TP=4 across A100-80GB GPUs.
+    - Parameters are fully sharded across TP ranks with negligible replicated parameters.
+    - AdamW states are resident per local TP shard and are not further sharded by ZeRO/FSDP.
     **Calculations:**
     - TP=4: 30B/4 = 7.5B params per GPU.
     - Weight only: 7.5B × 2B = 15 GB.

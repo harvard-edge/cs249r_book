@@ -11,7 +11,7 @@ title: T4 Continuous Batching Prefill-vs-Decode Tradeoff
 scenario: A T4 GPU runs continuous batching. A new request requiring a 500ms prefill phase arrives while the GPU is decoding tokens at 20ms/token for an active user.
 question: Should the T4 run a 500ms LLM prefill monolithically or use chunked prefill while decoding at 20ms/token?
 details:
-  realistic_solution: If the GPU executes the 500ms prefill as a single monolithic block, the active user's generation will stutter for half a second, destroying the interactive SLA. Chunked prefill breaks the context encoding into smaller 50ms blocks, interleaving them with the decode steps. The tradeoff maintains the 20ms decoding cadence at the expense of slightly extending the total time-to-first-token for the new incoming request.
+  realistic_solution: If the GPU executes the 500ms prefill as a single monolithic block, the active user's generation will stutter for half a second, destroying the interactive SLA. Chunked prefill breaks the context encoding into smaller blocks and interleaves them with decode steps. The tradeoff improves fairness by capping active-user blocking to the chunk size plus scheduling overhead, while the new request's TTFT depends on the scheduler policy and may increase because its prefill no longer runs as one uninterrupted block.
   common_mistake: |
     **The Pitfall:** Optimizing purely for lowest Time-To-First-Token (TTFT) for the new request.
     **The Rationale:** Candidates view the prefill as an atomic operation that must complete instantly, ignoring the impact on concurrent streams.
@@ -24,12 +24,13 @@ details:
 
     **Calculations:**
     - Monolithic prefill: Active user waits 500ms. New user TTFT = 500ms.
-    - Chunked prefill (10 blocks of 50ms): Cycle = 50ms prefill + 20ms decode = 70ms.
-    - Impact on active user: Token latency degrades from 20ms to 70ms.
-    - Impact on new user: TTFT = 10 blocks * 70ms = 700ms.
+    - Example chunked prefill: split into 10 chunks of 50ms each.
+    - If the scheduler alternates one 50ms prefill chunk with one 20ms decode step, active-user token latency is capped around 70ms instead of one 500ms pause.
+    - The new request still requires 500ms of total prefill compute before its first decode token.
+    - Any TTFT above 500ms comes from interleaved decode work and scheduler policy, so it should be reported as a scheduling tradeoff rather than a universal 700ms constant.
 
     **Conclusion & Interpretation:**
-    - **Result: 700ms TTFT (Latency-Bound).** Chunked prefill avoids a massive 500ms stutter for the active user, sacrificing new user TTFT (700ms) to maintain the streaming SLA.
+    - **Result: bounded active-user jitter, scheduler-dependent TTFT (Latency-Bound).** Chunked prefill avoids a 500ms stutter for the active user by spreading the same 500ms prefill work across iterations; the exact new-user TTFT must be derived from the chosen interleaving policy.
 status: published
 provenance: imported
 requires_explanation: false

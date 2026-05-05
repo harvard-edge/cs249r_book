@@ -11,25 +11,25 @@ title: Optimizing MoE Routing on NVIDIA H100 for Latency-Sensitive Inference
 scenario: You are deploying a large Mixture of Experts (MoE) model (64 experts, top-2 routing) for a real-time inference service on GPUs. While the GPUs offer immense compute, the overall system throughput is not scaling linearly with the number of experts, and latency spikes occur under moderate load.
 question: Why are GPU MoE throughput and latency scaling poorly, and how would you mitigate routing, capacity, and memory-bandwidth bottlenecks?
 details:
-  realistic_solution: Implement dynamic capacity factor mechanisms and expert-level parallelism to minimize inter-GPU communication. Leverage FP8/FP16 acceleration. For memory-bound operations, optimize kernel fusion and data layouts to mask the memory transfer overhead.
+  realistic_solution: Diagnose the poor scaling as a routing and placement problem first, not a raw GPU FLOPs problem. Top-2 routing can send tokens to remote experts, create all-to-all activation traffic, and overload hot experts while other experts are idle. Mitigate by placing frequently co-selected experts near the tokens that use them, replicating hot experts, tuning capacity factors to avoid both drops and overpadding, adding router load-balancing pressure, batching/gathering routed tokens efficiently, and overlapping communication with expert compute. FP8/FP16 and kernel fusion help only after locality, capacity saturation, and token-routing imbalance are under control.
   common_mistake: |
     **The Pitfall:** Assuming that raw TFLOPs directly translate to MoE throughput, and statically setting expert capacity factors.
     **The Rationale:** Engineers treat MoE inference like dense inference, overlooking the network latency for inter-GPU expert communication and the memory-FLOPs decoupling.
     **The Consequence:** Frequent 'expert drops' (tokens skipped due to saturation) leading to severe generation degradation, or massive underutilization of compute due to memory bottlenecks.
   napkin_math: |
     **Assumptions & Constraints:**
-    - HBM bandwidth: 3.35 TB/s = 3350 GB/s.
-    - Assumed uncached expert weight movement for top-2 routing: 5 GB per expert, 10 GB total per token group.
-    - Sustained FP16 compute for comparison: assume 40% of 989 TFLOPS peak ≈ 396 TFLOPS.
-    - Active expert compute for the same token group: assume 0.5 TFLOP after batching.
+    - 64 experts with top-2 routing means each token creates two expert assignments.
+    - GPU compute does not scale linearly if routed tokens require remote dispatch or if expert loads are imbalanced.
+    - Exact bytes per routed token depend on hidden size, batch shape, and placement, which are not specified.
 
     **Calculations:**
-    - Expert weight transfer time = 10 GB / 3350 GB/s = 0.00299 s ≈ 3.0 ms.
-    - Compute time = 0.5 TFLOP / 396 TFLOPS = 0.00126 s ≈ 1.3 ms.
-    - Routing and all-to-all dispatch add latency on top of the 3.0 ms memory floor when selected experts are remote or overloaded.
+    - Route volume per token = 2 expert assignments, so dispatcher/gather work scales with routed tokens, not just original tokens.
+    - If the router sends a disproportionate share to a few experts, those experts set tail latency while less-used experts leave GPU compute idle.
+    - If selected experts are remote, each assignment adds activation send/receive traffic and synchronization; the correct measurement is profiled all-to-all bytes and wait time per layer.
+    - Capacity factor trades off quality and latency: too low causes token drops or rerouting; too high reserves padded capacity and wastes memory/compute.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory and routing bound.** Under the stated working-set assumption, expert weight movement is more than 2x the compute time before communication overhead, explaining poor scaling unless routing locality, capacity factors, expert replication, and kernel fusion reduce the data movement.
+    - **Result: routing locality, capacity imbalance, and communication are the likely bottlenecks.** Validate with per-expert load histograms, dispatch/gather time, and network/HBM counters, then mitigate with locality-aware placement, hot-expert replication, load-balanced routing, capacity tuning, and communication overlap.
 status: published
 provenance: imported
 requires_explanation: false

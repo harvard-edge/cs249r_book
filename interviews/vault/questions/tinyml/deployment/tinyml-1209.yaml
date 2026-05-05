@@ -12,7 +12,7 @@ scenario: You are designing an OTA update architecture for a predictive maintena
 question: How should an edge MCU structure a fail-safe OTA update for firmware and model payloads within exactly 1 MB Flash?
 details:
   realistic_solution: |
-    The optimal architecture decouples the ML model from the application firmware using an asymmetric single-staging-slot scheme: bootloader, primary firmware, primary model, and one shared 250 KB OTA slot. Every update artifact must be signed, versioned, and small enough to fit in the staging slot before it is accepted. A firmware update is delivered as a compressed/delta patch of at most 250 KB, verified in the slot, applied to the inactive pages of the primary firmware region with a resumable copy protocol, then boot-marked only after post-write hash validation. A model update follows the same rule for the model region. If power fails before validation and commit, the bootloader keeps the previous firmware/model pair; if validation fails after download, the slot is erased and the current image remains active.
+    The optimal architecture decouples the ML model from the application firmware using an asymmetric single-staging-slot scheme: bootloader, primary firmware, primary model, and one shared 250 KB OTA slot. Every update artifact must be signed, versioned, and small enough to fit in the staging slot before it is accepted. Because the 1 MB layout does not provide a second full firmware or model bank, the safe artifact is a compressed or delta update whose installer has an explicitly verified copy/commit protocol for the target region. That protocol may patch inactive pages only if the flash map reserves such pages; otherwise it must use power-fail-safe page journals, manifests, rollback records, and post-write hash validation before marking the new firmware/model pair active. If validation fails, the slot is erased and the current committed image remains active.
   common_mistake: |
     **The Pitfall:** Symmetrically dividing Flash for A/B updates.
     **The Rationale:** Candidates instinctively suggest a classic A/B dual-bank scheme, halving the 1 MB flash into two 500 KB partitions.
@@ -29,8 +29,7 @@ details:
     - Maximum accepted staged artifact: <= 250 KB including patch metadata, signature, and manifest.
     - Full model image does not fit in the slot: 300 KB - 250 KB = 50 KB too large.
     - Minimum model artifact reduction before metadata: 50 KB / 300 KB = 16.7%, so real patches need more than 16.7% reduction after signature/manifest overhead.
-    - Download time for a full slot: 250 KB / 50 KB/s = 5 seconds.
-    - Energy cost: 5 mA * (5 s / 3600 s) = ~0.007 mAh.
+    - Download time for a full slot: 250 KB / 50 KB/s = 5 seconds, which is secondary to the storage and rollback constraint.
 
     **Conclusion & Interpretation:**
     - **Result: 250 KB OTA slot (Storage-Bound)**. Fail-safe OTA is possible only for signed delta/compressed firmware or model artifacts that fit the shared slot; full 450 KB firmware or 300 KB model replacement images cannot be staged in this 1 MB layout.

@@ -11,7 +11,7 @@ title: Scheduling a 1,000-GPU Job Across H100 and B200 Fleets
 scenario: Your company is deploying next-generation B200 GPUs alongside the existing H100 fleet. The B200s require direct-to-chip liquid cooling. 30% of your datacenter has liquid cooling (500 B200s); the rest is air-cooled (2,000 H100s). A critical 1,000-GPU LLM pre-training job needs the fastest possible time-to-completion. B200s are 2x faster per GPU for training.
 question: How would you schedule the job to maximize speed, and can both GPU types be used synchronously?
 details:
-  realistic_solution: 'For the job as stated, 500 B200s alone are not a valid schedule because the job requires 1,000 physical GPUs. The fastest valid naive synchronous schedule is therefore 1,000 H100s, because that is the only homogeneous 1,000-GPU pool available. Do not mix 500 B200s and 500 H100s in one ordinary synchronous data-parallel job: the H100 workers become stragglers, the B200 workers wait at every collective, and the step clock is set by the slower tier unless the training stack supports heterogeneous load balancing. The scheduler should model GPU type, cooling zone, and topology as hard placement constraints. If the algorithm is changed to support asynchronous or load-balanced heterogeneous training, then the B200 and H100 fleets can be used together as a separate design, but that is not the same as scheduling one naive synchronous 1,000-GPU job.'
+  realistic_solution: 'For the job as stated, 500 B200s alone are not a valid schedule because the job requires 1,000 physical GPUs. The fastest valid naive synchronous schedule is therefore 1,000 H100s, because that is the only homogeneous 1,000-GPU pool available. Do not mix 500 B200s and 500 H100s in one ordinary synchronous data-parallel job with equal work per rank: the H100 workers become stragglers, the B200 workers wait at every collective, and the step clock is set by the slower tier. A heterogeneous schedule can be valid only if the training stack supports load-balanced work assignment, such as giving B200 ranks roughly 2x the microbatch tokens of H100 ranks while preserving optimizer semantics and collective compatibility. The scheduler should model GPU type, cooling zone, and topology as hard placement constraints. If heterogeneous load balancing is unavailable, schedule 1,000 H100s and use the B200 pool for a separate job.'
   common_mistake: |
     **The Pitfall:** Mixing B200 and H100 GPUs in a single synchronous data-parallel training job.
     **The Rationale:** Assuming that adding more GPUs automatically increases total throughput, regardless of individual GPU speeds.
@@ -24,9 +24,10 @@ details:
     2. **Calculations:**
        - B200-only schedule: 500 physical GPUs, so it fails the 1,000-GPU requirement even though compute throughput is high.
        - H100-only schedule: 1,000 physical GPUs, homogeneous synchronous training, valid.
-       - Mixed 500 B200 + 500 H100 schedule: 1,000 physical GPUs, but naive synchronous steps wait for H100-speed workers, so B200 capacity is partly wasted at synchronization barriers.
+       - Mixed 500 B200 + 500 H100 schedule with equal per-rank work: 1,000 physical GPUs, but step time is H100-speed, so effective throughput is roughly 1,000 H100-equivalent units while the B200 half could have supplied another 500 H100-equivalent units if load-balanced.
+       - Mixed schedule with heterogeneous load balancing: assign about 2x work to each B200 rank and 1x to each H100 rank, giving up to 500*2 + 500*1 = 1,500 H100-equivalent units, but only if the framework supports uneven batches/gradients without changing training semantics.
     3. **Conclusion & Interpretation:**
-       - **Result: Straggler-Bound Synchronization.** Schedule 1,000 H100s for the fastest valid naive synchronous job, and treat B200s as a separate liquid-cooled pool unless the training algorithm explicitly supports heterogeneous async or load-balanced execution.
+       - **Result: Straggler-Bound Synchronization.** Schedule 1,000 H100s for the fastest valid naive synchronous job, and use both GPU types synchronously only with explicit heterogeneous load balancing; otherwise the B200s idle behind H100 stragglers.
 status: published
 provenance: imported
 requires_explanation: true

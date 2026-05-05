@@ -11,7 +11,7 @@ title: Architecting Sub-4-bit LLM Deployment on Mobile NPU
 scenario: You are tasked with deploying a 7B parameter LLM on a mobile NPU for real-time on-device translation. The system has a shared 12 GB memory pool, but the OS, ISP, and other background tasks consume 8 GB, leaving strict constraints on model footprint. You need to design an extreme quantization strategy that maximizes NPU throughput while ensuring the model fits in the remaining memory and maintains acceptable translation quality.
 question: How should a 7B translation LLM use extreme quantization while fitting memory and bandwidth limits?
 details:
-  realistic_solution: A strong L5 design employs AWQ (Activation-aware Weight Quantization) or GPTQ at 3-bit or 4-bit precision to protect salient weights, coupled with a highly optimized custom NPU kernel for mixed-precision execution. Since memory bandwidth is the primary bottleneck in generative decoding on the shared bus, the architecture must prioritize aggressively packing weights and fusing dequantization operations directly within the NPU's SRAM to keep the compute units fed.
+  realistic_solution: A strong L4 design starts with a calibrated 4-bit weight format such as AWQ or GPTQ and verifies whether the packed weights, KV cache, activations, and runtime buffers fit inside the remaining 4 GB. If the 4-bit package leaves too little headroom for translation context, use mixed 3/4-bit only on less sensitive layers or channels while preserving higher precision for outliers and embeddings. The deployment should use an NPU-supported packed layout with fused or low-overhead dequantization where available, plus bounded KV cache and conservative batch/context limits, rather than assuming a custom kernel is always practical.
   common_mistake: |
     **The Pitfall:** Suggesting standard 8-bit or unoptimized 4-bit quantization without considering the shared memory bottleneck.
     **The Rationale:** Candidates focus solely on reducing model size and overlook the NPU requirement for specific weight packing to utilize its TOPS.
@@ -24,12 +24,12 @@ details:
 
     **Calculations:**
     - 4-bit weights: 7B * 0.5 bytes = 3.5 GB before scales, zero-points, alignment, and packing metadata.
-    - A practical 4-bit package can approach 3.7-3.9 GB, leaving little room for KV cache, activations, runtime buffers, and tokenizer state inside a 4 GB budget.
-    - A 3-bit or mixed 3/4-bit layout can reduce packed weights to roughly 2.8-3.3 GB, leaving hundreds of MB for KV cache and runtime overhead.
+    - A practical 4-bit package can approach 3.7-3.9 GB after scales, zero-points, alignment, and packing metadata, leaving only about 100-300 MB for KV cache, activations, runtime buffers, and tokenizer state inside a 4 GB budget.
+    - If that headroom is insufficient for the target context, a calibrated mixed 3/4-bit layout can reduce packed weights to roughly 2.8-3.3 GB, leaving hundreds of MB more for KV cache and runtime overhead.
     - Decoding bandwidth is driven by the bytes moved per generated token after tiling, caching, and fused dequantization, not by a simple full-model-size * tokens/sec product.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bandwidth Bound**. Plain 4-bit is too tight once overhead is included, so the design should use calibrated 3/4-bit weight packing, fused dequantization, and bounded KV memory rather than relying on nominal parameter size alone.
+    - **Result: Memory-Bandwidth Bound**. 4-bit is the likely baseline, but the final format depends on measured overhead and KV budget; mixed 3/4-bit becomes justified when 4-bit leaves too little headroom for context and runtime buffers.
 status: published
 provenance: imported
 requires_explanation: true

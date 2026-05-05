@@ -12,30 +12,30 @@ scenario: |
   You are the lead architect for a new Automotive Emergency Braking System (AEBS) running on a Cortex-M7 microcontroller. The system must fuse data from two sensors: a standard camera (8-bit pixel values, 0-255) and a new, low-cost LiDAR sensor whose output represents distance in millimeters (0-65535, i.e., 16-bit). The fusion model has two input branches that meet at a shared 'fusion layer'. Your hard real-time deadline from sensor read to brake signal is 1ms. The MCU's SRAM is 1MB.
 question: 'Propose a quantization strategy for the two branches of the network, and determine what the dominant factor in your energy budget calculation is: compute or memory access?'
 details:
-  realistic_solution: The correct architectural decision is to use mixed precision. The camera branch, with its native 8-bit input, is a perfect candidate for full INT8 quantization. Its weights and activations will fit neatly within the 8-bit dynamic range. The LiDAR branch, however, requires its early layers to be kept in FP16 (or at least 16-bit integer) to preserve the high dynamic range of the distance measurements. After several layers of processing where the internal feature maps have been normalized or their range has been reduced (e.g., through activation functions like ReLU6), the LiDAR branch can then be quantized to INT8 before the fusion layer. This hybrid approach prevents overflow on the critical sensor while still reaping most of the benefits of INT8 quantization in the deeper parts of the model and the entire camera branch. You must use a representative calibration dataset that captures the full range of LiDAR values to determine the precise layer to transition from FP16
-    to INT8. The dominant energy cost will be memory access, not compute, as is typical for memory-bound TinyML systems.
+  realistic_solution: The correct architectural decision is to use mixed precision. The camera branch starts from 8-bit pixels, so it is a strong candidate for INT8 after representative calibration confirms that its early activations and accuracy remain stable. The LiDAR branch should keep the raw input and early feature extraction in FP16 or 16-bit fixed point to preserve distance resolution and avoid excessive clipping. After normalization or range-reducing layers, the LiDAR branch can transition to INT8 before the fusion layer if calibration shows acceptable error. This hybrid approach preserves the high-dynamic-range sensor path while still gaining most of the SRAM and bandwidth benefits from INT8 in the camera path, later LiDAR layers, and fusion layers. The dominant energy cost is usually SRAM/Flash traffic for weights and activations, not the arithmetic alone.
   common_mistake: |
-    **The Pitfall:** Quantizing the entire model, including the LiDAR branch, directly to INT8.
-    **The Rationale:** Engineers apply blanket INT8 quantization to maximize speed and minimize memory without profiling the native dynamic range of the sensors.
-    **The Consequence:** The 16-bit LiDAR input (0-65535) suffers catastrophic overflow when linearly squeezed into INT8 (-128 to 127), causing the vehicle to misinterpret distant objects as imminent collision threats.
+    **The Pitfall:** Quantizing the entire model, including the LiDAR front end, directly to INT8.
+    **The Rationale:** Engineers apply blanket INT8 quantization to maximize speed and minimize memory without calibrating the native dynamic range of each sensor branch.
+    **The Consequence:** The 16-bit LiDAR distance path loses resolution or clips important ranges, so the fusion model can mis-rank obstacles even though the camera branch still behaves well.
   napkin_math: |
     **Assumptions & Constraints:**
     - Latency constraint: 1 ms.
     - Cortex-M7 clock: 480 MHz.
-    - Conservative scalar FP32 throughput: ~1 floating-point operation/cycle = 480 Mops/s.
-    - INT8 DSP throughput assumption: ~4 8-bit operations/cycle = 1.92 Gops/s.
-    - 250K-parameter fusion model: assume roughly 2 operations per parameter per inference = 500K operations.
-    - Approximate SRAM read energy: 20 pJ/byte; approximate MAC energy: 1 pJ/op.
+    - FP32 throughput budget: roughly 480 Mops/s before pipeline and memory stalls.
+    - INT8 DSP throughput budget: up to roughly 1.92 Gops/s for well-mapped kernels.
+    - 250K-parameter fusion model: roughly 500K operations per inference.
+    - SRAM/Flash movement for weights and activations is often the dominant TinyML energy term; use 20 pJ/byte as an illustrative SRAM-access budget and 1 pJ/op as an illustrative MAC budget.
 
     **Calculations:**
-    - FP32 compute runtime: 500K ops / 480 Mops/s = 1.04 ms, already over the 1 ms deadline before sensor I/O and control overhead.
-    - INT8 compute runtime: 500K ops / 1.92 Gops/s = 0.26 ms, leaving room for the real-time pipeline.
+    - FP32 compute lower-bound runtime: 500K ops / 480 Mops/s = 1.04 ms before sensor I/O, memory stalls, and control overhead.
+    - INT8 compute lower-bound runtime for supported layers: 500K ops / 1.92 Gops/s = 0.26 ms, leaving more schedule headroom.
     - FP32 parameter traffic: 250K * 4 bytes = 1.0 MB; memory energy ≈ 1.0 MB * 20 pJ/byte = 20 µJ.
     - INT8 parameter traffic: 250K * 1 byte = 250 KB; memory energy ≈ 250 KB * 20 pJ/byte = 5 µJ.
-    - Compute energy estimate: 500K ops * 1 pJ/op = 0.5 µJ.
+    - Compute energy illustration: 500K ops * 1 pJ/op = 0.5 µJ, smaller than repeated parameter/activation traffic under these assumptions.
+    - Mixed precision keeps LiDAR raw input and early layers at FP16 or 16-bit fixed point, then uses INT8 only after calibration shows feature ranges are bounded.
 
     **Conclusion & Interpretation:**
-    - **Result: FP32 is ~1.04 ms before overhead; INT8 is ~0.26 ms, and memory traffic dominates energy (Memory-Bound)**. Hybrid quantization is justified by both latency headroom and the 4x reduction in parameter traffic, while FP16 or 16-bit handling is reserved for the high-dynamic-range LiDAR front end.
+    - **Result: mixed precision with memory traffic as the dominant energy term (Memory-Bound)**. Use INT8 for the calibrated camera branch and later normalized layers, while preserving FP16 or 16-bit precision for the LiDAR front end until quantization error is validated.
 status: published
 provenance: imported
 requires_explanation: false

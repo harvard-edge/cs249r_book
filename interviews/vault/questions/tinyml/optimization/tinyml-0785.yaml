@@ -11,23 +11,25 @@ title: The Depthwise Separable Arithmetic Intensity Drop
 scenario: You replace standard convolutions with depthwise separable convolutions on a Jetson Orin to speed up a vision model. Despite FLOPs dropping by 9x, the end-to-end latency only improves by 10%.
 question: Why does replacing standard convolutions with depthwise separable convolutions barely improve Jetson Orin latency?
 details:
-  realistic_solution: Depthwise convolutions have notoriously low arithmetic intensity because they don't reuse input channels across output channels. While you slashed the FLOPs, you pushed the operation deep into the memory-bound region of the roofline model. The Jetson Orin's ridge point is 275 TOPS / 204 GB/s ≈ 1348 ops/byte. With a simple depthwise 3x3 traffic model of 18 ops per roughly 20 bytes, AI ≈ 0.9 ops/byte, so attainable throughput is only about 184 GOPS — far below the 275 TOPS compute ceiling. The GPU is now idling waiting for memory. The solution is to fuse the depthwise convolution with the pointwise convolution or activation layers to increase arithmetic intensity and reduce memory traffic.
+  realistic_solution: Depthwise convolutions have notoriously low arithmetic intensity because they don't reuse input channels across output channels. While you slashed the FLOPs, you pushed the operation into a memory-bound region of the roofline model. Using an INT8 convention of 1 TOPS = 10^12 operations/s, a 275 TOPS peak and 204 GB/s memory bandwidth imply a very high compute-to-bandwidth balance of about 1348 ops/byte. A 3x3 depthwise output does 9 MACs, or 18 ops, while reading at least 9 input bytes, 9 weight bytes, and writing 1 output byte before counting scale metadata or imperfect cache reuse. That gives at most about 0.95 ops/byte, so bandwidth alone caps sustained work near 194 GOPS before overheads. The GPU is now idling waiting for memory. The solution is to fuse the depthwise convolution with the pointwise convolution or activation layers to increase arithmetic intensity and reduce memory traffic.
   common_mistake: |
     **The Pitfall:** Assuming that reducing theoretical FLOPs will yield a linearly proportional decrease in latency on modern bandwidth-constrained hardware.
     **The Rationale:** Engineers evaluate algorithms entirely on FLOPs instead of factoring in the cost of memory movement and arithmetic intensity.
     **The Consequence:** Heavy refactoring effort yields practically zero real-world speedup because the bottleneck shifted entirely to memory bandwidth.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Orin ridge point: 275 TOPS / 204 GB/s ≈ 1348 OPs/byte.
-    - Depthwise 3x3 per output element: 9 MACs = 18 OPs.
-    - Simple byte model: 9 input bytes + 9 weight bytes + 1 output write + about 1 byte amortized scale/metadata traffic = 20 bytes.
+    - Convention: 1 TOPS = 10^12 INT8 operations/s and 1 GB/s = 10^9 bytes/s.
+    - Orin compute-to-bandwidth balance: 275e12 ops/s / 204e9 bytes/s = about 1348 ops/byte.
+    - Depthwise 3x3 per output element: 9 MACs = 18 ops.
+    - Conservative lower-bound byte traffic: 9 input bytes + 9 weight bytes + 1 output byte = 19 bytes, before scale metadata, activation re-reads, or cache inefficiency.
 
     **Calculations:**
-    - Arithmetic Intensity: 18 OPs / 20 bytes = 0.9 OPs/byte.
-    - Attainable compute: 0.9 OPs/byte × 204 GB/s = 183.6 GOPS.
+    - Arithmetic intensity upper bound: 18 ops / 19 bytes = 0.95 ops/byte.
+    - Bandwidth-limited throughput upper bound: 0.95 ops/byte * 204 GB/s = about 194 GOPS.
+    - 0.95 ops/byte is far below the about 1348 ops/byte balance point, so the layer is memory-bound under this model.
 
     **Conclusion & Interpretation:**
-    - **Result: about 184 GOPS (Memory-Bound)**. AI (0.9) << Ridge Point (1348). This is only about 0.07% of the 275 TOPS ceiling, so the depthwise layer can be dominated by memory stalls despite a large FLOP reduction.
+    - **Result: at most about 194 GOPS before additional overheads (Memory-Bound)**. The exact sustained number depends on cache reuse, layout, and kernel fusion, but the qualitative diagnosis is robust: the depthwise layer has too little arithmetic work per byte to approach the 275 TOPS compute ceiling.
 status: published
 provenance: imported
 requires_explanation: false

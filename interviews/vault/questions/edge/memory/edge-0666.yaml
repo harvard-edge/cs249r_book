@@ -11,7 +11,7 @@ title: The Edge GPU Memory Bandwidth
 scenario: 'Your team developed a YOLOv8-L model that runs at 60 FPS on a desktop RTX 4090 (1 TB/s GDDR6X bandwidth, 1321 TOPS INT8). You need to deploy the same model on a Jetson Orin NX (102.4 GB/s LPDDR5, 100 TOPS INT8). Your colleague calculates: ''The Orin has 100/1321 = 7.6% of the 4090''s compute, so we''ll get 60 × 0.076 = 4.5 FPS.'' But the actual result is 8 FPS.'
 question: Why is the colleague's estimate wrong in both directions — too pessimistic about compute, too optimistic about the real bottleneck?
 details:
-  realistic_solution: The colleague's estimate is wrong because peak TOPS is the wrong scaling signal for this deployment. On the RTX 4090, the roofline ridge point is 1321 TOPS / 1000 GB/s = ~1321 ops/byte, so a ~600 ops/byte YOLO workload can still be compute-limited there. On the Orin NX, the ridge point is 100 TOPS / 102.4 GB/s = ~977 ops/byte, so the same workload is closer to the memory-bandwidth limit and can use only about 600 ops/byte × 102.4 GB/s = 61 TOPS before memory traffic dominates. Scaling the 4090 result by peak TOPS predicts 4.5 FPS, but scaling by the Orin's attainable 61 TOPS versus its 100 TOPS peak gives a less pessimistic compute ceiling. The observed 8 FPS is plausible because the Orin run is partly memory-bound and benefits from TensorRT layer fusion and lower memory traffic; the lesson is to compare ridge points and effective bandwidth, not just peak TOPS.
+  realistic_solution: The colleague's estimate is wrong because peak TOPS is the wrong scaling signal for this deployment. A roofline view shows the YOLO engine is affected by arithmetic intensity and real tensor traffic, not just advertised INT8 throughput. With an approximate 600 ops/byte workload, the Orin NX memory roof is about 61 TOPS, so assuming the model can use the full 100 TOPS is too optimistic about the bottleneck. At the same time, comparing Orin's 100 TOPS directly to the RTX 4090's 1321 TOPS is too pessimistic because the 4090 result is also shaped by memory traffic, fusion, and framework behavior rather than pure peak compute. The measured 8 FPS is therefore plausible if TensorRT lowers activation traffic and uses bandwidth well, but it is not derivable from peak TOPS alone.
   common_mistake: |
     **The Pitfall:** "Performance scales linearly with TOPS."
     **The Rationale:** This assumes the workload is compute-bound on both platforms, which is almost never true for the same model on different hardware.
@@ -24,16 +24,17 @@ details:
 
     **Calculations:**
     - Peak TOPS ratio: 1321 / 100 = 13.2x, so naive FPS = 60 / 13.2 = 4.5 FPS.
-    - 4090 ridge point: 1321 TOPS / 1000 GB/s = 1321 ops/byte; AI=600 is below the ridge, so peak compute can still matter.
-    - Orin ridge point: 100 TOPS / 102.4 GB/s = 977 ops/byte; AI=600 is below peak-compute balance but attainable compute is capped by memory traffic at 600 * 102.4 GB/s = 61.4 TOPS.
-    - Orin effective TOPS fraction: 61.4 / 100 = 0.61, so a purely TOPS-based 4.5 FPS estimate can be too pessimistic if the deployed engine reduces traffic and uses the available bandwidth well.
+    - 4090 ridge point: 1321 TOPS / 1000 GB/s = 1321 ops/byte; with AI=600, the desktop run is below the ridge and cannot be explained by peak compute alone.
+    - Orin ridge point: 100 TOPS / 102.4 GB/s = 977 ops/byte; with AI=600, attainable throughput is capped by memory traffic at 600 ops/byte * 102.4 GB/s = 61.4 TOPS.
+    - Relative to Orin's 100 TOPS peak, the memory roof is 61.4 / 100 = 61%, so the full 100 TOPS is not the right expectation.
+    - Relative to the 4090's memory-limited roof of about 600 TOPS, Orin's 61.4 TOPS is about 10%, which would suggest roughly 6 FPS before differences in engine fusion, tensor layouts, and actual traffic. A measured 8 FPS is plausible if the Orin engine reduces bytes per frame versus the rough estimate.
 
     **Conclusion & Interpretation:**
     - **Result: 8 FPS is plausible but not derivable from peak TOPS alone.** The Orin run is constrained by attainable bandwidth and layer memory traffic, while the 4090 baseline is not evidence that both devices are memory-bound.
   options:
     - The latency is dominated by data preprocessing on the CPU; moving to GPU-accelerated preprocessing will resolve the bottleneck.
     - Performance scales linearly with TOPS. This assumes the workload is compute-bound on both platforms and ignores memory traffic and layer fusion.
-    - "The colleague's estimate is wrong because peak TOPS alone misses the roofline: the Orin run is limited by attainable memory bandwidth and effective layer traffic, while the 4090 baseline does not prove both devices have the same bottleneck."
+    - 'The colleague''s estimate is wrong because peak TOPS alone misses the roofline: the Orin run is limited by attainable memory bandwidth and effective layer traffic, while the 4090 baseline does not prove both devices have the same bottleneck.'
     - INT8 quantization reduces model size by 8x compared to FP32, so inference speed should also improve by exactly 8x.
   correct_index: 2
 status: published

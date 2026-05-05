@@ -25,12 +25,11 @@ details:
     - H100 bandwidth: 3.35 TB/s. Ridge point: 295 FLOPs/Byte.
 
     **Calculations:**
-    - Dense batch work = 128 tokens * 80 GFLOPs/token = 10.24 TFLOPs.
-    - Dense weight traffic per batch step is roughly one 80 GB weight stream if weights are reused across the batch, so dense AI ≈ 10.24 TFLOPs / 80 GB = 128 FLOPs/Byte, ignoring activations and cache effects.
-    - With uniform top-1 routing, each expert processes only about 16 tokens, so the same 80 GB expert stream is amortized over 16 tokens instead of 128.
-    - Expert-local AI falls by about 8x: 16 tokens * 80 GFLOPs/token / 80 GB ≈ 16 FLOPs/Byte.
-    - Equivalently, if the step touches all 8 experts, the batch-level upper-bound traffic intuition is 8 * 80 GB = 640 GB for the same 10.24 TFLOPs of active work.
-    - At 16 FLOPs/Byte, the MoE is far below the H100 ridge point, and dispatch/all-to-all, load imbalance, and smaller per-expert GEMMs further reduce achieved throughput.
+    - Dense serving applies one shared set of weights to all 128 tokens, so matrix operations are large and each streamed weight tile gets broad reuse across the batch.
+    - Uniform top-1 routing fragments the same 128 tokens across 8 experts, leaving each expert with about 16 tokens of useful work.
+    - Smaller expert-local batches shrink GEMM sizes, reduce tile reuse, and make the achieved arithmetic intensity lower even though each token still activates ~40B parameters.
+    - The MoE path also pays routing, dispatch/all-to-all, load-balance padding, and expert synchronization overhead that the dense path does not pay.
+    - Therefore equal active FLOPs is not a sufficient throughput model; the roofline denominator changes because useful weight reuse and communication behavior change.
 
     **Conclusion & Interpretation:**
     - **Result: Lower Effective Arithmetic Intensity.** The problem is not that every token uses 640GB of weights; it is that the batch is fragmented across experts, so there is far less reuse of each expert's weights and additional routing overhead. Equal active FLOPs therefore do not imply equal throughput.

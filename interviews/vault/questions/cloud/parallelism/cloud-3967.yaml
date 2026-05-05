@@ -11,7 +11,7 @@ title: Communication-Aware Model Architecture Design
 scenario: You are designing a new transformer architecture for training on 1024 GPUs. The current architecture has 128 attention heads and hidden_size=16384, requiring tensor-parallel AllReduce of 16384-dimensional vectors per layer.
 question: How would you choose the transformer dimensions and tensor-parallel layout to maximize communication-computation overlap on 1024 GPUs?
 details:
-  realistic_solution: 'Communication-aware design: (1) Map tensor-parallel groups inside the fastest local fabric, e.g. TP=8 within each 8-GPU NVLink island so each rank gets 128/8=16 heads. (2) Use the remaining 1024/(8 TP)=128 groups for pipeline and data parallelism, for example PP=16 and DP=8, with pipeline stages mapped across high-bandwidth neighboring nodes and data-parallel replicas spanning the wider fabric. (3) Keep hidden_size and head count divisible by TP, avoid very small per-rank GEMMs, and choose microbatching so each layer has enough compute after its tensor-parallel collective is launched. (4) At seq=4096, hidden=16384, BF16, two TP collectives move about 256MB per rank per layer; at 900GB/s this is about 0.28ms. A full transformer layer at this size is several milliseconds of GEMM/attention compute across the TP group, so the collective can often be hidden if scheduled immediately and kept on NVLink. (5) Do not assume overlap from arithmetic alone: verify with traces,
+  realistic_solution: 'Communication-aware design: (1) Map tensor-parallel groups inside the fastest local fabric, e.g. TP=8 within each 8-GPU NVLink island so each rank gets 128/8=16 heads. (2) Use the remaining 1024/(8 TP)=128 groups for pipeline and data parallelism, for example PP=16 and DP=8, with pipeline stages mapped across high-bandwidth neighboring nodes and data-parallel replicas spanning the wider fabric. (3) Keep hidden_size and head count divisible by TP, avoid very small per-rank GEMMs, and choose microbatching so each layer has enough compute after its tensor-parallel collective is launched. (4) At seq=4096, hidden=16384, BF16, two TP collectives move about 256 MiB per rank per layer; at 900 GB/s this is about 0.30 ms. A full transformer layer at this size is several milliseconds of GEMM/attention compute across the TP group, so the collective can often be hidden if scheduled immediately and kept on NVLink. (5) Do not assume overlap from arithmetic alone: verify with traces,
     tune bucket/stream priority, and avoid TP groups that cross slower InfiniBand links.'
   common_mistake: |
     **The Pitfall:** Designing model architectures purely for model quality without scaling hardware implications.
@@ -25,9 +25,9 @@ details:
     - Per-rank NVLink bandwidth for the collective path is approximated as 900 GB/s.
 
     **Calculations:**
-    - One full activation tensor is seq_len * hidden_size * bytes = 4096 * 16384 * 2 = 134MB.
-    - Approximate two TP collectives as two activation-sized transfers per rank: 2 * 134MB = 268MB, or about 256MiB.
-    - Per-rank communication time lower bound = 268MB / 900GB/s = 0.30ms.
+    - One full activation tensor is seq_len * hidden_size * bytes = 4096 * 16384 * 2 = 134,217,728 bytes = 128 MiB.
+    - Approximate two TP collectives as two activation-sized transfers per rank: 2 * 128 MiB = 256 MiB.
+    - Per-rank communication time lower bound = 256 MiB / 900 GB/s = about 0.30 ms.
     - Transformer-layer compute model across the TP group: roughly 24 * seq_len * hidden_size^2 + 4 * seq_len^2 * hidden_size = 27.5 TFLOPs.
     - Per-rank compute at TP=8 is 27.5 / 8 = 3.44 TFLOPs.
     - At 989 TFLOPS per GPU, ideal per-rank compute time is 3.44 / 989 seconds = 3.5ms.

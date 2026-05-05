@@ -11,8 +11,8 @@ title: Designing Medusa Heads for Self-Speculation
 scenario: Instead of a separate draft model, Medusa adds K lightweight prediction heads to the target 70B model's last hidden layer. Each head i predicts token at position t+i. You need to deploy this on 4x H100 with tensor parallelism. The hidden_dim of the target is 8192.
 question: How would you design the Medusa heads for a 70B target with hidden_dim=8192 on 4x H100, and what is their overhead?
 details:
-  realistic_solution: A minimal dense Medusa design attaches K=5 independent vocabulary heads to the final hidden state. With hidden_dim=8192 and vocab=128K, each full head has 8192 x 128K = 1.05B weights, or about 2.1GB in FP16. Five heads are 5.24B weights = 10.5GB total. With 4-way tensor parallel sharding of the vocab dimension, the storage is about 2.6GB/GPU, plus small bias and optimizer state during training. Inference compute is 2 x 8192 x 128K = 2.1 GFLOP per head, or 10.5 GFLOP total across the system; sharded per GPU that is about 2.6 GFLOP plus top-k/logit communication. This is not free, and runtime depends on GEMM efficiency, memory bandwidth, and kernel launch overhead. The acceptance profile 0.85, 0.72, 0.61, 0.52, 0.29 gives an upper-bound served-token yield of 1 + sum(alphas) = 3.99 per target verification round, but end-to-end speedup will be below that after head overhead, tree verification overhead, and batching effects. A production design often uses smaller MLP or
-    bottleneck heads before the vocab projection to reduce this cost.
+  realistic_solution: A minimal dense Medusa design attaches K=5 independent vocabulary heads to the final hidden state, with each head predicting one future offset. With hidden_dim=8192 and vocab=128K, each full head has 8192 x 128K = 1.05B weights, or about 2.1GB in FP16. Five heads are 5.24B weights = 10.5GB total. With 4-way tensor parallelism that shards the vocab projection columns across GPUs, storage is about 2.6GB/GPU, and each GPU computes its local vocab shard before top-k/logit communication. Inference compute is 2 x 8192 x 128K = 2.1 GFLOP per head across the full TP group; five heads are 10.5 GFLOP total, or about 2.6 GFLOP/GPU before communication and launch overhead. This is not free, so K=5 dense heads are a deliberate latency-quality tradeoff; a production design often uses smaller MLP or bottleneck heads before the vocab projection to reduce this cost. If the listed alphas are treated as marginal probabilities that each future offset survives verification, the simple first-order
+    served-token estimate is 1 + sum(alphas) = 3.99 tokens/round, not a guaranteed speedup.
   common_mistake: |
     **The Pitfall:** Making Medusa heads too large by matching the target model's full FFN dimensions.
     **The Rationale:** Engineers intuitively mirror the base model's architectural complexity for the prediction heads to maintain accuracy.
@@ -27,9 +27,9 @@ details:
        - With 4-way tensor parallel vocab sharding: 10.5 GB / 4 = 2.6 GB per GPU.
        - Forward FLOPs per head: 2 * 8192 * 128K = 2.1 GFLOP total, or about 0.52 GFLOP/GPU when sharded.
        - Five heads: 10.5 GFLOP total, or about 2.6 GFLOP/GPU, plus logit/top-k communication and launch overhead.
-       - Expected served tokens upper bound from the stated acceptance profile: 1 + 0.85 + 0.72 + 0.61 + 0.52 + 0.29 = 3.99 tokens.
+       - If the acceptance profile is interpreted as marginal survival probabilities for offsets 1..5, first-order served-token estimate = 1 + 0.85 + 0.72 + 0.61 + 0.52 + 0.29 = 3.99 tokens/round.
     3. **Conclusion & Interpretation:**
-       - **Result: Non-negligible Head Overhead.** Dense heads add about 2.6GB/GPU and several GFLOPs/GPU per round; the 3.99-token yield is an upper bound, not a justified 4x end-to-end speedup.
+       - **Result: Non-negligible Head Overhead.** Dense heads add about 2.6GB/GPU and several GFLOPs/GPU per round; the 3.99-token estimate depends on the verification interpretation and is not a justified 4x end-to-end speedup.
 status: published
 provenance: imported
 requires_explanation: true

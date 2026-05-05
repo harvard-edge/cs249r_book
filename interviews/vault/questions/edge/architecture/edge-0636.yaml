@@ -12,7 +12,7 @@ scenario: Your current system, built on a Jetson AGX Orin, uses a large, monolit
 question: What are your first three architectural decisions, and how do you justify them with quantitative reasoning?
 details:
   realistic_solution: |
-    The first decision is to stop scaling the monolithic CNN and move to conditional compute: a cheap shared backbone plus specialist heads or experts that run only when scene complexity requires them. The second decision is to reduce sensor work before the large model, using per-camera ROI selection, lower-rate heavy inference, and asynchronous fusion so empty highway frames do not pay the same cost as dense urban frames. The third decision is to partition and schedule the model around the accelerator: keep the shared encoder resident, fuse kernels, and reserve the expensive heads for bounded time slots so average power stays under 60W and worst-case latency remains controlled.
+    The first decision is to reject a 40% always-on expansion of the monolithic CNN because it would exceed the 60W envelope. Replace it with conditional compute: a shared backbone plus specialist heads that run only on frames, cameras, or regions that need the extra capacity. The second decision is to reduce sensor work before the expensive heads through ROI selection, lower-rate heavy inference, and asynchronous fusion so empty highway frames do not pay dense-urban compute cost. The third decision is to partition and schedule the model around the accelerator: keep the shared encoder resident, fuse kernels, and allocate bounded time slots to specialist heads so average power stays under 60W and worst-case latency remains controlled.
   common_mistake: |
     **The Pitfall:** Proposing incremental optimizations like switching to MobileNetV3 or aggressive INT8 quantization.
     **The Rationale:** Engineers assume 10-20% efficiency gains will scale, but a 40% capability increase within the same power budget requires an architectural paradigm shift.
@@ -27,9 +27,10 @@ details:
     **Calculations:**
     - Naively scaling the current model by 40% gives roughly 55W * 1.4 = 77W, which exceeds the 60W limit by 17W.
     - To fit 60W, the average active compute must be no more than 60W / 77W = 78% of the naive always-on model.
-    - A conditional design can meet that if expensive experts run on at most about 50% of frames or regions: 55W shared baseline plus only the needed fraction of the added 22W compute.
-    - Raw RGB input for all cameras is 48MP * 3 bytes = 144MB per frame; at 30 FPS this is 4.32 GB/s before intermediate activations, so sensor traffic is manageable relative to 204.8 GB/s but activation reuse and scheduling still matter.
-    - ROI cropping or lower-rate heavy inference that removes 50% of pixels before specialist heads can reduce the new-feature compute and activation traffic by roughly 2x.
+    - The available headroom is only 60W - 55W = 5W, so the added feature compute may consume at most 5W / 22W = 23% of the naive always-on increment on average.
+    - Equivalently, a conditional design can fit if the extra heads run on no more than about 23% of frames/regions, or if ROI gating and model redesign reduce the added compute by roughly 4.4x.
+    - Raw RGB input for all cameras is 48MP * 3 bytes = 144MB per fused frame; at 30 FPS this is 4.32 GB/s before intermediate activations. That raw input stream is not the main power proof; the binding constraint is average accelerator work and activation movement inside the model.
+    - ROI cropping, lower-rate heavy inference, and specialist scheduling must therefore reduce both added FLOPs and activation traffic enough that the incremental average power stays within the 5W headroom.
 
     **Conclusion & Interpretation:**
     - **Result: Naive scaling is a power failure, not a raw input-bandwidth failure.** Conditional compute, sensor/ROI gating, and accelerator-aware partitioning are the architectural decisions that make the 40% accuracy-driven capacity increase plausible within 60W.

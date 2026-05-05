@@ -12,7 +12,7 @@ scenario: 'Your fraud detection system has a strict 50ms p99 latency SLA, leavin
 question: How do the on-the-fly and streaming designs compare for the 30-day z-score, and what architecture would you choose?
 details:
   realistic_solution: |
-    Approach A (On-the-fly) decomposes latency into: Redis lookup (1-2ms) + Network transfer of 50KB (approx 4-8ms at p99 depending on network topology and Redis serialization) + CPU JSON parsing and math (5-10ms). Total feature latency approaches 10-20ms, frequently violating the 15ms budget at p99. However, it requires no streaming infrastructure and avoids write-amplification. Approach B (Streaming) decomposes latency into: Redis lookup of a single pre-computed float (1ms) + Network transfer of 8 bytes (<1ms) + CPU parsing (<1ms). Total latency is ~2ms, safely within budget. The systemic tradeoff is architectural complexity: Flink must maintain massive state (30-day windows for millions of users) and write to Redis on every transaction. The optimal tradeoff is often a Hybrid (Lambda) architecture: Pre-compute daily batch rollups (sum, count, sum_squares) stored in Redis, and only fetch today's raw events (average ~33 events, <2KB) on-the-fly to compute the final delta, yielding 3-4ms latency while eliminating Flink state.
+    Approach A (On-the-fly) fetches the user's 30-day transaction history and computes the z-score at request time. Its p99 latency is Redis lookup/serialization plus transferring and parsing about 50KB, then computing count, sum, and sum of squares over roughly 1,000 transactions. That can land around 8-16ms and has little margin inside a 15ms feature budget. Approach B (Streaming) stores the rolling 30-day count, sum, and sum_squares in Redis; retrieval reads one compact aggregate record and computes the z-score in about 1-3ms. The tradeoff is write amplification and stream state: Flink must update or expire rolling aggregates on transaction events and handle late data. I would choose streaming aggregates for the p99 SLA, or a hybrid that stores daily rollups plus the current day's small delta when exact per-event streaming state is operationally too expensive.
   common_mistake: |
     **The Pitfall:** Assuming on-the-fly compute only adds CPU latency.
     **The Rationale:** Modern CPUs parse JSON fast, so engineers assume the math is cheap.
@@ -24,12 +24,14 @@ details:
        - Redis p99 lookup plus serialization: 3-6ms.
        - CPU parse/math for ~1,000 monthly transactions: 5-10ms.
        - Streaming state keeps rolling count, sum, sum of squares, and expiry metadata per user.
+       - Optional sizing example assumes 10M active users; the architecture choice does not depend on that exact count.
     **Calculations:**
        - Ideal wire time: 50 KB / 1.25 GB/s = ~0.04ms, so p99 latency is dominated by Redis lookup, serialization, and client/runtime overhead.
        - On-the-fly p99 estimate: 3-6ms fetch + 5-10ms parse/math = 8-16ms, which can exceed the 15ms budget.
-       - Streaming Redis value: count, sum, sum_squares, and timestamp metadata is roughly 32-64 bytes/user.
-       - Aggregate state for 10M users: 10M * 64 bytes = 640 MB, plus Flink window/timer overhead rather than 500 GB of raw payloads.
-    **Conclusion & Interpretation:** **8-16ms on-the-fly vs ~GB-scale streaming state (P99-Latency-Bound).** Precomputed rolling aggregates or a hybrid daily-rollup design meet the SLA more reliably than parsing 30 days of raw events per request.
+       - Streaming Redis value: count, sum, sum_squares, and timestamp/expiry metadata is roughly 32-64 bytes/user.
+       - Example aggregate state for 10M users: 10M * 64 bytes = 640 MB in Redis, plus Flink window/timer overhead; this replaces fetching 50KB of raw history on every scored request.
+       - Hybrid daily rollups store up to 30 daily aggregate rows per user and merge only the current-day delta, keeping request-time work bounded by a small number of aggregates rather than 1,000 raw events.
+    **Conclusion & Interpretation:** **8-16ms on-the-fly vs 1-3ms aggregate lookup (P99-Latency-Bound).** Precomputed rolling aggregates or a hybrid daily-rollup design meet the SLA more reliably than parsing 30 days of raw events per request.
 status: published
 provenance: imported
 requires_explanation: false

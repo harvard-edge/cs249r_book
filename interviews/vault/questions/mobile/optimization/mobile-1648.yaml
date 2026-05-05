@@ -7,12 +7,12 @@ topic: operator-scheduling
 competency_area: optimization
 bloom_level: analyze
 phase: inference
-title: LLM Operator Scheduling on Hexagon NPU
-scenario: You are tasked with optimizing the inference latency and memory footprint of a critical, computationally intensive block within a large language model (LLM) for deployment on a mobile NPU. The LLM block consists of a sequence of operators, some of which are memory-bound (e.g., element-wise operations with large tensors), while others are compute-bound (e.g., matrix multiplications).
+title: Transformer Decode Block Scheduling on Hexagon NPU
+scenario: You are optimizing a transformer decode block on a Snapdragon-class Hexagon NPU. The block runs RMSNorm, QKV projections, attention with KV-cache reads, output projection, MLP matmuls, GELU/SwiGLU, residual adds, and requantization; the matmuls are compute-heavy while norms, residuals, and cache reads are memory-heavy.
 question: How would you schedule an LLM block on the NPU to reduce latency, reuse memory, exploit parallelism, and apply layer fusion to meet a 100ms latency target?
 details:
   realistic_solution: |
-    A realistic solution involves a multi-pronged approach: 1. **Computational Graph Analysis**: Represent the LLM block as a DAG to identify data dependencies. 2. **Memory-Aware Scheduling**: Employ algorithms to determine an execution order that maximizes in-place operations and minimizes peak memory footprint. 3. **Layer Fusion**: Identify sequences of operations that can be fused into a single kernel (e.g., FlashAttention-style attention kernels where supported) to reduce memory reads/writes. 4. **Parallelism Exploitation**: Schedule independent subgraphs to run concurrently. 5. **Profiling and Iteration**: Start with an initial schedule, use Qualcomm AI Engine Direct / Snapdragon Profiler or equivalent on-device NPU profiling, analyze bottlenecks, and iteratively refine.
+    Represent the decode block as a DAG and schedule it around the longest live tensors: hidden state, QKV projections, attention output, MLP intermediate, and KV-cache slices. Fuse RMSNorm with the following linear input preparation where supported, fuse residual/add/requantization epilogues into matmul kernels, and use a FlashAttention-style or tiled attention kernel so QK, softmax, and AV do not materialize large intermediate tensors. Reuse a preallocated activation arena across the attention and MLP phases, keep KV-cache blocks contiguous or paged for predictable gathers, and avoid CPU/GPU fallback operators in the hot path. Use Qualcomm AI Engine Direct or Snapdragon Profiler to compare per-operator latency, bytes moved, and NPU occupancy, then revise tile sizes, fusion choices, and parallel head/MLP scheduling until the block fits the 100 ms budget.
   common_mistake: |
     **The Pitfall:** Prioritizing compute utilization without adequately considering memory access patterns and bandwidth limitations.
     **The Rationale:** Candidates often focus purely on parallelizing matrix multiplications and maximizing TOPS utilization.

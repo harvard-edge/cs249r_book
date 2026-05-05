@@ -11,14 +11,14 @@ title: AllReduce Algorithm Selection for Heterogeneous Bandwidth Topology
 scenario: 'A 256-GPU cluster has a hierarchical network: 8 GPUs per node (NVLink 900GB/s), 8 nodes per rack (HDR InfiniBand 200Gbps), 4 racks (HDR100 100Gbps inter-rack). Gradient tensors are 40GB (FP32, 10B params).'
 question: What hierarchical AllReduce topology, time estimate, and optimization should the 256-GPU cluster use for 40 GB gradients?
 details:
-  realistic_solution: 'Hierarchical AllReduce exploits bandwidth hierarchy. Treat the 900GB/s NVLink figure as bidirectional aggregate and use about 450GB/s as a conservative one-way ring bandwidth. Step 1: within each 8-GPU node, reduce and broadcast the 40GB gradient over NVLink, 2×(7/8)×40GB/450GB/s=155ms. Step 2: within each rack, the 8 node leaders reduce and broadcast the 40GB rack result over 200Gbps links, 2×(7/8)×40GB/25GB/s=2.8s. Step 3: rack leaders run a 4-way inter-rack AllReduce over 100Gbps links, 2×(3/4)×40GB/12.5GB/s=4.8s. Dominant cost is inter-rack. Optimize by compressing or sparsifying only restart-tolerant gradient traffic at the rack boundary; 10× compression makes the inter-rack term about 480ms and total time about 3.4s versus 7.8s uncompressed.'
+  realistic_solution: 'Hierarchical AllReduce exploits bandwidth hierarchy. Treat the 900GB/s NVLink figure as bidirectional aggregate and use about 450GB/s as a conservative one-way ring bandwidth. Step 1: within each 8-GPU node, reduce-scatter and allgather the local gradient partitions over NVLink, with a 40GB-equivalent ring cost of 2×(7/8)×40GB/450GB/s=155ms. Step 2: node leaders within each rack exchange the rack-level partitions over 200Gbps links, 2×(7/8)×40GB/25GB/s=2.8s. Step 3: rack leaders exchange the inter-rack partitions over 100Gbps links, 2×(3/4)×40GB/12.5GB/s=4.8s. The modeled tiers are sequential critical-path contributions, not additional full-gradient copies per GPU. Uncompressed total is about 7.76s. A concrete optimization is topology-aware sharding or PowerSGD/error-feedback compression at the inter-rack boundary; 10× compression makes the inter-rack term about 480ms and total time about 3.44s.'
   common_mistake: |
     **The Pitfall:** Using flat ring-AllReduce across all 256 GPUs.
     **The Rationale:** Candidates may default to the standard NCCL ring topology without adapting to the network's bandwidth hierarchy.
     **The Consequence:** Routing 80% of gradient traffic over the slow 100Gbps inter-rack links, drastically bottlenecking the entire training cluster.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 40GB gradients are reduced at each hierarchy level.
+    - 40GB gradient-equivalent traffic is modeled once per hierarchy level on the critical path.
     - NVLink is quoted as 900GB/s aggregate; use 450GB/s as a conservative one-way ring bandwidth.
     - Intra-rack 200Gbps bandwidth: 25GB/s between node leaders.
     - Inter-rack 100Gbps bandwidth: 12.5GB/s between rack leaders.
@@ -27,11 +27,12 @@ details:
     - Intra-node reduce+broadcast over 8 GPUs: 2 * (7/8) * 40GB / 450GB/s = 155ms.
     - Intra-rack reduce+broadcast over 8 node leaders: 2 * (7/8) * 40GB / 25GB/s = 2.8s.
     - Inter-rack AllReduce over 4 rack leaders: 2 * (3/4) * 40GB / 12.5GB/s = 4.8s (Critical Path).
-    - Compressing gradients at rack boundary by 10x: 4GB across racks -> 480ms.
-    - Total time with compression: 155ms + 2.8s + 480ms = 3.4s.
+    - Uncompressed critical-path total: 155ms + 2.8s + 4.8s = 7.76s.
+    - Compressing or topology-sharding inter-rack traffic by 10x: 4GB equivalent across racks -> 480ms.
+    - Total time with inter-rack compression: 155ms + 2.8s + 480ms = 3.44s.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.4s AllReduce Time** (Inter-rack bandwidth is the bottleneck; compression reduces total time significantly).
+    - **Result: 7.76s uncompressed, about 3.44s with 10x inter-rack reduction.** Inter-rack bandwidth is the bottleneck, so optimize the rack-boundary traffic first.
 status: published
 provenance: imported
 requires_explanation: true

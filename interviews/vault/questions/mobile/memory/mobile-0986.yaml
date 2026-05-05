@@ -12,7 +12,7 @@ scenario: An engineer asks why a 3B parameter model needs INT4 quantization to r
 question: Why does a 3B parameter model require INT4 quantization to run on an 8GB iPhone 16 Pro?
 details:
   realistic_solution: |
-    8GB total. iOS system reserve: ~2GB (kernel, IOKit, Metal framework, NE firmware). App memory pressure: iOS kills apps > 4-5GB in practice. Available for ML app: ~3-4GB effective. 3B FP16: 6GB doesn't fit. 3B INT4: 1.5GB weights. KV at 2048 ctx (32 layers, 32 heads, 128 dim): 2048x524KB=1.07GB FP16. App + KV + model: 1.5+1.07+1GB app = 3.57GB. Fits in 4GB budget. INT4 is required not because of raw RAM but due to OS overhead and KV-cache needs.
+    8GB total does not mean 8GB is available to the model. iOS and frameworks reserve roughly 2GB, and a production app should stay near a 3-4GB effective ML budget to avoid memory-pressure kills. A 3B FP16 model needs about 6GB for weights alone, so it does not fit. A 3B INT4 model uses about 1.5GB for weights. For an illustrative FP16 KV cache at 2048 tokens with 32 layers, 32 KV heads, and head_dim 128, KV bytes/token = 2 (K,V) * 32 * 32 * 128 * 2 = 524,288 bytes = 512 KiB, so 2048 tokens require 1.00 GiB = 1.07GB decimal. INT4 weights + FP16 KV + app/runtime overhead is roughly 1.5GB + 1.07GB + 1GB = 3.57GB, which fits a 4GB effective budget. INT4 is required because weights, context-length-dependent KV cache, and runtime overhead must fit the app budget, not because all physical RAM is available.
   common_mistake: |
     **The Pitfall:** Assuming all physical RAM is available exclusively for the ML model.
     **The Rationale:** Developers accustomed to cloud environments fail to account for the mobile OS's strict memory reservations and aggressive app-killing policies for memory pressure.
@@ -22,11 +22,13 @@ details:
     - Physical RAM: 8GB.
     - iOS Reserves: 2GB.
     - Safe ML app budget before memory pressure risk: ~4GB.
-    - KV cache at 2048 context: ~1.07GB.
+    - Illustrative FP16 KV cache: 32 layers, 32 KV heads, head_dim 128, 2048 context.
     - App/runtime overhead: ~1GB.
 
     **Calculations:**
-    - FP16 Model: 6GB > 4GB (Fails).
+    - FP16 Model: 3B * 2 bytes = 6GB > 4GB effective app budget (Fails).
+    - FP16 KV bytes/token = 2 (K,V) * 32 layers * 32 KV heads * 128 dim * 2 bytes = 524,288 bytes = 512 KiB.
+    - FP16 KV at 2048 tokens = 2048 * 512 KiB = 1.00 GiB = 1.07GB decimal.
     - INT8 Model: 3GB (weights) + 1.07GB (KV cache) + 1GB (app/runtime overhead) = 5.07GB (Fails).
     - INT4 Model: 1.5GB (weights) + 1.07GB (KV cache) + 1GB (app/runtime overhead) = 3.57GB (Fits).
 

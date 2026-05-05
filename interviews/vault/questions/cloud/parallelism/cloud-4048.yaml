@@ -11,8 +11,8 @@ title: Detecting Silent Gradient Corruption
 scenario: Your 512-H100 training run shows gradually increasing loss after 50K iterations, eventually diverging at 80K. All hardware health checks pass. GPU temperatures, memory errors (ECC), and NIC error counters are normal. You suspect silent gradient corruption during AllReduce.
 question: How would you detect which GPU or network path is producing corrupted gradients?
 details:
-  realistic_solution: 'Detection strategy: (1) Gradient checksum verification: before AllReduce, each GPU computes a CRC32 of its gradient buffer and broadcasts the checksum. After AllReduce, verify the result''s checksum matches the expected reduction of input checksums. Cost: ~200μs per iteration for a 2GB buffer using a GPU-parallel checksum kernel. (2) Sentinel value injection: insert known values (0.0, 1.0, -1.0) at fixed positions in the gradient buffer. After AllReduce, verify these sentinels reduced correctly (sum should equal N × value). Any deviation indicates corruption. (3) Binary search isolation: split GPUs into two halves and run the same checksum/sentinel test within each half. The half that reproduces checksum or sentinel mismatches contains the corrupted GPU or network path. Recurse for log₂(512) = 9 rounds, and confirm by rerunning with that GPU or path removed. (4) Per-GPU gradient norm monitoring: compute ||g_i|| for each GPU i. A corrupted GPU will have anomalous gradient
-    norms (typically very large due to bit flips in the exponent field of FP16). Alert if any GPU''s norm exceeds 10× the median. The root cause is often a marginal PCIe retimer or a faulty NIC ASIC that passes link-level CRC checks but corrupts payload intermittently.'
+  realistic_solution: 'Detection strategy: (1) Gradient signature verification: before AllReduce, each GPU computes a CRC32 or stronger hash of its local 2GB gradient buffer and logs/broadcasts that per-rank signature. After AllReduce, compute a separate checksum of the reduced output and compare it across ranks or against a clean rerun; do not assume CRCs reduce linearly with summed tensors. Cost: ~200μs per iteration for a 2GB buffer using a GPU-parallel checksum kernel. (2) Sentinel value injection: insert known values (0.0, 1.0, -1.0) at fixed positions in the gradient buffer. After AllReduce, verify these sentinels reduced correctly (sum should equal N × value). Any deviation indicates corruption. (3) Binary search isolation: split GPUs or network paths into two halves and run the same checksum/sentinel test within each half. The half that reproduces mismatches contains the corrupted GPU, NIC, link, or shared path. Recurse for log₂(512) = 9 rounds, and confirm by rerunning with that
+    GPU or path removed. (4) Per-GPU gradient norm monitoring: compute ||g_i|| for each GPU i. A corrupted GPU will have anomalous gradient norms (typically very large due to bit flips in the exponent field of FP16). Alert if any GPU''s norm exceeds 10× the median. The root cause is often a marginal PCIe retimer or a faulty NIC ASIC that passes link-level CRC checks but corrupts payload intermittently.'
   common_mistake: |
     **The Pitfall:** Only checking hardware error counters.
     **The Rationale:** Believing that modern hardware always reports errors when they occur.
@@ -20,10 +20,12 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - CPU CRC32 of 2GB at 32GB/s would take about 62.5ms, which is too expensive for every step.
-    - Use a GPU-parallel checksum kernel estimated at about 200us per 2GB buffer.
+    - Use a GPU-parallel checksum kernel estimated at about 200us per 2GB gradient buffer per iteration.
+    - Training iteration time for this overhead estimate is 100ms.
     - Binary search isolation requires up to 9 rounds (log2 of 512).
 
     **Calculations:**
+    - CPU checksum time: 2GB / 32GB/s = 62.5ms.
     - Cost: 200us per iteration / 100ms iteration = 0.2% overhead.
     - Isolation runtime is 9 rounds times the chosen reproduction test duration; the math determines the number of rounds, not a fixed wall-clock time.
 

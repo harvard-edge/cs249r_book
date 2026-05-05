@@ -11,8 +11,8 @@ title: Speculative Decoding vs Increasing Batch Size
 scenario: On 4x H100, a 70B model at batch=1 produces ~96 tok/s (memory-bound).
 question: For options (A) speculative decoding (K=5), (B) batch=8, and (C) both, how do latency, throughput, and GPU utilization compare?
 details:
-  realistic_solution: '(A) Speculation at batch=1: round time = 10ms draft + 10.5ms verify = 20.5ms. Expected served tokens per request = 3.69, so per-stream token latency is 20.5/3.69 = 5.6ms/tok and throughput is 3.69/20.5ms = 180 tok/s. Using an explicit 4xH100 bandwidth peak of about 13.4 TB/s, MBU is about 140GB/20.5ms = 6.8 TB/s, or 51%. This is a separate speculative setup from the stated 96 tok/s autoregressive baseline. (B) Batch=8 without speculation: weight read = 140GB plus KV read 8 x 640MB = 5.1GB, so IO time is about 10.8ms; compute is only about 0.28ms. Per-request token latency is 11.1ms/tok, aggregate throughput is 8/11.1ms = 721 tok/s, and MBU is about 98%. (C) Batch=8 with K=5 speculation: each round takes 10ms draft + 10.8ms IO + 1.7ms verification compute = 22.5ms total batch-round time. The batch serves 8 x 3.69 = 29.5 tokens per round, so aggregate throughput is 29.5/22.5ms = 1311 tok/s. The per-stream served-token latency is 22.5/3.69 = 6.1ms/tok, while the round
-    latency is 22.5ms. C has the highest aggregate throughput and good latency, but less than multiplicative gains because batching and speculation both consume the same bandwidth and compute headroom.'
+  realistic_solution: '(A) Speculation at batch=1: the given 96 tok/s baseline implies about 10.4ms per autoregressive target step, consistent with a 140GB weight read on ~13.4 TB/s aggregate HBM. Use 10.5ms as the K-token verification round. Round time = 10ms draft + 10.5ms verify = 20.5ms. Expected served tokens per request = 3.69, so per-stream token latency is 20.5/3.69 = 5.6ms/tok and throughput is 3.69/20.5ms = 180 tok/s. MBU during the full round is about 140GB/20.5ms = 6.8 TB/s, or 51%; the verify substep itself remains near the memory-bandwidth limit. (B) Batch=8 without speculation: weight read = 140GB plus KV read 8 x 640MB = 5.1GB, so IO time is about 10.8ms; compute is only about 0.28ms. Per-request token latency is 11.1ms/tok, aggregate throughput is 8/11.1ms = 721 tok/s, and MBU is about 98%. (C) Batch=8 with K=5 speculation: each round takes 10ms draft + 10.8ms IO + 1.7ms verification compute = 22.5ms total batch-round time. The batch serves 8 x 3.69 = 29.5 tokens per round,
+    so aggregate throughput is 29.5/22.5ms = 1311 tok/s. The per-stream served-token latency is 22.5/3.69 = 6.1ms/tok, while the round latency is 22.5ms. C has the highest aggregate throughput and good latency, but less than multiplicative gains because batching and speculation both consume the same bandwidth and compute headroom.'
   common_mistake: |
     **The Pitfall:** Treating speculation and batching as additive improvements.
     **The Rationale:** Candidates fail to realize both techniques exploit the exact same resource: memory bandwidth headroom.
@@ -21,10 +21,10 @@ details:
     **Assumptions & Constraints:**
     - 70B model, 4x H100.
     - Use ~13.4 TB/s aggregate HBM bandwidth for 4xH100 MBU percentages.
-    - The 96 tok/s number is the autoregressive batch=1 baseline; speculative timings below use a separate K=5 round model.
+    - The 96 tok/s autoregressive baseline implies 1/96s = 10.4ms per target step, consistent with a 140GB / 13.4TB/s weight-read estimate.
 
     **Calculations:**
-    - A, speculation K=5 at batch=1: round time = 20.5ms; served tokens/request = 3.69; per-stream latency = 20.5 / 3.69 = 5.6ms/tok; throughput = 180 tok/s; MBU = (140GB / 20.5ms) / 13.4TB/s ≈ 51%.
+    - A, speculation K=5 at batch=1: verify round ≈10.5ms and draft time = 10ms, so round time = 20.5ms. Served tokens/request = 3.69; per-stream latency = 20.5 / 3.69 = 5.6ms/tok; throughput = 180 tok/s; full-round MBU = (140GB / 20.5ms) / 13.4TB/s ≈ 51%.
     - B, batch=8 without speculation: step time = 11.1ms; per-stream latency = 11.1ms/tok; aggregate throughput = 8 / 11.1ms = 721 tok/s; MBU ~98%.
     - C, batch=8 plus K=5 speculation: batch-round time = 22.5ms; served tokens/batch = 8 * 3.69 = 29.5; aggregate throughput = 29.5 / 22.5ms = 1311 tok/s.
     - C per-stream served-token latency = 22.5 / 3.69 = 6.1ms/tok; C round latency = 22.5ms.

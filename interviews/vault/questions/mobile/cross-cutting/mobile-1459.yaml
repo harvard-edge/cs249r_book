@@ -11,7 +11,7 @@ title: Sizing On-Device Guardrails on Hexagon NPU
 scenario: You are deploying a 3B-parameter generative AI assistant on flagship devices featuring the Qualcomm Hexagon NPU (Snapdragon 8 Gen 3). Corporate governance mandates a strict on-device Responsible AI guardrail to intercept toxic output before displaying it to the user. The device shares 12-16 GB LPDDR5X memory and features a 45 TOPS INT8 NPU.
 question: How would you size on-device guardrail inference on Hexagon NPU for low-latency generated text checks?
 details:
-  realistic_solution: The optimal approach is to deploy a heavily distilled, INT8-quantized encoder model (e.g., 100M parameters) dedicated to guardrails, running chunk-by-chunk on the generated text. By utilizing the NPU's 45 TOPS INT8 capability for the guardrail while the main model generates tokens, we can hide the verification latency. Pinning the 100MB guardrail model in memory prevents expensive reloading and bandwidth contention with the main model's KV cache.
+  realistic_solution: The optimal approach is to deploy a heavily distilled, INT8-quantized encoder model around 100M parameters dedicated to guardrails, running chunk-by-chunk on the generated text. Size it so the model footprint is small enough to stay resident and each chunk check fits a low single-digit millisecond latency budget while the main model generates tokens. Pinning the 100 MB guardrail model in memory prevents expensive reloading and limits bandwidth contention with the main model's KV cache.
   common_mistake: |
     **The Pitfall:** Proposing a secondary LLM for the guardrail.
     **The Rationale:** Candidates assume LLMs are required for text evaluation, failing to realize the extreme memory bandwidth contention caused by running two large autoregressive models simultaneously.
@@ -25,12 +25,13 @@ details:
 
     **Calculations:**
     - Weight footprint: 100M params * 1 byte = ~100 MB.
-    - If the guardrail is an encoder run once per 50-token chunk, a rough upper-bound pass over all weights costs ~2 * 100M = 200M ops, plus attention and classifier overhead.
-    - Ideal compute latency lower bound: 200M ops / 45e12 ops/s = ~0.0044 ms, but real latency is dominated by kernel launch, memory traffic, tokenization, and scheduler contention.
+    - For a small encoder classifier, a representative dense pass is roughly 2 ops per parameter for the weight multiplies: 2 * 100M = 200M ops, plus attention, pooling, and classifier overhead.
+    - Ideal compute latency lower bound: 200M ops / 45e12 ops/s = 4.4e-6s = 0.0044 ms, so peak compute is not the sizing limiter.
     - Weight-read lower bound: 100 MB / 68 GB/s = ~1.5 ms if weights are streamed once and bandwidth is available.
+    - Practical chunk budget: add tokenization, launch/scheduling, and main-model contention, so target low single-digit milliseconds per chunk rather than the compute lower bound.
 
     **Conclusion & Interpretation:**
-    - **Result:** A 100M INT8 guardrail is plausible because its ~100 MB footprint is small relative to the main LLM, but the safe claim is that async chunked execution should target low single-digit millisecond overhead rather than a guaranteed 1.7 ms.
+    - **Result:** A 100M INT8 guardrail is a reasonable upper target because its ~100 MB footprint can stay resident and its latency is bandwidth/scheduling-bound, not compute-bound. Larger guardrails should be rejected unless profiling still meets the per-chunk latency budget.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,7 @@ title: 'Fault Tolerance: Design Checkpointing Architecture for 1024-GPU Training
 scenario: You are designing checkpointing for a 175B model training on 1,024 GPUs. The full checkpoint is 700GB. Your shared Lustre filesystem peaks at 200 GB/s write throughput.
 question: What checkpointing strategy minimizes interruption for a 175B model on 1,024 GPUs while preserving full recovery capability?
 details:
-  realistic_solution: 'Use asynchronous sharded checkpointing: each node writes its own shard in parallel. Snapshot the model state locally from GPU to CPU memory (extremely fast over PCIe), allow the GPUs to immediately resume training, and then asynchronously write the CPU shards to Lustre in the background.'
+  realistic_solution: Use asynchronous sharded checkpointing with a rollback-safe commit protocol. Each host snapshots its GPU shards into CPU memory or local NVMe, records the training step and shard manifest, and immediately resumes training once the local snapshot is consistent. Background writers flush shards to Lustre using temporary names, fsync or otherwise wait for acknowledged durable completion, verify sizes/checksums, and then atomically publish a manifest that marks the checkpoint complete. Recovery loads only the latest committed manifest; incomplete async writes are ignored or retried from local staging.
   common_mistake: |
     **The Pitfall:** Blocking all GPUs during the full checkpoint write to network storage.
     **The Rationale:** It guarantees consistency and avoids complex async buffer management.
@@ -31,7 +31,7 @@ details:
     - Required local staging for one in-flight checkpoint: 700GB total, or 5.47GB per host; provision at least 2 in-flight checkpoints to survive a delayed background write.
 
     **Conclusion & Interpretation:**
-    - **Result: ~100ms Training Pause, ~3.5s Background Completion.** The design minimizes interruption only if local staging is durable enough to cover the background Lustre write window; full recovery is available after the async write completes or from the staged shards while they remain intact.
+    - **Result: ~100ms Training Pause, ~3.5s Background Completion.** The design minimizes interruption only if local staging is consistent and durable enough to cover the background Lustre write window. Full recovery is unambiguous because a checkpoint is eligible for restore only after all shards are verified and the durable commit manifest is published.
 status: published
 provenance: imported
 requires_explanation: true

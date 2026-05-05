@@ -11,7 +11,7 @@ title: Dynamic KV-Cache Paging for A17 Pro Unified Memory
 scenario: You are designing the LLM inference engine for iOS running on the Apple A17 Pro. The system requires continuous background summarization using a 7B parameter model.
 question: How should an iOS LLM engine manage KV-cache pages on the Apple A17 Pro's unified memory to avoid OOM while preserving Neural Engine utilization?
 details:
-  realistic_solution: A robust L6+ design must implement an OS-aware, multi-tiered KV-cache system with semantic eviction. The engine should monitor modern iOS memory-pressure signals and scene lifecycle changes, keep KV pages discardable or compressible where possible, and dynamically reduce context through eviction or scheme-aware KV quantization when memory pressure rises. PagedAttention-style block allocation is useful, but it must be adapted to unified memory, app memory limits, display buffers, and OS reclaim behavior rather than assuming a dedicated server GPU memory pool.
+  realistic_solution: A robust L6+ design must implement an OS-aware, multi-tiered KV-cache system with fixed-size pages and a hard resident budget. Keep the active attention window and most recent hot KV pages resident in Neural Engine-friendly packed buffers, spill colder pages in quantized or compressed form, and evict semantic low-value spans when iOS memory-pressure signals arrive. Schedule prefetch and compaction outside the decode critical path so the Neural Engine sees stable buffer residency instead of page faults or allocator churn. PagedAttention-style block allocation is useful, but it must be adapted to unified memory, app limits, display buffers, and OS reclaim behavior rather than assuming a dedicated server GPU memory pool.
   common_mistake: |
     **The Pitfall:** Proposing server-side solutions like standard PagedAttention.
     **The Rationale:** Candidates do not account for the A17 Pro's unified memory architecture where the OS can forcefully reclaim memory, incorrectly assuming the entire 8 GB is available for the LLM.
@@ -25,6 +25,7 @@ details:
        - Approximate available memory for KV cache = 8 GiB - 3.5 GiB - 3 GiB = 1.5 GiB.
        - FP16 KV cache per token = 2 (K&V) * 2 bytes * 32 * 4096 = 524,288 bytes = 512 KiB.
        - Max context length in 1.5 GiB = 1.5 * 1024 MiB / 0.5 MiB = 3072 tokens before allocator and metadata overhead.
+       - FP16 KV cache for 8K context = 8192 tokens * 0.5 MiB/token = 4096 MiB = 4 GiB.
     3. **Conclusion & Interpretation:**
        - **Result: Memory-Bound. An 8K context needs roughly 4 GiB of FP16 KV cache, so the design must use semantic eviction, paging, or a specified KV quantization scheme whose metadata and scale overhead still fit within the app's real memory budget.**
 status: published

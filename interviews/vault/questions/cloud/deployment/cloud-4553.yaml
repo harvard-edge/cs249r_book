@@ -8,28 +8,29 @@ competency_area: deployment
 bloom_level: evaluate
 phase: both
 title: LoRA Adapter Memory Footprint
-scenario: A cloud server runs a base 7B model dynamically swapping 10 fine-tuned LoRA adapters (500MB each) on a single GPU.
+scenario: A cloud server runs a base 7B model dynamically swapping 10 fine-tuned LoRA adapters (500MB each) on a single GPU. Assume the KV heads times head dimension equals the 4096 hidden dimension.
 question: Evaluate the memory overhead of the adapters against the KV cache assuming batch size 32, 2000 sequence length, 32 layers, and 4096 hidden dimension?
 details:
-  realistic_solution: The 10 LoRA adapters consume a static 5 GB of memory total. Using the stated 4096 hidden dimension as the per-layer KV-cache payload, the cache requires 32 layers x 2000 tokens x 32 batch x 4096 elements x 2 bytes = 16.78 GB decimal, or about 15.6 GiB. Thus, the KV cache dominates the memory footprint, at about 3.3x the adapter memory.
+  realistic_solution: |
+    The 10 LoRA adapters consume a static 5 GB of memory total. With KV_heads x head_dim equal to 4096, the KV cache stores both K and V tensors: 32 layers x 2000 tokens x 32 batch x 4096 elements x 2 for K/V x 2 bytes = 33.55 GB decimal, or about 31.25 GiB. Thus, the KV cache dominates the memory footprint, at about 6.7x the adapter memory.
   common_mistake: |
     **The Pitfall:** Overestimating the footprint of the static LoRA adapters while ignoring KV cache scaling.
     **The Rationale:** Candidates fixate on the "10 adapters" detail in the prompt, forgetting the underlying math of transformer inference memory.
-    **The Consequence:** They falsely identify the adapters as the memory bottleneck, completely missing the massive quadratic/linear scaling of the KV cache.
+    **The Consequence:** They falsely identify the adapters as the memory bottleneck, missing the large linear scaling of KV cache with batch size, sequence length, layers, and KV width.
   napkin_math: |
     **Assumptions & Constraints:**
     - Adapters: 10 adapters at 500 MB each.
-    - KV Cache specs: batch=32, seq=2000, layers=32, dim=4096.
+    - KV Cache specs: batch=32, seq=2000, layers=32, KV_heads * head_dim = 4096.
     - Precision: FP16/BF16 (2 bytes/element).
 
     **Calculations:**
     - LoRA Adapters total: 10 × 0.5 GB = 5.0 GB.
-    - KV cache payload per token per layer: 4096 x 2 bytes = 8192 bytes = 8 KB.
-    - Total KV Cache: 8 KB x 32 layers x 2000 tokens x 32 batch = 16,777,216,000 bytes = 16.78 GB decimal (~15.6 GiB).
-    - Ratio vs adapters: 16.78 GB / 5.0 GB = 3.36x.
+    - KV cache payload per token per layer: 4096 elements x 2 for K/V x 2 bytes = 16,384 bytes = 16 KB.
+    - Total KV Cache: 16 KB x 32 layers x 2000 tokens x 32 batch = 33,554,432,000 bytes = 33.55 GB decimal (~31.25 GiB).
+    - Ratio vs adapters: 33.55 GB / 5.0 GB = 6.71x.
 
     **Conclusion & Interpretation:**
-    - **Result: KV cache (~16.8 GB) is about 3.3x larger than adapters (5.0 GB) (Memory-Capacity Bound)**.
+    - **Result: KV cache (~33.6 GB) is about 6.7x larger than adapters (5.0 GB) (Memory-Capacity Bound)**.
 status: published
 provenance: llm-draft
 requires_explanation: true

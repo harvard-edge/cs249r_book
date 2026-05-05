@@ -8,11 +8,11 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: Edge LLM Latency Breakdown on AI 100
-scenario: You are deploying a 5-billion parameter INT8 autoregressive LLM on an on-premise Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). A local client sends a request with a 500-token prompt and expects a 100-token response. The network round-trip takes 30ms, and CPU tokenization/preprocessing takes 20ms. The accelerator executes the prefill phase (TTFT) at 200 effective TOPS, while the decode phase (TPOT) is strictly bottlenecked by the LPDDR4x memory bandwidth, operating at an effective 50 GB/s.
+scenario: You are deploying a 5-billion parameter INT8 autoregressive LLM on an on-premise Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). A local client sends a request with a 500-token prompt and expects a 100-token response. The network round-trip takes 30ms, and CPU tokenization/preprocessing takes 20ms. The accelerator executes the prefill phase (TTFT) at 200 effective TOPS. During decode, weights are resident, kernels reuse them across the decode loop, and the effective KV-cache plus activation traffic is 250 MB per generated token at 50 GB/s.
 question: What is the end-to-end latency for the 500-token prompt and 100-token response, and why does 400 TOPS mainly help prefill?
 details:
   realistic_solution: |
-    The correct approach decomposes latency into fixed overhead, prefill, and autoregressive decode: E2E = Network + Preprocessing + TTFT_compute + (Output tokens * TPOT). Fixed overhead is 30 ms + 20 ms = 50 ms. Using the scenario's effective prefill rate, the 500-token prompt requires about 5 TOP and takes 25 ms, so user-perceived TTFT is 75 ms. During decode, the scenario states that TPOT is strictly bandwidth-bound at an effective 50 GB/s; using one streaming pass over the 5 GB resident INT8 weight set as the per-token traffic model gives 100 ms/token. For 100 output tokens, decode takes 10,000 ms and total E2E latency is 10,075 ms. Peak TOPS mainly helps prefill because prefill is compute-bound matrix-matrix work, while single-token decode is memory-bound matrix-vector work.
+    The correct approach decomposes latency into fixed overhead, prefill, and autoregressive decode: E2E = Network + Preprocessing + TTFT_compute + (Output tokens * TPOT). Fixed overhead is 30 ms + 20 ms = 50 ms. Using the scenario's effective prefill rate, the 500-token prompt requires about 5 TOP and takes 25 ms, so user-perceived TTFT is 75 ms. During decode, the weights are resident and the stated bottleneck is 250 MB of effective KV-cache plus activation traffic per generated token at 50 GB/s, so TPOT is 5 ms. For 100 output tokens, decode takes 500 ms and total E2E latency is 575 ms. Peak TOPS mainly helps prefill because prefill is compute-bound matrix-matrix work, while decode is serialized and bandwidth-bound.
   common_mistake: |
     **The Pitfall:** Dividing total operations for the entire request by 400 TOPS.
     **The Rationale:** Failing to recognize that autoregressive generation is a memory-bound matrix-vector operation.
@@ -20,22 +20,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Fixed Overhead: Network (30 ms) + Preprocessing (20 ms) = 50 ms.
-    - Model Size: 5B params = 5 GB weights (INT8).
     - LPDDR4x Bandwidth: 50 GB/s.
     - Prefill operation model: roughly one multiply-add per parameter per prompt token, counted as 2 ops, so 500 tokens * 5B params * 2 = 5 TeraOPs.
     - Effective Compute: 200 TOPS.
-    - Decode traffic model: one effective streaming pass over the resident INT8 weights per generated token; KV-cache and activation traffic are ignored for a lower-bound estimate.
+    - Decode traffic model: weights are resident and reused by the decode kernels; effective KV-cache plus activation traffic is 250 MB per generated token.
 
     **Calculations:**
     - Prefill Time: 5 TeraOPs / 200 TOPS = 25 ms.
     - User-perceived TTFT: 50 ms + 25 ms = 75 ms.
-    - Decode bandwidth estimate: 5 GB of effective per-token weight traffic at 50 GB/s.
-    - Time per token (Decode): 5 GB per token / 50 GB/s = 0.1 s = 100 ms per token.
-    - Total Decode Time: 100 tokens * 100 ms = 10,000 ms.
-    - End-to-End Latency: 50 ms + 25 ms + 10,000 ms = 10,075 ms.
+    - Decode bandwidth estimate: 250 MB per token at 50 GB/s.
+    - Time per token (Decode): 0.25 GB per token / 50 GB/s = 0.005 s = 5 ms per token.
+    - Total Decode Time: 100 tokens * 5 ms = 500 ms.
+    - End-to-End Latency: 50 ms + 25 ms + 500 ms = 575 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 10,075 ms (Memory-Bound Decode)**. The high TOPS only accelerates the prefill phase; the decode phase remains strictly bottlenecked by the 50 GB/s memory bandwidth.
+    - **Result: 575 ms (Memory-Bound Decode)**. The high TOPS mainly accelerates prefill; decode remains governed by per-token memory traffic and serialization rather than peak INT8 TOPS.
 status: published
 provenance: imported
 requires_explanation: false

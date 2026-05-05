@@ -11,7 +11,7 @@ title: Evaluating MoE Serving Topologies on H100 Nodes
 scenario: Your team is deploying an 8x22B Mixture of Experts (MoE) LLM (141B total parameters, 39B active per token) on a node with 8x GPUs connected via NVSwitch. Serving with standard Tensor Parallelism (TP=8) yields poor throughput due to massive communication bottlenecks during expert routing.
 question: Which parallelization topology should you use for the 8x22B MoE on 8x GPUs, and why is it better than pure TP or pipeline parallelism?
 details:
-  realistic_solution: Implement a hybrid strategy using Tensor Parallelism for the dense attention layers and Expert Parallelism (EP=8) for the MoE layers. By placing one expert on each GPU, you isolate the massive parameters while utilizing the NVSwitch efficiently for All-to-All token routing.
+  realistic_solution: Implement a hybrid strategy using Tensor Parallelism for the dense attention layers and Expert Parallelism (EP=8) for the MoE layers. Pure TP shards every expert across all GPUs, so expert MLPs pay collectives around large matrix multiplies even though each token uses only a few experts. Pure pipeline parallelism is also a poor fit because MoE routing creates dynamic, imbalanced token flows and pipeline bubbles. EP keeps expert weights resident on their owning GPUs and uses NVSwitch for routed activation All-to-All traffic, which scales with tokens and selected experts rather than with all expert parameters.
   common_mistake: |
     **The Pitfall:** Treating the MoE model exactly like a dense model by defaulting to TP=8 across all layers.
     **The Rationale:** TP=8 is the standard, easy-to-deploy strategy for large dense models.
@@ -24,11 +24,13 @@ details:
     - MoE communication moves routed activations, not the 141B parameters.
     - Hidden size = 4096, FP16 activations = 2 bytes/value, so one routed token activation is about 8 KB.
     - Top-2 routing sends each token to two experts and later returns the expert outputs.
+    - Example serving microbatch = 4096 tokens.
 
     **Calculations:**
-    - Pure TP shards every expert computation across all 8 GPUs, so expert-heavy layers pay collective communication around large expert matrix multiplies.
-    - EP routes each token activation to the GPU that owns the selected expert; traffic scales with tokens * selected experts * hidden size, not with active parameter count.
     - Per routed activation payload ≈ 4096 * 2 bytes = 8 KB, plus a similar return payload after expert compute.
+    - EP routing traffic for the example microbatch ≈ 4096 tokens * 2 experts * 8 KB * 2 send/return = 128 MiB per MoE layer before routing metadata and imbalance.
+    - Pure TP shards every expert computation across all 8 GPUs, so it adds collectives around expert matrix multiplies for the active expert weights instead of only routing token activations.
+    - Pure pipeline parallelism places layers on different stages, but dynamic expert routing sends uneven token counts across stages and leaves bubbles when one expert or stage is hot.
     - Communication is therefore dominated by All-to-All activation exchange and load balance, while expert weights stay resident on their owning GPUs.
 
     **Conclusion & Interpretation:**

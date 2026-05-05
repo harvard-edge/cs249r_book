@@ -11,19 +11,21 @@ title: The Embedding Sharding Strategy
 scenario: Your production DLRM has 50 embedding tables totaling 400 GB. Table sizes range from 200 MB to 80 GB. You have 8 GPUs with 80 GB HBM each. A naive row-parallel sharding splits every table equally across all 8 GPUs. The system runs, but GPU utilization is only 25% and All-to-All communication dominates the profile.
 question: Why does row-parallel sharding cause massive communication bottlenecks here, and how do you fix it?
 details:
-  realistic_solution: 'Naively row-sharding every table creates 400 table fragments and turns many embedding lookups into cross-GPU exchanges: each GPU owns only 1/8 of each table, so batches frequently need remote rows and then must gather or redistribute embedding vectors for the downstream interaction network. That overhead is especially wasteful for the many small 200MB-scale tables, where table-wise placement would fit easily on one GPU and avoid collectives. Use mixed sharding: table-wise placement for small tables, column-wise or table-wise placement for medium tables when it reduces exchange volume, and row-wise sharding only for the few large tables that exceed practical per-GPU capacity.'
+  realistic_solution: 'Naively row-sharding every table turns most embedding lookups into cross-GPU exchanges: each GPU owns only 1/8 of each table, so a local mini-batch needs remote rows for roughly 7/8 of uniformly distributed IDs and then must gather embedding vectors for the downstream interaction network. That overhead is especially wasteful for small 200MB-scale tables, where table-wise placement would fit easily on one GPU and avoid collectives. Use mixed sharding: table-wise placement for small tables, column-wise or table-wise placement for medium tables when it reduces exchange volume, and row-wise sharding only for the few large tables that exceed practical per-GPU capacity.'
   common_mistake: |
     **The Pitfall:** Assuming uniform sharding is universally optimal.
     **The Rationale:** Candidates blindly apply "split everything evenly" rules, forgetting small embeddings incur massive communication penalties.
     **The Consequence:** The network interface saturates with tiny lookup exchanges, crippling GPU utilization.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 50 tables, 8 GPUs.
+    - 50 embedding tables, 8 GPUs.
+    - A batch touches many tables and each lookup returns an embedding vector that must be consumed by the interaction network.
 
     **Calculations:**
-    - Naive row-wise sharding: 50 tables * 8 GPUs = 400 table fragments.
-    - Because each GPU owns only 1/8 of every table, a batch with features from many tables must route lookup IDs to the owner shards and gather the resulting embedding vectors for feature interaction.
+    - With uniform row-wise sharding, each GPU owns 1/8 of every table, so about 7/8 of uniformly distributed lookup IDs are remote to any given GPU.
+    - If a GPU issues L lookups in its local batch, the expected remote lookup count is about 0.875L before accounting for skew; hot-key skew can improve or worsen this depending on placement.
     - The communication pattern is a lookup scatter/gather or All-to-All-style exchange across GPUs; it is not justified for small 200MB-scale tables that could be placed whole on one GPU.
+    - Fragment count still matters operationally: 50 tables * 8 GPUs = 400 fragments to route and synchronize, but the bottleneck comes from remote lookup and embedding-vector traffic, not from the count alone.
     - Table-wise placement for small tables removes those unnecessary remote lookups; column-wise or row-wise sharding should be reserved for tables large enough to justify the communication.
 
     **Conclusion & Interpretation:**

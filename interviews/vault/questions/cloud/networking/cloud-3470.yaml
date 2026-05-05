@@ -11,7 +11,7 @@ title: LLM Inference Load Balancing on TPU Fleet
 scenario: You are tasked with designing a robust and efficient serving system for large language model (LLM) inference on a fleet of TPU accelerators. The system must handle a sustained inference request rate of 50,000 queries per second (QPS) with an average inference latency target of 100ms.
 question: How would you route and load-balance 50,000 QPS across TPU inference servers to hit 100 ms latency during updates and failures?
 details:
-  realistic_solution: A realistic solution involves a multi-layered load balancing approach. A global ingress load balancer distributes requests to regional clusters. Within each cluster, dynamic weighted round-robin routes traffic based on real-time TPU HBM utilization, current QPS, pending queue depth, model version, and failure state. Autoregressive decoding is often memory-bandwidth-sensitive, so capacity planning should be based on measured tokens/sec per TPU at the chosen batch and sequence mix, then scaled to the total generated-token demand while preserving 100ms latency headroom.
+  realistic_solution: Use a latency-aware, load-based routing policy rather than static round-robin. Global ingress should send traffic to healthy regional pools with spare SLO headroom; inside a region, route each request to the TPU shard or replica with the lowest predicted finish time, using queue depth, active batch slots, observed prefill/decode latency, HBM pressure, model version, and health state as inputs. Keep separate admission limits for prefill and decode because long prompts and short decode steps consume different resources. During updates, drain old-version replicas, shift traffic gradually with canary weights, and keep enough spare capacity for rollback. During failures, remove unhealthy TPUs from the picker immediately and spill to the next regional pool only when local queues would exceed the 100ms target.
   common_mistake: |
     **The Pitfall:** Employing static load balancing without hardware awareness.
     **The Rationale:** Engineers apply standard web server load balancing techniques, ignoring the massive compute vs memory bottleneck ratio of TPUs.
@@ -19,17 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target is 50,000 QPS with 100ms latency.
-    - Average response emits 4 decoded tokens inside the latency budget.
-    - Per decoded token reads about 8 GB of model/KV data from HBM.
-    - TPU memory bandwidth is 1.6 TB/s, or 1,600 GB/s.
+    - Average request service time at the chosen prompt/output mix must fit under the 100ms SLO including queueing.
+    - Little's Law gives the allowed in-flight work and exposes how much headroom the router needs.
+    - Per-TPU service rate must be measured separately for prefill and decode at the production batch mix.
 
     **Calculations:**
-    - Per-TPU upper bound = 1,600 GB/s / 8 GB per token = 200 tokens/sec before batching efficiency and overhead.
-    - Required fleet output = 50,000 QPS * 4 tokens/request = 200,000 tokens/sec.
-    - Minimum TPU count from this bound = 200,000 / 200 = 1,000 TPUs, before redundancy, update capacity, and tail-latency headroom.
+    - Fleet concurrency allowed by the latency target is 50,000 requests/s * 0.100 s = 5,000 in-flight requests at the p50 service mix; tail headroom must be lower than this.
+    - If load tests show one TPU replica can complete 80 requests/s at P99 <= 80ms with batching, serving 50,000 QPS needs ceil(50,000 / 80) = 625 active replicas.
+    - Reserve 20% capacity for updates, failures, and tail spikes: 625 / 0.80 = 782 replicas, rounded up by placement constraints.
+    - The router should stop admitting to a replica when predicted wait plus service time approaches 100ms, then spill to lower-loaded replicas or another region.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bandwidth-Sensitive.** Dynamic batching improves realized efficiency, but fleet sizing should come from measured tokens/sec and latency headroom, not from multiplying bandwidth by batch size.
+    - **Result: use latency-aware weighted least-queue routing with health-based spillover.** Fleet sizing and weights should come from measured prefill/decode service curves and 100ms queueing headroom, not a single HBM-bandwidth token estimate.
 status: published
 provenance: imported
 requires_explanation: true

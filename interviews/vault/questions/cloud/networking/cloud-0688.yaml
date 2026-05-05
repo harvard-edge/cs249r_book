@@ -11,7 +11,7 @@ title: The Communication Wall
 scenario: We have a 512-GPU cluster connected via 10 Gbps Ethernet. We are training a 70B parameter model using standard Data Parallelism. Despite having 512 GPUs, our training speed is barely faster than a single machine.
 question: Why has scaling efficiency collapsed on this 512-GPU 10 Gbps Ethernet cluster?
 details:
-  realistic_solution: This cluster will experience **near-zero scaling efficiency**. To train a 70B model using Data Parallelism, all 512 GPUs must synchronize their gradients via an AllReduce operation at the end of *every single training step*. This requires moving hundreds of gigabytes of data across the network simultaneously. The 10 Gbps Ethernet uplinks to the Core Switch will instantly choke, turning a matrix-multiplication workload into a pure network-wait workload. Training large models requires specialized topologies like a non-blocking Fat-Tree (Clos) with InfiniBand (200-400 Gbps) and NVLink (900 GB/s) within nodes.
+  realistic_solution: This cluster will experience **near-zero scaling efficiency** because synchronous data parallelism gates every step on gradient AllReduce. A 70B FP16 model has about 140 GB of gradients, and each GPU must communicate roughly twice that payload in a large ring AllReduce. At 10 Gbps, that turns a 2-second compute step into minutes of network wait. Practical remedies include faster non-blocking interconnects for cross-node collectives, NVLink only for intra-node traffic, larger gradient-accumulation windows to reduce sync frequency, sharded/data-plus-model parallelism, communication overlap, and carefully validated gradient compression.
   common_mistake: |
     **The Pitfall:** Assuming 10 Gbps is plenty for gradient sync or that 512 GPUs will give a linear ~512x speedup.
     **The Rationale:** Engineers accustomed to standard web workloads vastly underestimate the volume of data that must cross the network during every single training step in large-scale Data Parallelism.
@@ -30,7 +30,7 @@ details:
     - Network fraction of step time: 223 / (223 + 2) ≈ 99.1%.
 
     **Conclusion & Interpretation:**
-    - **Result: ~223 seconds of communication per step (Network-Bound)**. With only 10 Gbps per GPU, the AllReduce dominates the 2-second compute step and collapses scaling efficiency.
+    - **Result: ~223 seconds of communication per step (Network-Bound)**. With only 10 Gbps per GPU, gradient synchronization dominates the 2-second compute step, so the slow cross-node Ethernet fabric gates the whole synchronous training job.
 status: published
 provenance: imported
 requires_explanation: false

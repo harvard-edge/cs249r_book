@@ -11,19 +11,21 @@ title: Static Batching and TTFT SLO Failure
 scenario: You are designing an LLM serving system for a 13B model on H100 GPUs. Workload consists of long conversations (2048 prompt, 2048 completion). The business requires a P99 TTFT of less than 400ms.
 question: Can any nonzero static batch size meet the 400ms P99 TTFT SLO, and what does that imply for throughput?
 details:
-  realistic_solution: No nonzero static batch size can meet the SLO under these assumptions. Even at B=1, a request that arrives just after another request starts must wait for that request's long decode phase before its own prefill can begin. The prefill is only about 108ms, but the 2048-token decode occupies the batch for about 15.9 seconds, so worst-case TTFT is far above 400ms. The throughput implication is that reducing the static batch size enough to protect TTFT collapses useful batching to effectively zero; the serving design needs continuous batching or prefill/decode scheduling rather than a larger static batch.
+  realistic_solution: No nonzero static batch size can meet the SLO under these assumptions. Even at B=1, a request that arrives just after another request starts must wait for that request's long decode phase before its own prefill can begin. Using a simple roofline estimate, the prefill is about 108ms, but each decode token streams roughly the 26 GB FP16 weight set, so 2048 decode tokens occupy the static batch for about 15.9 seconds before overhead. Worst-case TTFT is therefore far above 400ms. The throughput implication is that protecting TTFT requires continuous batching or explicit prefill/decode scheduling rather than increasing the static batch.
   common_mistake: |
     **The Pitfall:** Focusing only on the inference time for a single request.
     **The Rationale:** Candidates ignore queuing dynamics that dominate P99 latency, calculating best-case TTFT.
     **The Consequence:** The system violates the SLO under load because requests wait behind massive static batches.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 13B model on H100 (3.35 TB/s bandwidth, 494.5 TFLOPS MFU).
+    - 13B FP16 model on H100: ~26 GB weights.
+    - Use an optimistic roofline proxy: 3.35 TB/s HBM bandwidth and 494.5 TFLOP/s effective prefill compute.
     - 2048 tokens prefill, 2048 decode.
 
     **Calculations:**
-    - Prefill Time: (2 * 13e9 * 2048) / 494.5 TFLOPS = 108 ms.
-    - Decode Time per Token: 26 GB / 3.35 TB/s = 7.76 ms/token.
+    - Prefill FLOPs: 2 * 13e9 params * 2048 tokens = 5.32e13 FLOPs.
+    - Prefill Time: 5.32e13 FLOPs / 4.945e14 FLOP/s = 0.108s = 108ms.
+    - Decode Time per Token: 26 GB / 3.35 TB/s = 26 GB / 3350 GB/s = 0.00776s = 7.76 ms/token.
     - Total Decode Time: 2048 * 7.76 ms = 15.9 seconds.
     - Static Batch Wait (B=1): a new request arriving behind the active decode waits up to 15.9 seconds before prefill.
     - Resulting worst-case TTFT: 15.9s + 108ms = ~16.0s, which is ~40x the 400ms SLO.

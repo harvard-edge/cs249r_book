@@ -12,7 +12,7 @@ scenario: You are scaling a distributed training cluster from 128 to 1,024 nodes
 question: At 512-1,024 nodes, why does NCCL initialization hang from RDMA QP exhaustion, and what scaling limits and architectural fixes would you propose?
 details:
   realistic_solution: |
-    Use one QP model consistently: if a communicator creates one QP for every participating GPU pair, each local GPU needs a QP to every remote GPU in that communicator. With 8 local GPUs sharing one HCA, HCA QP pressure is 8 * (communicator_size - 1), multiplied by the number of simultaneous communicators. A 512-node, 8-GPU/node job has 4,096 ranks, so one full-width communicator consumes 32,760 QPs on each node's HCA, leaving almost no headroom under a 32,768-QP limit. At 1,024 nodes it needs 65,528 QPs per HCA and cannot initialize. The fix is architectural: reduce communicator fan-out with hierarchical or node-aware AllReduce, shard large jobs into smaller data-parallel groups, avoid unnecessary concurrent communicators, reuse communicators instead of recreating them, and use reduction offload such as SHARP when available.
+    Use one QP model consistently: if a communicator creates one RDMA QP for every local-to-remote participating GPU pair, each local GPU needs a QP to every remote GPU in that communicator. Same-node GPU pairs do not consume QPs on the node's InfiniBand HCA. With 8 local GPUs sharing one HCA, per-node HCA pressure is 8 * (total_ranks - local_ranks), multiplied by the number of simultaneous communicators. A 512-node, 8-GPU/node job has 4,096 ranks, so one full-width communicator consumes 32,704 QPs on each node's HCA, leaving only 64 QPs under a 32,768-QP limit. At 1,024 nodes it needs 65,472 QPs per HCA and cannot initialize. The fix is architectural: reduce communicator fan-out with hierarchical or node-aware AllReduce, shard large jobs into smaller data-parallel groups, avoid unnecessary concurrent communicators, reuse communicators instead of recreating them, and use reduction offload such as SHARP when available.
   common_mistake: |
     **The Pitfall:** Assuming NCCL's QP count scales linearly with N nodes.
     **The Rationale:** Engineers overlook that NCCL creates a QP for each participating rank-to-rank pair, leading to O(N²) scaling for fully-connected collectives.
@@ -21,18 +21,18 @@ details:
     **Assumptions & Constraints:**
     - HCA limit = 32,768 QPs.
     - 1 HCA/node, 8 GPUs/node.
-    - One full-width communicator creates one QP per participating GPU pair.
+    - One full-width communicator creates one RDMA QP per local-to-remote participating GPU pair.
 
     **Calculations:**
     - 512 nodes * 8 GPUs = 4,096 GPUs.
-    - QPs per local GPU = 4,096 - 1 = 4,095.
-    - QPs owned by one node's HCA = 8 local GPUs * 4,095 = 32,760 QPs.
+    - Remote GPU peers per local GPU = 4,096 - 8 = 4,088.
+    - QPs owned by one node's HCA = 8 local GPUs * 4,088 = 32,704 QPs.
     - 1,024 nodes * 8 GPUs = 8,192 GPUs.
-    - QPs per HCA at 1,024 nodes = 8 * (8,192 - 1) = 65,528 QPs.
-    - Two concurrent full-width communicators at 512 nodes would require 65,520 QPs per HCA.
+    - QPs per HCA at 1,024 nodes = 8 * (8,192 - 8) = 65,472 QPs.
+    - Two concurrent full-width communicators at 512 nodes would require 65,408 QPs per HCA.
 
     **Conclusion & Interpretation:**
-    - **Result: 512 nodes is already at the HCA limit for one full-width communicator, and 1,024 nodes exceeds it by 2x (RDMA QP Exhaustion)**. Hierarchical collectives and smaller communicator groups reduce the per-HCA endpoint count.
+    - **Result: 512 nodes is operationally at the HCA limit for one full-width communicator, and 1,024 nodes exceeds it by about 2x (RDMA QP Exhaustion)**. Hierarchical collectives and smaller communicator groups reduce the per-HCA endpoint count.
 status: published
 provenance: imported
 requires_explanation: false

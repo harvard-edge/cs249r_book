@@ -11,7 +11,8 @@ title: Flash Endurance Under Continuous Inference Logging
 scenario: Your vibration monitoring sensor logs inference results to on-chip flash. The sensor runs 1 inference per second, 24/7.
 question: How does the ML model's output dimensionality dictate the flash write rate, and how does the flash endurance budget determine the maximum model output complexity you can log?
 details:
-  realistic_solution: Flash endurance is dictated by page erase cycles, so the allowable log record size comes from total lifetime bytes, not from erases per second alone. With 128 pages, 2 KB per page, and 10,000 erase cycles per page, an ideal wear-leveled append log can store about 2.62 GB over its lifetime. Spread over 5 years at 1 inference per second, that is about 16 bytes per inference. That budget must include the model output plus timestamp, checksum, and record headers. If firmware erases a page for each tiny record instead of packing records into full pages, the allowable payload is far smaller.
+  realistic_solution: |
+    Flash endurance is dictated by page erase cycles and write amplification, so the allowable output dimensionality comes from how many complete log records can be packed into each 2 KB erase page. With 128 pages and 10,000 erase cycles per page, an ideal wear-leveled append log can commit about 1.28 million full pages, or 2.62 GB, over its lifetime. Across 157.7 million one-second inferences in 5 years, that leaves about 16 bytes per inference for the complete record: model output, timestamp, checksum, and header. If firmware erases a page for each tiny record instead of packing records into full pages, the maximum safe output complexity collapses.
   common_mistake: |
     **The Pitfall:** Assuming flash memory is an infinite sink for small logs.
     **The Rationale:** Engineers think "1 MB of flash is huge" because they only consider static capacity, completely neglecting the physical page erase limits (endurance).
@@ -24,13 +25,15 @@ details:
     - Target lifetime: 5 years (157 million seconds).
 
     **Calculations:**
-    - Lifetime writable capacity with ideal wear leveling = 128 pages * 10,000 erases/page * 2,048 bytes/page = 2,621,440,000 bytes.
-    - Five years = 5 * 365 * 24 * 3600 = 157,680,000 seconds.
-    - Sustainable append-log rate = 2,621,440,000 bytes / 157,680,000 seconds = 16.6 bytes/second.
-    - At 1 inference/second, record budget = ~16 bytes per inference.
+    - Lifetime page commits with ideal wear leveling = 128 pages * 10,000 erases/page = 1,280,000 full-page writes.
+    - Lifetime writable capacity when records are packed into full pages = 1,280,000 * 2,048 bytes/page = 2,621,440,000 bytes.
+    - Five years at 1 Hz = 5 * 365 * 24 * 3600 = 157,680,000 records.
+    - Ideal record budget = 2,621,440,000 bytes / 157,680,000 records = 16.6 bytes/record.
+    - If each record has 8 bytes of timestamp/checksum/header, the model output payload is only about 8 bytes, such as eight INT8 scores or four INT16 values.
+    - If the firmware erases a 2 KB page per record, the write amplification is roughly 2,048 / 16.6 = 123x and the design fails the 5-year target.
 
     **Conclusion & Interpretation:**
-    - **Result: ~16 bytes per inference with ideal page packing (I/O-Bound)**. The cap applies to the full log record, not just raw class scores. Page-aligned writes or poor wear leveling increase write amplification and reduce the safe payload.
+    - **Result: ~16 bytes per inference with ideal page packing (I/O-Bound)**. The cap applies to the full log record, not just raw class scores; larger output vectors require aggregation, lower logging cadence, external storage, or a different retention policy.
 status: published
 provenance: imported
 requires_explanation: false

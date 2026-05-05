@@ -11,7 +11,7 @@ title: Federated DP-SGD Parameters for Device-Level Mobile Privacy
 scenario: You are implementing device-level differential privacy for federated data collection on 10M mobile devices. Each selected device clips its locally trained model update before secure aggregation. You need the training job to target ε=1.0 at δ=1e-7 over 100 rounds.
 question: How should DP-SGD be implemented for federated gradients on mobile devices to achieve epsilon 1.0, and what are the required parameters?
 details:
-  realistic_solution: 'Implement device-level DP for federated averaging: sample 10,000 of 10M eligible devices per round (q=0.001), clip each device update to L2 norm C=1.0 before secure aggregation, and add Gaussian noise to the aggregated update calibrated as σ*C with a conservative noise multiplier around 1.5. Track privacy with an RDP or moments accountant using Poisson-style device sampling, T=100 rounds, δ=1e-7, and the selected σ. The exact ε must come from the accountant implementation, but the required parameters are the privacy unit (device), clipping norm C, sampling rate q, number of rounds T, noise multiplier σ, and accounting method.'
+  realistic_solution: 'Implement device-level DP for federated averaging: sample 10,000 of 10M eligible devices per round (q=0.001), clip each device update to L2 norm C=1.0 before secure aggregation, and add Gaussian noise to the summed or averaged clipped update using a chosen noise multiplier σ. Track privacy with an RDP or moments accountant using Poisson-style device sampling, T=100 rounds, δ=1e-7, and the selected σ. The exact ε must come from the accountant implementation, not from a single-round heuristic; the required parameters are the privacy unit (device), clipping norm C, sampling rate q, number of rounds T, noise multiplier σ, aggregation convention, and accounting method.'
   common_mistake: |
     **The Pitfall:** Using a static noise multiplier without accounting for subsampling amplification.
     **The Rationale:** Engineers apply standard DP-SGD formulas directly, ignoring that sampling a small fraction of a large device pool drastically strengthens the privacy guarantee.
@@ -25,13 +25,13 @@ details:
 
     **Calculations:**
     - Subsampling rate q = 10,000 / 10,000,000 = 0.001.
-    - Configure the accountant with q=0.001, T=100, δ=1e-7, and Gaussian noise multiplier σ=1.5.
-    - Per-coordinate aggregate noise scale after clipping = σ * C = 1.5.
-    - Accept the run only if the RDP/moments accountant reports ε <= 1.0 for these parameters; otherwise increase σ or reduce T/q.
-    - Example tuning rule: if σ=1.5 reports ε near the target, σ is the release parameter; if σ=1.1 reports ε > 1.0, it is rejected rather than rounded down.
+    - Choose an initial Gaussian noise multiplier σ, then configure the accountant with q=0.001, T=100, δ=1e-7, and the same sampling/aggregation convention used by training.
+    - Add Gaussian noise calibrated to the clipped summed update before or inside secure aggregation; if the server averages N selected updates, the noisy sum is divided by N after aggregation.
+    - Compute ε with the selected RDP or moments accountant. A single expression such as σ*C is only the noise calibration input, not the privacy guarantee.
+    - Accept the run only if the accountant reports ε <= 1.0; otherwise increase σ, reduce T, or lower q and recompute.
 
     **Conclusion & Interpretation:**
-    - **Result: Device-level DP with q=0.001, T=100, C=1.0, δ=1e-7, and an accountant-verified noise multiplier such as σ≈1.5 (Privacy-Bound)**. The accountant result, not a hand-written per-round epsilon shortcut, determines whether ε<=1.0 is achieved.
+    - **Result: Device-level DP with q=0.001, T=100, C=1.0, δ=1e-7, and an accountant-verified noise multiplier (Privacy-Bound)**. The accountant result determines whether ε<=1.0 is achieved; σ is tuned until that report passes.
 status: published
 provenance: imported
 requires_explanation: false

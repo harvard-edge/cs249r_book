@@ -12,7 +12,7 @@ scenario: In pipeline parallelism with 1F1B scheduling, each stage must store ac
 question: How does this choice affect communication overlap?
 details:
   realistic_solution: |
-    Activation recomputation actually IMPROVES overlap. Because the backward pass takes longer (it now includes the forward recomputation), there is more compute time available to hide the AllReduce communication latency. If the freed memory allows doubling the batch size, overall throughput improves despite the extra compute.
+    Activation recomputation can improve overlap headroom, but it is not free speed. Because the backward pass includes forward recomputation, there is more compute time in which an AllReduce might be hidden if scheduling makes the collective ready early enough. The tradeoff is a longer compute critical path; use recomputation when the memory savings or larger feasible batch outweigh the extra compute, and verify the overlap in traces.
   common_mistake: |
     **The Pitfall:** Choosing activation recomputation purely based on memory savings.
     **The Rationale:** Candidates fail to consider the positive side-effect that extending the compute duration helps mask communication latency.
@@ -22,14 +22,14 @@ details:
     - Backward compute window without recompute: 200 ms.
     - AllReduce communication to hide: 150 ms.
     - Recompute adds 200 ms of compute to the backward window.
-    - Hidden communication fraction = min(1, compute_window / comm_time) when the communication is scheduled inside that window.
+    - Communication can be hidden only if it is launched early enough and overlaps the compute window.
 
     **Calculations:**
-    - Without recompute: hidden fraction = min(1, 200/150) = 1.0, so the 150 ms AllReduce can be fully hidden if it is ready early enough.
-    - Without recompute critical-path time for this window: max(200 ms, 150 ms) = 200 ms.
+    - Without recompute, best-case critical path for this window is max(200 ms compute, 150 ms communication) = 200 ms if the AllReduce is ready at the start of the window.
+    - If scheduling delays the AllReduce launch, exposed communication is the portion that extends past the 200 ms compute window.
     - With recompute: compute window = 200 ms + 200 ms = 400 ms.
-    - With recompute hidden fraction = min(1, 400/150) = 1.0, so communication is still fully hidden, but the critical path becomes max(400 ms, 150 ms) = 400 ms.
-    - Recomputation improves overlap headroom and may enable a larger batch, but throughput gain depends on the larger-batch efficiency rather than overlap alone.
+    - Best-case critical path with recompute is max(400 ms compute, 150 ms communication) = 400 ms; the communication is easier to hide, but compute time doubled.
+    - Recomputation improves overlap slack by 200 ms, but throughput gain requires the memory savings to improve batch size, pipeline occupancy, or OOM avoidance enough to offset added compute.
 
     **Conclusion & Interpretation:**
     - **Result: More Overlap Headroom, Not Free Speed**. Recomputation can make communication easier to hide and save memory, but the added compute must be justified by larger batches or reduced activation memory pressure.

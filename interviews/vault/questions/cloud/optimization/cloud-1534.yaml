@@ -11,7 +11,7 @@ title: Evaluating MMD Drift Detection Scale
 scenario: You operate a RAG system serving 1,200 embedding queries/sec (~10^8 daily queries) using a 1024-dimensional model. To monitor drift, your team proposes computing exact Maximum Mean Discrepancy (MMD) with an RBF kernel between a 100,000-sample reference set and the full daily window of 10^8 queries. The drift job must run nightly on a single A100 (312 TFLOPs FP16) and finish within a 1-hour SLA.
 question: Can exact nightly MMD between 100,000 reference embeddings and 10^8 daily queries finish on one A100 in 1 hour, and what should you use instead?
 details:
-  realistic_solution: Reject the exact quadratic MMD calculation. Instead, project the embeddings using Random Fourier Features (RFF) to approximate the RBF kernel and compare linear mean embeddings in O((N+M)r), or use a linear-time unbiased MMD estimator in O(N+M). Exact nightly MMD cannot finish inside the 1-hour SLA on one A100.
+  realistic_solution: Do not run full exact two-sample MMD over all 10^8 daily queries. The reference-query cross term alone is about 10^13 RBF evaluations, but exact MMD also needs the query-query within-window term, which is about 10^16 evaluations and dominates. Instead, project embeddings with Random Fourier Features (RFF) and compare streaming mean embeddings in O((N+M)r), or use a linear-time unbiased MMD estimator in O(N+M).
   common_mistake: |
     **The Pitfall:** Focusing purely on systems engineering (e.g., chunking the matrix to avoid GPU OOM errors).
     **The Rationale:** Engineers often assume that OOM is the only barrier and that the GPU can compute any mathematically simple operation given enough time.
@@ -24,10 +24,11 @@ details:
     - A100 peak FP16 throughput = 312 TFLOPs.
 
     **Calculations:**
-    - The cross-sample term alone has N * M = 10^5 * 10^8 = 10^13 kernel evaluations.
-    - Full exact MMD also includes within-sample terms, adding N^2 ≈ 10^10 and M^2 ≈ 10^16 evaluations, so the live-window term dominates.
-    - Exact FLOPs ≈ 10^16 * 2,048 ≈ 2.05e19 FLOPs.
-    - Ideal time = 2.05e19 / 312e12 ≈ 65,700 seconds ≈ 18.3 hours, so it misses the 1-hour SLA.
+    - Reference-query cross term: N * M = 10^5 * 10^8 = 10^13 kernel evaluations.
+    - Cross-term FLOPs alone: 10^13 * 2,048 ≈ 2.05e16 FLOPs, an ideal lower bound of about 66 seconds at peak; this is not the full exact MMD.
+    - Full exact two-sample MMD also includes N^2 and M^2 within-sample terms; M^2 = (10^8)^2 = 10^16 daily-query kernel evaluations dominates.
+    - Full exact MMD FLOPs ≈ 10^16 * 2,048 ≈ 2.05e19 FLOPs.
+    - Ideal time = 2.05e19 / 312e12 ≈ 65,700 seconds ≈ 18.3 hours before memory traffic, kernel launch overhead, and non-peak RBF evaluation costs.
     - With RFF using r=4096 features, feature mapping plus streaming aggregation is O((N+M)r) after projection and avoids all-pairs kernel materialization.
     - A linear-time unbiased MMD estimator pairs samples and evaluates O(N+M) kernel terms instead of O(M^2 + NM + N^2) terms.
 

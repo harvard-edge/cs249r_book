@@ -11,7 +11,7 @@ title: Optimizing KV-Cache Eviction for On-Device LLMs
 scenario: You are deploying an 8B parameter LLM optimized for on-device chat, using 32 layers, 32 query heads, 8 KV heads, and 128-dimension heads. During long multi-turn conversations, the app crashes from Out-Of-Memory (OOM) errors on a device with 12 GB shared LPDDR5X memory. You need to analyze KV-cache growth and cap it with token eviction.
 question: How would you cap and evict KV-cache entries for an on-device LLM while preserving useful context?
 details:
-  realistic_solution: A realistic approach involves capping the maximum KV-cache size and implementing an eviction policy (like H2O or StreamingLLM) that retains 'heavy-hitter' tokens and recent context while discarding less important tokens. Given the shared memory, budget a strict upper bound for the KV-cache from the model's explicit GQA shape. With 32 layers and 8 KV heads, FP16 KV is 128 KiB per token, so a 4096-token retained cache costs 512 MiB and fits the 1.0 GiB safety allocation.
+  realistic_solution: A realistic approach involves capping the maximum KV-cache size and implementing an eviction policy (like H2O or StreamingLLM) that retains 'heavy-hitter' tokens and recent context while discarding less important tokens. Given the shared memory, budget a strict upper bound for the KV-cache from the model's explicit GQA shape. With 32 layers and 8 KV heads, FP16 KV is 128 KiB per token, so the 1.0 GiB safety allocation can hold up to 8192 tokens. Cap the retained cache at 4096 tokens instead, using 512 MiB and leaving the other 512 MiB for allocator fragmentation, prompt growth, and transient decode buffers.
   common_mistake: |
     **The Pitfall:** Assuming the entire 12 GB is available and suggesting naive truncation without math.
     **The Rationale:** Developers ignore the shared nature of UMA architectures.
@@ -26,10 +26,11 @@ details:
     - Memory per token: batch 1 * 2 (K+V) * 32 layers * 8 KV heads * 128 head_dim * 2 bytes = 131,072 bytes.
     - Unit conversion: 131,072 bytes = 128 KiB = 0.125 MiB per token.
     - Max retained context under 1.0 GiB: 1024 MiB / 0.125 MiB per token = 8192 tokens.
+    - Operational cap: use only half of that allocation for retained KV so transient decode buffers and fragmentation do not trigger OOM.
     - Eviction impact: capping cache at 4096 tokens = 4096 * 0.125 MiB = 512 MiB; batch size N would multiply this by N.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound OOM Risk**. By proactively capping and evicting to maintain a 4096-token cache, the system bounds FP16 KV overhead to **512 MiB** within the shared-memory budget and reduces OS-level kill risk.
+    - **Result: Memory-Bound OOM Risk**. The computed hard maximum is 8192 tokens, but the recommended operational cap is 4096 tokens so FP16 KV overhead stays at **512 MiB** and preserves headroom inside the shared-memory budget.
 status: published
 provenance: imported
 requires_explanation: false

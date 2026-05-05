@@ -7,11 +7,12 @@ topic: kv-cache-management
 competency_area: memory
 bloom_level: apply
 phase: inference
-title: 'KV-Cache: Realize KV Cache Memory Layout for 3B LLM on A17 Pro'
+title: KV-Cache Memory Layout for a 3B LLM on A17 Pro
 scenario: 'A 3B LLM runs on an A17 Pro (35 TOPS, 8GB unified memory). The model has 32 layers, GQA with 8 KV heads, head_dim=128. Chat session length: 2048 tokens.'
 question: How would you specify tensor dimensions, memory addresses, data types, and total allocation for the KV cache?
 details:
-  realistic_solution: 'K and V stored separately for attention computation efficiency. Cache layout: [num_layers, 2, max_seq_len, num_kv_heads, head_dim]. Physical memory: contiguous bf16 tensor.'
+  realistic_solution: |
+    Reserve one contiguous bf16 KV arena for the session with logical shape [32 layers, 2 K/V, 2048 tokens, 8 KV heads, 128 head_dim]. Each element is 2 bytes, so the allocation is 32 * 2 * 2048 * 8 * 128 * 2 = 268,435,456 bytes, or 256 MiB. Store K and V as separate planes inside the arena for each layer so attention kernels can read contiguous head_dim vectors. The base address points to layer 0 K token 0 head 0; V starts after one K tensor of 134,217,728 bytes, and each layer stride is 2 * 2048 * 8 * 128 * 2 = 8,388,608 bytes. Align the arena and per-layer offsets to the accelerator DMA/page alignment used by the runtime.
   common_mistake: |
     **The Pitfall:** Storing K and V interleaved (page-cache style) without considering contiguous memory layout requirements.
     **The Rationale:** Candidates might default to generic CPU/cloud KV cache structures without accounting for the A17 Pro GPU/NPU's preference for contiguous access patterns.

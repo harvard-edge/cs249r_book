@@ -11,7 +11,7 @@ title: AllReduce Volume for an MI300X Transformer Block
 scenario: A Llama-70B transformer block has hidden_dim=8192 and runs with TP=8 on MI300X GPUs. Each transformer block requires 2 AllReduce operations in the forward pass (one for attention, one for MLP).
 question: For hidden=8192, TP=8, and batch=2048 on MI300X, what are the per-AllReduce and summed per-block volumes and times?
 details:
-  realistic_solution: Each AllReduce sends a tensor of shape [2048, 8192] in BF16 = 2048 × 8192 × 2 = 33.6 MB. Two AllReduces per block = 67.2 MB message volume. Using ring AllReduce, actual bytes per GPU = 2 × (7/8) × 33.6 MB = 58.8 MB per AllReduce. With 8×MI300X connected via Infinity Fabric at ~400 GB/s bisection bandwidth, each AllReduce takes ~58.8 MB / 400 GB/s ≈ 0.15 ms. Two AllReduces ≈ 0.3 ms per block. With 80 layers, total TP communication ≈ 24 ms per forward pass. This is small relative to compute, confirming TP is communication-efficient within a node.
+  realistic_solution: Each AllReduce operates on a tensor of shape [2048, 8192] in BF16, so the logical payload is 2048 × 8192 × 2 = 33.6 MB. The two forward-pass AllReduces in one block therefore have 67.2 MB of summed logical payload. For ring AllReduce with TP=8, the bytes transferred per GPU are 2 × (7/8) × 33.6 MB = 58.8 MB per AllReduce. With intra-node MI300X Infinity Fabric bandwidth estimated at 400 GB/s, each AllReduce takes about 58.8 MB / 400 GB/s = 0.15 ms. Two AllReduces sum to 117.6 MB transferred per GPU and about 0.30 ms per block. This answers only the per-block communication cost; compute-bound versus communication-bound requires a compute-time estimate that is not provided.
   common_mistake: |
     **The Pitfall:** Forgetting that AllReduce = ReduceScatter + AllGather.
     **The Rationale:** Candidates often assume the data sent over the wire is exactly equal to the message size.
@@ -30,7 +30,7 @@ details:
     - Total time per block: 2 AllReduces × 0.15 ms = 0.30 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound. The two forward collectives sum to 117.6 MB per GPU and about 0.30 ms per block, so TP is communication-efficient within a node.**
+    - **Result: 117.6 MB per GPU and about 0.30 ms per block.** The logical payload is 67.2 MB across the two collectives, while the ring transfers 117.6 MB per GPU; compute-bound status cannot be concluded without compute timing.
 status: published
 provenance: imported
 requires_explanation: false

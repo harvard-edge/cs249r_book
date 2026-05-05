@@ -11,25 +11,26 @@ title: 4-bit Quantization Fallback Diagnosis on Ethos-U55
 scenario: You are deploying a 4-bit quantized keyword spotting model on an ARM Cortex-M-class host CPU with an Ethos-U55 NPU and shared 512 KB SRAM. The model fits within SRAM. During profiling, inference latency is drastically higher than the 8-bit baseline, and the 480 MHz host CPU is pegged at 100% utilization while the Ethos-U55 NPU shows near-zero utilization.
 question: Why does a 4-bit Ethos-U55 keyword model peg the 480 MHz host CPU while the NPU sits idle?
 details:
-  realistic_solution: The root cause is an operator fallback from the NPU to the CPU. Ethos-U55 acceleration is centered on supported TFLite Micro operators and quantized data types such as int8, with limited int16-style paths depending on the operation; arbitrary 4-bit activation or weight tensors are not a standard accelerated path. The Vela compiler therefore cannot keep those 4-bit convolutions on the NPU and the runtime executes software kernels on the Cortex-M7. The M7 must unpack or widen the 4-bit data before computing the MACs, bypassing the NPU and causing severe latency.
+  realistic_solution: The root cause is an operator-coverage mismatch between the 4-bit model and the deployed TFLite Micro/Vela/Ethos-U55 path. The compiler can only place supported operator and quantization patterns on the NPU; unsupported 4-bit tensors or kernels are partitioned out and executed by software on the Cortex-M-class host. The CPU then spends time unpacking or widening low-bit data, running slower kernels, and moving tensors through shared SRAM, which pegs the host while the NPU is idle. The fix is to use a quantization scheme and operator set verified by Vela for Ethos-U55, commonly the supported int8 path, or provide a supported custom kernel rather than assuming 4-bit storage implies 4-bit acceleration.
   common_mistake: |
     **The Pitfall:** Assuming 4-bit quantization universally accelerates execution.
     **The Rationale:** Candidates assume that lower precision always equals higher speed due to reduced memory bandwidth, without checking the NPU's operator support matrix.
     **The Consequence:** Unsupported operations trigger a software fallback to the CPU, leading to catastrophic latency degradation.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware: Cortex-M-class host CPU (480 MHz) + Ethos-U55 (256 MACs/cycle illustrative peak).
-       - Model: 4-bit quantized keyword spotting model.
-       - Operations: 1,000,000 MACs.
-       - NPU Support: Ethos-U55 lacks native 4-bit activation support (requires CPU fallback).
-    2. **Calculations:**
-       - Ideal NPU cycles: 1,000,000 MACs / 256 MACs/cycle = 3,906 cycles.
-       - Ideal NPU latency: 3,906 cycles / 480,000,000 cycles/s = 8.1 µs.
-       - CPU Fallback Cycles: 1,000,000 MACs × 4 cycles/MAC (unpacking overhead) = 4,000,000 cycles.
-       - CPU Fallback Latency: 4,000,000 cycles / 480 MHz = 8.33 ms.
-       - Penalty Factor: 8.33 ms / 8.1 µs ≈ 1000x slower.
-    3. **Conclusion & Interpretation:**
-       - **Result: Unpacking 4-bit on CPU adds ~1000x latency.** **Result: Compute-Bound Fallback Penalty.**
+    **Assumptions & Constraints:**
+    - Hardware: Cortex-M-class host CPU at 480 MHz with shared SRAM plus Ethos-U55.
+    - Model region: 1,000,000 MACs in convolutions that were fast in the supported 8-bit baseline.
+    - Supported path: Vela keeps compatible int8 operators on the NPU.
+    - Faulty path: the 4-bit operator/quantization pattern is unsupported by the deployed toolchain, so this region falls back to CPU software.
+
+    **Calculations:**
+    - NPU path should be treated as the measured 8-bit baseline for this layer group, not as raw 256 MACs/cycle divided by host CPU clock.
+    - CPU fallback lower bound at 1 MAC/cycle: 1,000,000 cycles / 480M cycles/s = 2.1 ms before unpacking, memory traffic, kernel overhead, or synchronization.
+    - If unpacking/widening and software-kernel overhead cost 4-8 cycles/MAC, CPU time becomes 8.3-16.7 ms for the same MAC region.
+    - Extra tensor movement through shared SRAM and subgraph handoff adds more latency while the Ethos-U55 utilization remains near zero.
+
+    **Conclusion & Interpretation:**
+    - **Result: CPU fallback from unsupported 4-bit operator coverage, not a general 4-bit speedup (Fallback-Bound).** The realistic comparison is against the measured supported 8-bit NPU path; raw peak MAC math is not a valid latency model for the fallback.
 status: published
 provenance: imported
 requires_explanation: false

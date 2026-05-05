@@ -11,23 +11,25 @@ title: Orin Thermal Throttle Floor for SLA
 scenario: A roadside Jetson AGX Orin enclosure (passive heatsink, no fan, IP67 housing) runs a 20 TOPS INT8 traffic-monitoring model that must hold 30 FPS. In a controlled 25 C bench the unit holds 60W mode (275 TOPS peak) and meets the SLA. In summer field conditions the enclosure internal temperature rises to 75 C and the SoC dynamic frequency scaler clamps the GPU clock by 32% sustained, dropping the platform to a 30W envelope (~140 GB/s LPDDR5, ~165 TOPS effective peak). The model needs 18 GB/s of bandwidth.
 question: Determine whether the thermally-throttled 30W envelope meets the 30 FPS SLA, and recommend whether thermal mitigation or model trimming is the cheaper fix?
 details:
-  realistic_solution: 'Use the throttled 30W figures as the already-reduced envelope: about 165 TOPS effective peak and 140 GB/s LPDDR5 peak. The 20 TOPS model demand is far below the compute ceiling. For memory, apply an efficiency factor to the 140 GB/s figure: 140 * 0.65 ≈ 91 GB/s usable. The model needs 18 GB/s; even with an assumed 10 GB/s for camera/ISP/VIC traffic, total demand is about 28 GB/s, leaving roughly 63 GB/s of bandwidth headroom. The thermally-throttled 30W envelope should still meet 30 FPS if latency variance and scheduling are controlled. Thermal mitigation is usually the cheaper first fix when a simple mechanical change can recover clock margin, but the exact cost comparison depends on fleet BOM, installation labor, and model-trimming/revalidation effort.'
+  realistic_solution: |
+    Treat the throttled 30W figures as the reduced sustained envelope and compare them to the 30 FPS frame budget. A 30 FPS SLA gives 33.3ms per frame. If the model's stated 20 TOPS demand is sustained work at 30 FPS, that is about 0.67 TOP per frame; at 165 TOPS effective peak the compute floor is roughly 4ms of ideal compute time. The 18 GB/s model bandwidth demand maps to about 0.6 GB per frame; at 140 GB/s LPDDR5 peak that is about 4.3ms of ideal memory service. These aggregate ceilings suggest the SLA should pass under the throttled envelope unless profiling shows kernel launch gaps, contention, or thermal variance pushing the critical path above 33.3ms. Given the numbers, model trimming is not mathematically required; use thermal mitigation first if it is cheaper than revalidating a trimmed model, and trim only if profiling shows compute or bandwidth on the 30W path is the true bottleneck.
   common_mistake: |
     **The Pitfall:** Overlooking LPDDR5 clock throttling.
     **The Rationale:** Engineers treat thermal throttling as an additive percentage on compute power only, forgetting memory controllers live on the same scaled SoC buses.
     **The Consequence:** They miss that memory bandwidth degrades in lockstep with compute, threatening the SLA immediately since vision models are bandwidth-hungry.
   napkin_math: |
-    1. **Assumptions & Constraints:**
+    **Assumptions & Constraints:**
+       - 30 FPS frame budget: 1 / 30 = 33.3ms.
        - Throttled 30W envelope from the prompt: 140 GB/s LPDDR5 and 165 TOPS effective peak.
-       - Efficiency factor: 0.65.
-       - Model bandwidth demand: 18 GB/s. ISP reserve: 10 GB/s.
-    2. **Calculations:**
-       - Compute Floor = 165 TOPS effective peak; 20 TOPS demand uses about 12% of that ceiling.
-       - Bandwidth Floor = 140 GB/s * 0.65 = 91 GB/s usable.
-       - System Demand = 18 GB/s (model) + 10 GB/s (ISP) = 28 GB/s.
-       - Headroom = 91 GB/s - 28 GB/s = ~63 GB/s.
-    3. **Conclusion & Interpretation:**
-       - **Result: SLA likely passes under the throttled envelope**. Compute and bandwidth both have headroom for 30 FPS, so thermal mitigation is a qualitative cost/risk choice rather than a mathematically proven $10 fix from the given data.
+       - Model demand: 20 TOPS sustained at 30 FPS and 18 GB/s bandwidth.
+    **Calculations:**
+       - Per-frame compute work = 20 TOP/s / 30 FPS = 0.667 TOP/frame.
+       - Ideal compute service time at the throttled peak = 0.667 TOP / 165 TOP/s = 0.0040s = 4.0ms.
+       - Per-frame memory traffic = 18 GB/s / 30 FPS = 0.6 GB/frame.
+       - Ideal memory service time at 140 GB/s = 0.6 GB / 140 GB/s = 0.0043s = 4.3ms.
+       - Both ideal service times are below the 33.3ms frame budget, so a miss would likely come from pipeline latency, contention, or variance not captured by aggregate TOPS and GB/s.
+    **Conclusion & Interpretation:**
+       - **Result: SLA likely passes under the throttled envelope if profiling confirms the critical path stays below 33.3ms.** The given numbers do not justify model trimming by themselves; thermal mitigation is the cheaper first fix when it restores margin without model revalidation.
 status: published
 provenance: llm-draft
 requires_explanation: true

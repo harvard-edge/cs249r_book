@@ -8,7 +8,7 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Tensor Parallelism Embedding Layer Split and Vocabulary Parallelism
-scenario: A 7B model with 128K vocabulary size is being trained with TP=4. The embedding layer (128K * 4096 * 2 bytes = 1GB) and the output LM head (same 1GB) together consume 2GB. A team member suggests these can also be tensor-parallelized.
+scenario: A 7B model with 128K vocabulary size is being trained with TP=4. The embedding layer (128K * 4096 * 2 bytes = 1.0 GiB) and the output LM head (same 1.0 GiB) together consume about 2.0 GiB. A team member suggests these can also be tensor-parallelized.
 question: How would you tensor-parallelize the 128K-token embedding and LM head with TP=4, and what communication does it add?
 details:
   realistic_solution: 'Split the vocabulary dimension: each GPU holds [32K, 4096] of the embedding matrix (128K/4 = 32K rows). During embedding forward, each rank masks tokens outside its shard, looks up local rows for in-shard tokens, and an all-reduce sums the partial embedding outputs into the full hidden vectors. For the LM head, each rank computes logits for its vocabulary shard. Training can compute vocab-parallel cross-entropy without gathering all logits; inference needs either distributed top-k across shards or a gather of candidate logits only when the sampler requires it.'
@@ -27,7 +27,8 @@ details:
     - Per-GPU sharded embedding: 1.0 GiB / 4 = 256 MiB.
     - The LM head has the same size, so sharding saves about 768 MiB per GPU for embeddings and another 768 MiB per GPU for the LM head.
     - Embedding output collective size: 8 * 2048 * 4096 * 2 bytes = 134,217,728 bytes = 128 MiB.
-    - Ring all-reduce traffic per rank is about 2 * (4-1) / 4 * 128 MiB = 192 MiB on the TP interconnect.
+    - Embedding output collective payload: 128 MiB of hidden activations must be summed across TP ranks.
+    - If implemented as a 4-rank ring all-reduce, per-rank link traffic is about 2 * (4-1) / 4 * 128 MiB = 192 MiB; other collective implementations can have different traffic and latency constants.
 
     **Conclusion & Interpretation:**
     - **Result: Memory-Bound Optimization**. Vocabulary parallelism saves about 1.5 GiB per GPU across embedding plus LM head, while adding an embedding-output collective for training and distributed logits handling for inference.

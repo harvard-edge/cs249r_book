@@ -12,7 +12,7 @@ scenario: You are training a 2B parameter Transformer on a single 80GB A100 GPU 
 question: What is the peak activation memory with layer-boundary checkpointing, and will the 2B model OOM on an 80GB A100?
 details:
   realistic_solution: |
-    Store the layer-boundary checkpoints, then add the peak activation memory needed while recomputing one layer during the backward pass. The checkpoints use 24 * 256MB = 6.0GB. Because recomputation proceeds one layer at a time, the extra recompute peak is one layer's 4.5GB, so peak activation memory is 10.5GB. Adding the 32GB model state gives 42.5GB total, leaving 37.5GB of headroom on an 80GB A100, so the model should not OOM from these components.
+    Store the layer-boundary checkpoints, then add the peak activation memory needed while recomputing one layer during the backward pass. Under the idealized assumption that recomputation is scheduled one layer at a time and recomputed intermediates do not overlap across layers, the checkpoints use 24 * 256MB = 6.0GB and the extra recompute peak is one layer's 4.5GB. Peak activation memory is therefore about 10.5GB. Adding the 32GB model state gives 42.5GB total, leaving 37.5GB of headroom on an 80GB A100, so the model should not OOM from these components.
   common_mistake: |
     **The Pitfall:** Forgetting to add the memory of the currently executing layer.
     **The Rationale:** Candidates assume only the stored checkpoints consume memory during the backward pass.
@@ -22,16 +22,17 @@ details:
     - Model state: 32GB. 80GB A100 GPU.
     - 24 layers, 4.5GB activations per layer (without checkpointing).
     - Checkpointing at layer boundaries (256MB boundary tensor).
+    - Idealized schedule: one layer is recomputed at a time, with no overlap between recomputed layer activations.
 
     **Calculations:**
     - Stored checkpoints = 24 layers * 0.25GB = 6.0GB.
     - Recomputation peak = one layer's activations = 4.5GB.
-    - Total activation memory = 6.0GB + 4.5GB = 10.5GB.
+    - Peak checkpointed activation memory = stored checkpoints + one recomputed layer = 6.0GB + 4.5GB = 10.5GB.
     - Total GPU memory = 32GB (model) + 10.5GB (activations) = 42.5GB.
     - Headroom = 80GB - 42.5GB = 37.5GB.
 
     **Conclusion & Interpretation:**
-    - **Result: 10.5GB peak activation memory; 42.5GB total, so no OOM under these assumptions (Memory-Capacity-Bound Computation).** Activation checkpointing solves the forward pass bloat.
+    - **Result: about 10.5GB peak activation memory under the idealized non-overlap schedule; 42.5GB total, so no OOM under these assumptions.** A less efficient checkpoint schedule could add extra temporary activation overlap.
 status: published
 provenance: imported
 requires_explanation: false

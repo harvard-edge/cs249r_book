@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: training
 title: Optimizing Large Model Training with Mixed-Precision on Google TPU v5e
 scenario: You are training a 70B parameter LLM on a single TPU v5e using FP32 for weights and activations, with a batch size of 1. You are encountering out-of-memory errors and achieving significantly lower throughput than expected.
-question: How would you diagnose the OOM and low throughput for a 70B FP32 LLM on a TPU v5e and design a mixed-precision strategy to fix it?
+question: How would you diagnose OOM for a 70B FP32 LLM on one TPU v5e and decide whether mixed precision can fix it?
 details:
   realistic_solution: |
     First diagnose the OOM as a capacity issue, not a tuning issue: a 70B model cannot be trained on one TPU v5e in FP32 or BF16 because weights alone exceed the device memory by a large margin, and optimizer states, gradients, and activations make the gap much larger. On a single TPU v5e, the correct fix is to change the problem scope: use a much smaller model, use parameter-efficient fine-tuning of a model that can be streamed/offloaded, or move to a distributed TPU configuration with model/state sharding. If the scope changes to a distributed setup, use BF16 for weights, activations, and gradients with FP32 optimizer states or master weights as needed; BF16 generally does not need dynamic loss scaling. Diagnose low throughput separately by checking XLA compilation/cache behavior, input pipeline stalls, host-device transfer, and whether the chosen sharding strategy keeps matrix units fed.
@@ -18,17 +18,19 @@ details:
     **The Rationale:** Candidates often assume changing the data type is a silver bullet and overlook the memory footprint of weights, gradients, activations, and Adam's momentum and variance states.
     **The Consequence:** The model still OOMs on one TPU v5e, and throughput debugging distracts from the impossible memory budget.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model: 70B parameter LLM.
-       - Optimizer: Adam (2 states per parameter).
-       - TPU v5e device memory: 16 GB HBM.
-    2. **Calculations:**
-       - FP32 Weights = 70e9 * 4 bytes = 280 GB.
-       - FP32 Adam States = 70e9 * 2 * 4 bytes = 560 GB.
-       - FP32 weights + Adam states = 840 GB before gradients and activations.
-       - BF16 weights + FP32 Adam states = 140 GB + 560 GB = 700 GB before gradients and activations.
-       - BF16 weights alone are 140 GB, which is 8.75x larger than 16 GB HBM.
-    3. **Conclusion & Interpretation:** **Result: Impossible on one TPU v5e (Capacity-Bound)**. Mixed precision reduces storage but does not make the 70B training state fit; the scope must change to a smaller model/offload-heavy fine-tune or a distributed sharded TPU setup.
+    **Assumptions & Constraints:**
+    - Model: 70B parameter LLM.
+    - Optimizer: Adam with gradients and optimizer state needed for training.
+    - TPU v5e device memory: 16 GB HBM.
+
+    **Calculations:**
+    - FP32 weights alone = 70B * 4 bytes = 280 GB.
+    - BF16 weights alone = 70B * 2 bytes = 140 GB, still 8.75x larger than 16 GB.
+    - FP32 Adam moments alone = 70B * 2 states * 4 bytes = 560 GB.
+    - A realistic training footprint also includes gradients, activations, temporary buffers, and any master weights.
+    - Therefore even the smallest weight-only mixed-precision case exceeds one TPU v5e before training state is counted.
+
+    **Conclusion & Interpretation:** **Result: mixed precision cannot fix this on one TPU v5e (Capacity-Bound)**. Use a smaller model, parameter-efficient/offloaded fine-tuning, or distributed sharding; then debug throughput after the workload is memory-feasible.
 status: published
 provenance: imported
 requires_explanation: false

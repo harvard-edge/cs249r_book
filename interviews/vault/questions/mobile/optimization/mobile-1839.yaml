@@ -19,19 +19,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Camera frame: 1 x 3 x 720 x 1280 (uint8).
-    - Memory Bandwidth: 50 GB/s.
-    - Non-contiguous penalty: 20-30x.
+    - Sustained measured copy bandwidth can be far below peak bandwidth when format conversion, allocation, cache effects, and dtype conversion are included.
 
     **Calculations:**
     - Frame elements: 3 * 720 * 1280 = 2,764,800.
     - uint8 frame size: 2,764,800 bytes = 2.76 MB.
     - float32 tensor size after cast: 2,764,800 * 4 bytes = 11.06 MB.
-    - A separate NHWC-to-NCHW float32 copy reads and writes about 11.06 MB each, or 22.12 MB of memory traffic.
-    - Ideal transfer time: 22.12 MB / 50 GB/s = 0.44 ms.
-    - With a 20-30x non-contiguous/cache penalty, effective time is roughly 8.8-13.3 ms, matching the observed 12 ms memory cost.
+    - A separate NHWC-to-NCHW float32 copy reads and writes about 11.06 MB each, or 22.12 MB of raw memory traffic.
+    - Ideal raw traffic at 50 GB/s would take 22.12 MB / 50 GB/s = 0.44 ms, so peak bandwidth alone cannot explain a measured 12 ms memory section.
+    - The 12 ms profile must therefore include more than one raw copy: format conversion, uint8-to-float cast, normalization, allocation, possible .contiguous() calls, and non-contiguous access. Its effective bandwidth is 22.12 MB / 0.012 s = 1.84 GB/s for just one copy-equivalent.
+    - Profile with operator-level tracing to count copy-equivalent traffic; if tracing shows roughly 5-10 copy-equivalents plus conversion kernels, the observed 12 ms is plausible.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory Copy Bound**. Converting to channels-last eliminates the NHWC to NCHW penalty, dropping memory time from 12ms to ~1-2ms.
+    - **Result: Memory Copy Bound**. The fix is to measure and remove the copy path, not assume one transpose costs 12 ms. Channels-last tensors, fused cast/normalization, and removing .contiguous() calls should collapse multiple memory passes into one pipeline.
 status: published
 provenance: imported
 requires_explanation: false

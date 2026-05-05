@@ -12,7 +12,7 @@ scenario: A hyperscaler proposes replacing some HBM stacks on a chiplet AI accel
 question: For 70B LLM inference, what are the bandwidth and latency tradeoffs of replacing some HBM stacks with CXL 3.0 DRAM?
 details:
   realistic_solution: |
-    Use CXL as a warm or spill tier, not as an equal replacement for HBM. For token decode, all 80 layers are traversed every token, so placing arbitrary layer ranges in CXL makes those weights part of the critical path every token. Residency should be based on access frequency and locality: keep the active model weights, current KV cache, and latency-critical working set in HBM; use CXL for cold adapters, rarely used experts, oversized KV spill, or batch contexts that can tolerate prefetch. With 100GB of weights in HBM at 2TB/s and 40GB in CXL at 400GB/s, the byte-weighted load time doubles from about 70ms to 140ms before considering extra CXL latency. The design is justified only when the cost/capacity gain is worth that SLA loss or the CXL-resident bytes can be prefetched off the decode critical path.
+    Use CXL as a warm or spill tier, not as an equal replacement for HBM. For token decode, all 80 layers are traversed every token, so placing arbitrary layer ranges in CXL puts those weights on the critical path unless they are prefetched or cached in HBM before use. Residency should be based on access frequency and locality: keep the active model weights, current KV cache, and latency-critical working set in HBM; use CXL for cold adapters, rarely used experts, oversized KV spill, or batch contexts that can tolerate prefetch. As a lower-bound byte-transfer model, 100GB of weights in HBM at 2TB/s and 40GB in CXL at 400GB/s doubles the weight-stream time from about 70ms to 140ms before adding CXL's higher access latency, KV-cache traffic, and kernel overhead. The design is justified only when the cost/capacity gain is worth that SLA loss or the CXL-resident bytes can be moved off the decode critical path.
   common_mistake: |
     **The Pitfall:** Treating CXL memory as equivalent to HBM, just with lower bandwidth.
     **The Rationale:** Ignoring that CXL 3.0 latency (100-200ns) is 5-10x higher than HBM (20-40ns).
@@ -20,16 +20,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 70B BF16 weights = 140 GB.
-    - 4x HBM3 stacks: 100 GB, 2 TB/s. CXL tier: 40 GB, 400 GB/s, 150ns latency.
-    - Per-layer weight load: 140GB/80 = 1.75 GB/layer.
+    - 4x HBM3 stacks: 100 GB, 2 TB/s. CXL tier: 40 GB, 400 GB/s, about 150ns access latency.
+    - Capacity placement example: 100GB of weights in HBM and 40GB in CXL.
+    - Lower-bound streaming model assumes weights are read on the decode critical path; it excludes KV-cache traffic, compute, kernel overhead, and reuse effects.
 
     **Calculations:**
-    - HBM time: 1.75GB / 2TB/s = 0.875ms/layer. Full model HBM: 80 * 0.875ms = 70ms.
-    - CXL time: 1.75GB / 400GB/s = 4.375ms/layer.
-    - Mixed (60 HBM + 20 CXL): (60 * 0.875) + (20 * 4.375) = 52.5 + 87.5 = 140ms.
+    - All-HBM lower-bound weight-stream time: 140GB / 2TB/s = 70ms.
+    - Mixed lower-bound weight-stream time: 100GB / 2TB/s + 40GB / 400GB/s = 50ms + 100ms = 150ms.
+    - CXL also adds higher access latency than HBM, so small or irregular accesses can hurt more than the bandwidth ratio alone suggests.
 
     **Conclusion & Interpretation:**
-    - **Result: 140ms vs 70ms decode step (Memory-Bandwidth-Bound)**. Yields a 2x slowdown for the entire decode step.
+    - **Result: CXL is not a bandwidth-equivalent HBM substitute.** In this placement example, the lower-bound weight-stream time grows from 70ms to about 150ms before CXL latency and KV-cache effects; use CXL for cold, spill, or prefetched data rather than latency-critical decode state.
 status: published
 provenance: imported
 requires_explanation: true

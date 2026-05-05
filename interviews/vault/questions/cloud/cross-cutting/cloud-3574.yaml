@@ -18,18 +18,22 @@ details:
     **The Consequence:** The system becomes catastrophically memory-bandwidth bottlenecked, making the 1-year training SLA impossible to hit despite having an H100.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 1B records, 4096 global batch, 1B param model.
-    - Weights = 2GB. Per-sample grads (BS=16) = 32GB.
-    - HBM at 3.35 TB/s.
-    - Target ε=8.
+    - 1B records, 4096 global batch, 1B parameter model.
+    - FP16 weights = 2 GB.
+    - Microbatch size = 16, so one logical batch uses 256 microbatches.
+    - H100 HBM bandwidth is about 3.35 TB/s.
+    - Target privacy guarantee is ε=8, δ=1e-7 over the actual one-year run.
+
     **Calculations:**
-    - Steps: 1B records / 4096 = 244,140 steps per epoch. (256 microbatches/step).
-    - Sampling rate q = 4096 / 1,000,000,000 = 4.096e-6.
-    - The microbatch count affects throughput, but the privacy accountant should see one logical DP step per global batch, not 256 independent DP steps.
-    - σ must be selected by an RDP/moments accountant using q, total logical steps in the year, δ=1e-7, and ε=8; σ≈0.001 is not credible because it would add negligible noise.
-    - Naive per-sample-gradient materialization for a 1B-parameter FP16 model would be about 4096 * 2 GB and is infeasible; practical systems compute per-example norms and clipped sums incrementally.
+    - Steps per epoch = 1B records / 4096 = 244,140 logical DP steps.
+    - Sampling rate per logical step q = 4096 / 1,000,000,000 = 4.096e-6.
+    - The one-year accountant needs the actual number of logical DP steps run in that year, for example epochs_per_year * 244,140, not just the per-epoch count.
+    - The 256 microbatches affect throughput and memory traffic, but privacy accounting should count one noisy clipped update per logical batch, not 256 separate DP releases.
+    - A naive per-sample-gradient tensor for one 16-example microbatch is 16 * 2 GB = 32 GB before activations and optimizer state; materializing the full 4096-example logical batch would be 4096 * 2 GB = 8 TB and is infeasible.
+    - σ must be solved by an RDP/moments accountant from q, total logical steps, δ, and ε; a near-zero value such as σ≈0.001 is not justified by these inputs.
+
     **Conclusion & Interpretation:**
-    - **Result: Throughput- and Utility-Sensitive DP-SGD**. H100 utilization is limited by per-sample clipping overhead and memory traffic, while utility depends on the accountant-derived σ and the clipping norm rather than an unsupported near-zero noise estimate.
+    - **Result: accountant-derived noise and memory-efficient clipping are required.** H100 utilization is limited by per-sample clipping overhead and memory traffic, while utility depends on the chosen clipping norm and the σ returned by the privacy accountant.
 status: published
 provenance: imported
 requires_explanation: false

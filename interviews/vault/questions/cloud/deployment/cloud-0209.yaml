@@ -12,7 +12,7 @@ scenario: We want to A/B test our current 13B model against a new 70B model in s
 question: Why is this statistically unnecessary but infrastructure-ruinous, and how does the GPU memory asymmetry between these models dictate your A/B testing architecture?
 details:
   realistic_solution: |
-    Separate statistical need from serving capacity. Shadow mode should not mirror every production request into the 70B path unless the experiment truly needs that many paired samples. Log production requests and mirror only a sampled fraction to the 70B deployment, or replay sampled logs asynchronously through a small evaluation cluster. Keep the 13B production serving path unchanged; send sampled shadow traffic to a separately quota-limited 70B pool so evaluation cannot steal production KV cache or GPU slots. With FP16 weights, 13B is about 26 GB and can fit on one 40 GB or 80 GB A100 depending on context and batch requirements, while 70B is about 140 GB and usually needs TP=2 on 80 GB H100/A100 or more shards if context and KV cache are large. That memory asymmetry dictates a sampled shadow architecture, not a 100% mirror.
+    Separate statistical need from serving capacity. Shadow mode should not mirror every production request into the 70B path unless the experiment truly needs that many paired samples. Log production requests and mirror only a sampled fraction to the 70B deployment, or replay sampled logs asynchronously through a small evaluation cluster. Keep the 13B production serving path unchanged; send sampled shadow traffic to a separately quota-limited 70B pool so evaluation cannot steal production KV cache or GPU slots. With FP16 weights, 13B is about 26 GB before KV cache, while 70B is about 140 GB before KV cache and usually needs a multi-GPU serving replica. The exact accelerator choice depends on production hardware, context length, and batch size, but the asymmetry is enough to dictate sampled or replayed shadow traffic instead of a 100% live mirror.
   common_mistake: |
     **The Pitfall:** Blindly mirroring 100% of traffic to the shadow deployment.
     **The Rationale:** Engineers follow standard web-service A/B testing practices, forgetting the massive, non-linear hardware cost of LLM inference.
@@ -20,20 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Memory asymmetry: 13B FP16 ~= 26 GB; 70B FP16 ~= 140 GB.
-    - Production traffic: 1,000 QPS served by the existing 13B fleet.
-    - A 70B FP16 shadow replica uses TP=2 on two 80 GB GPUs.
-    - Assume one 70B TP=2 replica can process 4 sampled shadow QPS for the experiment's latency/context mix.
-    - H100 cost example: $4/GPU-hour, so one TP=2 replica costs $8/hour.
+    - A 100% mirror would run the full production request stream through both models.
+    - Shadow evaluation only needs enough samples for the metric's confidence interval, not every request.
+    - The 70B path should have isolated GPU slots, KV cache, quotas, and backpressure so it cannot affect production.
 
     **Calculations:**
-    - 100% mirroring requires 1,000 QPS / 4 QPS per 70B replica = 250 TP=2 replicas = 500 H100s.
-    - Weekly 100% shadow cost = 500 GPUs * $4/hr * 24 hr/day * 7 days = $336,000/week.
-    - If the experiment needs 3,200 shadow samples, sampling 1 QPS gathers them in 3,200 seconds = 53.3 minutes.
-    - One TP=2 shadow replica for that hour costs 2 GPUs * $4/hr * 0.89 hr = ~$7.10.
-    - Even running the sampled shadow for a full week at 1 QPS costs 2 * $4 * 24 * 7 = $1,344, far below full mirroring.
+    - Weight memory alone: 13B FP16 ~= 13B * 2 bytes = 26 GB; 70B FP16 ~= 70B * 2 bytes = 140 GB.
+    - A 100% mirror requires enough 70B serving capacity for the same live QPS as production, plus separate KV cache for all mirrored contexts.
+    - A 1% sampled shadow sends only 1/100 of production requests to the 70B pool while preserving unbiased paired examples if sampling is random and logged.
+    - Offline replay can use the same sampled logs at a controlled rate, decoupling evaluation throughput from production peak QPS.
 
     **Conclusion & Interpretation:**
-    - **Result: Sampled Shadowing Is Statistically Adequate and Infrastructure-Safe.** Route about 0.1% of traffic, or replay logs offline, to a quota-limited 70B pool. Full mirroring provisions hundreds of GPUs to collect redundant samples.
+    - **Result: Sampled Shadowing Is Statistically Adequate and Infrastructure-Safe.** Route a small random sample, or replay logs offline, to a quota-limited 70B pool. Full mirroring duplicates the live serving problem with a much larger model and collects many redundant samples.
 status: published
 provenance: imported
 requires_explanation: false

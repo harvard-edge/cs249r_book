@@ -11,7 +11,7 @@ title: Jank Analysis of On-Device LLM on Tensor G3
 scenario: Your team is deploying a real-time smart reply feature using Gemini Nano on the Google Tensor G3. The UI thread requires a steady 60 FPS (16.6ms per frame) to prevent jank during scrolling. However, when the on-device TPU begins processing a prompt, you observe frame drops and responsiveness warnings, despite the TPU being a separate coprocessor and having 12 GB LPDDR5X memory available.
 question: Why do frame drops and responsiveness warnings occur when Gemini Nano runs on Tensor G3's TPU during 60 FPS scrolling?
 details:
-  realistic_solution: The frame drops occur due to memory bandwidth saturation and synchronous blocking. While the Tensor G3's TPU processes the LLM operations, it aggressively consumes the LPDDR5X memory bandwidth. If the UI thread synchronously waits for the inference result or competes for the same memory bus to render high-resolution textures, it misses the 16.6ms deadline. The system behavior is explained by the shared memory controller bottleneck.
+  realistic_solution: The frame drops occur because the UI path is exposed to an inference stall that is longer than the 16.6ms frame deadline. Even though the TPU handles the compute, any synchronous wait for the result, blocking IPC, or shared-memory transfer on the render path can hold up frame production. Shared LPDDR contention can worsen the stall, but the deadline violation is already explained by a 50ms block on a 60 FPS UI thread.
   common_mistake: |
     **The Pitfall:** Assuming the CPU is free just because the TPU handles the compute.
     **The Rationale:** Candidates miss the impact of memory bandwidth contention or synchronous IPC overhead on the UI thread.
@@ -23,9 +23,10 @@ details:
 
     **Calculations:**
     - Frame-budget multiple: 50 ms / 16.6 ms = ~3.0 frame intervals.
+    - Because a frame must be produced every 16.6 ms, a synchronous 50 ms wait can miss the current deadline and the next two frame opportunities.
 
     **Conclusion & Interpretation:**
-    - **Result: about 3 frame budgets consumed (Latency-Bound)**. A 50ms synchronous stall can cause multiple dropped frames and visible jank, though the exact count depends on scheduler timing and render pipeline state; longer repeated stalls are what escalate into ANR-class responsiveness failures.
+    - **Result: about 3 frame budgets consumed (Latency-Bound)**. A 50ms synchronous stall is enough to cause visible jank; the exact dropped-frame count depends on scheduler timing and render pipeline state.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: 'You''re serving a 70B LLM and must choose the tensor parallelism (TP)
 question: Which TP degree—2, 4, or 8—is optimal for the 70B LLM on H100 NVLink under a 40 ms per-token latency target?
 details:
   realistic_solution: |
-    TP=4 is the best choice under this model. TP=2 meets the 40 ms target but leaves too much weight-read work per GPU. TP=8 further reduces per-GPU weight reads, but its extra collective startup latency across 80 layers offsets that gain. With H100 NVLink treated as 450 GB/s effective unidirectional bandwidth and two activation AllReduces per layer, TP=4 gives the lowest estimated per-token latency at about 15 ms.
+    TP=4 is the best choice under this model. TP=2 meets the 40 ms target but leaves too much weight-read work per GPU. TP=8 further reduces per-GPU weight reads, but its extra collective startup latency across 80 layers offsets that gain. With H100 NVLink treated as 450 GB/s effective unidirectional bandwidth and two ring activation AllReduces per layer, TP=4 gives the lowest estimated per-token latency at about 20 ms.
   common_mistake: |
     **The Pitfall:** 'Use TP=8 for maximum parallelism — more GPUs always means lower latency.'
     **The Rationale:** This ignores that each TP step requires an AllReduce synchronization, and the communication cost grows with TP degree.
@@ -24,17 +24,18 @@ details:
     - Hidden size: 8192, batch size: 1 token, activation dtype: FP16.
     - Each layer has two TP AllReduce operations.
     - NVLink is modeled as 900 GB/s bidirectional, or 450 GB/s effective per direction for a collective transfer.
-    - Collective startup latency: 10 microseconds per ring step.
+    - Collective startup latency: 10 microseconds per ring phase.
 
     **Calculations:**
     - Per-token weight-read time = 140 GB / TP / 3.35 TB/s.
     - Per AllReduce payload per GPU = 2 * (TP - 1) / TP * 8192 * 2 bytes.
-    - TP=2: weight read = 20.9 ms; bandwidth time = 160 * 16 KiB / 450 GB/s = 0.006 ms; startup = 160 * 1 * 10 us = 1.6 ms; total = 22.5 ms.
-    - TP=4: weight read = 10.4 ms; bandwidth time = 160 * 24 KiB / 450 GB/s = 0.009 ms; startup = 160 * 3 * 10 us = 4.8 ms; total = 15.2 ms.
-    - TP=8: weight read = 5.2 ms; bandwidth time = 160 * 28 KiB / 450 GB/s = 0.010 ms; startup = 160 * 7 * 10 us = 11.2 ms; total = 16.4 ms.
+    - Ring startup phases per AllReduce = 2 * (TP - 1), so startup across 160 AllReduces is 160 * 2 * (TP - 1) * 10 us.
+    - TP=2: weight read = 20.9 ms; bandwidth time = 160 * 16 KiB / 450 GB/s = 0.006 ms; startup = 160 * 2 * 1 * 10 us = 3.2 ms; total = 24.1 ms.
+    - TP=4: weight read = 10.4 ms; bandwidth time = 160 * 24 KiB / 450 GB/s = 0.009 ms; startup = 160 * 2 * 3 * 10 us = 9.6 ms; total = 20.0 ms.
+    - TP=8: weight read = 5.2 ms; bandwidth time = 160 * 28 KiB / 450 GB/s = 0.010 ms; startup = 160 * 2 * 7 * 10 us = 22.4 ms; total = 27.6 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: TP=4 is optimal for latency in this explicit model (15.2 ms).** TP=8 still meets the 40 ms target, but its additional per-layer collective startup cost makes it slower than TP=4.
+    - **Result: TP=4 is optimal for latency in this explicit model (20.0 ms).** TP=8 still meets the 40 ms target, but its additional per-layer collective startup cost makes it slower than TP=4.
 status: published
 provenance: imported
 requires_explanation: false

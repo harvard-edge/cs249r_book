@@ -11,7 +11,7 @@ title: MCU SIMD Alignment for Audio CNNs
 scenario: You are deploying a keyword spotting CNN on an ARM Cortex-M4 microcontroller (features DSP extensions, 32-bit SIMD MAC instructions, 256KB SRAM, 168MHz). The input is a 13-band MFCC spectrogram. Using an INT8 quantized model, inference takes 180ms per window, missing the 50ms real-time deadline. Profiler shows the CMSIS-NN library is executing standard scalar instructions instead of packed SIMD.
 question: Why is the INT8 keyword-spotting CNN using scalar CMSIS-NN kernels on the Cortex-M4, and how would you hit the 50ms deadline?
 details:
-  realistic_solution: The Cortex-M4 DSP extensions and CMSIS-NN kernels depend on aligned packed data and inner-loop channel counts that match the kernel's lane assumptions. A 13-band MFCC input leaves a scalar tail and can push the library onto slower fallback paths. Pad the input features from 13 to 16 bands with zeros, keep intermediate channel counts aligned to multiples of 4, and ensure buffers are 4-byte aligned. This slightly increases theoretical MACs but enables packed DSP kernels and removes scalar fallback; it should be treated as a major speedup opportunity, not a guaranteed exact 4x result.
+  realistic_solution: The Cortex-M4 DSP extensions and CMSIS-NN kernels depend on aligned packed data and inner-loop channel counts that match the kernel's lane assumptions. A 13-band MFCC input leaves a scalar tail and can push the library onto slower fallback paths. Pad the input features from 13 to 16 bands with zeros, keep intermediate channel counts aligned to multiples of 4, and ensure buffers are 4-byte aligned. This slightly increases theoretical MACs but enables packed DSP kernels and removes scalar fallback; then reprofile to verify whether the 50ms deadline is met.
   common_mistake: |
     **The Pitfall:** Overclocking the MCU or aggressively pruning the model.
     **The Rationale:** Engineers try brute-force hardware scaling or accuracy trade-offs instead of optimizing memory alignment for the SIMD DSP.
@@ -22,13 +22,13 @@ details:
     - Processor: 168MHz.
 
     **Calculations:**
-    - Per output position, scalar fallback processes 13 channel MACs as about 13 scalar work units.
-    - Padding to 16 channels lets CMSIS-NN use packed DSP kernels across the inner loop instead of carrying a scalar tail or fallback path.
-    - The best-case inner-loop work ratio is roughly 13 scalar iterations versus 16 padded values processed in packed groups, but real speedup depends on loads, loop overhead, saturation, and surrounding layers.
-    - A 3x class improvement would move 180ms to about 60ms; aligned buffers and applying the multiple-of-4 rule to later layers can close the remaining gap to the 50ms deadline.
+    - The current 180ms profile proves the implementation is not on the intended packed DSP path.
+    - Padding 13 MFCC bands to 16 and aligning buffers makes the inner loop match the 4-lane INT8 packing expected by CMSIS-NN kernels.
+    - The padded model performs slightly more nominal MACs, but avoids scalar fallback, scalar tail handling, and less efficient memory access.
+    - No exact deadline proof follows from channel count alone: the fix must be accepted only after profiling the packed kernels against the 50ms budget.
 
     **Conclusion & Interpretation:**
-    - **Result: packed-kernel enablement, not a fixed 4x guarantee (Compute-Bound)**. Channel padding fixes the scalar fallback; reaching the <50ms deadline also requires aligned buffers and keeping later kernels on the CMSIS-NN DSP path.
+    - **Result: packed-kernel enablement, not a fixed latency guarantee (Compute-Bound)**. Channel padding is the correct first fix because it removes scalar fallback; reaching the <50ms deadline remains a profiler-verified requirement, not something proven by the 13-to-16 padding arithmetic alone.
 status: published
 provenance: imported
 requires_explanation: false

@@ -24,15 +24,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 128-expert MoE (800B total parameters).
-    - Precision: BF16 (1.6 TB total weights).
+    - Precision: BF16 at 2 bytes/parameter, so 800B parameters require 1.6 TB total weights.
     - Routing: Top-2 experts per token.
     - H100 capacity assumption: 80 GB HBM, with roughly 20% reserved for runtime headroom, so about 64 GB usable for resident weights per GPU.
 
     **Calculations:**
     - Active Utilization: 2 / 128 = 1.56% of parameters active per token.
     - Per-expert BF16 weight size: 1.6 TB / 128 = 12.5 GB.
-    - Zipfian Cache Optimization: the top-16 experts require 16 * 12.5 GB = 200 GB and fit on about 4 H100s with headroom.
+    - Zipfian Cache Optimization: the top-16 experts require 16 * 12.5 GB = 200 GB; at 64 GB usable/GPU, that needs ceil(200 / 64) = 4 H100s.
     - Cold Quantization: the remaining 112 experts are 112 * 12.5 GB = 1.4 TB in BF16. INT4 is roughly 1/4 of BF16 storage, so the cold set is ~350 GB and fits on about 6 H100s with headroom.
+    - Cold placement: at 64 GB usable/GPU, ceil(350 / 64) = 6 H100s if cold experts remain sharded and compressed in GPU HBM rather than replicated everywhere.
+    - Total resident placement example: 4 H100s for the hot BF16/FP8 cache plus 6 H100s for the compressed cold shard pool = about 10 H100s, before any extra hot-expert replication for load balance.
 
     **Conclusion & Interpretation:**
     - **Result: Memory Capacity-Bound.** Naively storing all experts in BF16 requires 1.6 TB / 80 GB = 20 H100s by raw capacity, or 1.6 TB / 64 GB = 25 H100s with 20% headroom, while only 1.56% of weights are active per token. Caching hot experts and quantizing cold experts reduces the resident footprint to about 10 H100s with headroom, roughly a 2x-2.5x capacity reduction without relying on PCIe offload latency.

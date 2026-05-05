@@ -7,11 +7,11 @@ topic: mcu-compute-constraints
 competency_area: memory
 bloom_level: apply
 phase: inference
-title: The Memory-Mapped Sensor Bottleneck
+title: SPI Polling Busy-Wait Bottleneck
 scenario: Your TinyML vibration monitoring system uses a Cortex-M0+ (48 MHz, 32 KB SRAM) with an external accelerometer connected via SPI. The accelerometer produces 3-axis INT16 samples at 3.2 kHz. Your colleague reads each sample by polling the SPI data register in a busy-wait loop inside the main inference function. The system works, but inference latency is 3x worse than expected.
 question: Why does busy-wait SPI polling make Cortex-M0+ vibration inference 3x slower than expected?
 details:
-  realistic_solution: 'Polling SPI stalls the CPU pipeline while the transfer completes, so the problem is CPU occupancy rather than raw SPI bandwidth. A 512-sample window contains 512 * 3 axes * 2 bytes = 3,072 bytes. With a polling loop that costs about 156 cycles per sample group, the CPU burns 79,872 cycles, or 1.66ms at 48MHz, before doing useful inference work. That overhead alone can explain a multi-x latency regression for a sub-millisecond kernel. Fix: configure SPI DMA to fill the sample buffer autonomously in the background. DMA setup is about 20 cycles (~0.4 microseconds), so the CPU no longer busy-waits through the I/O window.'
+  realistic_solution: 'Polling SPI stalls the CPU pipeline while the transfer completes, so the problem is CPU occupancy rather than raw SPI bandwidth. A 512-sample-group window contains 512 time steps * 3 axes * 2 bytes = 3,072 bytes. With a polling loop that costs about 156 cycles per 3-axis sample group, the CPU burns 79,872 cycles, or 1.66ms at 48MHz, before doing useful inference work. That overhead alone can explain a multi-x latency regression for a sub-millisecond kernel. Fix: configure SPI DMA to fill the sample buffer autonomously in the background. DMA setup is about 20 cycles (~0.4 microseconds), so the CPU no longer busy-waits through the I/O window.'
   common_mistake: |
     **The Pitfall:** Blaming the SPI bus bandwidth instead of CPU overhead.
     **The Rationale:** Candidates assume the 8 MHz SPI bus is too slow, overlooking that transferring 6 bytes takes only 6 µs, while busy-waiting stalls the CPU pipeline.
@@ -19,8 +19,8 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Cortex-M0+ at 48 MHz.
-    - 512 samples per window.
-    - Polling takes ~156 cycles/sample.
+    - 512 three-axis sample groups per window.
+    - Polling takes ~156 cycles per three-axis sample group.
     - DMA setup takes 20 cycles (~0.4 microseconds).
 
     **Calculations:**

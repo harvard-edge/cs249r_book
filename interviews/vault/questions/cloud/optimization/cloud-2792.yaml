@@ -11,7 +11,8 @@ title: Hybrid AOT JIT Compilation for Dynamic 13B Inference
 scenario: You need to serve a 13B model with highly dynamic sequence lengths (10 to 8000) using a hybrid AOT/JIT compilation architecture. The goal is to minimize both kernel launch overhead and compilation latency.
 question: How would you design a hybrid AOT/JIT compiler for a 13B model with sequence lengths from 10 to 8000?
 details:
-  realistic_solution: Architect a bucketing system combined with PTX JIT compilation. Pre-compile (AOT) kernels for a fixed set of sequence length buckets (e.g., 32, 128, 512, 2048, 8192) using fixed shapes to maximize register utilization. Route requests to the nearest upper bucket and pad inputs to the bucket size to reuse the highly optimized AOT kernels. For extremely large or irregular shapes that cause high memory fragmentation in buckets, trigger a background JIT compilation cache. On an 80GB GPU, the 13B FP16 weights leave about 54GB before runtime overhead; an 8192-token KV cache at 800KB/token is about 6.55GB, so 8 max-bucket requests is a theoretical upper bound and 7 is the safer production target after reserving memory for activations, workspaces, and fragmentation.
+  realistic_solution: |
+    Architect a bucketing system combined with a bounded JIT cache. Pre-compile (AOT) kernels for fixed sequence buckets such as 32, 128, 512, 2048, and 8192 so common shapes reuse optimized kernels and avoid compile latency. Route requests to the nearest upper bucket and pad only within the selected bucket; use JIT compilation in the background for outlier shapes that repeatedly waste too much padding or trigger fragmentation. On an 80GB GPU, 13B FP16 weights use about 26GB, leaving about 54GB before runtime overhead. If the total KV cache for one request is 800KB per allocated token across all layers, one 8192-token bucket consumes about 6.55GB; after a 10% reserve for workspaces, activations, and fragmentation, plan for roughly 7 concurrent max-bucket requests rather than the arithmetic ceiling of 8. The design tradeoff is bucket count versus padding waste: more AOT buckets reduce memory waste but increase compile and cache-management surface area.
   common_mistake: |
     **The Pitfall:** Attempting to JIT compile kernels on-the-fly for every unique sequence length.
     **The Rationale:** Engineers want to perfectly optimize hardware usage for every request to avoid padding waste.
@@ -19,18 +20,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model size: 13B (26GB FP16).
-    - KV cache per token: 800KB.
+    - KV cache: 800KB per allocated token for one request, total across all layers and KV heads.
     - Max bucket size: 8192 context.
+    - GPU memory: 80GB, with 10% of post-weight memory reserved for workspaces, activations, fragmentation, and runtime buffers.
 
     **Calculations:**
-    - Memory for max bucket: 8192 * 800KB = 6,553,600KB ≈ 6.55GB decimal.
-    - Padding penalty (e.g., 4000 to 8192): 4192 * 800KB = 3,353,600KB ≈ 3.35GB decimal (about 3.2GiB).
+    - Memory for one max-bucket request: 8192 tokens * 800KB/token = 6,553,600KB ≈ 6.55GB decimal.
+    - Padding penalty for routing a 4000-token request to the 8192 bucket: (8192 - 4000) * 800KB = 3,353,600KB ≈ 3.35GB decimal.
     - Raw remaining memory on 80GB GPU: 80GB - 26GB = 54GB.
     - Theoretical max-bucket capacity: 54GB / 6.55GB ≈ 8.2, so at most 8 fully padded requests before overhead.
-    - With a modest ~10% reserve for activations, workspaces, allocator fragmentation, and runtime buffers: 48.6GB / 6.55GB ≈ 7.4, so plan for 7 concurrent max-bucket requests.
+    - With a 10% reserve on post-weight memory: 54GB * 0.90 = 48.6GB usable; 48.6GB / 6.55GB ≈ 7.4, so plan for 7 concurrent max-bucket requests.
+    - Adding an intermediate AOT bucket, such as 4096, cuts the 4000-token padding penalty from about 3.35GB to 96 * 800KB ≈ 77MB, at the cost of another compiled shape to build, test, and cache.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Capacity-Bound.** Bucketing trades memory for low compilation latency; 8 max-bucket requests is the arithmetic ceiling, while 7 is the safer operating target after overhead.
+    - **Result: Bucketed AOT with Cached JIT.** Bucketing trades memory for low launch and compilation latency; 8 max-bucket requests is the arithmetic ceiling, 7 is the safer target after overhead, and extra buckets are justified when they avoid repeated multi-GB padding waste.
 status: published
 provenance: imported
 requires_explanation: true

@@ -12,7 +12,7 @@ scenario: An on-device LLM on an iPhone 15 Pro uses the A17 Pro SoC to serve aut
 question: Should the A17 Pro Neural Engine or the GPU handle KV cache updates for a 1B parameter INT8 model to maximize throughput?
 details:
   realistic_solution: |
-    Do not model KV-cache updates as rereading the 1 GB INT8 model per token. The KV path appends the current token's K/V vectors and, during attention, reads prior K/V entries from the cache. Those are memory-layout and bandwidth-sensitive operations with gathers, appends, transposes, and cache management, while the Neural Engine is strongest on dense tiled matrix multiplies. A practical A17 Pro split is to keep dense projections and MLPs on the Neural Engine when supported, but run KV-cache update/layout work on the GPU or a dedicated memory path with Metal kernels. The GPU is preferable for the KV-cache updates specifically because it is more programmable for irregular memory movement, not because it avoids a fictitious 1 GB model fetch per token.
+    Do not model KV-cache updates as rereading the 1 GB INT8 model per token. The KV path appends the current token's K/V vectors and, during attention, reads prior K/V entries from the cache. Those are memory-layout and bandwidth-sensitive operations with gathers, appends, transposes, and cache management, while the Neural Engine is strongest on dense tiled matrix multiplies. A practical A17 Pro split is to keep dense projections and MLPs on the Neural Engine when supported, but run KV-cache update/layout work on the GPU or a dedicated memory path with Metal kernels. The GPU is the better default for these KV-cache updates because it is more programmable for irregular memory movement; this is a workload-specific conclusion, not a universal claim that the GPU wins all KV-cache work.
   common_mistake: |
     **The Pitfall:** Blindly assigning all LLM tasks to the Neural Engine.
 
@@ -21,19 +21,19 @@ details:
     **The Consequence:** Autoregressive decoding performance tanks because the memory-bound KV cache operations stall on the NPU's internal data paths.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Example transformer: 24 layers, hidden size 2048.
-    - INT8 KV cache: K and V each store one byte per hidden element.
+    - Simplified illustrative transformer: 24 layers, hidden size 2048.
+    - Toy INT8 KV cache assumption: K and V each store one byte per hidden element, with heads and head dimension folded into hidden size.
     - Context length for attention read example: 1024 tokens.
     - System memory bandwidth is the limiting shared resource for cache movement.
 
     **Calculations:**
-    - KV bytes appended per new token = 24 layers * 2 tensors * 2048 bytes = 98,304 bytes, or about 96 KB.
+    - Illustrative KV bytes appended per new token = 24 layers * 2 tensors * 2048 bytes = 98,304 bytes, or about 96 KB.
     - KV bytes read for attention at 1024-token context = 96 KB/token * 1024 = about 96 MB per generated token.
     - This is cache traffic, not model-weight traffic; the 1 GB model is not a valid per-token KV-update cost.
-    - The hardware decision should minimize cache movement and layout conversion, so use GPU/Metal for programmable KV append and cache-layout kernels while reserving the Neural Engine for dense INT8 compute.
+    - The hardware decision should minimize cache movement and layout conversion, so prefer GPU/Metal for programmable KV append and cache-layout kernels while reserving the Neural Engine for dense INT8 compute when supported.
 
     **Conclusion & Interpretation:**
-    - **Result: GPU for KV-cache updates; Neural Engine for dense matmuls when possible.** KV-cache work is dominated by cache reads/writes and layout handling, so the GPU's programmable memory pipeline is the better fit for updates even though the Neural Engine may be better for dense model layers.
+    - **Result: GPU for KV-cache updates; Neural Engine for dense matmuls when possible.** Under this simplified KV-size estimate, cache work is dominated by reads/writes and layout handling, so the GPU's programmable memory pipeline is the better fit for updates even though the Neural Engine may be better for dense model layers.
 status: published
 provenance: llm-draft
 requires_explanation: true

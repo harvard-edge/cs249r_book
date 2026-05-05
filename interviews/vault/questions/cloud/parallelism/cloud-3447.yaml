@@ -12,7 +12,7 @@ scenario: You are managing a multi-tenant ML cluster utilizing TPU v5e devices (
 question: How would you schedule the 2 GB, 20 TFLOPS inference job onto the occupied TPU v5e while minimizing disruption, and what are the trade-offs?
 details:
   realistic_solution: |
-    A realistic solution should first ask what the TPU runtime and cluster scheduler actually support. If the stack has explicit TPU preemption or gang-scheduled priority queues, use that mechanism at a safe job boundary: checkpoint or drain the training step, run the urgent inference job, then resume training. If the occupied TPU v5e cannot be partitioned or time-sliced with isolation guarantees, do not assume MIG-like sharing. Minimizing disruption means either delaying inference until the training job reaches a checkpoint, preempting the training job with known restart cost, or provisioning a separate TPU for inference. The main trade-off is latency versus training waste: co-location without scheduler support risks unpredictable contention, while checkpoint/preempt/provision choices make the cost explicit.
+    The primary strategy is priority preemption at a safe boundary: mark the inference service as higher priority, ask the scheduler to stop the training job after its current step or next checkpoint, run the short inference workload, then resume training from the checkpoint. This gives predictable inference latency without assuming TPU v5e has MIG-like partitioning. If the runtime supports TPU-native time slicing with isolation, reserve a small quota only after measuring HBM bandwidth and MXU contention; otherwise avoid co-location because the training job already owns the device. If checkpoint latency is too high for the inference SLO, route the request to a spare TPU or keep a small hot standby pool. The trade-off is explicit latency versus wasted training work: checkpoint-and-preempt bounds interference, while waiting preserves training progress but may miss the inference deadline.
   common_mistake: |
     **The Pitfall:** Simply preempting and restarting the training job, or assuming simple time-slicing will suffice.
     **The Rationale:** Full preemption leads to significant wasted computation and increased time-to-train. Simple time-slicing ignores memory bandwidth or compute constraints and potential resource contention.
@@ -26,10 +26,11 @@ details:
     **Calculations:**
     - Capacity fractions are small: 20 / 197 = 10.2% of peak BF16 compute and 2 / 16 = 12.5% of HBM capacity.
     - These fractions do not predict training slowdown because contention depends on kernel timing, memory bandwidth, compiler placement, and scheduler isolation.
-    - If the scheduler can only run one TPU job at a time, the disruption is explicit preemption time plus lost work since the last checkpoint; if it cannot be interrupted safely, inference must wait or use another TPU.
+    - If the scheduler can only run one TPU job at a time, the recommended disruption is checkpoint latency plus preemption/resume time; lost work is bounded by the time since the last checkpoint or safe step boundary.
+    - If that delay violates the inference SLO, using a spare TPU is the only predictable option without verified TPU-native isolation.
 
     **Conclusion & Interpretation:**
-    - **Result: choose queueing, checkpoint/preemption, or another TPU unless TPU-native isolation is guaranteed.** The 10.2% compute and 12.5% memory fractions are capacity checks, not a valid slowdown estimate.
+    - **Result: use checkpoint-and-preempt as the default scheduling action, with spare-capacity spillover for tighter SLOs.** The 10.2% compute and 12.5% memory fractions are capacity checks, not a valid slowdown estimate.
 status: published
 provenance: imported
 requires_explanation: false

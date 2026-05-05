@@ -12,11 +12,8 @@ scenario: Your team is tasked with deploying a large Transformer-based language 
 question: How would you tile the 20B BF16 transformer's GEMMs on TPU v5e, and when would you choose weight-stationary versus output-stationary dataflow?
 details:
   realistic_solution: |
-    A realistic solution would involve analyzing the dimensions of the matrix multiplications, the model's memory footprint, and the TPU's HBM capacity. For a large language model, weight-stationary dataflow is often preferred due to the reusability of weights across multiple activations, especially for batch inference or sequence processing where the same weights are applied to different input elements. The solution should detail a tiling strategy:
-    1.  **Spatial Tiling:** Partitioning the large matrices into smaller blocks that fit within the systolic array's dimensions and on-chip memory.
-    2.  **Temporal Tiling:** Iteratively processing these blocks, ensuring data (activations, partial sums) are reused in on-chip buffers as much as possible before going back to HBM.
-    3.  **Data Placement:** Strategically placing weights and activations in HBM and on-chip caches to minimize external memory transfers, utilizing the 1.6 TB/s bandwidth efficiently but not exhaustively.
-    The solution should articulate how these choices lead to high utilization of the 197 TFLOPS BF16 compute and minimize stalls due to HBM bandwidth limitations.
+    A realistic solution must first account for residency: a 20B BF16 model is about 40 GB, so one 16 GB TPU v5e device cannot hold all weights plus activations and KV/cache buffers. The model must be partitioned across multiple v5e devices with tensor/pipeline parallelism, or weight panels must be streamed from host or peer memory with enough prefetching to hide transfer time. Within each shard, tile the dominant GEMMs into systolic-array-sized blocks and keep the most reused operand on chip.
+    Weight-stationary dataflow is preferred for decode or batched inference when the same weight tile is applied to many token activations, because it amortizes HBM reads for the weight panel. Output-stationary or hybrid tiling is preferred when K is split across tiles and partial sums would otherwise be repeatedly spilled to HBM. Use temporal tiling to keep activations, weights, and accumulators in on-chip buffers across token or batch tiles, and choose shard sizes so each device has HBM room for its weight slice, activations, KV/cache, and runtime buffers.
   common_mistake: |
     **The Pitfall:** Suggesting a simple partitioning strategy without considering actual data reuse patterns or quantifying data movement.
     **The Rationale:** Candidates often have a superficial understanding of TPU memory hierarchy, assuming one dataflow is universally superior.
@@ -29,13 +26,14 @@ details:
     - HBM Bandwidth: 1.6 TB/s.
 
     **Calculations:**
-    - Model footprint: 20B * 2 bytes = 40 GB, so all weights cannot reside in one 16 GB HBM device at once.
+    - Model footprint: 20B * 2 bytes = 40 GB, so all weights cannot reside in one 16 GB HBM device at once; serving requires partitioning across devices or host/peer-assisted streaming.
     - To sustain peak compute, required operational intensity is 197 TFLOPs/s / 1.6 TB/s = ~123 FLOPs/byte from HBM.
     - A single BF16 GEMM tile with MxK times KxN performs 2*M*N*K FLOPs and moves at least 2*(M*K + K*N + M*N) bytes if each operand tile is loaded once and C is written once.
     - Example 128x1024 by 1024x128 tile: FLOPs = 33.6M; bytes = 2*(131k + 131k + 16k) = ~557 KB; intensity is ~60 FLOPs/byte, below the peak-compute roofline unless weights, activations, or partial sums are reused across additional tokens/batches.
+    - Weight-stationary tiling raises effective intensity when the KxN weight tile is reused across multiple M token rows; output-stationary tiling avoids extra HBM traffic when many K-split tiles contribute to the same MxN output tile.
 
     **Conclusion & Interpretation:**
-    - **Result: Dataflow choice is a roofline tradeoff, not a hard full-model residency requirement.** Weight-stationary tiling is attractive when weights are reused across tokens or batches; output-stationary tiling is better when partial-sum traffic dominates. The design should stream model shards through HBM while maximizing on-chip reuse.
+    - **Result: Dataflow choice is a roofline tradeoff under a hard shard-residency constraint.** Weight-stationary tiling is attractive when weights are reused across tokens or batches; output-stationary tiling is better when partial-sum traffic dominates. The design should shard or stream the 40 GB model while maximizing on-chip reuse.
 status: published
 provenance: imported
 requires_explanation: true

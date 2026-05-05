@@ -17,14 +17,14 @@ visual:
   caption: KV cache memory demand vs single GPU capacity.
 details:
   realistic_solution: |
-    KV memory footprint requires accounting for both Key and Value tensors. Formula: 2 * layers * KV_heads * head_dim * seq_len * batch_size * bytes_per_param.
-    For FP16 (2 bytes): 2 * 80 * 8 * 128 * 2048 * 128 * 2 = 85,899,345,920 bytes.
-    Converted to GiB: 85,899,345,920 / (1024^3) = 80 GiB.
-    This KV cache alone is about the full nominal 80 GiB capacity of an H100, leaving effectively no room for model weights, allocator reserve, activations, or runtime overhead.
+    Use the cache payload implied by the stated KV shape and apply the FP16 byte width once. Formula: layers * KV_heads * head_dim * seq_len * batch_size * bytes_per_param.
+    For FP16 (2 bytes): 80 * 8 * 128 * 2048 * 128 * 2 = 42,949,672,960 bytes.
+    Converted to GiB: 42,949,672,960 / (1024^3) = 40 GiB.
+    This KV cache is about half of an 80 GiB H100 before model weights, allocator reserve, activations, or runtime overhead, so it is still a major batch-capacity limiter but not the full device by itself.
   common_mistake: |
-    **The Pitfall:** Forgetting to multiply by 2 for separate Key and Value tensors, or utilizing the number of attention heads instead of KV heads.
-    **The Rationale:** Engineers often mix up standard Multi-Head Attention equations with Grouped Query Attention (GQA) architectures, accidentally vastly overstating KV footprint by using the query head count instead of the much smaller KV head count.
-    **The Consequence:** Wildly inaccurate memory forecasts lead to vast over-provisioning of GPU infrastructure or incorrect assumptions about batch capacity limits.
+    **The Pitfall:** Double-counting the KV factor or using the number of query attention heads instead of the stated KV-head cache shape.
+    **The Rationale:** Engineers often mix standard multi-head attention equations with grouped-query attention cache layouts, then apply an extra K/V multiplier on top of a prompt-provided KV payload.
+    **The Consequence:** Inaccurate memory forecasts can lead to over-provisioning GPU capacity or rejecting feasible batch sizes.
   napkin_math: |
     **Assumptions & Constraints:**
     - GPU: H100 (80 GiB).
@@ -32,12 +32,12 @@ details:
     - Inference config: Batch size 128, sequence length 2048.
 
     **Calculations:**
-    - Total KV elements: (2 for K+V) x 80 layers x 8 KV heads x 128 head_dim x 2048 tokens x 128 batch.
-    - Memory calculation: (2 x 80 x 8 x 128 x 2048 x 128) elements x 2 bytes/element = 85,899,345,920 bytes.
-    - Conversion: 85,899,345,920 bytes / (1024^3) = ~80.0 GiB.
+    - Total cached elements from the stated KV shape: 80 layers x 8 KV heads x 128 head_dim x 2048 tokens x 128 batch.
+    - Memory calculation: (80 x 8 x 128 x 2048 x 128) elements x 2 bytes/element = 42,949,672,960 bytes.
+    - Conversion: 42,949,672,960 bytes / (1024^3) = 40.0 GiB.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory Capacity-Bound.** The KV cache is about 80.0 GiB in binary units, roughly the full nominal capacity of an 80 GiB H100 before weights and runtime overhead are counted.
+    - **Result: Memory Capacity-Bound.** The KV cache is about 40.0 GiB in binary units, roughly half of an 80 GiB H100 before weights and runtime overhead are counted.
 status: published
 provenance: llm-draft
 requires_explanation: true

@@ -12,24 +12,28 @@ scenario: Our 70B model serves chat completions with a P50 time-to-first-token o
 question: Walk me through the systems math for speculative decoding — when does it help, and when does it backfire?
 details:
   realistic_solution: |
-    Speculative decoding works in three steps: (1) the draft model generates K candidate tokens autoregressively; (2) the target 70B model verifies those candidates in a single forward pass; (3) the target accepts the matching prefix and emits the first corrected token after a rejection, or one extra token if all K match. The speedup depends on acceptance rate α, draft latency, target verification latency, and memory overhead. With K=5, a 5 ms/token draft model, and a 45 ms target verification pass, the method exceeds 2x only when α is roughly 0.73 or higher. It backfires when low acceptance leaves you paying draft latency and extra memory while producing only one or two verified tokens per target pass.
+    Speculative decoding works in three steps: (1) the draft model generates K candidate tokens autoregressively; (2) the target 70B model verifies those candidates in a single forward pass; (3) the target accepts the matching prefix and emits the first corrected token after a rejection, or one extra token if all K match. The speedup depends on acceptance rate α, draft latency, target verification latency, and memory overhead. With K=5, a 5 ms/token draft model, and a 45 ms target verification pass, the method exceeds 2x only when the expected accepted prefix is long enough to amortize the 70ms draft-plus-verify cycle. Under the simple independent acceptance model below, that threshold is α around 0.73. It backfires when low acceptance leaves you paying draft latency and extra memory while producing only one or two verified tokens per target pass.
   common_mistake: |
     **The Pitfall:** Assuming the speedup scales linearly with the draft model's generation speed.
     **The Rationale:** Candidates ignore the probabilistic acceptance rate and the memory overhead of holding two models simultaneously.
     **The Consequence:** Grossly overestimating the speedup and causing OOM errors in production by reducing available KV-cache.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 70B baseline latency = 45 ms/token.
-       - Speculative decoding with K=5 candidate tokens.
-       - Draft model latency = 5 ms/token, so draft time = 5 * 5 ms = 25 ms.
-       - Target verifies the K-token block in one 45 ms pass.
-    2. **Calculations:**
-       - Expected output tokens per target verification pass: E[tokens] = 1 + α + α^2 + α^3 + α^4 + α^5.
-       - With α=0.8: E[tokens] = 1 + 0.8 + 0.64 + 0.512 + 0.410 + 0.328 = 3.69 tokens.
-       - Effective latency: (25 ms draft + 45 ms verify) / 3.69 = 19.0 ms/token, a 45 / 19.0 = 2.4x speedup.
-       - To exceed 2x, effective latency must be below 22.5 ms/token, so E[tokens] must exceed 70 / 22.5 = 3.11 tokens. For K=5, that requires α ≈ 0.73 or higher.
-       - When it backfires at α=0.4: E[tokens] = 1 + 0.4 + 0.16 + 0.064 + 0.026 + 0.010 = 1.66 tokens. Latency = 70 / 1.66 = 42.2 ms/token, only 1.1x faster before accounting for memory overhead.
-    3. **Conclusion & Interpretation:**
-       - **Result: acceptance-rate and memory-capacity bound.** Speculative decoding helps when the draft model is fast, α is high enough to amortize target verification, and the extra draft-model weights/KV cache do not reduce batch capacity. It backfires when α is low or the draft model's memory footprint lowers batching enough to erase the per-token latency gain.
+    **Assumptions & Constraints:**
+    - 70B baseline latency = 45 ms/token.
+    - Speculative decoding proposes K=5 candidate tokens.
+    - Draft model latency = 5 ms/token, so draft time = 5 * 5ms = 25ms.
+    - Target verifies the K-token block in one 45ms pass.
+    - Use the simplified independent acceptance model: each proposed token is accepted with probability α, and the target emits the accepted prefix plus one corrected or bonus token.
+
+    **Calculations:**
+    - Expected tokens emitted per verify cycle: E[T] = sum_{i=0}^{K} α^i = (1 - α^(K+1)) / (1 - α).
+    - With α=0.8 and K=5: E[T] = 1 + 0.8 + 0.64 + 0.512 + 0.410 + 0.328 = 3.69 tokens.
+    - Cycle time = 25ms draft + 45ms verify = 70ms.
+    - Effective latency at α=0.8: 70ms / 3.69 = 19.0ms/token, so speedup = 45 / 19.0 = 2.4x.
+    - To exceed 2x, effective latency must be below 22.5ms/token, so E[T] must exceed 70 / 22.5 = 3.11 tokens. For K=5 under this model, α is about 0.73.
+    - With α=0.4: E[T] = 1.66 tokens, so latency = 70 / 1.66 = 42.2ms/token before memory overhead, barely faster than baseline.
+
+    **Conclusion & Interpretation:**
+    - **Result: acceptance-rate and memory-capacity bound.** Speculative decoding helps when the draft model is fast, α is high enough to amortize target verification, and the extra draft-model weights/KV cache do not reduce batch capacity. It backfires when α is low or the draft model's memory footprint lowers batching enough to erase the per-token latency gain.
 status: published
 provenance: imported

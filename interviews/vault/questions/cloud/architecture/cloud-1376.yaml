@@ -13,7 +13,7 @@ scenario: |
 question: How would you partition compute across the Cortex-M4 cameras, Jetson edge server, and cloud to meet all network constraints while maximizing camera battery life?
 details:
   realistic_solution: |
-    Deploy a hierarchical cascade: Run a 300KB TinyML person-detection model on the Cortex-M4 (Tier 1) to only stream frames when a human is present. At the edge, the Jetson Orin runs a YOLO tracker (Tier 2) to extract 112x112 bounding box crop sequences of customer actions. Finally, transmit only these small action crops to the Cloud L4 instances for the final 3D-CNN behavioral classification (Tier 3).
+    Deploy a hierarchical cascade: Keep cameras mostly asleep and use a sparse wake/sampling loop on the Cortex-M4 with a 300KB TinyML person detector (Tier 1). Only on person events should a camera briefly stream low-rate frames or thumbnails to the Jetson. At the edge, the Jetson Orin runs a YOLO tracker (Tier 2) to form 112x112 bounding box crop sequences and suppress duplicate/background frames. Finally, transmit only these compact action crops to the Cloud L4 instances for the final 3D-CNN behavioral classification (Tier 3).
   common_mistake: |
     **The Pitfall:** Attempting to stream all compressed video to the edge server, or trying to run the heavy 3D-CNN directly on the edge server.
     **The Rationale:** Misjudging the compute-to-bandwidth tradeoff and the limited capacity of both the local Wi-Fi and the edge server's hardware.
@@ -22,13 +22,14 @@ details:
     1. **Assumptions & Constraints:**
        - Local Wi-Fi: 10 Mbps. Store uplink: 20 Mbps.
        - 100 cameras, raw video = 1.5 Mbps each (150 Mbps total).
-       - Tier 1 only opens streams on detected human presence; use 5% active cameras as the design target from store occupancy measurements.
-       - Tier 2 sends compact 112x112 action-crop sequences at about 200 Kbps per active camera.
+       - Tier 1 keeps cameras duty-cycled and only opens brief event streams on detected human presence; use 5% active cameras as the design target from store occupancy measurements.
+       - Event streams are capped at about 1.5 Mbps per active camera after low-rate compression; Tier 2 sends compact 112x112 action-crop sequences at about 200 Kbps per active camera.
     2. **Calculations:**
        - Raw video from cameras to edge: 150 Mbps, which fails the 10 Mbps shared Wi-Fi.
-       - Tier 1 camera filtering: 5 active cameras * 1.5 Mbps = 7.5 Mbps to the Jetson, which fits the 10 Mbps Wi-Fi budget.
+       - Tier 1 camera filtering and duty cycling: 5 active event streams * 1.5 Mbps = 7.5 Mbps to the Jetson, which fits the 10 Mbps Wi-Fi budget and avoids continuous radio use on inactive cameras.
        - Tier 2 edge cropping/tracking: 5 active cameras * 200 Kbps = 1.0 Mbps of action crops.
        - Tier 3 cloud uplink: 1.0 Mbps of action crops, which fits the 20 Mbps internet uplink.
+       - Across 50 stores, the cloud receives about 50 Mbps of action crops instead of 7.5 Gbps of raw camera video.
     3. **Conclusion & Interpretation:**
        - **Result: Bandwidth-Bound Mitigation.** The cascade keeps local Wi-Fi at 7.5 Mbps and cloud uplink at 1.0 Mbps, so both network constraints are met while camera nodes only run the lightweight TinyML gate.
 status: published

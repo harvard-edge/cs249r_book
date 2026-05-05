@@ -12,7 +12,7 @@ scenario: 'FlashAttention-1 parallelizes over batch and heads. FlashAttention-2 
 question: Why does FlashAttention-2 achieve higher occupancy than FlashAttention-1 for an H100 workload (batch=1, 32 heads, seq_len=16384, head_dim=128)?
 details:
   realistic_solution: |
-    FA-1 exposes parallel work mainly over batch x heads, so this workload has only 32 coarse units of work and cannot keep 132 H100 SMs busy. FA-2 adds parallelism over Q tiles: batch x heads x ceil(N/B_r) = 1 x 32 x 128 = 4,096 blocks. That is about 31 blocks of work per SM over the launch, giving the scheduler enough concurrency to keep SMs much better utilized. This is launch parallelism and SM utilization, not a literal occupancy percentage; true occupancy still depends on registers, shared memory, and warps per block. FA-2 also reduces non-matmul FLOPs.
+    FA-1 exposes parallel work mainly over batch x heads, so this workload has only about 32 coarse units of work and cannot keep 132 H100 SMs busy. FA-2 adds parallelism over Q tiles: batch x heads x ceil(N/B_r) = 1 x 32 x 128 = 4,096 blocks. That gives the scheduler thousands of independent Q-tile blocks instead of tens of head-level blocks, so SMs have enough launch parallelism to stay much better utilized. This is launch parallelism and SM utilization, not a literal occupancy percentage; true occupancy still depends on registers, shared memory, and warps per block. FA-2 also reduces non-matmul FLOPs.
   common_mistake: |
     **The Pitfall:** Thinking the loop reordering is a minor algorithmic tweak.
     **The Rationale:** Candidates fail to realize that FA-1 with batch=1 drastically under-utilizes the SMs.
@@ -24,10 +24,10 @@ details:
 
     **Calculations:**
     - FA-1 coarse work units: approximately 1 * 32 = 32 blocks, depending on exact kernel tiling.
-    - Available FA-1 work: 32 / 132 = 0.24 blocks per SM, so many SMs are idle for batch=1.
+    - Since 32 coarse units is less than 132 SMs, a batch=1 FA-1 launch cannot expose enough independent work to fill the H100.
     - FA-2 Blocks: 1 * 32 * ceil(16384 / 128) = 4,096 blocks.
-    - Available FA-2 work: 4,096 / 132 ≈ 31 blocks per SM over the launch.
-    - True occupancy requires kernel resource usage; block count only shows that FA-2 has enough work to fill the machine.
+    - FA-2 exposes 4,096 / 32 = 128x more scheduling work than the FA-1 head-level decomposition.
+    - True occupancy requires kernel resource usage; block count only shows that FA-2 has enough independent work to fill the machine.
 
     **Conclusion & Interpretation:**
     - **Result: Higher SM Utilization**. FA-2 fixes severe launch under-parallelism at batch=1 by exposing thousands of Q-tile blocks, but the block count should not be reported as a literal occupancy percentage.

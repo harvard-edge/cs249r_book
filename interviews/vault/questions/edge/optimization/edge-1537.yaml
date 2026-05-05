@@ -11,7 +11,7 @@ title: Distillation vs Pruning on Cloud AI 100
 scenario: You are deploying a large language model for an on-premise enterprise application using a Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). The original FP16 model is 70B parameters (140GB), which far exceeds the 32GB memory limit.
 question: 'Which compression strategy is better: 80% unstructured pruning + INT8, or Knowledge distillation to a dense 15B parameter student + INT8, and why?'
 details:
-  realistic_solution: Knowledge distillation to a dense 15B student model is the superior choice. The Qualcomm Cloud AI 100 is designed for dense INT8 matrix operations. A dense 15B INT8 model uses contiguous weights, optimized kernels, and predictable memory access, while 80% unstructured pruning requires sparse metadata and only helps if the accelerator and compiler can exploit that exact sparsity pattern. Without strong unstructured-sparse kernel support, the pruned model loses most of its theoretical compute benefit and can become an irregular memory-bandwidth problem. The dense student fits in memory and leaves room for KV cache.
+  realistic_solution: Knowledge distillation to a dense 15B student model is the safer default unless the accelerator stack explicitly supports the chosen unstructured sparsity pattern with efficient sparse kernels. The Qualcomm Cloud AI 100 is designed around dense INT8 matrix operations. A dense 15B INT8 model uses contiguous weights, optimized kernels, and predictable memory access, while 80% unstructured pruning requires sparse metadata and only helps if the accelerator and compiler can exploit that exact sparsity pattern. Without strong unstructured-sparse kernel support, the pruned model loses most of its theoretical compute benefit and can become an irregular memory-bandwidth problem. The dense student fits in memory and leaves room for KV cache.
   common_mistake: |
     **The Pitfall:** Choosing unstructured pruning because it preserves the original architecture's theoretical capacity.
     **The Rationale:** Unstructured sparsity looks great on paper for reducing parameter count without losing representational power.
@@ -19,17 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Dense 15B student in INT8: 15B parameters * 1 byte/parameter = 15 GB.
-    - Dense student work per token estimate: ~30 GOP.
-    - Cloud AI 100 peak dense INT8 compute: 400 TOPS = 400,000 GOPS.
+    - Dense student can use dense INT8 kernels and contiguous weight reads.
+    - Pruned model only gets a latency win if hardware and compiler exploit unstructured sparsity efficiently.
 
     **Calculations:**
-    - Dense student lower-bound compute time = 30 GOP / 400,000 GOPS = 0.000075 s = 0.075 ms, before memory and kernel overhead.
     - Pruned 70B model values = 70B * 20% * 1 byte = 14 GB.
     - Sparse indices/metadata at even 1 byte per nonzero add ~14 GB, bringing storage to ~28 GB before KV cache and runtime buffers.
+    - Dense 15B student storage = 15 GB, leaving roughly 17 GB of the 32 GB device memory for KV cache, activations, and runtime workspace.
     - If unstructured sparsity is not accelerated, the sparse model's irregular gathers reduce effective bandwidth and may not reduce latency.
 
     **Conclusion & Interpretation:**
-    - **Result: 15B dense model is the better deployment target.** It fits comfortably and uses dense INT8 kernels; the pruned model's nominal 14 GB value storage is misleading once sparse metadata and limited unstructured-sparsity support are included.
+    - **Result: dense distillation is preferred by default.** The pruned model is attractive only with verified sparse-kernel support; otherwise its nominal 14 GB value storage is misleading once metadata, KV cache, workspace, and irregular memory access are included.
 status: published
 provenance: imported
 requires_explanation: false

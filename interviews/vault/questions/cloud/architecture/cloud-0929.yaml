@@ -11,7 +11,7 @@ title: Decoupling Shared Embeddings
 scenario: 'A large-scale recommender system serves 10,000 QPS across a cluster of 32 GPUs. The core 30GB user embedding model is shared by two downstream systems: Candidate Retrieval (Team A) and Ad CTR Ranking (Team B). Team A updates the embedding pipeline to improve recall by 5%, but this causes an implicit data distribution shift that silently degrades Team B''s CTR accuracy by 12%.'
 question: How should the shared 30GB embedding model be decoupled or versioned to stop Team A's update degrading Team B under the 15ms SLA?
 details:
-  realistic_solution: Implement explicit embedding data contracts and versioned serving APIs. Pin Team B to the validated v1 embedding contract while Team A ships v2 behind a separate versioned endpoint or feature flag, with compatibility tests that measure Team B CTR quality before any migration. If storage or serving constraints make full duplication expensive, use a lightweight adapter only as a compatibility bridge, trained and validated by Team B to map v2 embeddings back to the v1 contract without adding enough latency to violate the 15ms SLA.
+  realistic_solution: Implement explicit embedding data contracts and versioned serving APIs. Pin Team B to the validated v1 embedding contract while Team A ships v2 behind a separate endpoint, model version, or feature flag. Require backward-compatibility tests that measure Team B CTR quality, latency, and distribution drift before any migration, then canary and roll back independently. Adapters are optional migration tooling only; they must be trained and validated by Team B and used only if they preserve the v1 contract within the 15ms SLA.
   common_mistake: |
     **The Pitfall:** Naively duplicating the embedding model for each team.
     **The Rationale:** Candidates prioritize team autonomy and strict decoupling without considering hardware capacity limits.
@@ -19,18 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - GPU capacity is 80GB.
-    - Base model is 30GB.
-    - Adapter layer is ~4MB.
+    - Shared embedding model is 30GB.
+    - Each team can be pinned to an embedding contract version.
+    - Adapter layer, if used for migration, is ~4MB.
 
     **Calculations:**
-    - Current replicas per GPU: floor(80GB / 30GB) = 2 replicas.
-    - Memory for duplicated models (v1 + v2): 30GB + 30GB = 60GB.
-    - Replicas with duplicated models: floor(80GB / 60GB) = 1 replica (50% throughput loss).
-    - Memory for model + adapter: 30GB + 4MB =~ 30GB.
-    - Replicas with adapter: floor(80GB / 30GB) = 2 replicas.
+    - Unsafe shared update: Team A v2 silently changes Team B's input distribution and causes a 12% CTR degradation.
+    - Version pinning: Team B continues calling v1 while Team A calls v2, so Team B's production contract does not change.
+    - Full co-resident duplication on one 80GB GPU costs 30GB + 30GB = 60GB, reducing density from floor(80/30) = 2 replicas to floor(80/60) = 1 replica.
+    - Optional adapter migration costs about 30GB + 4MB =~ 30GB, but only if validation proves it preserves Team B quality and latency.
 
     **Conclusion & Interpretation:**
-    - **Result: Adapter preserves 2 replicas/GPU density (Memory-Capacity-Bound)**. The system avoids a throughput collapse.
+    - **Result: pin Team B to v1 and serve Team A's v2 independently, with compatibility tests, canarying, and rollback gates.** Use adapters only as validated migration aids, not as the primary decoupling contract.
 status: published
 provenance: imported
 requires_explanation: true

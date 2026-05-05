@@ -7,11 +7,11 @@ topic: model-size-estimation
 competency_area: memory
 bloom_level: create
 phase: both
-title: 'Model Size Estimation: Specify Memory Budget for Edge LLM with Fixed 16GB'
-scenario: 'You need to specify the maximum LLM model size and configuration for an edge system with 16GB LPDDR5 (no swap). Requirements: OS needs 3GB, CUDA needs 1GB, and minimum 2GB KV-cache is required for 8 concurrent users at 512-token context. The model must achieve >60% accuracy on the MMLU benchmark.'
+title: Maximum Safe INT4 Edge LLM Configuration for 16GB LPDDR5
+scenario: 'You need to specify the maximum safe LLM model size and configuration for an edge system with 16GB LPDDR5 (no swap). Requirements: OS needs 3GB, CUDA needs 1GB, and 8 concurrent users need 512-token context each. The selected model family must be validated to exceed 60% MMLU before release.'
 question: What LLM family, precision, parameter count, KV-cache budget, and Time Per Output Token (TPOT) would you deploy within the 16GB constraints?
 details:
-  realistic_solution: 'Available for model weights plus KV cache: 16-3-1=12GB. Reserve 2.0GiB minimum for KV cache; for a 7B Llama/Mistral-class model with 32 layers and hidden size 4096, FP16 KV is about 512KiB per token, so 8 users * 512 tokens needs about 2.0GiB. Deploy a 7B instruction-tuned Llama/Mistral-family model at INT4/GPTQ or AWQ precision: weights are about 3.5GB, leaving roughly 6GB for allocator overhead, tokenizer/runtime buffers, and safety margin. Total budget is about 3GB OS + 1GB CUDA + 3.5GB weights + 2.0GiB KV = 9.6GB, under 16GB. Expected MMLU is roughly mid-60s for a strong 7B INT4 model, and the deployment TPOT target should be specified as <=150ms/token for interactive edge use; larger 13B-class INT4 models may fit raw memory but would consume the margin and are not the maximum safe deployable configuration under the stated KV and latency constraints.'
+  realistic_solution: 'Available for model weights plus KV cache and runtime headroom: 16-3-1=12GB. A 13B Llama-family INT4/GPTQ or AWQ model is the largest safe class if the chosen checkpoint is separately validated to exceed 60% MMLU. Budget weights at about 7.2GB including quantization scales/metadata. For a 13B Llama-class model with 40 layers and hidden size 5120, FP16 KV is about 800KiB per token, so 8 users * 512 tokens needs about 3.125GiB. Total memory is about 3GB OS + 1GB CUDA + 7.2GB weights + 3.125GiB KV = ~14.3GB, leaving ~1.7GB for allocator overhead, tokenizer/runtime buffers, and fragmentation. A 7B INT4 model is safer but not the maximum; a 13B FP16 or much larger INT4 model would exceed the budget once KV and runtime headroom are included. Set the deployment TPOT target around <=250ms/token for the 13B edge configuration, then measure on the actual accelerator.'
   common_mistake: |
     **The Pitfall:** Specifying an FP16 model that breaches the memory budget.
     **The Rationale:** Candidates often default to standard FP16 7B models without performing a strict memory accounting of system and KV-cache overhead.
@@ -21,20 +21,21 @@ details:
     - 16GB RAM.
     - 3GB OS, 1GB CUDA.
     - 8 users, 512 tokens/user context.
-    - Target model is 7B INT4 (0.5 bytes/param).
-    - KV cache uses FP16 keys and values for a 32-layer, hidden-size-4096 model.
-    - Interactive TPOT target: <=150ms/token.
+    - Target maximum safe class is 13B INT4 (0.5 bytes/param plus quantization metadata).
+    - KV cache uses FP16 keys and values for a 40-layer, hidden-size-5120 Llama-class model.
+    - Release requires measured MMLU >60% for the selected checkpoint.
+    - Interactive TPOT target for this maximum-size edge configuration: <=250ms/token.
 
     **Calculations:**
     - Available RAM = 16 - 3 - 1 = 12GB.
-    - KV cache per token = layers * 2(K,V) * hidden_size * bytes = 32 * 2 * 4096 * 2 = 524,288 bytes = 512KiB.
-    - Total KV = 8 users * 512 tokens/user * 512KiB = 2.0GiB, satisfying the 2GB minimum.
-    - Model Weights = 7B * 0.5 = 3.5GB.
-    - Total Usage = 3 + 1 + 3.5 + ~2.0 = ~9.5-9.6GB before runtime headroom.
-    - Remaining memory = 16 - 9.6 = ~6.4GB for allocator overhead and buffers.
+    - KV cache per token = layers * 2(K,V) * hidden_size * bytes = 40 * 2 * 5120 * 2 = 819,200 bytes = 800KiB.
+    - Total KV = 8 users * 512 tokens/user * 800KiB = 3.125GiB.
+    - Raw INT4 weights = 13B * 0.5 = 6.5GB; budget ~7.2GB with quantization scales/metadata.
+    - Total Usage = 3 + 1 + 7.2 + ~3.125 = ~14.3GB before runtime headroom.
+    - Remaining memory = 16 - 14.3 = ~1.7GB for allocator overhead and buffers.
 
     **Conclusion & Interpretation:**
-    - **Result: 7B Llama/Mistral-family INT4, ~2GiB KV cache, and <=150ms/token TPOT target.** This safely meets the memory and MMLU constraints while preserving operational headroom.
+    - **Result: 13B Llama-family INT4, ~3.125GiB KV cache, and <=250ms/token TPOT target.** This is the largest safe memory fit under the stated concurrency; it must use a checkpoint whose measured MMLU exceeds 60%.
 status: published
 provenance: imported
 requires_explanation: true

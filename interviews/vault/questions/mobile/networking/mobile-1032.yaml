@@ -14,7 +14,7 @@ details:
   realistic_solution: |
     Do not let both decoders issue full token bursts against LPDDR5X at the same instant. A 3B INT4 assistant has about 1.5GB of weights; meeting a 25ms TPOT target implies up to 60GB/s of token-time memory traffic before KV overhead. A 1B INT4 summarizer has about 0.5GB of weights; if it also tries to finish a token in 25ms it needs another 20GB/s. The combined 80GB/s burst exceeds a 77GB/s bus, so unmanaged simultaneous decode is unsafe.
 
-    Use a foreground-priority token scheduler. Divide time into 25ms assistant slots. In each slot, run the assistant token first, then let the summarizer run preemptible layer chunks only in the slack. Over a 100ms window the assistant gets four token starts at 0ms, 25ms, 50ms, and 75ms, while the summarizer accumulates roughly one token of work across the slack fragments. If the summarizer kernel cannot be preempted into layer chunks, defer its token until the assistant burst finishes rather than allowing concurrent peak bandwidth contention.
+    Use a foreground-priority token scheduler. Divide time into 25ms assistant slots. At the 77GB/s bus limit, an assistant token needs 1.5/77 = 19.5ms of service, leaving about 5.5ms slack inside each 25ms slot. Over a 100ms window the assistant starts at 0ms, 25ms, 50ms, and 75ms, leaving about 4×5.5 = 22ms of slack. The summarizer needs only 0.5/77 = 6.5ms of full-bus service to produce its one token per 100ms target, so it can run preemptible layer chunks in that slack. If the summarizer kernel cannot be preempted into layer chunks, defer its token until the assistant burst finishes rather than allowing concurrent peak bandwidth contention.
   common_mistake: |
     **The Pitfall:** Treating the two models as temporally independent.
     **The Rationale:** Candidates look at average throughput and assume it applies smoothly across time.
@@ -31,7 +31,9 @@ details:
     - Unmanaged overlap: 60 + 20 = 80 GB/s, before KV-cache and activation traffic, which exceeds 77 GB/s.
     - Minimum assistant service time at 77 GB/s: 1.5 / 77 = 19.5ms.
     - Minimum summarizer service time at 77 GB/s: 0.5 / 77 = 6.5ms.
-    - Token-interleaved 100ms window: assistant starts at 0, 25, 50, and 75ms; summarizer runs preemptible layer chunks during the ~5.5ms slack after each assistant token, accumulating ~22ms of background service per 100ms.
+    - Slack per assistant slot: 25ms target - 19.5ms minimum service = 5.5ms.
+    - Token-interleaved 100ms window: assistant starts at 0, 25, 50, and 75ms; summarizer runs preemptible layer chunks during the ~5.5ms slack after each assistant token, accumulating 4 * 5.5 = 22ms of background service per 100ms.
+    - Summarizer service needed for 10 tokens/s: one 0.5GB token per 100ms needs 0.5 / 77 = 6.5ms of full-bus-equivalent service, so 22ms slack is sufficient if kernels are chunkable.
 
     **Conclusion & Interpretation:**
     - **Result: token-interleaving required.** The average traffic fits, but simultaneous full-token bursts do not. Foreground-priority interleaving keeps peak bus use under the 77 GB/s limit and gives the background summarizer enough accumulated service time for 10 tokens/s only if it can be preempted into small chunks.

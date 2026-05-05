@@ -16,7 +16,7 @@ details:
 
     Index design: build tiered ANN indexes. Keep a replicated hot index for recent/viral/eligible inventory in RAM, use compressed IVFPQ/HNSW-style indexes for warm inventory, and keep cold or long-tail shards on SSD with a larger latency budget or lower recall target. Shard by content id or coarse centroid, replicate hot shards across regions, route queries to the nearest healthy replicas, and merge top-k candidates with lightweight business filters. Refresh hot embeddings continuously or every few minutes, and rebuild larger warm/cold partitions asynchronously with versioned index manifests.
 
-    Serving infrastructure: dedicate enough hot-index replicas to handle the compute-bound QPS from the napkin math, add cache layers for repeated user/session embeddings and popular candidate sets, and reserve capacity for P99 bursts. Enforce latency budgets per stage: user embedding, ANN search, filtering, merge, and handoff to ranking. Use admission control, load shedding, stale-index fallback, and hot-only retrieval during incidents rather than late-fusion fan-out. With 50 hot-index replicas at 2,000 QPS each, the hot tier can cover 100k QPS, while warm/cold tiers are sampled selectively to improve recall without violating the 50ms SLA.
+    Serving infrastructure: dedicate enough hot-index serving replicas or shards to handle the query load from the napkin math, add cache layers for repeated user/session embeddings and popular candidate sets, and reserve capacity for P99 bursts. Enforce latency budgets per stage: user embedding, ANN search, filtering, merge, and handoff to ranking. Use admission control, load shedding, stale-index fallback, and hot-only retrieval during incidents rather than late-fusion fan-out. With 50 serving replicas at 2,000 QPS each, the hot tier can cover 100k QPS, while warm/cold tiers are sampled selectively to improve recall without violating the 50ms SLA.
   common_mistake: |
     **The Pitfall:** Proposing late-fusion of separate text, video, and audio embeddings at inference time.
     **The Rationale:** Candidates think splitting modalities allows more precise search, completely failing to account for the multiplicative cost of performing multiple nearest-neighbor searches per query.
@@ -24,15 +24,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - "Hot" corpus: 1B videos. Embedding: 256-dim float16 (512 bytes).
-    - Peak load: 100,000 QPS. Node capacity: 2,000 QPS for ANN search.
+    - Peak load: 100,000 QPS. Serving replica capacity: 2,000 QPS for ANN search.
+    - ANN index uses compression/sharding; hot corpus storage is not assumed to be fully replicated on every node.
 
     **Calculations:**
     - Raw vectors: 1B * 512B = 512GB.
-    - Compressed IVFPQ index: ~50GB (fits in node RAM).
-    - Compute replicas needed: 100,000 / 2,000 = 50 nodes.
+    - Compression can reduce index bytes substantially, but the exact footprint depends on the IVFPQ/codebook and metadata design and must be checked against per-node RAM.
+    - Query-serving replicas needed for throughput: 100,000 / 2,000 = 50 replica slots.
+    - Top-1000 retrieval still requires careful shard fan-out, candidate merge, and cache strategy; memory/index layout can dominate P99 latency even when QPS capacity is sufficient.
 
     **Conclusion & Interpretation:**
-    - **Result: 50 nodes (Compute-Bound)**. 50 replicas of the hot index are required purely to handle the compute-bound query throughput.
+    - **Result: at least 50 serving replica slots for throughput, plus sharded/compressed hot-index capacity sized by RAM and P99 latency.** The 50-replica estimate covers query-serving capacity, not full hot-corpus replication on every node.
 status: published
 provenance: imported
 requires_explanation: true

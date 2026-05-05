@@ -11,7 +11,7 @@ title: The AR Navigation Preemption Crisis
 scenario: An AR navigation feature renders guidance over a camera feed at 30 FPS. A 'Vision Query' feature triggers a 2B parameter VLM.
 question: How do you schedule a 400ms VLM inference without starving a 30 FPS navigation task on a non-preemptible NPU?
 details:
-  realistic_solution: The core challenge is that a long-running, low-priority task (VLM) must not starve a short, high-priority, real-time task (Navigation) on shared, non-preemptible hardware like an NPU. The architecture must create the illusion of preemption by chunking the VLM inference into fine-grained execution blocks.
+  realistic_solution: Use a deadline-aware cooperative scheduler. Reserve a fixed NPU slot for navigation in every 33ms frame, then run the VLM only in bounded chunks at operator or subgraph boundaries that the compiled model actually supports. Before launching a VLM chunk, check the next navigation deadline and admit the chunk only if its profiled worst-case runtime plus handoff overhead fits the remaining slack. If no safe chunk fits, defer it, run it on a lower-priority accelerator, reduce VLM resolution, or return a delayed result rather than blocking navigation.
   common_mistake: |
     **The Pitfall:** Using a simple FIFO queue for NPU scheduling.
     **The Rationale:** Assuming the OS or hardware will magically multiplex tasks, ignoring that NPUs generally run coarse-grained workloads to completion.
@@ -20,19 +20,20 @@ details:
     **Assumptions & Constraints:**
     - Navigation Framerate: 30 FPS (33 ms budget/frame).
     - Nav Inference Time: 8 ms per frame.
-    - VLM Prefill Total Time: 400 ms.
-    - NPU is non-preemptible.
+    - VLM Prefill Total Time: 400 ms if run as one uninterrupted graph.
+    - NPU is non-preemptible once a compiled subgraph starts.
+    - The exported VLM has profiled operator-boundary chunks with worst-case runtime <= 23 ms; otherwise this schedule is invalid and the VLM must be deferred or moved off the NPU.
 
     **Calculations:**
     - Scheduling policy: reserve the first 8 ms of every 33 ms frame for navigation, then allow at most one VLM slice before the next navigation deadline.
     - Remaining frame budget for VLM: 33 ms - 8 ms = 25 ms.
-    - Safe non-preemptible VLM slice size after handoff overhead: 23 ms.
+    - Safe non-preemptible VLM chunk size after handoff overhead: 23 ms, but only at supported graph boundaries.
     - Number of VLM slices needed for 400 ms of compute: ceil(400 ms / 23 ms) = 18 slices.
-    - Under the one-slice-per-frame policy, the VLM completes after 18 frame periods: 18 * 33 ms = 594 ms wall-clock.
+    - Under the one-chunk-per-frame policy, the VLM completes after 18 frame periods: 18 * 33 ms = 594 ms wall-clock.
     - NPU compute consumed by the VLM is still about 400 ms; the extra ~194 ms is waiting for navigation deadlines and scheduler overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 594 ms wall-clock completion (Scheduling-Bound)**. Chunking preserves the 30 FPS navigation deadline, but the VLM stretches from 400 ms of compute to about 594 ms elapsed time because it can only run one safe slice per frame.
+    - **Result: 594 ms wall-clock completion (Scheduling-Bound)**. Fixed navigation reservations plus deadline-aware admission preserve the 30 FPS deadline. The VLM stretches from 400 ms of compute to about 594 ms elapsed time only if its compiled graph supports safe 23 ms chunks; otherwise the scheduler must defer or downgrade the VLM instead of risking navigation starvation.
 status: published
 provenance: imported
 requires_explanation: true

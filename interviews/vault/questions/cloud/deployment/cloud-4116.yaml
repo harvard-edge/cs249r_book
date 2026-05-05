@@ -11,7 +11,7 @@ title: Spot Instance Strategy for Training Resilience
 scenario: You are training a 13B model on 32 spot instances at a 70% discount. Spot interruptions occur on average every 2 hours with a 2-minute warning.
 question: What checkpointing strategy maximizes cost savings while minimizing wasted compute for a 13B model on 32 spot instances?
 details:
-  realistic_solution: 'Use two-tier checkpointing. Write fast local sharded checkpoints about every 9-10 minutes, and copy durable checkpoints to object storage every 30 minutes. On the 2-minute spot warning, immediately take a final local checkpoint, start the upload if bandwidth allows, and terminate cleanly before eviction. Checkpoint size for the full job is roughly 26 GB of BF16 weights plus about 156 GB of ZeRO-sharded optimizer state, or 182 GB total across 32 GPUs. With sharded writes to local NVMe, a conservative end-to-end checkpoint cost of about 20 seconds gives Young''s interval sqrt(2 × 7200 s × 20 s) ≈ 537 seconds, about 9 minutes. The warning means most planned interruptions should lose near-zero training progress; the periodic interval mainly caps loss for sudden failures or missed notices. Cost savings: on-demand cost is 32 × $3/hr × 24 = $2,304/day; a 70% spot discount saves about $1,613/day before modest checkpoint overhead.'
+  realistic_solution: 'Use two-tier checkpointing. Treat the 2-minute spot warning as the primary path: immediately quiesce, write a final local sharded checkpoint, start a durable upload if bandwidth allows, and terminate cleanly before eviction. Also write periodic local checkpoints about every 9-10 minutes to cap loss from sudden failures or missed notices, and upload durable snapshots less frequently based on bandwidth and recovery objectives. Checkpoint size for the full job is roughly 26 GB of BF16 weights plus about 156 GB of FP32 master weights and Adam states if 12 bytes/parameter of optimizer state are needed for exact training resume, or 182 GB total across 32 GPUs. With sharded writes to local NVMe, a conservative end-to-end checkpoint cost of about 20 seconds gives Young''s interval sqrt(2 × 7200 s × 20 s) ≈ 537 seconds, about 9 minutes. Cost savings: on-demand cost is 32 × $3/hr × 24 = $2,304/day; a 70% spot discount saves about $1,613/day before modest checkpoint overhead.'
   common_mistake: |
     **The Pitfall:** Checkpointing too frequently (e.g., every 5 minutes) or too infrequently (e.g., every 2 hours).
     **The Rationale:** Candidates either focus solely on minimizing wasted compute without considering checkpoint overhead, or they ignore the high frequency of spot interruptions.
@@ -19,18 +19,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 13B parameters in BF16.
-    - ZeRO-sharded optimizer state: about 12 bytes per parameter across the job.
+    - BF16 model weights: 2 bytes per parameter.
+    - Training-resume optimizer state: assume 12 bytes per parameter across the job for FP32 master weights plus Adam moments.
     - MTBF: 2 hours (7200 s); interruption warning: 2 minutes.
 
     **Calculations:**
-    - Full-job checkpoint payload = 13B * 2 bytes + 13B * 12 bytes = 182 GB total.
+    - BF16 weights = 13B * 2 bytes = 26 GB.
+    - Optimizer/master state = 13B * 12 bytes = 156 GB.
+    - Full-job training checkpoint payload = 26 GB + 156 GB = 182 GB total.
     - Sharded payload per GPU = 182 GB / 32 = about 5.7 GB before metadata.
     - Conservative local checkpoint cost = about 20 seconds end to end.
     - Young's interval = sqrt(2 * 7200s * 20s) = sqrt(288,000) = about 537 seconds, or 9 minutes.
     - On-demand daily cost = 32 * $3/hr * 24 = $2,304; 70% spot discount saves about $1,613/day.
 
     **Conclusion & Interpretation:**
-    - **Result: checkpoint locally about every 9-10 minutes and always checkpoint on the 2-minute warning**. Periodic checkpoints cap sudden-failure loss, while the warning path should preserve nearly all progress for normal spot interruptions.
+    - **Result: checkpoint immediately on the 2-minute warning and checkpoint locally about every 9-10 minutes otherwise**. The warning path handles normal spot interruptions; the periodic interval is derived from the interruption model to bound loss when the warning path is unavailable.
 status: published
 provenance: imported
 requires_explanation: false
