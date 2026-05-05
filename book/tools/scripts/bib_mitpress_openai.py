@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = Path(__file__).resolve().parents[3]  # script lives at book/tools/scripts/<this>.py
 BIB_LINT_PATH = REPO_ROOT / "book" / "tools" / "bib_lint.py"
 DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_REPORT_DIR = REPO_ROOT / "book" / "tools" / "audit" / "out"
