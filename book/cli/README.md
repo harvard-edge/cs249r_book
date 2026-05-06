@@ -108,16 +108,14 @@ Every `book-*` pre-commit hook routes through `./book/binder`. The hook tree mir
 
 Two structural exceptions, both documented inline in `.pre-commit-config.yaml`:
 
-- **Per-scope split for vol-asymmetric groups** — `headers` and `labels` each run as two hooks because one of their scopes is currently clean only on Vol I. The split lets the universally-clean scope cover both volumes while the WIP-sensitive scope stays vol1-only:
+- **Per-scope split for `labels`** — the `orphans` scope is currently clean only on Vol I (Vol II has forward references to unwritten chapters). The split lets the universally-clean `duplicates` scope cover both volumes while `orphans` stays vol1-only:
 
   | Group | Scope hook | Vol coverage |
   |---|---|---|
-  | headers | `book-check-headers-ids` | vol1 only (vol2 sections lack `{#sec-...}` IDs) |
-  | headers | `book-check-headers-case` | both vols |
-  | labels  | `book-check-labels-orphans` | vol1 only (vol2 has forward refs to unwritten chapters) |
+  | labels  | `book-check-labels-orphans` | vol1 only (vol2 forward refs to unwritten chapters) |
   | labels  | `book-check-labels-duplicates` | both vols (fig+tbl+lst by binder default) |
 
-  When vol2 catches up on either dimension, collapse the pair back to a single `book-check-<group>` running `./binder check <group>`.
+  Collapse back to a single `book-check-labels` once Vol II's chapter list is complete.
 
 - **Format-vs-content split** (`book-check-tables` runs `binder check tables` for content; `book-check-tables-format` runs `binder format tables --check` for whitespace) — these are different binder commands.
 
