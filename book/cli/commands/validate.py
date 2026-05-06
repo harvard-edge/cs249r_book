@@ -1,10 +1,24 @@
 """
 Native validation commands for MLSysBook Binder CLI.
 
-Validation logic is implemented in Binder where possible (e.g. references,
-citations, labels, figures, rendering). Some checks still delegate to scripts
-under book/tools/scripts/ (tables, spelling, epub, sources, grid-tables,
-images).
+Every `book-*` pre-commit hook dispatches through `./book/binder check <group>`
+so there is one entry point, one error format, and one place to add new
+checks. See the `ValidateCommand` class docstring below for the contract:
+
+    1. Add a `_run_<scope>` method that returns a ValidationRunResult.
+    2. Add a `Scope("<name>", "_run_<scope>", default=...)` to the relevant
+       group in GROUPS. Use `default=False` if the scope still fails on dev
+       or is intentionally opt-in (slow / heavy / manual stage).
+    3. Surface any new flags on the argparse block in `run()`.
+
+Pre-commit picks the new scope up automatically once `default=True` —
+no YAML edit needed. Ad-hoc audits use `--all-scopes` or `--scope <name>`.
+
+Some checks still delegate to scripts under book/tools/scripts/ (tables,
+spelling, epub, sources, grid-tables, images) and to standalone audit
+scripts under book/tools/audit/index/. The dispatch pattern uses
+`_delegate_script` for subprocess wrappers; preserve that pattern for new
+script-backed scopes.
 """
 
 from __future__ import annotations
@@ -114,59 +128,152 @@ LABEL_REF_PATTERN = re.compile(r"@((?:fig|tbl|sec|eq|lst)-[\w-]+)")
 EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-")
 
 
+@dataclass(frozen=True)
+class Scope:
+    """One scope inside a binder check group.
+
+    A "scope" is a single check that lives inside a group (e.g.
+    `refs.citations`, `prose.contractions`). Scopes are the unit of dispatch:
+    `./binder check refs --scope citations` runs one. `./binder check refs`
+    runs every scope flagged `default=True`. Pre-commit consumes the
+    `default=True` set; ad-hoc audits opt into everything via
+    `./binder check refs --all-scopes`.
+
+    Why this matters: as the corpus matures, new scopes get added in a
+    "warning-only / not-yet-clean" state. Marking them `default=False`
+    lets them ship without blocking commits, while still being runnable
+    on demand. Flip to `default=True` once dev is clean for that scope.
+    """
+
+    name: str
+    runner: str
+    default: bool = True
+    note: str = ""
+
+
 class ValidateCommand:
     """Native `binder check` command group (also available as `binder validate`).
 
-    Groups:
-        refs        — inline-python, cross-refs, citations, inline patterns
-        labels      — duplicate labels, orphaned/unreferenced labels
-        headers     — section header IDs
-        footnotes   — placement rules, reference integrity, capitalization
-        figures     — captions/alt-text, float flow, image files
-        rendering   — render patterns, indexes, dropcaps, parts
-        all         — run every check
+    The hierarchy is:
+        binder check <group>                  # all default=True scopes
+        binder check <group> --scope <name>   # one specific scope
+        binder check <group> --all-scopes     # every scope (incl. default=False)
+
+    The `default` flag on each Scope encodes "is this scope curated for the
+    pre-commit/CI baseline today." That is the *only* concept the YAML and CI
+    need to know about. Adding a new check is therefore three things:
+
+        1. Add a `_run_<scope>` method below that returns a ValidationRunResult.
+        2. Add a `Scope("<name>", "_run_<scope>", default=...)` entry to the
+           appropriate group below. Use `default=False` when the scope still
+           fails on dev or is intentionally opt-in (slow, heavy, manual).
+        3. If the scope needs new flags, add them to the argparse block in
+           `run()` and dispatch them in `_run_group`.
+
+    No new pre-commit hook needed. Pre-commit runs `./binder check <group>`
+    and picks up the new scope automatically once it is `default=True`.
+
+    Group catalogue:
+        refs       — refs / citations / cross-refs hygiene
+        labels     — duplicate labels, orphaned/unreferenced labels
+        headers    — section header IDs and headline-case policy
+        bib        — bibliography (.bib) hygiene + canonical forms
+        footnotes  — placement, integrity, cross-chapter, capitalization
+        figures    — captions/alt-text, float flow, image files
+        markup     — low-level markup (patterns, div fences, dropcaps)
+        prose      — prose style (contractions, dup words, ASCII, ...)
+        punctuation — em-dash, slash, vs., e.g./i.e., en-dash ranges
+        numbers    — units / percent / binary units
+        math       — \\times spacing, attr-leaks, render-audit (manual)
+        structure  — heading levels, parts, Purpose-unnumbered
+        code       — python-echo, _str/_math LaTeX leak, LEGO dead code
+        tables     — grid → pipe, table content
+        index      — \\index{} placement, anti-patterns, tag-placement, xrefs
+        images     — file formats, externals, SVG well-formedness
+        json       — JSON syntax
+        units      — physics-engine unit conversion tests
+        notation   — iron-law symbol consistency (BW, R_peak, L_lat, D_vol)
+        spelling   — prose + TikZ spell checks (requires aspell)
+        epub       — source hygiene, smoke checks, epubcheck (built)
+        sources    — source citation patterns
+        references — bibliography vs. academic DBs (hallucinator; slow)
+        content    — content tree (shared/, frontmatter/ required)
+        all        — every group above
     """
 
-    # Maps group name → list of (scope_name, runner_method_name) pairs.
-    # This is the single source of truth for the hierarchy.
-    GROUPS: Dict[str, List[tuple]] = {
+    # Single source of truth for the group → scopes hierarchy.
+    # Order within each group: cheaper / earlier checks first, since later
+    # scopes typically build on earlier ones (e.g. labels.duplicates before
+    # labels.orphans). default=False scopes are listed alongside their kin
+    # so the file reads as a complete map of what *could* run.
+    GROUPS: Dict[str, List[Scope]] = {
         "refs": [
-            ("python-syntax", "_run_python_syntax"),
-            ("inline-python", "_run_inline_python"),
-            ("cross-refs", "_run_refs"),
-            ("citations", "_run_citations"),
-            ("duplicate-year", "_run_duplicate_citation_year"),  # "[@foo1964] (1964)" → redundant year
-            ("duplicate-key", "_run_duplicate_citation_key"),    # "[@k; @k]" or "[@k] [@k]" — same-key citeproc dup
-            ("manual-bracket", "_run_manual_bracket_citation"),  # *et al.*(…) or *A & B*(…) + [@k] — citeproc dup
-            ("inline", "_run_inline_refs"),
-            ("self-ref", "_run_self_referential"),
-            ("capitalized", "_run_mitpress_capitalized_refs"),  # "chapter 12" lowercase in prose
+            # python-syntax: passes on dev but never wired to pre-commit historically;
+            # leaving default=False to preserve current coverage exactly. Flip later
+            # if we want it in the curated set.
+            Scope("python-syntax", "_run_python_syntax", default=False),
+            # inline-python + self-ref currently fail on dev (corpus debt).
+            # Runnable on demand via --scope or --all-scopes.
+            Scope("inline-python", "_run_inline_python", default=False),
+            Scope("cross-refs", "_run_refs"),
+            Scope("citations", "_run_citations"),
+            Scope("duplicate-year", "_run_duplicate_citation_year",
+                  note='"[@foo1964] (1964)" — redundant year after citation'),
+            Scope("duplicate-key", "_run_duplicate_citation_key",
+                  note='"[@k; @k]" or "[@k] [@k]" — same-key citeproc dup'),
+            Scope("manual-bracket", "_run_manual_bracket_citation",
+                  note='*et al.*(…) — manual attribution next to [@k]'),
+            # inline scope is run with --check-patterns OFF in the curated set
+            # (matches former pre-commit hook). Pattern hazards still live in
+            # the corpus; opt in with --check-patterns when cleaning them up.
+            Scope("inline", "_run_inline_refs"),
+            Scope("self-ref", "_run_self_referential", default=False),
+            Scope("capitalized", "_run_mitpress_capitalized_refs",
+                  note='"chapter 12" lowercase in prose (§10.3.2)'),
         ],
         "labels": [
-            ("duplicates", "_run_duplicate_labels"),
-            ("orphans", "_run_unreferenced_labels"),
-            ("fig-labels", "_run_fig_label_underscores"),
+            # duplicates and orphans are both curated, but each carries its
+            # own implicit filter when invoked from pre-commit:
+            #   - duplicates: figures + tables + listings only (sections /
+            #     equations have legitimate dup-key collisions in vol2 WIP)
+            #   - orphans:    vol1 only (vol2 has many forward labels for
+            #     not-yet-authored chapters)
+            # The YAML hook embeds the appropriate flags. fig-labels currently
+            # fails (corpus debt) so it stays default=False until cleaned up.
+            Scope("duplicates", "_run_duplicate_labels"),
+            Scope("orphans", "_run_unreferenced_labels"),
+            Scope("fig-labels", "_run_fig_label_underscores", default=False),
         ],
         "headers": [
-            ("ids", "_run_headers"),
-            ("case", "_run_heading_case"),
+            # ids: vol1 only (vol2 chapters are early-development; many
+            # sections still missing IDs). YAML hook embeds --vol1.
+            Scope("ids", "_run_headers"),
+            Scope("case", "_run_heading_case",
+                  note="MIT Press headline-case (§10.3.1)"),
         ],
         "bib": [
-            ("hygiene", "_run_bib_hygiene"),
-            ("key-content", "_run_bib_key_content"),
+            Scope("hygiene", "_run_bib_hygiene"),
+            # key-content fails on dev (legacy keys grandfathered).
+            # Was never wired to pre-commit; default=False preserves status quo.
+            Scope("key-content", "_run_bib_key_content", default=False),
         ],
         "footnotes": [
-            ("placement", "_run_footnote_placement"),
-            ("integrity", "_run_footnote_refs"),
-            ("cross-chapter", "_run_footnote_cross_chapter"),
-            ("capitalization", "_run_footnote_capitalization"),
+            Scope("placement", "_run_footnote_placement"),
+            Scope("integrity", "_run_footnote_refs"),
+            Scope("cross-chapter", "_run_footnote_cross_chapter", default=False),
+            Scope("capitalization", "_run_footnote_capitalization"),
         ],
         "figures": [
-            ("captions", "_run_figures"),
-            ("div-syntax", "_run_figure_div_syntax"),
-            ("flow", "_run_float_flow"),
-            ("files", "_run_images"),
-            ("alt-text-style", "_run_alt_text_style"),   # alt-text follows body-prose rules (§10.12)
+            Scope("captions", "_run_figures"),
+            Scope("div-syntax", "_run_figure_div_syntax"),
+            # flow: deferred to copyeditor's PDF layout pass (2026-05-03).
+            # The "near first reference" heuristic conflicts with the
+            # repositioning the copyeditor does to balance pages in print.
+            # Re-enable when we own figure placement again.
+            Scope("flow", "_run_float_flow", default=False),
+            Scope("files", "_run_images"),
+            Scope("alt-text-style", "_run_alt_text_style",
+                  note="alt-text follows body-prose rules (§10.12)"),
         ],
         # ------------------------------------------------------------------
         # Semantic check groups: classify checks by WHAT is validated
@@ -176,98 +283,154 @@ class ValidateCommand:
         # scopes. See .claude/rules/book-prose.md for style provenance.
         # ------------------------------------------------------------------
         "markup": [
-            ("patterns", "_run_rendering"),       # low-level markup patterns (backticks, dollar signs, asterisks)
-            ("div-fences", "_run_div_fences"),    # ::: / :::: balance + form
-            ("dropcaps", "_run_dropcaps"),        # drop-cap compatibility
+            Scope("patterns", "_run_rendering",
+                  note="low-level markup (backticks, dollar signs, asterisks)"),
+            Scope("div-fences", "_run_div_fences",
+                  note=":::/ :::: balance and form"),
+            Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
-            ("contractions", "_run_contractions"),           # no "can't", "it's" in body prose
-            ("duplicate-words", "_run_duplicate_words"),     # consecutive dup words
-            ("unblended-prose", "_run_unblended_prose"),     # space after period
-            ("above-below", "_run_mitpress_above_below"),    # no "above"/"below" spatial refs
-            ("ascii", "_run_ascii"),                         # non-ASCII chars
-            ("acknowledgements", "_run_mitpress_acknowledgements"),  # American spelling
-            ("compound-prefix", "_run_compound_prefix"),     # pre-/non- close-up (§10.8)
-            ("concept-caps", "_run_concept_term_capitalization"),  # iron law, memory wall lowercase (§10.3)
-            ("abbreviation-first-use", "_run_abbreviation_first_use"),  # expand on first use per chapter (§10.5)
-            ("latin-abbrevs", "_run_latin_running_text"),    # viz./e.g./etc. in running text (§10.6)
+            Scope("contractions", "_run_contractions",
+                  note='no "can\'t", "it\'s" in body prose'),
+            Scope("duplicate-words", "_run_duplicate_words"),
+            Scope("unblended-prose", "_run_unblended_prose",
+                  note="space after period"),
+            Scope("above-below", "_run_mitpress_above_below",
+                  note='no "above"/"below" spatial refs'),
+            # ascii: corpus has many legitimate non-ASCII chars (em-dashes,
+            # smart quotes from imports). Default=False until corpus-wide
+            # ASCII pass lands.
+            Scope("ascii", "_run_ascii", default=False),
+            Scope("acknowledgements", "_run_mitpress_acknowledgements",
+                  note="American spelling: Acknowledgments"),
+            Scope("compound-prefix", "_run_compound_prefix",
+                  note="pre-/non- close-up (§10.8)"),
+            Scope("concept-caps", "_run_concept_term_capitalization",
+                  note="iron law, memory wall lowercase (§10.3)"),
+            # abbreviation-first-use currently noisy; default=False until tuned.
+            Scope("abbreviation-first-use", "_run_abbreviation_first_use", default=False),
+            Scope("latin-abbrevs", "_run_latin_running_text",
+                  note="viz./e.g./etc. in running text (§10.6)"),
         ],
         "punctuation": [
-            ("emdash", "_run_mitpress_spaced_emdash"),        # word—word, no spaces
-            ("slash", "_run_mitpress_spaced_slash"),          # training/inference, no spaces
-            ("vs-period", "_run_mitpress_vs_period"),         # vs. not vs
-            ("eg-ie-comma", "_run_mitpress_eg_ie_comma"),     # comma after e.g./i.e.
-            ("hyphen-range", "_run_mitpress_hyphen_range"),   # en-dash for number ranges
+            Scope("emdash", "_run_mitpress_spaced_emdash",
+                  note="word—word, no spaces"),
+            Scope("slash", "_run_mitpress_spaced_slash",
+                  note="training/inference, no spaces"),
+            Scope("vs-period", "_run_mitpress_vs_period",
+                  note="vs. not vs"),
+            Scope("eg-ie-comma", "_run_mitpress_eg_ie_comma",
+                  note="comma after e.g./i.e."),
+            Scope("hyphen-range", "_run_mitpress_hyphen_range",
+                  note="en-dash for number ranges"),
         ],
         "numbers": [
-            ("unit-spacing", "_run_unit_spacing"),                          # 100 ms, not 100ms
-            ("binary-units", "_run_binary_units"),                          # GB/TB not GiB/TiB
-            ("percent-spacing", "_run_percent_spacing"),                    # no space before %
-            ("percent-in-captions", "_run_mitpress_percent_in_captions"),   # spell out in captions
+            Scope("unit-spacing", "_run_unit_spacing",
+                  note="100 ms, not 100ms"),
+            Scope("binary-units", "_run_binary_units",
+                  note="GB/TB not GiB/TiB"),
+            Scope("percent-spacing", "_run_percent_spacing",
+                  note="no space before %"),
+            Scope("percent-in-captions", "_run_mitpress_percent_in_captions",
+                  note="spell out 'percent' in captions"),
         ],
         "math": [
-            ("times-spacing", "_run_times_spacing"),                 # space after $\times$
-            ("times-product-spacing", "_run_times_product_spacing"), # space before $\times$ after inline code
-            ("attr-leaks", "_run_attr_latex_leaks"),                 # LaTeX in title=/fig-cap/tbl-cap/fig-alt/tbl-alt — won't render or leaks to lightbox
-            ("render-audit", "_run_math_render_audit"),              # full HTML build + leak scan (slow; manual stage)
+            Scope("times-spacing", "_run_times_spacing",
+                  note="space after $\\times$"),
+            Scope("times-product-spacing", "_run_times_product_spacing",
+                  note="space before $\\times$ after inline code"),
+            Scope("attr-leaks", "_run_attr_latex_leaks",
+                  note="LaTeX in title=/fig-cap/tbl-cap/fig-alt/tbl-alt"),
+            # render-audit builds every chapter (~10 min). Manual stage only;
+            # default=False ensures `binder check math` stays under 1s.
+            Scope("render-audit", "_run_math_render_audit", default=False),
         ],
         "structure": [
-            ("heading-levels", "_run_heading_levels"),    # H1→H2→H3 hierarchy
-            ("parts", "_run_parts"),                       # part keys valid
-            ("purpose-unnumbered", "_run_purpose_unnumbered"),  # Purpose sections unnumbered
+            Scope("heading-levels", "_run_heading_levels",
+                  note="H1→H2→H3 hierarchy"),
+            Scope("parts", "_run_parts",
+                  note="part keys valid"),
+            Scope("purpose-unnumbered", "_run_purpose_unnumbered",
+                  note="Purpose sections unnumbered"),
         ],
         "code": [
-            ("python-echo", "_run_python_echo"),           # echo: false on python blocks
-            ("str-latex-leak", "_run_str_latex_leak"),     # *_str exports must not contain raw LaTeX (use md()/md_math())
+            Scope("python-echo", "_run_python_echo",
+                  note="echo: false on python blocks"),
+            Scope("str-latex-leak", "_run_str_latex_leak",
+                  note="*_str exports must not contain raw LaTeX"),
+            # Migrated 2026-05-06: was scripts/check_lego_vars.py
+            Scope("lego-dead-code", "_run_lego_dead_code",
+                  note="LEGO variables defined but never referenced"),
         ],
         "tables": [
-            ("grid-tables", "_run_grid_tables"),           # prefer pipe tables
-            ("content", "_run_table_content"),             # bare pipes, fracs, HTML entities
+            Scope("grid-tables", "_run_grid_tables",
+                  note="prefer pipe tables"),
+            Scope("content", "_run_table_content",
+                  note="bare pipes, fracs, HTML entities"),
         ],
         "index": [
-            ("placement", "_run_indexes"),                 # \index{} not inline with headings/callouts
+            Scope("placement", "_run_indexes",
+                  note='\\index{} not inline with headings/callouts'),
+            # Migrated 2026-05-06: was book/tools/audit/index/check_anti_patterns.py
+            Scope("anti-patterns", "_run_index_anti_patterns",
+                  note="anti-patterns from .claude/rules/index.md §9"),
+            # Migrated 2026-05-06: was book/tools/audit/index/check_tag_placement.py
+            Scope("tag-placement", "_run_index_tag_placement",
+                  note='\\index{} not inside **bold**, *italic*, `code`, or headings'),
+            # Migrated 2026-05-06: was book/tools/audit/index/check_xref_resolves.py
+            Scope("xref-resolves", "_run_index_xref_resolves",
+                  note="every |see / |seealso target resolves to a real main entry"),
         ],
 
         "images": [
-            ("formats", "_run_image_formats"),
-            ("external", "_run_external_images"),
-            ("svg-xml", "_run_svg_wellformedness"),
+            Scope("formats", "_run_image_formats"),
+            Scope("external", "_run_external_images"),
+            Scope("svg-xml", "_run_svg_wellformedness"),
         ],
         "json": [
-            ("syntax", "_run_json_syntax"),
+            Scope("syntax", "_run_json_syntax"),
         ],
         "units": [
-            ("physics", "_run_unit_tests"),
+            # Physics-engine unit tests. Heavyweight for pre-commit; runs in
+            # under 5s today but is fundamentally a test suite, not a static
+            # check. TODO: consider moving to CI.
+            Scope("physics", "_run_unit_tests"),
         ],
         "notation": [
-            ("consistency", "_run_notation_consistency"),  # iron-law symbols (BW, R_peak, L_lat, D_vol)
+            Scope("consistency", "_run_notation_consistency",
+                  note="iron-law symbols (BW, R_peak, L_lat, D_vol)"),
         ],
         "spelling": [
-            ("prose", "_run_spelling_prose"),
-            ("tikz", "_run_spelling_tikz"),
+            # Both scopes require aspell. Heavy and not part of pre-commit
+            # today. Default=False until aspell is on every contributor box.
+            Scope("prose", "_run_spelling_prose", default=False),
+            Scope("tikz", "_run_spelling_tikz", default=False),
         ],
         "epub": [
-            # Fast source-level invariants. No EPUB build required. Suitable
-            # for pre-commit — runs in <1s across all SVGs + .bib files.
-            ("hygiene", "_run_epub_hygiene"),
+            # Fast source-level invariants (<1s across SVGs + .bib).
+            # Suitable for pre-commit.
+            Scope("hygiene", "_run_epub_hygiene"),
             # Reader-compatibility smoke checks against the built EPUB.
-            # No Java required; catches patterns epubcheck does not, e.g.
-            # CSS custom properties (ClearView / Tolino compat) and
-            # external resource references.
-            ("smoke", "_run_epub_smoke"),
-            # Full W3C epubcheck validation of built EPUB artifacts under
-            # _build/epub-vol*/. Requires epubcheck + JRE. Slow (~30s per
-            # volume) — appropriate for CI, not pre-commit.
-            ("epubcheck", "_run_epubcheck"),
+            # Requires a prior epub build under _build/epub-vol*/.
+            # Default=False because it presupposes a build step.
+            Scope("smoke", "_run_epub_smoke", default=False),
+            # Full W3C epubcheck validation. Requires epubcheck + JRE,
+            # slow (~30s per volume). CI-only.
+            Scope("epubcheck", "_run_epubcheck", default=False),
         ],
         "sources": [
-            ("citations", "_run_sources"),
+            Scope("citations", "_run_sources"),
         ],
         "references": [
-            ("hallucinator", "_run_check_references"),
+            # Hits external academic DBs (slow, network-dependent).
+            # Manual / CI-only by design.
+            Scope("hallucinator", "_run_check_references", default=False),
         ],
         "content": [
-            ("tree", "_run_content_tree"),
+            # Currently fails on this checkout (contents/shared/ structure
+            # not present on every branch). Was never wired to pre-commit.
+            # Run on demand via --scope tree.
+            Scope("tree", "_run_content_tree", default=False),
         ],
     }
 
@@ -306,6 +469,11 @@ class ValidateCommand:
             help="Optional file(s) or directories to check; used by pre-commit",
         )
         parser.add_argument("--scope", default=None, help="Narrow to a specific check within a group")
+        parser.add_argument(
+            "--all-scopes", action="store_true", default=False,
+            help="Include scopes marked default=False (heavy / not-yet-clean / opt-in). "
+                 "Without this flag, `binder check <group>` runs only the curated set.",
+        )
         parser.add_argument("--path", default=None, help="File or directory path to check")
         parser.add_argument("--vol1", action="store_true", help="Scope to Volume I")
         parser.add_argument("--vol2", action="store_true", help="Scope to Volume II")
@@ -314,8 +482,11 @@ class ValidateCommand:
         parser.add_argument("--quiet", "-q", action="store_true", dest="quiet", help="Suppress verbose output")
         parser.add_argument("--citations-in-code", action="store_true", help="refs: check citations in code fences")
         parser.add_argument("--citations-in-raw", action="store_true", help="refs: check citations in raw blocks")
-        parser.add_argument("--check-patterns", action="store_true", default=True, help="refs --scope inline: include pattern hazard checks (default: on)")
-        parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks")
+        # Default OFF: the inline scope ships in the curated set without
+        # pattern checks (matches pre-2026-05 hook behavior; the pattern
+        # corpus has known noise that needs cleanup before flipping default).
+        parser.add_argument("--check-patterns", action="store_true", default=False, help="refs --scope inline: include pattern hazard checks (opt-in; noisy on dev)")
+        parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks (default)")
         parser.add_argument("--check-scope", action="store_true", default=False, help="refs --scope inline: detect bare variable refs in class bodies that need ClassName.attr")
         parser.add_argument("--no-check-scope", action="store_false", dest="check_scope", help="refs --scope inline: skip scope analysis")
         parser.add_argument("--include-lightbox", action="store_true", default=False, help="math --scope attr-leaks: also surface fig-cap/tbl-cap math that leaks into HTML lightbox tooltips (warning, opt-in; ~70 pre-existing instances on dev)")
@@ -389,8 +560,8 @@ class ValidateCommand:
         else:
             group_name = ns.subcommand
             scope = ns.scope
-            if scope and not any(s == scope for s, _ in self.GROUPS.get(group_name, [])):
-                valid = [s for s, _ in self.GROUPS[group_name]]
+            if scope and not any(sc.name == scope for sc in self.GROUPS.get(group_name, [])):
+                valid = [sc.name for sc in self.GROUPS[group_name]]
                 console.print(f"[red]Unknown scope '{scope}' for group '{group_name}'.[/red]")
                 console.print(f"[yellow]Valid scopes: {', '.join(valid)}[/yellow]")
                 return False
@@ -424,10 +595,28 @@ class ValidateCommand:
         root: Path,
         ns: argparse.Namespace,
     ) -> List[ValidationRunResult]:
-        """Run all checks in *group*, or just the one matching *scope*."""
+        """Run checks in *group*.
+
+        Selection rules (in order):
+          1. If `scope` is set: run that one scope (regardless of its `default` flag).
+          2. Otherwise, run every scope in the group whose `default=True`.
+          3. If `--all-scopes` is set: also include `default=False` scopes.
+
+        This three-way distinction is what lets pre-commit run a curated
+        set without flag soup, while ad-hoc audits (`--all-scopes`) and
+        targeted runs (`--scope`) still reach every scope on demand.
+        """
+        all_scopes = getattr(ns, "all_scopes", False)
         results: List[ValidationRunResult] = []
-        for scope_name, method_name in self.GROUPS[group]:
-            if scope and scope != scope_name:
+        for scope_obj in self.GROUPS[group]:
+            scope_name = scope_obj.name
+            method_name = scope_obj.runner
+            if scope:
+                if scope != scope_name:
+                    continue
+            elif not all_scopes and not scope_obj.default:
+                # Default group invocation skips scopes flagged default=False.
+                # Run them via `--scope <name>` or `--all-scopes`.
                 continue
             method = getattr(self, method_name)
             # Some runners need extra kwargs
@@ -440,7 +629,27 @@ class ValidateCommand:
                                       check_scope=getattr(ns, 'check_scope', False)))
             elif method_name == "_run_attr_latex_leaks":
                 results.append(method(root, include_lightbox=getattr(ns, 'include_lightbox', False)))
-            elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
+            elif method_name == "_run_duplicate_labels":
+                # Curated default for duplicates: figures + tables + listings only.
+                # Section / equation dup-keys are legitimately ambiguous in vol2
+                # WIP (forward-referenced labels not yet authored) and would
+                # block every commit. Explicit type flags from the user override
+                # this default and switch to the user-selected subset.
+                explicit = (ns.figures or ns.tables or ns.sections or
+                            ns.equations or ns.listings or ns.all_types)
+                if explicit:
+                    label_types = self._selected_label_types(ns)
+                else:
+                    label_types = {
+                        k: v for k, v in LABEL_DEF_PATTERNS.items()
+                        if k in ("Figure", "Table", "Listing")
+                    }
+                results.append(method(root, label_types))
+            elif method_name == "_run_unreferenced_labels":
+                # Curated default for orphans: all label types. The vol filter
+                # comes from --vol1 / --vol2 at the path level (vol2 has many
+                # forward references not yet authored — pre-commit pins to
+                # --vol1 to avoid blocking commits on legitimate forwards).
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
                 results.append(method(root, ns))
@@ -496,18 +705,23 @@ class ValidateCommand:
             "content": "Content tree (shared/, frontmatter/ required)",
         }
         for group_name, checks in self.GROUPS.items():
-            scopes = ", ".join(s for s, _ in checks)
-            desc = descriptions.get(group_name, "")
-            table.add_row(group_name, scopes, desc)
-        table.add_row("all", "(everything)", "Run all checks")
+            # Show curated scopes plain; mark default=False ones with a dim asterisk
+            # so the user knows they exist but require --all-scopes / --scope opt-in.
+            parts = []
+            for sc in checks:
+                parts.append(sc.name if sc.default else f"{sc.name}*")
+            table.add_row(group_name, ", ".join(parts), descriptions.get(group_name, ""))
+        table.add_row("all", "(every group)", "Run every group's curated set; add --all-scopes for opt-in too")
 
         console.print(Panel(table, title="binder check <group> [--scope <name>]", border_style="cyan"))
         console.print("[dim]Examples:[/dim]")
-        console.print("  [cyan]./binder check refs[/cyan]              [dim]# all reference checks[/dim]")
-        console.print("  [cyan]./binder check refs --scope citations[/cyan]  [dim]# only citation check[/dim]")
-        console.print("  [cyan]./binder check figures --vol1[/cyan]    [dim]# all figure checks, Vol I[/dim]")
-        console.print("  [cyan]./binder check all[/cyan]               [dim]# everything[/dim]")
-        console.print("  [cyan]./binder check <group> help[/cyan]      [dim]# per-group error codes + guidance[/dim]")
+        console.print("  [cyan]./binder check refs[/cyan]                [dim]# curated default scopes for refs[/dim]")
+        console.print("  [cyan]./binder check refs --scope citations[/cyan]  [dim]# one specific scope[/dim]")
+        console.print("  [cyan]./binder check refs --all-scopes[/cyan]   [dim]# every scope including opt-in (* in table)[/dim]")
+        console.print("  [cyan]./binder check figures --vol1[/cyan]      [dim]# default figure scopes, Vol I only[/dim]")
+        console.print("  [cyan]./binder check all[/cyan]                 [dim]# every group, default scopes[/dim]")
+        console.print("  [cyan]./binder check <group> help[/cyan]        [dim]# per-group error codes + guidance[/dim]")
+        console.print("[dim]An asterisk (*) marks a scope that is default=False — runnable via --scope or --all-scopes.[/dim]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -517,16 +731,26 @@ class ValidateCommand:
         if group == "epub":
             self._print_epub_help()
             return
-        # Generic fallback: list scopes and a one-line description.
+        # Generic fallback: list scopes, default flag, runner method, and the
+        # short note (if any). The Default column is the contract pre-commit /
+        # CI rely on.
         scopes = self.GROUPS.get(group, [])
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Scope", style="yellow")
-        table.add_column("Method", style="dim")
-        for s, m in scopes:
-            table.add_row(s, m)
+        table.add_column("Default", style="green", width=8)
+        table.add_column("Note", style="white")
+        table.add_column("Runner", style="dim")
+        for sc in scopes:
+            table.add_row(
+                sc.name,
+                "yes" if sc.default else "opt-in",
+                _rich_escape(sc.note) if sc.note else "",
+                sc.runner,
+            )
         console.print(Panel(table, title=f"binder check {group}", border_style="cyan"))
-        console.print(f"[dim]Run `./binder check {group}` to run every scope, or "
-                      f"`./binder check {group} --scope <name>` for one.[/dim]")
+        console.print(f"[dim]Run [cyan]./binder check {group}[/cyan] for the curated set "
+                      f"(Default = yes), [cyan]--scope <name>[/cyan] for one specific scope, "
+                      f"or [cyan]--all-scopes[/cyan] to include opt-in scopes.[/dim]")
         console.print()
 
     def _print_epub_help(self) -> None:
@@ -6481,3 +6705,56 @@ class ValidateCommand:
             files_checked=len(test_fns), issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
+
+    # ------------------------------------------------------------------
+    # Migrated runners (2026-05-06): scripts that previously lived as
+    # standalone pre-commit entries have moved into binder so every
+    # book-* check has one entry point. The scripts themselves remain
+    # callable from the CLI for ad-hoc use; these wrappers convert their
+    # exit code to a ValidationRunResult so they show up in the standard
+    # check summary table.
+    # ------------------------------------------------------------------
+
+    def _run_index_anti_patterns(self, root: Path) -> ValidationRunResult:
+        """index --scope anti-patterns: \\index{} anti-patterns from §9.
+
+        Wraps book/tools/audit/index/check_anti_patterns.py.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "audit" / "index" / "check_anti_patterns.py"
+        )
+        return self._delegate_script(script, [], "index-anti-patterns")
+
+    def _run_index_tag_placement(self, root: Path) -> ValidationRunResult:
+        """index --scope tag-placement: \\index{} not inside bold/italic/code/heading.
+
+        Wraps book/tools/audit/index/check_tag_placement.py.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "audit" / "index" / "check_tag_placement.py"
+        )
+        return self._delegate_script(script, [], "index-tag-placement")
+
+    def _run_index_xref_resolves(self, root: Path) -> ValidationRunResult:
+        """index --scope xref-resolves: every |see / |seealso resolves.
+
+        Wraps book/tools/audit/index/check_xref_resolves.py.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "audit" / "index" / "check_xref_resolves.py"
+        )
+        return self._delegate_script(script, [], "index-xref-resolves")
+
+    def _run_lego_dead_code(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-dead-code: LEGO variables defined but never used.
+
+        Wraps scripts/check_lego_vars.py.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent.parent
+            / "scripts" / "check_lego_vars.py"
+        )
+        return self._delegate_script(script, [], "lego-dead-code")
