@@ -92,6 +92,16 @@ HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 QUARTO_XREF_PREFIXES = ("@sec-", "@fig-", "@tbl-", "@eq-", "@lst-", "@thm-",
                         "@cor-", "@def-", "@exr-", "@exm-", "@prp-")
 
+# Artifacts injected by CI at deploy time, not present in the committed tree.
+# Match by basename so source links resolve regardless of relative path.
+# Matched against `Path(path_part).name`, so subdirectory variants
+# (`./mlsysim-paper.pdf`, `../mlsysim-paper.pdf`) are also skipped.
+# Source: mlsysim-publish-live.yml copies pdf-artifacts/paper.pdf into
+# mlsysim/docs/mlsysim-paper.pdf at deploy.
+CI_INJECTED_BASENAMES = {
+    "mlsysim-paper.pdf",
+}
+
 # Match explicit Quarto / Pandoc anchor syntax inside headings:
 #   ## My Header {#sec-foo}
 ANCHOR_ATTR_RE = re.compile(r"\{#(?P<id>[^\s}]+)[^}]*\}")
@@ -350,6 +360,9 @@ def check_file(path: Path, cache: dict[Path, str]) -> list[Problem]:
                         Problem(path, line_no, target, "anchor not found in this file")
                     )
                 continue
+
+            if Path(path_part).name in CI_INJECTED_BASENAMES:
+                continue  # Built and dropped in by CI; not in the committed tree.
 
             cands = candidate_paths(path, path_part)
             if not cands:
