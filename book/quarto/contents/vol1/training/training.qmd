@@ -159,7 +159,7 @@ Any mismatch in the throughput of these stages creates **accelerator bubbles**\i
 
 [^fn-checkpointing-training]: **Gradient Checkpointing (Activation Checkpointing)**: The memory pressure described here arises because backpropagation requires every layer's activations from the forward pass. Checkpointing breaks this requirement by saving activations at only $\sqrt{L}$ strategic layers and recomputing the rest during the backward pass, trading roughly thirty-three percent additional compute for up to 10$\times$ activation memory reduction. For GPT-2's forty-eight layers, this means storing seven checkpoints instead of forty-eight full activation tensors. \index{Activation Checkpointing!compute-memory trade-off}
 
-[^fn-mixed-precision-training]: **Mixed-Precision Training**: Uses half-precision (FP16 or BF16) for computation while maintaining FP32 "master weights" for accumulation, where rounding errors would otherwise compound. A loss scaling trick prevents gradient underflow in FP16's limited dynamic range, yielding nearly 2$\times$ memory savings and 2$\times$--8$\times$ throughput gains on Tensor Cores. BF16 ("Brain Floating Point," from Google Brain, 2018) later eliminated loss scaling by matching FP32's 8-bit exponent range, simplifying the dominant failure mode of half-precision training. \index{Mixed-Precision Training!trade-off}
+[^fn-mixed-precision-training]: **Mixed-Precision Training**: Uses half-precision (FP16 or BF16) for computation while maintaining FP32 "master weights" for accumulation, where rounding errors would otherwise compound. A loss scaling trick prevents gradient underflow in FP16's limited dynamic range, yielding nearly 2$\times$ memory savings and 2--8$\times$ throughput gains on Tensor Cores. BF16 ("Brain Floating Point," from Google Brain, 2018) later eliminated loss scaling by matching FP32's 8-bit exponent range, simplifying the dominant failure mode of half-precision training. \index{Mixed-Precision Training!trade-off}
 
 The chapter proceeds through five stages. First, we formalize the *iron law of Training Performance*, a specialized application of the general iron law (@sec-introduction-iron-law-ml-systems-c32a) that decomposes training time into total operations, peak throughput, and utilization, three levers that every optimization technique in this chapter targets. Second, we examine the *mathematical foundations* that underpin training: neural network computation as a systems workload, optimization algorithms that navigate loss landscapes, backpropagation mechanics, and the arithmetic intensity analysis that determines whether training is compute bound or memory bound. Third, we dissect the *pipeline architecture* of a training system as a staged pipeline where data loading, forward pass, backward pass, and parameter updates each constrain the next. Fourth, we develop *pipeline optimizations* that target specific iron law terms to close the gap between theoretical peak and actual training speed: mixed-precision training, FlashAttention, gradient accumulation, and checkpointing. Fifth, we explore how training *scales* beyond a single GPU to multi-GPU and multi-node configurations, where communication overhead introduces new bottlenecks.
 
@@ -216,7 +216,7 @@ The simplification is valid when the pipeline is correctly staged: at training s
 
 A caveat: the iron law focuses on *execution efficiency*---how fast the hardware processes a given workload. It does not capture data-side factors such as data quality, dataset size, or curriculum design, which affect how many total operations $O$ are needed to reach a target accuracy. A cleaner dataset or a better data mix can reduce the number of epochs required, shrinking $O$ without touching hardware at all. These data-side levers are covered in @sec-data-engineering; here we hold the workload fixed and ask how to execute it as fast as possible.
 
-The gap between theoretical peak performance and actual training speed is often 2$\times$--3$\times$. Scaling to multiple accelerators introduces additional communication overhead that can erode these gains, a trade-off we examine in @sec-model-training-scaling-training-systems-adfd. The following checkpoint tests the core intuition behind *why* this gap exists.
+The gap between theoretical peak performance and actual training speed is often 2--3$\times$. Scaling to multiple accelerators introduces additional communication overhead that can erode these gains, a trade-off we examine in @sec-model-training-scaling-training-systems-adfd. The following checkpoint tests the core intuition behind *why* this gap exists.
 
 ::: {.callout-checkpoint title="The Physics of Training"}
 
@@ -234,7 +234,7 @@ Training speed is governed by the utilization of hardware peaks.
 :::
 
 \index{Transformer!training evolution}
-The iron law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the *binding constraint* has shifted over time as hardware and algorithms co-evolved. In 1986, backpropagation was formalized [@rumelhart1986], and training a three-layer network on toy datasets required days on CPU workstations---the bottleneck was raw compute throughput ($R_{\text{peak}}$). In 2012, AlexNet demonstrated GPU training [@krizhevsky2012imagenet], reducing ImageNet training from weeks to days and launching the deep learning era. By 2017, transformers and NVIDIA Volta Tensor Cores enabled mixed-precision training with a further 5$\times$ speedup [@vaswani2017]. GPT-3 in 2020 used over `{python} TrainingScenarios.gpt3_gpu_count_str` V100 GPUs at an estimated \$`{python} TrainingScenarios.gpt3_compute_cost_str`M cost [@brown2020language], making utilization ($\eta_{\text{hw}}$) critical. By 2023, training efficiency improved 10$\times$ through the techniques examined in this chapter: FlashAttention reduces memory traffic while improving $\eta$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $R_{\text{peak}}$. Each innovation was motivated by a specific iron law bottleneck.
+The iron law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the *binding constraint* has shifted over time as hardware and algorithms co-evolved. In 1986, backpropagation was formalized [@rumelhart1986], and training a three-layer network on toy datasets required days on CPU workstations---the bottleneck was raw compute throughput $(R_{\text{peak}})$. In 2012, AlexNet demonstrated GPU training [@krizhevsky2012imagenet], reducing ImageNet training from weeks to days and launching the deep learning era. By 2017, transformers and NVIDIA Volta Tensor Cores enabled mixed-precision training with a further 5$\times$ speedup [@vaswani2017]. GPT-3 in 2020 used over `{python} TrainingScenarios.gpt3_gpu_count_str` V100 GPUs at an estimated \$`{python} TrainingScenarios.gpt3_compute_cost_str`M cost [@brown2020language], making utilization $(\eta_{\text{hw}})$ critical. By 2023, training efficiency improved 10$\times$ through the techniques examined in this chapter: FlashAttention reduces memory traffic while improving $\eta$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $R_{\text{peak}}$. Each innovation was motivated by a specific iron law bottleneck.
 
 ```{python}
 #| label: gpt2-lighthouse-hardware-calc
@@ -378,7 +378,7 @@ Where:
 \index{Matrix Multiplication!training operations}\index{Strassen's Algorithm!matrix multiplication}\index{cuBLAS!hardware-accelerated linear algebra}
 Matrix multiplication dominance has driven both algorithmic and hardware innovations. Early neural network implementations relied on standard CPU-based linear algebra libraries, but the scale of modern training demanded specialized optimizations. Strassen's algorithm[^fn-strassen-training] reduced the naive $O(n^3)$ complexity to approximately $O(n^{2.807})$ [@strassen1969], and contemporary hardware-accelerated libraries like cuBLAS [@nvidia_cublas] continue pushing computational efficiency limits.
 
-[^fn-strassen-training]: **Strassen's Algorithm**: Achieves $O(n^{2.807})$ by replacing one of eight sub-multiplications with additions, but training systems rarely benefit. The recursion disrupts the regular memory-access patterns that Tensor Cores exploit, and accumulated rounding errors across billions of training iterations can destabilize convergence. In practice, cuBLAS invokes Strassen only for matrices exceeding roughly $500\times500$ dimensions, leaving the dominant training GEMMs to brute-force $O(n^3)$ with superior hardware utilization. \index{Strassen's Algorithm!practical crossover}
+[^fn-strassen-training]: **Strassen's Algorithm**: Achieves $O(n^{2.807})$ by replacing one of eight sub-multiplications with additions, but training systems rarely benefit. The recursion disrupts the regular memory-access patterns that Tensor Cores exploit, and accumulated rounding errors across billions of training iterations can destabilize convergence. In practice, cuBLAS invokes Strassen only for matrices exceeding roughly $500{\times}500$ dimensions, leaving the dominant training GEMMs to brute-force $O(n^3)$ with superior hardware utilization. \index{Strassen's Algorithm!practical crossover}
 
 This computational dominance has driven system-level optimizations: blocked matrix computations that parallelize across multiple units, and memory hierarchies designed for the access patterns of both forward and backward passes. As neural architectures grew, weight and activation matrices both had to remain accessible for backpropagation, and hardware evolved to serve these dense multiplication patterns within growing memory budgets.
 
@@ -544,7 +544,7 @@ The progression from matrix-vector to batched matrix-matrix operations explains 
 
 ::: {.callout-perspective title="Why GPUs Dominate Training"}
 
-The matrix operations described earlier directly explain modern training hardware architecture. GPUs dominate training for three reasons. First, matrix multiplication's independent element calculations map perfectly to thousands of GPU cores (NVIDIA A100 has 6,912 CUDA cores). Second, specialized hardware units like Tensor Cores accelerate matrix operations by 10$\times$--20$\times$ through dedicated hardware for the dominant workload. Third, blocked matrix computation patterns enable efficient use of GPU memory hierarchy (L1/L2 cache, shared memory, global memory).
+The matrix operations described earlier directly explain modern training hardware architecture. GPUs dominate training for three reasons. First, matrix multiplication's independent element calculations map perfectly to thousands of GPU cores (NVIDIA A100 has 6,912 CUDA cores). Second, specialized hardware units like Tensor Cores accelerate matrix operations by 10--20$\times$ through dedicated hardware for the dominant workload. Third, blocked matrix computation patterns enable efficient use of GPU memory hierarchy (L1/L2 cache, shared memory, global memory).
 
 When GPT-2 examples later show *why* V100 GPUs achieve 2.4$\times$ speedup with mixed precision, this acceleration comes from Tensor Cores executing the matrix multiplications we just analyzed. Matrix operation characteristics are prerequisite for appreciating *why* pipeline optimizations like mixed-precision training provide such substantial benefits.
 
@@ -739,9 +739,9 @@ The GELU approximation highlights a broader pattern: compute cost is not always 
 ::: {.callout-perspective title="Memory Bandwidth Bottlenecks"}
 
 \index{Memory Bandwidth!activation function bottleneck}
-Activation functions reveal a critical systems principle: not all operations are compute bound. While matrix multiplications saturate accelerator compute units, activation functions often become memory-bandwidth-bound for three reasons. First, element-wise operations perform few calculations per memory access (ReLU performs one operation per load). Second, simple operations complete faster than memory transfer time, limiting parallelism benefits. Third, modern GPUs have 10$\times$--100$\times$ more compute throughput than memory bandwidth.
+Activation functions reveal a critical systems principle: not all operations are compute bound. While matrix multiplications saturate accelerator compute units, activation functions often become memory-bandwidth-bound for three reasons. First, element-wise operations perform few calculations per memory access (ReLU performs one operation per load). Second, simple operations complete faster than memory transfer time, limiting parallelism benefits. Third, modern GPUs have 10--100$\times$ more compute throughput than memory bandwidth.
 
-This is why activation function choice matters less than expected. ReLU vs. sigmoid shows only 2$\times$--3$\times$ difference despite vastly different computational complexity, because both are bottlenecked by memory access. The forward pass must carefully manage activation storage to prevent memory bandwidth from limiting overall training throughput.
+This is why activation function choice matters less than expected. ReLU vs. sigmoid shows only 2--3$\times$ difference despite vastly different computational complexity, because both are bottlenecked by memory access. The forward pass must carefully manage activation storage to prevent memory bandwidth from limiting overall training throughput.
 
 :::
 
@@ -1170,7 +1170,7 @@ for param in model.parameters():
 
 :::
 
-Framework implementations also handle the memory management challenges in optimizer trade-offs. The optimizer automatically allocates storage for momentum terms and squared gradient statistics, managing the 2$\times$--3$\times$ memory overhead transparently while providing efficient memory access patterns optimized for the underlying hardware.
+Framework implementations also handle the memory management challenges in optimizer trade-offs. The optimizer automatically allocates storage for momentum terms and squared gradient statistics, managing the 2--3$\times$ memory overhead transparently while providing efficient memory access patterns optimized for the underlying hardware.
 
 #### Learning rate scheduling integration {#sec-model-training-learning-rate-scheduling-integration-451b}
 
@@ -1706,9 +1706,9 @@ Batch size directly influences arithmetic intensity. With batch = 1, many operat
 
 This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores, parallelism, or quantization matters more. See @sec-hardware-acceleration for detailed roofline model analysis and hardware-specific optimization strategies.
 
-Look back at @fig-training-roofline and notice where standard attention sits (memory-bound region) vs. where FlashAttention[^fn-flashattention-training] lands (compute-bound region)—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N{\times}N$ attention matrix and instead processing in tiles that fit in fast SRAM (on-chip static RAM), FlashAttention reduces memory traffic from $O(N^2)$ to $O(N)$, achieving 2$\times$--4$\times$ speedups [@dao2022]. We examine the algorithm, its implementation, and when to use it in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
+Look back at @fig-training-roofline and notice where standard attention sits (memory-bound region) vs. where FlashAttention[^fn-flashattention-training] lands (compute-bound region)—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N{\times}N$ attention matrix and instead processing in tiles that fit in fast SRAM (on-chip static RAM), FlashAttention reduces memory traffic from $O(N^2)$ to $O(N)$, achieving 2--4$\times$ speedups [@dao2022]. We examine the algorithm, its implementation, and when to use it in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
 
-[^fn-flashattention-training]: **FlashAttention**: The core mechanism is processing the attention calculation in small tiles that fit entirely within the accelerator's fast, on-chip SRAM, which avoids writing the full intermediate $N{\times}N$ matrix to slower HBM. This design directly causes the shift from the memory-bound to the compute-bound region of a roofline model by trading a slight increase in FLOPs for a massive reduction in memory I/O. The result is the 2$\times$--4$\times$ end-to-end speedup mentioned in the text. \index{FlashAttention!IO-aware design}
+[^fn-flashattention-training]: **FlashAttention**: The core mechanism is processing the attention calculation in small tiles that fit entirely within the accelerator's fast, on-chip SRAM, which avoids writing the full intermediate $N{\times}N$ matrix to slower HBM. This design directly causes the shift from the memory-bound to the compute-bound region of a roofline model by trading a slight increase in FLOPs for a massive reduction in memory I/O. The result is the 2--4$\times$ end-to-end speedup mentioned in the text. \index{FlashAttention!IO-aware design}
 
 The preceding arithmetic intensity analysis reveals which operations constrain training performance and why: matrix multiplications are compute bound while normalization and activation functions are memory bound, each requiring different optimization strategies. FlashAttention exemplifies how understanding these bottlenecks enables algorithmic solutions that shift operations from one regime to another.
 
@@ -2673,7 +2673,7 @@ Transformer architectures introduce attention mechanisms (see @sec-network-archi
 Throughout these networks, element-wise operations play a supporting role. Activation functions like ReLU and sigmoid transform values independently. While conceptually simple, these operations can become bottlenecked by memory bandwidth rather than computational capacity, as they perform relatively few calculations per memory access. Batch normalization presents similar challenges, computing statistics and normalizing values across batch dimensions while creating synchronization points in the computation pipeline.
 
 \index{Warp!GPU execution unit}
-Modern hardware accelerators, particularly GPUs, optimize these diverse computations through massive parallelization. Achieving peak performance requires careful attention to hardware architecture. GPUs process data in fixed-size blocks of threads called warps[^fn-warp-training] (in NVIDIA architectures) or wavefronts (in AMD architectures). Peak efficiency occurs when matrix dimensions align with these hardware-specific sizes. For instance, NVIDIA GPUs typically achieve optimal performance when processing matrices aligned to $32\times32$ dimensions. This fixed-size execution model creates a subtle but consequential effect that practitioners frequently overlook.
+Modern hardware accelerators, particularly GPUs, optimize these diverse computations through massive parallelization. Achieving peak performance requires careful attention to hardware architecture. GPUs process data in fixed-size blocks of threads called warps[^fn-warp-training] (in NVIDIA architectures) or wavefronts (in AMD architectures). Peak efficiency occurs when matrix dimensions align with these hardware-specific sizes. For instance, NVIDIA GPUs typically achieve optimal performance when processing matrices aligned to $32{\times}32$ dimensions. This fixed-size execution model creates a subtle but consequential effect that practitioners frequently overlook.
 
 [^fn-warp-training]: **Warp**: From textile weaving, where a "warp" is the set of threads held taut on a loom while a shuttle weaves across them. NVIDIA adopted the term because GPU threads within a warp execute the same instruction in lockstep, analogous to parallel threads moving together on the loom. The fixed warp size of 32 threads is a hardware constant that creates the wave quantization effect analyzed below: when matrix dimensions are not multiples of 32, partial warps execute with idle lanes, silently wasting silicon. \index{Warp!etymology and hardware constraint}
 
@@ -3873,7 +3873,7 @@ Machine learning frameworks provide built-in support for mixed-precision trainin
 
 #### Mixed-precision benefits {#sec-model-training-mixedprecision-benefits-d57b}
 
-Mixed-precision benefits manifest across three dimensions that compound in practice. First, memory consumption decreases by approximately `{python} MixedPrecisionScenarios.mp_mem_savings_pct_str` percent: a one billion parameter transformer requires `{python} MixedPrecisionScenarios.model_1b_fp32_gb_str` GB in FP32 but only `{python} MixedPrecisionScenarios.model_1b_fp16_gb_str` GB in FP16 for weights alone, enabling larger batch sizes or deeper architectures. Second, computational throughput increases dramatically as Tensor Cores achieve 2$\times$--3$\times$ speedup for matrix multiplications, as detailed in @sec-model-training-mixedprecision-hardware-support-d7c1. Third, halving tensor sizes proportionally reduces inter-device communication bandwidth requirements in distributed training.
+Mixed-precision benefits manifest across three dimensions that compound in practice. First, memory consumption decreases by approximately `{python} MixedPrecisionScenarios.mp_mem_savings_pct_str` percent: a one billion parameter transformer requires `{python} MixedPrecisionScenarios.model_1b_fp32_gb_str` GB in FP32 but only `{python} MixedPrecisionScenarios.model_1b_fp16_gb_str` GB in FP16 for weights alone, enabling larger batch sizes or deeper architectures. Second, computational throughput increases dramatically as Tensor Cores achieve 2--3$\times$ speedup for matrix multiplications, as detailed in @sec-model-training-mixedprecision-hardware-support-d7c1. Third, halving tensor sizes proportionally reduces inter-device communication bandwidth requirements in distributed training.
 
 These benefits compound: a practitioner might simultaneously double batch size (memory savings), accelerate each iteration (Tensor Core throughput), and reduce gradient synchronization time (smaller tensors). Quantifying the *GPT-2 mixed precision training impact* makes these compounding gains concrete.
 
@@ -4080,16 +4080,16 @@ Despite the benefits demonstrated earlier, mixed-precision training introduces n
 
 Understanding how modern hardware implements reduced-precision arithmetic reveals why mixed-precision achieves substantial speedups beyond mere memory savings. The performance gains from FP16 and BF16 computation stem from specialized hardware units designed explicitly for low-precision tensor operations[^fn-tensor-core-training], with architectural decisions that trade numerical range or precision for dramatic increases in computational throughput.
 
-[^fn-tensor-core-training]: **Tensor Core**: The specialized hardware unit behind the FP16/BF16 speedups described here. Each Tensor Core performs a fused $4\times4$ matrix multiply-accumulate in a single cycle, achieving 8$\times$--16$\times$ the throughput of standard CUDA cores. The catch: input matrices must align to multiples of 8 or 16 for peak utilization, meaning misaligned tensor dimensions in a training workload silently forfeit most of this hardware advantage. \index{Tensor Core!training throughput}
+[^fn-tensor-core-training]: **Tensor Core**: The specialized hardware unit behind the FP16/BF16 speedups described here. Each Tensor Core performs a fused $4{\times}4$ matrix multiply-accumulate in a single cycle, achieving 8$\times$--16$\times$ the throughput of standard CUDA cores. The catch: input matrices must align to multiples of 8 or 16 for peak utilization, meaning misaligned tensor dimensions in a training workload silently forfeit most of this hardware advantage. \index{Tensor Core!training throughput}
 
 ##### Tensor Core architecture {#sec-model-training-tensor-core-architecture-14ee}
 
 \index{Tensor Core!mixed precision acceleration}\index{Tensor Core!matrix multiply-accumulate}
-NVIDIA introduced Tensor Cores in their Volta architecture (2017) as dedicated matrix multiplication units optimized for mixed-precision workloads. Unlike standard CUDA cores that process scalar or small vector operations, Tensor Cores perform $4\times4$ matrix multiply-accumulate operations in a single clock cycle. For FP16 inputs, a single Tensor Core executes:
+NVIDIA introduced Tensor Cores in their Volta architecture (2017) as dedicated matrix multiplication units optimized for mixed-precision workloads. Unlike standard CUDA cores that process scalar or small vector operations, Tensor Cores perform $4{\times}4$ matrix multiply-accumulate operations in a single clock cycle. For FP16 inputs, a single Tensor Core executes:
 $$
 D = A \times B + C
 $$
-where $A$ and $B$ are $4\times4$ FP16 matrices, $C$ is an FP32 accumulator, and $D$ is the FP32 result. This accumulation in higher precision prevents catastrophic cancellation\index{Catastrophic Cancellation!mixed precision} errors that would occur if intermediate products were stored in FP16.
+where $A$ and $B$ are $4{\times}4$ FP16 matrices, $C$ is an FP32 accumulator, and $D$ is the FP32 result. This accumulation in higher precision prevents catastrophic cancellation\index{Catastrophic Cancellation!mixed precision} errors that would occur if intermediate products were stored in FP16.
 
 ##### Throughput scaling {#sec-model-training-throughput-scaling-7e6d}
 
@@ -4179,7 +4179,7 @@ Optimal mixed-precision training requires matching the precision format to hardw
 | **Architecture**  | **Recommended Precision**            | **Key Considerations**                                                                                      |
 |:------------------|:-------------------------------------|:------------------------------------------------------------------------------------------------------------|
 | **V100 (Volta)**  | FP16 with loss scaling               | No BF16 support; gradient clipping essential                                                                |
-| **A100 (Ampere)** | BF16 for transformers; FP16 for CNNs | TF32 mode provides automatic 2$\times$--3$\times$ speedup for legacy FP32 code                              |
+| **A100 (Ampere)** | BF16 for transformers; FP16 for CNNs | TF32 mode provides automatic 2--3$\times$ speedup for legacy FP32 code                              |
 | **H100 (Hopper)** | FP8 via TransformerEngine            | Requires FP8-aware training recipes; `{python} AcceleratorSpecs.h100_tflops_fp8_str` TFLOPS peak throughput |
 
 : **Precision Strategy by GPU Architecture.** Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy tbl-colwidths="[14,34,52]"}
@@ -4230,9 +4230,9 @@ The performance impact across generations appears in the throughput numbers: tra
 
 \index{FlashAttention!IO-aware algorithm}\index{FlashAttention!memory bandwidth optimization}Mixed-precision training addresses two bottlenecks: compute throughput (Tensor Cores operate faster on FP16) and memory capacity (half the bytes per value). For transformer models during training, however, a third bottleneck often dominates: *memory bandwidth*. The attention mechanism's quadratic intermediate matrices must be repeatedly loaded and stored during the forward pass and accessed again during backpropagation. Even with reduced precision, the sheer volume of memory traffic can leave compute units idle—GPUs waiting for data rather than computing.
 
-Flash Attention[^fn-flashattention-origin] [@dao2022] addresses this bandwidth bottleneck through a radically different approach: rather than optimizing *what precision* to use, it optimizes *how data flows* between memory hierarchies. By processing attention in small tiles that fit in fast on-chip SRAM, Flash Attention avoids materializing the full $n{\times}n$ attention matrix in slow HBM. This algorithmic restructuring achieves 2$\times$--4$\times$ training speedups while enabling training on sequences that would otherwise cause out-of-memory errors\index{Out-of-Memory Error!training constraint}.
+Flash Attention[^fn-flashattention-origin] [@dao2022] addresses this bandwidth bottleneck through a radically different approach: rather than optimizing *what precision* to use, it optimizes *how data flows* between memory hierarchies. By processing attention in small tiles that fit in fast on-chip SRAM, Flash Attention avoids materializing the full $n{\times}n$ attention matrix in slow HBM. This algorithmic restructuring achieves 2--4$\times$ training speedups while enabling training on sequences that would otherwise cause out-of-memory errors\index{Out-of-Memory Error!training constraint}.
 
-[^fn-flashattention-origin]: **FlashAttention**: Introduced by @dao2022, achieving 2$\times$--4$\times$ wall-clock speedups without changing the mathematical output of attention. The key insight was treating attention as an IO problem rather than a compute problem: by never materializing the $N{\times}N$ score matrix in HBM and instead computing in SRAM-sized tiles, the algorithm shifted the operation from memory-bound to compute-bound on the roofline model. FlashAttention-2 [@dao2023flashattention2] further improved throughput to 50--73 percent of theoretical peak on A100. \index{FlashAttention!origin and engineering insight}
+[^fn-flashattention-origin]: **FlashAttention**: Introduced by @dao2022, achieving 2--4$\times$ wall-clock speedups without changing the mathematical output of attention. The key insight was treating attention as an IO problem rather than a compute problem: by never materializing the $N{\times}N$ score matrix in HBM and instead computing in SRAM-sized tiles, the algorithm shifted the operation from memory-bound to compute-bound on the roofline model. FlashAttention-2 [@dao2023flashattention2] further improved throughput to 50--73 percent of theoretical peak on A100. \index{FlashAttention!origin and engineering insight}
 
 #### The standard attention memory bottleneck {#sec-model-training-standard-attention-memory-bottleneck-6f39}
 
@@ -4316,7 +4316,7 @@ Flash Attention decomposes this computation by partitioning queries into $B_q$ b
    - Discard $S_{ij}$ and $P_{ij}$ (no HBM storage)
 3. Write final $O_i$ to HBM
 
-No $n{\times}n$ matrix ever exists in HBM. The largest intermediate tensor is $b{\times}b$ (typically $b = 128$), requiring only 64 KB for a $128\times128$ FP32 matrix compared to 64 MB for the full $4096\times4096$ matrix.
+No $n{\times}n$ matrix ever exists in HBM. The largest intermediate tensor is $b{\times}b$ (typically $b = 128$), requiring only 64 KB for a $128{\times}128$ FP32 matrix compared to 64 MB for the full $4096{\times}4096$ matrix.
 
 The online softmax algorithm enables this decomposition. Traditional softmax requires knowing all inputs before computing any output: $\text{softmax}(x)_i = e^{x_i} / \sum_j e^{x_j}$. Flash Attention uses an incremental formulation that updates softmax statistics as new blocks arrive, tracking the running maximum $m$ (for numerical stability) and denominator $l$ as each block is processed, then rescaling accumulated outputs accordingly.
 
@@ -4374,7 +4374,7 @@ class FlashAttentionCalc:
 ```
 
 \index{FlashAttention!IO complexity reduction}
-For $n = 4096$, $d = 64$: Standard attention requires $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` MB per head. Flash Attention requires only (3$\times$ $4096\times64$)$\times$ 4 bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` MB per head, a **`{python} FlashAttentionCalc.fa_reduction_str`$\times$ reduction**.
+For $n = 4096$, $d = 64$: Standard attention requires $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` MB per head. Flash Attention requires only (3$\times$ $4096{\times}64$)$\times$ 4 bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` MB per head, a **`{python} FlashAttentionCalc.fa_reduction_str`$\times$ reduction**.
 
 ##### IO complexity (memory reads/writes) {#sec-model-training-io-complexity-memory-readswrites-4af5}
 
@@ -4498,7 +4498,7 @@ class FlashAttentionSpeedup:
 Standard attention runs out of memory beyond 2048 tokens on a 40 GB A100, while Flash Attention trains sequences up to 8192 tokens. Even at 2048 tokens where both fit, Flash Attention achieves `{python} FlashAttentionSpeedup.flash_fwd_speedup_str`$\times$ forward pass speedup and `{python} FlashAttentionSpeedup.flash_bwd_speedup_str`$\times$ backward pass speedup.
 
 \index{FlashAttention!2, improved parallelism}\index{FlashAttention!3, FP8 tensor cores}
-Subsequent versions have continued improving performance: Flash Attention two (2023) achieved 1.5$\times$--2$\times$ additional speedup through better parallelism and register allocation, while Flash Attention three (2024) exploits FP8 tensor cores and asynchronous memory operations on Hopper GPUs to reach 740 TFLOPS on H100 (75 percent of theoretical peak).
+Subsequent versions have continued improving performance: Flash Attention two (2023) achieved 1.5--2$\times$ additional speedup through better parallelism and register allocation, while Flash Attention three (2024) exploits FP8 tensor cores and asynchronous memory operations on Hopper GPUs to reach 740 TFLOPS on H100 (75 percent of theoretical peak).
 
 #### When to use flash attention {#sec-model-training-use-flash-attention-375d}
 
@@ -4519,7 +4519,7 @@ Flash Attention exemplifies a fundamental systems engineering principle: **IO-aw
 
 This principle extends beyond attention. In IO-aware matrix multiplication, tiling algorithms like those in CUTLASS minimize DRAM traffic by maximizing data reuse in fast caches. A naive $n{\times}n$ matrix multiply performs $O(n^3)$ FLOPs with $O(n^2)$ memory traffic, while blocked algorithms maintain $O(n^3)$ FLOPs but reduce cache misses through locality optimization.
 
-The same logic applies to communication-efficient distributed training: gradient compression techniques trade extra computation (compression/decompression) for reduced network bandwidth consumption. Low-power edge devices with limited memory bandwidth benefit even more from IO-aware algorithms, where a ten percent increase in FLOPs that halves memory traffic yields 3$\times$--5$\times$ energy savings.
+The same logic applies to communication-efficient distributed training: gradient compression techniques trade extra computation (compression/decompression) for reduced network bandwidth consumption. Low-power edge devices with limited memory bandwidth benefit even more from IO-aware algorithms, where a ten percent increase in FLOPs that halves memory traffic yields 3--5$\times$ energy savings.
 
 Flash Attention transforms practical model training capabilities. By eliminating the $O(n^2)$ memory bottleneck, it enables:
 
@@ -4903,7 +4903,7 @@ Both techniques introduce explicit trade-offs. Activation checkpointing adds app
 
 ### Optimization technique comparison {#sec-model-training-optimization-technique-comparison-a89a}
 
-@tbl-optimization synthesizes three of the four core optimization strategies, contrasting their primary goals, mechanisms, and trade-offs. Flash Attention (@sec-model-training-flash-attention-ioaware-attention-optimization-3da0) complements these by addressing memory-bandwidth bottlenecks in attention layers through IO-aware tiling, achieving 2$\times$--4$\times$ speedups while reducing memory from $O(n^2)$ to $O(n)$. Selecting an appropriate strategy depends on the specific bottleneck identified through profiling.
+@tbl-optimization synthesizes three of the four core optimization strategies, contrasting their primary goals, mechanisms, and trade-offs. Flash Attention (@sec-model-training-flash-attention-ioaware-attention-optimization-3da0) complements these by addressing memory-bandwidth bottlenecks in attention layers through IO-aware tiling, achieving 2--4$\times$ speedups while reducing memory from $O(n^2)$ to $O(n)$. Selecting an appropriate strategy depends on the specific bottleneck identified through profiling.
 
 | **Aspect**                    | **Prefetching and Overlapping**                                    | **Mixed-Precision Training**                                | **Gradient Accumulation and Checkpointing**                              |
 |:------------------------------|:-------------------------------------------------------------------|:------------------------------------------------------------|:-------------------------------------------------------------------------|
@@ -5859,7 +5859,7 @@ node[above,pos=0.45,text=black!50,font=\usefont{T1}{phv}{m}{n}
 Model parallelism's challenge is *idle time*. While Device one computes layers 1--6, Devices 2--4 sit idle waiting for activations. During the backward pass, the problem reverses: Device four computes first while others wait. This "pipeline bubble" means naive model parallelism achieves poor accelerator utilization---often 25--50 percent even with careful partitioning. Pipeline parallelism addresses this inefficiency, as the discussion of distributed strategies demonstrates.
 
 \index{NVLink!GPU interconnect}\index{NVLink!gradient synchronization}
-Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink[^fn-nvlink-training] (up to `{python} StorageBandwidth.nvlink_h100_str` GB/s on modern systems), making gradient synchronization and activation transfers fast. Data parallelism transfers gradients, which are proportional to model size. Model parallelism transfers activations, proportional to batch size times hidden dimension, at every partition boundary. The 10$\times$--50$\times$ bandwidth advantage of NVLink over PCIe makes both strategies practical within a node. This intra-node parallelism forms the building block for larger distributed systems. To understand *when* to choose each strategy, the following analysis compares *data vs. model parallelism* quantitatively.
+Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink[^fn-nvlink-training] (up to `{python} StorageBandwidth.nvlink_h100_str` GB/s on modern systems), making gradient synchronization and activation transfers fast. Data parallelism transfers gradients, which are proportional to model size. Model parallelism transfers activations, proportional to batch size times hidden dimension, at every partition boundary. The 10--50$\times$ bandwidth advantage of NVLink over PCIe makes both strategies practical within a node. This intra-node parallelism forms the building block for larger distributed systems. To understand *when* to choose each strategy, the following analysis compares *data vs. model parallelism* quantitatively.
 
 ::: {.callout-notebook title="Data vs. Model Parallelism"}
 
@@ -5870,14 +5870,14 @@ Within a single node, GPUs communicate via high-bandwidth interconnects like NVL
 **1. Data Parallelism (Split the Batch)**
 
 *   **Compute ($O$)**: Split by $N$ (Each GPU does $1/N$ of the batch).
-*   **Memory ($D_{\text{vol}}$)**: **Replicated**. Every GPU must hold the full model weights $P$.
+*   **Memory $(D_{\text{vol}})$**: **Replicated**. Every GPU must hold the full model weights $P$.
 *   **Communication**: **Gradients**. Size $\propto P$. Occurs at end of backward pass.
 *   **Bottleneck**: When Model Size $P >$ GPU Memory.
 
 **2. Model Parallelism (Split the Weights)**
 
 *   **Compute ($O$)**: Split by $N$ (Each accelerator computes part of the layer).
-*   **Memory ($D_{\text{vol}}$)**: **Split**. Each GPU holds $P/N$ weights.
+*   **Memory $(D_{\text{vol}})$**: **Split**. Each GPU holds $P/N$ weights.
 *   **Communication**: **Activations**. Size $\propto B \times \text{Width}$. Occurs at every layer boundary.
 *   **Bottleneck**: When Activation Size is large (high communication frequency).
 
@@ -5888,7 +5888,7 @@ Within a single node, GPUs communicate via high-bandwidth interconnects like NVL
 
 :::
 
-[^fn-nvlink-training]: **NVLink**: NVIDIA's proprietary, direct GPU-to-GPU interconnect that bypasses the general-purpose PCIe bus. The bandwidth advantage quantified in the text (10$\times$--50$\times$ over PCIe) is what determines whether intra-node parallelism is practical: data parallelism must transfer gradient tensors proportional to model size every iteration, and model parallelism must transfer activations at every layer boundary. If either transfer takes longer than the computation it overlaps, the parallelism strategy yields negative returns. \index{NVLink!training interconnect}
+[^fn-nvlink-training]: **NVLink**: NVIDIA's proprietary, direct GPU-to-GPU interconnect that bypasses the general-purpose PCIe bus. The bandwidth advantage quantified in the text (10--50$\times$ over PCIe) is what determines whether intra-node parallelism is practical: data parallelism must transfer gradient tensors proportional to model size every iteration, and model parallelism must transfer activations at every layer boundary. If either transfer takes longer than the computation it overlaps, the parallelism strategy yields negative returns. \index{NVLink!training interconnect}
 
 ### Scaling beyond a single node {#sec-model-training-scaling-beyond-single-node-a671}
 
@@ -5897,9 +5897,9 @@ When single-node multi-GPU training remains insufficient, distributed training e
 
 ::: {.callout-perspective title="The Physics of Synchronization"}
 
-Recall the **Energy-Movement Invariant**\index{Energy-Movement Invariant!distributed training} from @sec-data-engineering: moving data is 100$\times$--1,000$\times$ more expensive than computing on it. In distributed training, this physical law manifests as the **communication tax**\index{Distributed Training!dataset scale bottleneck}.
+Recall the **Energy-Movement Invariant**\index{Energy-Movement Invariant!distributed training} from @sec-data-engineering: moving data is 100--1,000$\times$ more expensive than computing on it. In distributed training, this physical law manifests as the **communication tax**\index{Distributed Training!dataset scale bottleneck}.
 
-Synchronizing gradients across a fleet of GPUs means moving megabytes of data across a network or PCIe bus for every few milliseconds of computation. If the energy required for communication ($E_{\text{net}}$) exceeds the energy for computation ($E_{\text{compute}}$), system efficiency ($\eta_{\text{hw}}$) collapses. Techniques like **Mixed Precision** (@sec-model-training-mixedprecision-training-9218) and **Gradient Compression**\index{Training!wall-clock time limit}\index{Gradient Compression!definition} address this directly: they reduce the bytes moved per synchronization step, managing the physical limits of distributed scaling.
+Synchronizing gradients across a fleet of GPUs means moving megabytes of data across a network or PCIe bus for every few milliseconds of computation. If the energy required for communication ($E_{\text{net}}$) exceeds the energy for computation ($E_{\text{compute}}$), system efficiency $(\eta_{\text{hw}})$ collapses. Techniques like **Mixed Precision** (@sec-model-training-mixedprecision-training-9218) and **Gradient Compression**\index{Training!wall-clock time limit}\index{Gradient Compression!definition} address this directly: they reduce the bytes moved per synchronization step, managing the physical limits of distributed scaling.
 
 :::
 
@@ -6321,8 +6321,8 @@ This co-design principle, where algorithms, software frameworks, and hardware ar
 * **Optimizer selection is a memory-convergence trade-off**: Adam converges in roughly one-third the iterations of SGD but requires 3$\times$ the memory for per-parameter state, making the choice a binding constraint for large model training. Variants like AdamW and 8-bit Adam shift this trade-off without eliminating it.
 * **Profiling precedes optimization**: The iterative loop is: profile → identify bottleneck → apply targeted fix → re-profile. Optimization without profiling typically wastes effort on non-bottlenecks.
 * **Mixed precision provides substantial performance gains**: FP16 training with FP32 accumulation delivers approximately 2$\times$ throughput and 2$\times$ memory reduction with typically <one percent accuracy impact on most workloads.
-* **IO-aware algorithm design transforms bottleneck regimes**: Flash Attention's tiling strategy converts attention from memory-bound to compute-bound by never materializing the full $n{\times}n$ matrix in HBM, achieving 2$\times$--4$\times$ speedups and enabling 4$\times$ longer sequences. The principle extends beyond attention: optimizing data movement often yields larger gains than optimizing computation.
-* **Gradient checkpointing trades compute for memory**: Recomputing activations during the backward pass enables training larger models (for example, GPT-3 scales from 1.3B to 3.7B parameters on V100s) or achieves 3$\times$--4$\times$ activation memory reduction. Essential when memory is the binding constraint.
+* **IO-aware algorithm design transforms bottleneck regimes**: Flash Attention's tiling strategy converts attention from memory-bound to compute-bound by never materializing the full $n{\times}n$ matrix in HBM, achieving 2--4$\times$ speedups and enabling 4$\times$ longer sequences. The principle extends beyond attention: optimizing data movement often yields larger gains than optimizing computation.
+* **Gradient checkpointing trades compute for memory**: Recomputing activations during the backward pass enables training larger models (for example, GPT-3 scales from 1.3B to 3.7B parameters on V100s) or achieves 3--4$\times$ activation memory reduction. Essential when memory is the binding constraint.
 * **Optimizations compose and must be applied systematically**: No single technique addresses all bottlenecks. The GPT-2 walkthrough demonstrates how mixed precision, gradient checkpointing, and data prefetching must be layered together, guided by iterative profiling, to transform an infeasible 89 GB memory requirement into a practical 32 GB configuration.
 * **Single-machine optimizations reduce the cost of scaling out**: Distributed training adds communication overhead and complexity. A well-optimized single GPU often outperforms a poorly-optimized multi-GPU setup; assess prefetching, mixed precision, checkpointing, and accumulation before scaling out.
 * **Energy and cost scale linearly with training time**: The same optimizations that accelerate training also reduce carbon emissions and cloud costs. Efficiency improvements directly translate to reduced resource consumption.
