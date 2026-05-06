@@ -1133,7 +1133,7 @@ layer = nn.Linear(256, 512)  # Layer transforms 256 inputs to
 # 512 outputs
 output = layer(input_batch)  # Process a batch of 32 samples
 
-# Framework Internal: Core operations
+# Framework Internal: Core operations (column-batch convention)
 Z = matmul(weights, input)  # Matrix: transforms [256×32]
 # input to [512×32] output
 Z = Z + bias  # Vector: adds bias to each
@@ -3855,7 +3855,7 @@ This is only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` percent of pea
 
 :::
 
-The dense layer's lower arithmetic intensity stems from limited weight reuse: each weight element is used only once per batch element, whereas convolutional weights are reused across spatial dimensions. This difference explains why transformer inference (dominated by dense projections) is typically memory bound while CNN inference can be compute bound.
+The dense layer's lower arithmetic intensity stems from limited weight reuse: each weight is reused across the batch but lacks the additional spatial reuse of convolutional filters, so small-batch dense layers have much lower arithmetic intensity than convolutions. This difference explains why transformer inference (dominated by dense projections) is typically memory bound while CNN inference can be compute bound.
 
 The situation becomes even more extreme for element-wise operations like normalization layers. These operations perform negligible computation relative to the data they touch, as a *LayerNorm analysis* reveals. Each element is loaded, transformed by a simple formula, and written back, leaving essentially no opportunity for data reuse.
 
@@ -3929,7 +3929,7 @@ LayerNorm with input shape (batch = 32, seq = 512, hidden = 768):
 **Computational Requirements**:
 
 - Elements: $32 \times 512 \times 768$ = `{python} LayernormAnalysisCalc.ln_elements_m_str` M
-- Operations per element: mean (1 ADD), variance (2 ADD, 1 MUL), normalize (1 ADD, 1 MUL, 1 DIV) ≈ 6 FLOPs
+- Operations per element: mean (1 ADD), variance (1 ADD, 1 MUL), normalize (1 ADD, 1 MUL, 1 DIV) ≈ 6 FLOPs
 - Total FLOPs: `{python} LayernormAnalysisCalc.ln_elements_m_str` M $\times$ 6 = `{python} LayernormAnalysisCalc.ln_total_mflops_str` M FLOPs
 
 **Memory Traffic**:
@@ -4097,7 +4097,7 @@ Efficient execution of machine learning models on specialized AI acceleration ha
 
 ***Mapping in AI Acceleration***\index{Mapping!definition} is the process of binding the **Logical Computation Graph** to the **Physical Hardware Topology** by deciding which operations execute on which processing elements, which data resides in which memory tier, and in what temporal order.
 
-1.  **Significance (Quantitative):** Within the D·A·M taxonomy, mapping is the Machine-axis decision that determines whether the Algorithm's operations run at $R_{\text{peak}}$ or at $\text{BW} \times I$. Specifically, a general matrix multiply (GEMM) with arithmetic intensity $AI$ runs at $\min(R_{\text{peak}},\; \text{BW} \times I)$; a poor tiling choice that forces unnecessary DRAM accesses can reduce effective $I$ by 10$\times$--50$\times$, collapsing a compute-bound operation into a bandwidth-bound one and causing a commensurate drop in sustained throughput.
+1.  **Significance (Quantitative):** Within the D·A·M taxonomy, mapping is the Machine-axis decision that determines whether the Algorithm's operations run at $R_{\text{peak}}$ or at $\text{BW} \times \text{AI}$. Specifically, a general matrix multiply (GEMM) with arithmetic intensity $\text{AI}$ runs at $\min(R_{\text{peak}},\; \text{BW} \times \text{AI})$; a poor tiling choice that forces unnecessary DRAM accesses can reduce effective $\text{AI}$ by 10$\times$--50$\times$, collapsing a compute-bound operation into a bandwidth-bound one and causing a commensurate drop in sustained throughput.
 2.  **Distinction (Durable):** Unlike **Traditional Compilation** (which targets a linear instruction stream on a von Neumann processor), Mapping targets a **Dataflow Architecture**\index{Dataflow Architecture!definition} where the movement of data is as costly as the computation itself: off-chip DRAM access consumes ~200$\times$ more energy than a multiply-accumulate in local registers.
 3.  **Common Pitfall:** A frequent misconception is that mapping is automatically handled by frameworks. For general GPU workloads, compilers like Accelerated Linear Algebra (XLA) achieve near-optimal mappings; for specialized accelerators (systolic arrays, custom ASICs), compiler-generated mappings are often 20–50 percent suboptimal compared to hand-tuned schedules, because the compiler's search space is limited by the time budget at compilation.
 

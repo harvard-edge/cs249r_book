@@ -96,9 +96,10 @@ class FaultToleranceSetup:
     """Namespace for GPT-3 checkpoint sizing and shard calculations."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # GPT-3 checkpoint byte layout:
-    #   weights (2 bytes FP16) + Adam m (4 bytes) + Adam v (4 bytes) = 12 bytes/param
-    bytes_full_ckpt = 12   # bytes per param: weights + Adam m + v
+    # GPT-3 checkpoint byte layout (FP32 Adam, no mixed precision):
+    #   FP32 weights (4 bytes) + Adam m (4 bytes FP32) + Adam v (4 bytes FP32)
+    #   = 12 bytes/param
+    bytes_full_ckpt = 12   # bytes per param: FP32 weights + Adam m + v
     bytes_adam_only = 8    # bytes per param: Adam m + v only
     n_workers = 1000       # workers for shard size calculation
 
@@ -2494,12 +2495,12 @@ Consider our 175B parameter model training on 1,000 GPUs. The checkpoint size is
 
 1. **$T_{\text{detect}}$**: 60 seconds (conservative heartbeat timeout with verification retries)
 2. **$T_{\text{restart}}$**: 3 minutes (scheduler queue time + container launch + Python import overhead + NCCL initialization)
-3. **$T_{\text{load}}$**: 21 seconds (with sharded checkpointing, each of 1,000 workers reads only its `{python} FaultToleranceSetup.gpt3_shard_gb` GB shard at 5 GB/s from local NVMe staging)
+3. **$T_{\text{load}}$**: 21 seconds (this is the aggregate-shared-storage read of the full `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB checkpoint at 100 GB/s aggregate; with sharded local-NVMe reads at 5 GB/s, each `{python} FaultToleranceSetup.gpt3_shard_gb` GB shard loads in well under one second)
 4. **$T_{\text{warmup}}$**: 2 minutes (JIT kernel compilation, data pipeline buffer fill, TCP connection re-establishment)
 
 **Total**\index{Total}: $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}}$ $\approx$ **`{python} RecoveryBudget.t_total_str`** minutes per failure event.
 
-**Impact at scale**\index{Impact at Scale}: With a 1,000-GPU cluster MTBF of 50 hours (from @tbl-cluster-mtbf-scaling), we experience about 0.48 failures per day, losing about 3 minutes daily—a modest 0.2 percent overhead. But at 10,000 GPUs with MTBF of 5 hours, we experience about 4.8 failures per day, losing about 31 minutes daily—a 2.1 percent overhead equivalent to wasting 210 GPU-hours every day. This is why recovery time optimization matters more as clusters grow.
+**Impact at scale**\index{Impact at Scale}: With a 1,000-GPU cluster MTBF of 50 hours (from @tbl-cluster-mtbf-scaling), we experience about 0.48 failures per day, losing about 3 minutes daily—a modest 0.2 percent overhead. But at 10,000 GPUs with MTBF of 5 hours, we experience about 4.8 failures per day, losing about 31 minutes daily—a 2.1 percent overhead equivalent to wasting roughly 5,000 GPU-hours every day (31 min $\times$ 10,000 GPUs / 60). This is why recovery time optimization matters more as clusters grow.
 
 :::
 
