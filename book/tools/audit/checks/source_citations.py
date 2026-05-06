@@ -68,22 +68,33 @@ def _source_segment(line: str) -> tuple[int, str] | None:
     """Return the first source-note segment on the line, if present.
 
     The returned segment begins at `Source:` / `source:` and runs until
-    the next double quote or end-of-line. This makes the check work both
-    on body prose and on single-line Quarto attribute strings such as
-    `fig-cap="... Source: [@key]."`.
+    the right terminator for its context: a closing double quote when the
+    note sits inside a Quarto attribute string (`fig-cap="... Source:
+    [@key]."`), or the markdown-image close `](` when the note sits in
+    image alt text (`![Caption. Source: Vendor.](path){...}`). Inline
+    links inside an attribute string (`Source: [Name](URL).`) must NOT
+    truncate at `](`; the closing `"` bounds the note correctly.
     """
     m = _SOURCE_RE.search(line)
     if not m:
         return None
     start = m.start()
     rest = line[start:]
-    # Stop at the next unescaped double quote if we are inside an attr
-    # string; otherwise inspect the rest of the line.
-    quote = rest.find('"')
-    if quote != -1:
-        segment = rest[:quote]
+    # An odd count of double quotes before `Source:` means we are inside
+    # an attribute value; in that case `"` is the only correct terminator.
+    in_attr_string = line[:start].count('"') % 2 == 1
+    if in_attr_string:
+        quote = rest.find('"')
+        segment = rest[:quote] if quote != -1 else rest
     else:
-        segment = rest
+        img_close = rest.find("](")
+        quote = rest.find('"')
+        if img_close != -1:
+            segment = rest[:img_close]
+        elif quote != -1:
+            segment = rest[:quote]
+        else:
+            segment = rest
     # Quarto table captions carry trailing `{#tbl-...}` metadata after the
     # caption text. Stop before that marker so the punctuation check only
     # evaluates the human-written source note.
