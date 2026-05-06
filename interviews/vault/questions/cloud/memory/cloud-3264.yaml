@@ -8,10 +8,10 @@ competency_area: memory
 bloom_level: analyze
 phase: both
 title: VRAM Budgeting for 70B LLM on AMD MI300X
-scenario: You are deploying a 70-billion parameter LLM on an accelerator. Inference anticipates a max sequence length of 4096 tokens and a batch size of 8. Model weights are stored in FP16.
+scenario: You are deploying a 70-billion parameter LLM on an accelerator. Inference uses grouped-query attention with 16 KV heads per K tensor and per V tensor, a max sequence length of 4096 tokens, and batch size 8. Model weights are stored in FP16.
 question: How would you account for VRAM used by FP16 weights, AdamW state, activations, and KV-cache for 70B training and batch-8 inference?
 details:
-  realistic_solution: 'A realistic solution involves a multi-pronged approach: 1) Employing FP16 or even INT8/FP8 for weights where possible. 2) Utilizing techniques like ZeRO to shard optimizer states across multiple devices or offload them to CPU memory, as a 70B model with AdamW FP32 state will exceed limits. 3) During training, recomputing activations on demand. 4) Implementing techniques like PagedAttention to manage KV-cache more efficiently. 5) Rigorously profiling memory usage using specialized tools.'
+  realistic_solution: Separate the training and inference budgets. Training must account for FP16 weights, FP32 AdamW states, gradients, and peak activations; that state is far beyond one 192 GB accelerator without sharding, checkpointing, and/or offload. Batch-8 inference uses the FP16 weights plus the KV-cache. Assuming grouped-query attention with 16 KV heads for K and 16 KV heads for V, the stated 4096-token context needs about 21.47 GB of KV-cache, so the inference lower bound is about 161.47 GB before runtime overhead. It may still need quantization, tensor parallelism, or careful paging depending on how much HBM remains after weights and runtime overheads.
   common_mistake: |
     **The Pitfall:** Underestimating the VRAM impact of optimizer states and the dynamic KV-cache.
     **The Rationale:** Developers often focus solely on the size of the model weights and ignore the fact that complex optimizers like Adam require per-parameter FP32 states, and that KV-cache scales dynamically.
@@ -20,15 +20,17 @@ details:
     **Assumptions & Constraints:**
     - Model Weights (FP16): 70B * 2 bytes = 140 GB.
     - Optimizer State (AdamW, FP32): 70B * 2 states * 4 bytes = 560 GB.
-    - KV-Cache shape: 80 layers, 32 heads, 128 dim, seq=4096, batch=8, FP16 (2 bytes).
+    - KV-cache shape for inference: 80 layers, 2 tensors (K,V), batch=8, seq=4096, 16 KV heads per tensor, head_dim=128, FP16 (2 bytes).
+    - Peak retained activations are a separate assumed estimate because sequence length, microbatching, checkpointing, and layer scheduling are not specified.
 
     **Calculations:**
-    - KV-Cache = 80 * 2 * (8 * 32 * 4096 * 128) * 2 bytes = 42.4 GB.
-    - Activations (Forward Pass): Peak estimate roughly 40 GB.
-    - Total memory = 140 GB + 560 GB + 42.4 GB + 40 GB = ~782.4 GB.
+    - Inference KV-cache = 80 layers * 2 (K,V) * 8 batch * 4096 tokens * 16 KV heads * 128 dim * 2 bytes = 21.47 GB.
+    - Inference lower bound = weights + KV-cache = 140 GB + 21.47 GB = 161.47 GB before runtime overhead.
+    - Training state before activations = weights + gradients + AdamW states = 140 GB + 140 GB + 560 GB = 840 GB.
+    - If an external activation estimate is 40 GB, the rough training lower bound is ~880 GB before fragmentation and runtime buffers.
 
     **Conclusion & Interpretation:**
-    - **Result: ~782.4 GB (OOM Bound)**. Total memory exceeds 192 GB without aggressive state management and optimization.
+    - **Result: inference ~161.47 GB before overhead; training roughly ~880 GB with the stated activation assumption.** The KV-cache is an inference budget item, while AdamW state, gradients, and activations dominate training memory, so both modes need different mitigation plans.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,8 @@ title: 'Fault Tolerance: Fluency — Checkpoint Size for Edge Online Learning'
 scenario: Your Jetson Orin runs a YOLOv8-medium model (26M params) with LoRA fine-tuning (rank 8). The device writes a checkpoint every 30 minutes to NVMe.
 question: What should each YOLOv8-medium LoRA checkpoint include, and what are its size, write time, and 30-day storage use?
 details:
-  realistic_solution: 'Checkpoint must include: frozen base model (int8) + LoRA weights (fp32) + optimizer state for LoRA + training metadata. Base model is large but can be restored from factory image — only the LoRA delta needs to be checkpointed for online learning state.'
+  realistic_solution: |
+    Each checkpoint should include only the online-learning state: LoRA adapter weights, AdamW optimizer state for those adapter parameters, scheduler/training metadata, checkpoint version, base-model identifier, and integrity checksum. Do not rewrite the frozen YOLOv8-medium base model in every checkpoint; restore it from the factory image or A/B base partition and apply the latest verified LoRA delta. With the stated rank-8 adapter, each checkpoint is about 1.33 MB, writes in about 0.33 ms on a 4,000 MB/s NVMe path, and 30 days of half-hourly checkpoints uses about 1.91 GB.
   common_mistake: |
     **The Pitfall:** Checkpointing the entire frozen base model and forgetting optimizer states.
     **The Rationale:** Candidates treat LoRA tuning exactly like full fine-tuning without separating out the lightweight learned adapters.
@@ -22,6 +23,7 @@ details:
     - LoRA Adapter: Rank-8 (~110K parameters, FP32).
     - Optimizer: AdamW (requires 2x states per parameter).
     - Checkpoint frequency: Every 30 minutes (48 per day).
+    - NVMe sequential write path: 4000 MB/s.
 
     **Calculations:**
     - LoRA Parameters Memory: 110,000 * 4 bytes = 440 KB.
@@ -31,7 +33,7 @@ details:
     - Storage Cost (30 days): 30 * 48 * 1.33 MB = 1.91 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: Storage-Bound (Trivial).** Checkpointing only the LoRA weights and optimizer states costs only 1.91 GB over 30 days, minimizing NVMe wear compared to repeatedly writing the frozen 26 MB base model.
+    - **Result: 1.33 MB/checkpoint, 0.33 ms write time, and 1.91 GB over 30 days.** Checkpointing only the LoRA weights, optimizer states, and metadata minimizes NVMe wear compared with repeatedly writing the frozen 26 MB base model.
 status: published
 provenance: imported
 requires_explanation: false

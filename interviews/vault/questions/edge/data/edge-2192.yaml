@@ -11,26 +11,32 @@ title: Sparse Format for Edge Model Weights
 scenario: Your pruned MobileNetV3 model has 70% sparsity (70% of weights are zero). The model occupies 15 MB in dense format.
 question: Should you store the weights in a sparse format (CSR or bitmap+values), and how does this affect inference latency vs memory savings?
 details:
-  realistic_solution: 'Dense format: 15 MB of weights, all stored including zeros. Sparse CSR: store only non-zero values (30% of 15 MB = 4.5 MB) plus row pointers and column indices. CSR overhead: 4.5M non-zero values * 4 bytes (col index) = 18 MB. Total CSR size ~ 22.5 MB — LARGER than dense because index overhead exceeds zero storage savings at 70% sparsity. Bitmap format: 1 bit per weight for zero/non-zero mask (15M bits / 8 = 1.875 MB) + 4.5 MB values = 6.375 MB. Saves 57.5% memory. But inference: GPU sparse kernels (cuSPARSE) typically achieve only 30-50% of dense Tensor Core throughput because of irregular memory access patterns. On Jetson Orin with its Ampere GPU: dense GEMM at 60 TOPS INT8 vs sparse at ~25 TOPS. The ~8.6 MB memory saving is modest vs 32 GB LPDDR5. Keep dense unless memory is critical.'
+  realistic_solution: 'Dense format: 15 MB of weights, all stored including zeros. Sparse CSR: store only non-zero values (30% of 15 MB = 4.5 MB) plus column indices and row pointers. With 1-byte INT8 weights and 4-byte column indices, the column index overhead alone is about 4x the non-zero value bytes, or 18 MB, and row pointers add more metadata. Total CSR size is therefore about 22.7 MB, which is 7.7 MB larger than dense because index overhead exceeds zero storage savings at 70% sparsity. Bitmap format: 1 bit per weight for zero/non-zero mask (15M bits / 8 = 1.875 MB) + 4.5 MB values = 6.375 MB. Saves 57.5% memory, but bitmap storage alone does not make inference faster; it still needs a hardware-supported sparse kernel or decompression path. On Jetson Orin, keep dense for latency unless TensorRT/CUDA supports the exact sparse pattern and an end-to-end benchmark is faster at the target batch and shapes. Prefer structured sparsity or prune to a hardware break-even point; use bitmap only
+    when memory is the binding constraint and latency regression is acceptable.'
   common_mistake: |
     **The Pitfall:** Assuming sparse storage always wins because you store fewer values.
     **The Rationale:** Candidates ignore the CSR index overhead and loss of memory coalescing on parallel hardware.
     **The Consequence:** Increased memory footprint and slower inference due to poor Tensor Core utilization.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Dense weights: 15 MB
-    - Sparsity: 70% (30% non-zero)
-    - Jetson Orin compute: 60 TOPS (dense), ~25 TOPS (sparse)
+    - Dense weights: 15 MB of INT8 values, approximated as 15M one-byte weights.
+    - Sparsity: 70% (30% non-zero), so non-zero values occupy 4.5 MB.
+    - CSR uses 4-byte column indices per non-zero plus row pointers.
+    - Approximate row count for convolution matrices: 50K rows, with 4-byte row pointers.
 
     **Calculations:**
     - Non-zero values: 15 MB * 0.3 = 4.5 MB
-    - CSR indices (4 bytes/val): 4.5M * 4 = 18 MB
-    - Total CSR size: 4.5 MB + 18 MB = 22.5 MB
+    - CSR column indices: 4.5M * 4 bytes = 18 MB
+    - CSR row pointers: (50K + 1) * 4 bytes = ~0.2 MB
+    - Total CSR size: 4.5 MB + 18 MB + 0.2 MB = 22.7 MB
+    - CSR penalty versus dense: 22.7 MB - 15 MB = 7.7 MB larger.
     - Bitmap mask: 15M bits / 8 = 1.875 MB
     - Total Bitmap size: 4.5 MB + 1.875 MB = 6.375 MB
+    - Bitmap memory savings versus dense: 15 MB - 6.375 MB = 8.625 MB, or about 57.5%.
+    - Latency decision rule: use sparse inference only if the deployed accelerator/runtime has a supported sparse kernel for the pattern and end-to-end latency beats dense. Otherwise, unstructured metadata reads, gathers, and poor memory coalescing usually erase the storage savings.
 
     **Conclusion & Interpretation:**
-    - **Result: Keep Dense (Memory-Bound)**. Unstructured 70% sparsity in CSR is larger than dense (22.5 MB vs 15 MB) and sparse kernels reduce throughput.
+    - **Result: keep dense for latency unless a supported sparse path benchmarks faster.** CSR is larger than dense (~22.7 MB vs 15 MB), while bitmap+values saves about 8.6 MB but is mainly a storage win unless the hardware and kernel path exploit the sparsity directly.
 status: published
 provenance: imported
 requires_explanation: true

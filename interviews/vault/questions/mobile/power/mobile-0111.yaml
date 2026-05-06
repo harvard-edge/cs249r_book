@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: inference
 title: The DVFS Polling Delay
 scenario: Your app has a 'Magic Enhance' button that runs a heavy GAN on a photo. The user taps the button, and the inference takes 800ms. You notice that if the user taps the button while they are actively scrolling a list, the exact same inference only takes 400ms.
-question: Why does doing more work (scrolling + inference) make the inference 2x faster?
+question: Why is the same inference 2x faster while the user is actively scrolling?
 details:
-  realistic_solution: 'DVFS ramp-up delay. Idle CPU at 300 MHz takes hundreds of milliseconds to ramp to 2.8 GHz through intermediate steps. Inference runs at mixed frequencies = ~800ms. During scrolling, CPU already at 2.8 GHz for 60 FPS UI = same inference takes 400ms. Fix: PerformanceHintManager pre-boost before inference. A 1ms API call eliminates 400ms latency — the highest-ROI mobile ML optimization. 50% of cold-start inference latency is wasted in DVFS ramp.'
+  realistic_solution: The scrolling work is not making the model cheaper; it has already moved the device into a higher DVFS performance state. From idle, the CPU starts around 300 MHz and spends part of the inference ramping toward 2.8 GHz, so the fixed workload takes about 800ms. During active scrolling, the UI workload has already requested high clocks for 60 FPS rendering, so the same inference runs near the sustained high-frequency state and finishes in about 400ms. Fix by issuing a platform performance hint or pre-warm before the user-visible inference, and measure whether it removes the cold-start ramp on the target device.
   common_mistake: |
     **The Pitfall:** "The OS prioritizes the foreground app during scrolling."
     **The Rationale:** Candidates assume generic OS scheduling rules apply, ignoring the app is always in the foreground when the button is tapped.
@@ -21,13 +21,15 @@ details:
     - Total inference workload: 1120 M-cycles
     - Max clock speed: 2.8 GHz
     - Idle clock speed: 300 MHz
+    - Cold-start ramp model: 300 M-cycles at 0.8 GHz, 300 M-cycles at 1.5 GHz, then 520 M-cycles at 2.8 GHz.
 
     **Calculations:**
     - Hot chip execution (scrolling at 60fps keeps CPU at max clock) = 1120 M-cycles / 2.8 GHz = 400 ms
-    - Cold chip DVFS ramp (idle tap) = (150 M-cycles / 0.5 GHz) + (450 M-cycles / 1.5 GHz) + (520 M-cycles / 2.8 GHz) = 300 ms + 300 ms + 186 ms = 786 ms (~800 ms)
+    - Cold chip DVFS ramp (idle tap) = (300 M-cycles / 0.8 GHz) + (300 M-cycles / 1.5 GHz) + (520 M-cycles / 2.8 GHz) = 375 ms + 200 ms + 186 ms = 761 ms (~800 ms)
+    - Cold-start overhead relative to hot state: ~800 ms - 400 ms = ~400 ms
 
     **Conclusion & Interpretation:**
-    - **Result: 400ms (DVFS Latency Penalty)**. Pre-boosting the clock with a PerformanceHintManager API call avoids the 400ms Dynamic Voltage and Frequency Scaling (DVFS) ramp-up delay.
+    - **Result: ~400ms DVFS cold-start overhead.** Pre-boosting with a performance hint can avoid much of the ramp-up delay when the OS honors the hint, but the 400ms value is the observed gap between cold and already-boosted execution, not a guaranteed API effect.
 status: published
 provenance: imported
 requires_explanation: false

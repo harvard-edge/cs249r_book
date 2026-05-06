@@ -395,6 +395,39 @@ The v1 release-pipeline invariants (§3.5 hashing, §5 validators)
 absorb these without modification — `chains.json` is a Merkle leaf,
 and the new `tier` field flows into that leaf transparently.
 
+#### 3.6.1 Authoring conventions introduced in Phase 3
+
+Two YAML-body conventions were introduced when LLM-authored questions
+started landing via [`generate_question_for_gap.py`](../vault-cli/scripts/generate_question_for_gap.py).
+Neither is enforced by the schema (Pydantic accepts extra keys); both
+are stable across the pipeline:
+
+- **Private `_authoring` block** (drafts only). Underscore-prefixed so
+  it's clearly metadata, not a content field. Recorded by
+  `generate_question_for_gap.py` and stripped at promotion time
+  (`promote_drafts.py`). Shape:
+  ```yaml
+  _authoring:
+    origin: gemini-3.1-pro-preview
+    tool: generate_question_for_gap.py
+    generated_at: <ISO-8601 UTC>
+    gap:
+      between: [<lower-qid>, <higher-qid>]
+      missing_level: L<N>
+      rationale: <free text>
+  ```
+  At promotion the block is unwound into proper schema fields:
+  `provenance: llm-draft`, `authors: [<origin>]`,
+  `human_reviewed: { status: ... }`, `created_at: <generated_at>`,
+  plus a `gap-bridge:<lower>-<higher>` tag (see below).
+
+- **`gap-bridge:<from>-<to>` tag.** Added to the question's `tags` list
+  at promotion. Lets you find every LLM-bridge question for a given
+  pair of anchors via plain `git grep`, and gives the chain rebuild a
+  signal that this question was authored to fit a specific bridge.
+  Format is intentionally machine-stable: lowercase qids joined by a
+  literal dash, no whitespace.
+
 ---
 
 ## 4. CLI Specification (v2)

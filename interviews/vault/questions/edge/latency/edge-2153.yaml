@@ -8,10 +8,10 @@ competency_area: latency
 bloom_level: evaluate
 phase: inference
 title: 'Model Partitioning for Collaborative Inference: Edge+Cloud Split on Jetson Orin'
-scenario: A collaborative inference system splits a 50-layer ResNet-152 between Jetson Orin (first k layers) and a cloud A100 (remaining layers). The Jetson Orin has 5 Mbps uplink to the cloud. Each layer output doubles the channel count until bottleneck (layer 25, output 256x28x28xFP16 = 793KB). You must determine the optimal split point to minimize total latency.
+scenario: A collaborative inference system splits a 50-layer ResNet-152 between Jetson Orin (first k layers) and a cloud A100 (remaining layers). The Jetson Orin has 5 Mbps uplink to the cloud. Layer 25 outputs 256x28x28 FP16 activations, about 392 KiB, and layer 50 outputs a 4KB classification vector. You must determine the optimal split point to minimize total latency.
 question: With a 5 Mbps uplink, where should you split the 50-layer ResNet-152 between Jetson Orin and cloud to minimize latency?
 details:
-  realistic_solution: 'Network transfer cost: activation_size / bandwidth. At 5 Mbps = 0.625 MB/s. Layer 25 activation: 793KB / 0.625 MB/s = 1.27s upload. That''s 1.27 seconds just for network transfer — very slow. Layer 50 (final, after global avg pool): 2048x4B FP16 = 4KB. Upload: 4KB/0.625MB/s = 6.4ms. Option A: run all layers on Jetson Orin edge, send 4KB classification vector: 6.4ms network + 0ms cloud. Option B: split at layer 25: 793KB = 1270ms network alone. Option C: send raw image (640x480x3x1B = 921KB) to cloud: 921KB/0.625MB/s = 1474ms vs running locally. Optimal: run entire model on Jetson Orin, send only the 2048-dim feature vector (4KB) for final classification on cloud if needed. End-to-end latency: edge inference (~50ms) + 6.4ms upload = 56.4ms.'
+  realistic_solution: 'Network transfer cost is activation size divided by uplink bandwidth. At 5 Mbps, the uplink is 0.625 MB/s. A layer-25 split sends 256x28x28 FP16 activations: 256 * 28 * 28 * 2 = 401,408 bytes, about 392 KiB, which takes roughly 0.64s to upload. Splitting at layer 50 is effectively no cloud compute split: the full model runs on Jetson Orin and only the 4KB final classification vector is sent, taking about 6.4ms. Because the layer-25 upload alone is far slower than local full-model inference, the latency-minimizing choice is to keep the whole model on the Jetson Orin, or equivalently split after layer 50 only for result reporting.'
   common_mistake: |
     **The Pitfall:** Always splitting at the bottleneck layer (layer 25) because it has the smallest intermediate activation map.
     **The Rationale:** Ignoring the fact that running the entire model on the edge device might be faster than paying the network transfer cost for even the smallest intermediate activation.
@@ -19,18 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Uplink Bandwidth: 5 Mbps = 0.625 MB/s.
-    - Layer 25 intermediate size: 793 KB.
+    - Layer 25 intermediate size: 256 * 28 * 28 * 2 bytes = 401,408 bytes (~392 KiB).
     - Layer 50 classification vector size: 4 KB.
-    - Full raw image size: 921 KB.
+    - Edge inference time for all 50 layers: ~50ms.
 
     **Calculations:**
-    - Layer 25 Upload = 793 KB / 0.625 MB/s = 1.27s.
-    - Layer 50 Upload = 4 KB / 0.625 MB/s = 6.4ms.
-    - Raw Image Upload = 921 KB / 0.625 MB/s = 1.47s.
-    - Edge inference time for all 50 layers = ~50ms.
+    - Layer 25 upload = 0.401 MB / 0.625 MB/s = 0.64s.
+    - Layer 50 result upload = 0.004 MB / 0.625 MB/s = 0.0064s = 6.4ms.
+    - Full on-edge latency plus result upload = ~50ms + 6.4ms = ~56.4ms.
+    - Layer 25 split pays ~640ms of network transfer before any cloud compute, so it cannot beat the on-edge option.
 
     **Conclusion & Interpretation:**
-    - **Result: Computing all layers on-edge (56.4ms total) minimizes network latency bottleneck.** It avoids large mid-network transfer penalties.
+    - **Result: Split after Layer 50 / Keep All Compute On Edge**. With a 5 Mbps uplink, intermediate activation transfer dominates latency, so the best split is effectively no split.
 status: published
 provenance: imported
 requires_explanation: false

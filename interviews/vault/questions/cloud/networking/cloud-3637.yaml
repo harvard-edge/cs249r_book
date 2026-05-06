@@ -7,11 +7,12 @@ topic: rdma-transport
 competency_area: networking
 bloom_level: create
 phase: both
-title: 'RDMA Transport Mastery: End-to-End Network Design for 4096-H100 Training'
+title: RDMA Rail Fabric for 4096-GPU Training
 scenario: You are designing the complete network fabric for a 4096-GPU cluster optimized for LLM training with a $50M networking budget, requiring >90% all-reduce efficiency, <5µs intra-pod latency, and single switch fault tolerance.
 question: How would you design the network fabric to meet the 4096-GPU cluster's latency, all-reduce, fault-tolerance, and $50M budget requirements?
 details:
-  realistic_solution: 'Architecture: Rail-optimized 2-tier fat-tree with InfiniBand NDR 400Gbps. The 4096 GPUs are in 512 nodes (8 GPUs/node). Form 8 independent rails. Each rail connects 512 GPUs using a 2-tier non-blocking fat-tree of 64-port switches: 16 leaf switches (32 down, 32 up) and 8 spine switches per rail. Total: 192 switches. Intra-node: 8 GPUs via NVLink (900GB/s). Inter-node (tensor/pipeline parallel): single rail, 3 hops, <2µs. Cross-cluster (data parallel): striped across rails, 3 hops, <2µs. Fault tolerance: adaptive routing and SHARP handle switch failures, avoiding traffic collapse. Cost estimate: 4096 NICs (NDR CX7) × $3k = $12.3M. 192 switches × $100k = $19.2M. 8,192 cables/optics × $800 = $6.55M. Total $38.05M, fitting the $50M budget.'
+  realistic_solution: 'Architecture: rail-optimized 2-tier fat-tree with InfiniBand NDR 400Gbps. The 4096 GPUs are in 512 nodes with 8 GPUs/node and 8 NIC rails, so each rail has 512 endpoints, one endpoint per node on that rail. Each rail uses 64-port switches with 16 leaves and 8 spines. Each leaf uses 32 downlinks to endpoints and 32 uplinks to the spine tier; because there are 8 spines, each leaf has 4 links to each spine. Each spine consumes 16 leaves × 4 links = 64 ports, so the rail is non-blocking. Total switches: 24 per rail × 8 rails = 192. Intra-node traffic uses NVLink; inter-node traffic crosses endpoint -> leaf -> spine -> leaf -> endpoint and should be budgeted around 3-5µs fabric latency. AllReduce stripes data-parallel traffic across rails, with adaptive routing/SHARP where supported. A spine failure reduces bandwidth but path diversity keeps the rail operating; a leaf failure affects its attached endpoints, so node-level job resiliency is still required. Cost estimate includes
+    an explicit $800/link cables/optics assumption and remains about $38M, under the $50M budget.'
   common_mistake: |
     **The Pitfall:** Proposing generic multi-tier datacenter networks rather than rail-optimized fabrics.
     **The Rationale:** Scaling generic 3-tier architectures works for standard cloud workloads but adds hops unnecessarily.
@@ -20,14 +21,20 @@ details:
     **Assumptions & Constraints:**
     - 4096 GPUs. Budget: $50M.
     - Switch cost: $100k. NIC cost: $3k.
+    - Cables/optics cost assumption: $800 per endpoint or leaf-spine link.
 
     **Calculations:**
-    - Rail-optimized 2-tier fat-tree: 8 independent rails.
-    - 16 leaf + 8 spine = 24 switches per rail × 8 rails = 192 switches.
-    - Cost: 4096 NICs × $3k ($12.3M) + 192 switches × $100k ($19.2M) + cables ($6.55M) = $38.05M.
+    - 4096 GPUs / 8 GPUs per node = 512 nodes.
+    - With 8 NIC rails per node, each independent rail has 512 endpoints.
+    - Per rail: 16 leaf switches × 32 downlinks = 512 endpoint ports.
+    - Per rail: 16 leaves × 32 uplinks = 512 leaf-spine links. With 8 spines, each spine uses 512 / 8 = 64 ports, so the spine port count closes.
+    - Switches: (16 leaf + 8 spine) × 8 rails = 192 switches.
+    - Cables/optics: 512 endpoint links per rail + 512 leaf-spine links per rail = 1,024 links per rail; 1,024 × 8 = 8,192 links.
+    - Cost: 4096 NICs × $3k = $12.3M; 192 switches × $100k = $19.2M; 8,192 cables/optics × $800 = $6.55M; total = $38.05M.
+    - Latency budget: endpoint/NIC + two switch traversals + cables is plausibly in the 3-5µs fabric range, meeting the <5µs target with careful placement.
 
     **Conclusion & Interpretation:**
-    - **Result: Network-Bound.** A rail-optimized 2-tier network successfully limits hop count to <2µs, achieves high AllReduce bandwidth via NVLink striping, and stays well under the $50M budget.
+    - **Result: Consistent 2-Tier Rail Fabric.** The port counts close for a non-blocking 512-endpoint rail, the latency target is plausible at <5µs rather than <2µs, and the $38.05M estimate stays below the $50M budget.
 status: published
 provenance: imported
 requires_explanation: true

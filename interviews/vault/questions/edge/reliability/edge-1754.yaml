@@ -11,7 +11,7 @@ title: Sizing Telemetry for Coral Edge TPU Fleet
 scenario: 5,000 traffic monitoring nodes equipped with Google Coral Edge TPUs are deployed. Each node is limited to a 50 Kbps cellular uplink. You must design a telemetry system to detect stragglers and hardware degradation (thermal throttling, USB drops) to achieve a 15-minute MTTR.
 question: What telemetry architecture, metrics, cadence, and central ingestion sizing would you use for 5,000 nodes over 50 Kbps links?
 details:
-  realistic_solution: Implement a local agent that aggregates metrics over a 1-minute window, calculating P99 latency, average TPU temperature, power draw, and USB error counts. Send a compressed heartbeat containing these aggregated metrics.
+  realistic_solution: Implement a local agent that aggregates a 1-minute heartbeat with P50/P95/P99 inference latency, inference count, average and max TPU temperature, power estimate, throttle state, USB reset/error counts, queue depth, and software version. Send the heartbeat over MQTT or HTTPS with node ID, timestamp, sequence number, and retry/backoff; reserve alerts for threshold crossings so raw logs stay local unless requested. Centrally, size ingestion for the full 5,000-node minute cadence plus retry bursts, partition by node ID, and alert when a node misses heartbeats or violates thermal, USB, or latency thresholds for more than one window.
   common_mistake: |
     **The Pitfall:** Streaming raw metrics or full application logs to the cloud.
     **The Rationale:** Candidates default to standard cloud-native observability patterns (like continuous tracing) without respecting the severe 50 Kbps uplink constraint.
@@ -20,15 +20,19 @@ details:
     **Assumptions & Constraints:**
     - Fleet size: 5,000 nodes.
     - Uplink limit per node: 50 Kbps.
-    - Payload: 10 aggregated metrics per minute (4 bytes each).
+    - Cadence: 1 heartbeat per node per minute.
+    - Payload: ~12 metrics plus node ID, timestamp, sequence, version, framing, and authentication overhead.
+    - Estimated compressed heartbeat size: 300 bytes; provision 5x burst headroom for retries and reconnects.
 
     **Calculations:**
-    - Payload Size: 10 * 4 bytes = 40 bytes/minute.
-    - Node Bandwidth Usage: (40 bytes * 8 bits/byte) / 60 seconds = 5.3 bps.
-    - Central Ingestion Load: 5,000 nodes * 5.3 bps = 26.5 Kbps.
+    - Node Bandwidth Usage: (300 bytes * 8 bits/byte) / 60 seconds = 40 bps.
+    - Per-node uplink share: 40 bps / 50,000 bps = 0.08%.
+    - Central steady-state messages: 5,000 / 60 = 83.3 messages/second.
+    - Central steady-state bandwidth: 5,000 * 40 bps = 200 Kbps.
+    - Provisioned burst capacity: 5 * 83.3 = ~420 messages/second and 5 * 200 Kbps = ~1 Mbps.
 
     **Conclusion & Interpretation:**
-    - **Result: 26.5 Kbps central ingestion load, ~0.01% node uplink utilization (Network-Feasible).**
+    - **Result: ~83 messages/s steady state, provision ~420 messages/s burst (Network-Feasible).** A 300-byte aggregated heartbeat easily fits each 50 Kbps link while giving the central service enough capacity to detect 15-minute MTTR stragglers and hardware degradation.
 status: published
 provenance: imported
 requires_explanation: false

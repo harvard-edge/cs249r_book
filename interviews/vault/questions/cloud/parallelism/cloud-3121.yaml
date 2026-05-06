@@ -7,30 +7,35 @@ topic: pipeline-parallelism
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: 'Diagnose Load Imbalance Across Pipeline Stages on H100'
+title: Diagnose Load Imbalance Across Pipeline Stages on H100
 scenario: 'A 4-stage pipeline of a 32-layer transformer on H100 GPUs shows stage latencies: Stage 0: 12ms (embedding + layers 1-8), Stage 1: 8ms (layers 9-16), Stage 2: 8ms (layers 17-24), Stage 3: 14ms (layers 25-32 + LM head). Pipeline throughput is limited to 14ms per stage cycle.'
-question: 'What is causing the 4-stage pipeline imbalance, and how would you rebalance the stages to recover throughput?'
+question: What is causing the 4-stage pipeline imbalance, and how would you rebalance the stages to recover throughput?
 details:
-  realistic_solution: 'Stage 0 slow: embedding lookup (128K×8192 table, FP16) = 2GB; load time = 2GB/2000GB/s (H100 HBM) = 1ms + compute = 2ms. Main issue: first 8 layers include self-attention with KV cache allocation overhead. Stage 3 slow: LM head projection (8192→128K) = 8192×128K×2B = 2GB → 4ms + layer 32. Fix: (1) Move embedding to Stage 0 but parallelize vocab dimension. (2) Move LM head to Stage 1 and pipeline embedding lookup. (3) Rebalance: Stage 0: emb + layers 1-6; Stage 1: layers 7-16; Stage 2: layers 17-26; Stage 3: layers 27-32 + LM head. Test new latencies targeting <=10ms per stage.'
+  realistic_solution: 'The imbalance comes from assigning the same number of transformer layers to every stage while also placing extra work on the first and last stages. Stages 1 and 2 show that eight transformer layers cost about 8ms, or roughly 1ms per layer. Stage 0 is 12ms, so embedding and input-side overhead add about 4ms. Stage 3 is 14ms, so the LM head and output-side overhead add about 6ms. Preserve model order and rebalance transformer layers around those fixed endpoint costs: Stage 0 = embedding + layers 1-6 (about 10ms), Stage 1 = layers 7-17 (about 11ms), Stage 2 = layers 18-27 (about 10ms), Stage 3 = layers 28-32 + LM head (about 11ms). This reduces the bottleneck stage cycle from 14ms to about 11ms without moving the LM head before the final hidden states exist. Steady-state pipeline throughput improves by roughly 14/11 = 1.27x; the pipeline bubble fraction is unchanged because p and the micro-batch count do not change.'
   common_mistake: |
     **The Pitfall:** Rebalancing layers by count alone (giving exactly 8 layers to each stage).
     **The Rationale:** Candidates assume all transformer layers are completely identical in computational cost.
     **The Consequence:** They ignore the massive embedding lookup and LM head operations that dominate the first and last stages when vocabulary sizes are large (e.g., 128K tokens), maintaining the exact bottleneck they tried to solve.
   napkin_math: |
     **Assumptions & Constraints:**
-    - M = 8 microbatches, P = 4 stages
     - Current Stage Latencies: 12ms, 8ms, 8ms, 14ms
     - Current Bottleneck = 14 ms
+    - Stages 1 and 2 imply transformer layer cost is about 8ms / 8 layers = 1ms/layer.
+    - Stage 0 endpoint overhead: 12ms - 8ms = 4ms for embedding/input-side work.
+    - Stage 3 endpoint overhead: 14ms - 8ms = 6ms for LM head/output-side work.
 
     **Calculations:**
-    - Pipeline Bubble Fraction = (4 - 1) / (8 + 4 - 1) = 3/11 = 27.3%
-    - Perfectly Balanced Stage = 42 ms total / 4 = 10.5 ms
-    - Current Efficiency = (10.5 / 14) * (1 - 0.273) = 54.5%
-    - Rebalanced Target Stage = 11 ms max
-    - Rebalanced Efficiency = (10.5 / 11) * (1 - 0.273) = 69.4%
+    - Total stage work = 12 + 8 + 8 + 14 = 42ms, so the ideal balanced target is 42 / 4 = 10.5ms.
+    - Candidate rebalance:
+      Stage 0: embedding + 6 layers = 4ms + 6ms = 10ms.
+      Stage 1: 11 layers = 11ms.
+      Stage 2: 10 layers = 10ms.
+      Stage 3: 5 layers + LM head = 5ms + 6ms = 11ms.
+    - New bottleneck = 11ms.
+    - Steady-state throughput improvement = old bottleneck / new bottleneck = 14 / 11 = 1.27x.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.27x Improvement (Compute-Bound)**. Rebalancing the heavy embedding and LM head operations significantly improves pipeline efficiency.
+    - **Result: endpoint overhead from embedding and the LM head causes the imbalance.** Reassigning fewer transformer layers to the endpoint stages reduces the stage-cycle bottleneck from 14ms to about 11ms, recovering about 1.27x steady-state throughput while preserving model semantics.
 status: published
 provenance: imported
 requires_explanation: false

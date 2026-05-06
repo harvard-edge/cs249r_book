@@ -11,23 +11,26 @@ title: On-Device Summarization Architecture Selection for Snapdragon 8 Gen 3
 scenario: Your team is building offline document summarization for a flagship smartphone utilizing the Hexagon NPU. You must design an architecture that minimizes memory bandwidth during generation for inputs up to 1000 tokens and short outputs of 50 tokens.
 question: Which architecture should Snapdragon 8 Gen 3 use for long-input, short-output summarization and why?
 details:
-  realistic_solution: An encoder-decoder architecture is optimal for this asymmetric input/output constraint. The encoder processes the dense 1000-token input in a highly parallel pass, saturating the NPU compute. The decoder then generates 50 tokens using static cross-attention states rather than continuously re-reading a massive self-attention KV cache.
+  realistic_solution: An encoder-decoder architecture is a strong fit for this asymmetric task. The encoder processes the 1000-token input once and stores compact cross-attention states. The decoder still uses a self-attention KV cache for generated tokens, but only for the short 50-token output; it attends to the fixed encoder states instead of repeatedly treating the full 1000-token input as autoregressive prefix context. The specification should verify that both the encoder pass and the decoder/cross-attention working set fit the Hexagon NPU runtime and shared memory limits.
   common_mistake: |
     **The Pitfall:** Defaulting to a massive decoder-only LLM.
     **The Rationale:** Candidates immediately propose trending decoder-only architectures, ignoring that the KV cache for a 1000-token input must be continuously loaded from shared LPDDR5X memory during every auto-regressive step.
     **The Consequence:** A massive memory bandwidth bottleneck completely starving the NPU.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: 2B parameters (2GB INT8 footprint).
+    - Both candidates are sized to fit the mobile runtime budget after INT8 quantization.
     - Target task: 1000 input tokens, 50 output tokens.
-    - Evaluated architectures: 2B Decoder-Only vs. (1B Encoder + 1B Decoder).
+    - Decoder-only path carries a 1000-token prompt prefix through every generated token.
+    - Encoder-decoder path encodes the 1000-token input once, then decodes 50 output tokens with a short decoder self-cache plus fixed cross-attention states.
 
     **Calculations:**
-    - Decoder-only bandwidth (generation): 50 tokens * 2GB weights = 100GB transferred.
-    - Enc-Dec bandwidth: 1B Encoder runs once (1GB loaded) + 1B Decoder runs 50 times (50 * 1GB = 50GB). Total = 51GB.
+    - Decoder-only attention context touched across generation is approximately 50 steps * 1000 prompt tokens = 50,000 prompt-token interactions, plus output-token self-attention.
+    - Encoder-decoder input encoding cost is paid once for 1000 tokens.
+    - Decoder self-attention context across the 50 generated tokens is approximately 50 * 50 / 2 = 1,250 output-token interactions.
+    - Cross-attention still reads encoder states, but those states are fixed and can be scheduled as a compact 1000-token memory rather than growing with the generated KV cache.
 
     **Conclusion & Interpretation:**
-    - **Result: 51GB (Memory-Bandwidth-Bound)**. The Encoder-Decoder architecture halves the generative memory bandwidth pressure (from 100GB to 51GB) by avoiding redundant reads of the heavy input context from a KV cache.
+    - **Result: Encoder-decoder reduces repeated input-context pressure**. It does not eliminate decoder KV caching, but it moves the long input into a one-time encoder representation and keeps the autoregressive self-cache tied to the short output.
 status: published
 provenance: imported
 requires_explanation: true

@@ -7,27 +7,31 @@ topic: quantization-fundamentals
 competency_area: precision
 bloom_level: create
 phase: both
-title: The Hypersensitive Hyperscaler
+title: Quantizing a 105B Model on H100s With Accuracy SLOs
 scenario: You are the principal architect for a cloud provider. A client wants to deploy a 105B parameter foundation model on H100 GPUs. They demand the lowest cost-per-token (requiring quantization) but strictly require zero accuracy degradation compared to FP16.
-question: How do you formulate a quantization strategy and hardware configuration that guarantees zero accuracy loss while minimizing cost?
+question: How do you formulate a quantization strategy and hardware configuration that minimizes cost while preserving the client's accuracy SLO with validation and rollback?
 details:
-  realistic_solution: 'The correct approach is to design a dynamic, multi-layered defense system (like SmoothQuant or AWQ) that acknowledges quantization is a statistical process vulnerable to distribution shifts. Keep the highly sensitive outlier activation channels in FP16, while quantizing the rest of the weights and activations to INT8. This mixed-precision serving strategy maintains the exact FP16 accuracy profile while reducing the memory footprint enough to fit on 2x H100s instead of 3x H100s, satisfying both cost and accuracy constraints.'
+  realistic_solution: |
+    The correct approach is to reject an unconditional zero-loss guarantee and design an accuracy-SLO-preserving system. Use a mixed-precision quantization method such as SmoothQuant or AWQ: quantize robust weights and activations to INT8, keep sensitive layers or outlier activation channels in FP16/BF16, and validate against the FP16 baseline on the client's golden evaluation set plus representative production traffic. Hardware sizing should include weights, KV cache, batch size, and fallback capacity, not just parameter bytes. If a 2-H100 mixed-precision configuration meets latency and quality gates, deploy it behind canaries, drift monitoring, and automatic rollback to the 3-H100 FP16 baseline for prompts or model versions that breach the SLO. If validation cannot show the target accuracy bound, the cost-minimizing answer is not to quantize further.
   common_mistake: |
     **The Pitfall:** Applying a purely static quantization fix (e.g., just quantizing all layers to INT8 or hardcoding specific layers to FP16).
     **The Rationale:** Candidates lack a systems perspective, ignoring that quantization is statistical and vulnerable to data drift or new usage patterns.
     **The Consequence:** As input distributions shift in production, the static quantization breaks the strict accuracy SLO, breaching the client contract.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model: 105B parameters.
-       - FP16: 2 bytes/param. INT8: 1 byte/param.
-       - H100 capacity: 80 GB.
-    2. **Calculations:**
-       - FP16 Baseline: 105B * 2 bytes = 210 GB. Requires 3x H100s (240 GB total), leaving 30 GB for KV cache.
-       - INT8 Quantization: 105B * 1 byte = 105 GB. Fits on 2x H100s (160 GB total), leaving 55 GB for KV cache.
-       - Cost Reduction: Dropping from 3 to 2 GPUs = 33% hardware cost reduction.
-    3. **Conclusion & Interpretation:**
-       - Mixed-precision fits within 2 GPUs while protecting the accuracy SLO.
-       - **Result: 33% Cost Reduction (Mixed Precision)**
+    **Assumptions & Constraints:**
+    - Model: 105B parameters.
+    - FP16 weights: 2 bytes/parameter. INT8 weights: 1 byte/parameter.
+    - H100 capacity: 80 GB, but usable serving memory is lower after KV cache, runtime buffers, fragmentation, and tensor-parallel communication workspace.
+    - Client requires zero measured accuracy degradation against the FP16 baseline.
+
+    **Calculations:**
+    - FP16 weights alone: 105B * 2 bytes = 210 GB, so weights require at least 3x 80 GB H100s before KV cache and runtime overhead.
+    - INT8 weights alone: 105B * 1 byte = 105 GB. A 2-H100 placement has 160 GB raw capacity, leaving 55 GB raw headroom before KV cache and overhead.
+    - Mixed precision is a feasibility hypothesis, not a proof: keeping sensitive layers, outlier channels, embeddings, or logits in FP16/BF16 increases the footprint above 105 GB.
+    - The weights-only comparison suggests a possible 3-GPU to 2-GPU reduction, or 33.3% fewer weight-hosting GPUs, but this is not a deployment conclusion until KV cache, runtime overhead, latency, and the zero-degradation eval gate all pass.
+
+    **Conclusion & Interpretation:**
+    - **Result: Validate Before Claiming Savings.** Parameter bytes show only that 2-H100 placement is worth evaluating; they do not prove feasibility or a 33% cost reduction. If validation cannot show zero degradation with enough KV/cache headroom, the correct cost-minimizing configuration is the FP16 baseline or a higher-precision fallback path.
 status: published
 provenance: imported
 requires_explanation: true

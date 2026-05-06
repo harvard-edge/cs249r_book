@@ -1,31 +1,40 @@
 schema_version: '1.0'
 id: cloud-4032
 track: cloud
-level: L6+
+level: L5
 zone: mastery
 topic: congestion-control
 competency_area: networking
 bloom_level: evaluate
 phase: both
 title: End-to-End Congestion Budget for Training Iteration
-scenario: You are writing the SLA for a 1024-H100 training cluster that guarantees <5% communication overhead relative to ideal (zero-latency) AllReduce.
+scenario: You are writing the SLA for a 1024-H100 training cluster. Assume a 400ms training iteration and an ideal 80ms ring AllReduce for a 2GB gradient over 50GB/s links.
 question: How would you allocate the <5% communication-overhead SLA budget across ECMP imbalance, ECN/DCQCN, PFC, retransmissions, and software?
 details:
-  realistic_solution: 'Total communication overhead budget: 5% of iteration time. For a 400ms training iteration with 80ms ideal AllReduce time (2GB gradient, 1024 GPUs, ring AllReduce): 5% overhead = 20ms additional latency. Budget allocation: (1) ECMP imbalance: 4ms (20% of budget) — achievable with adaptive routing keeping path utilization variance < 5%. (2) ECN-induced rate reduction (DCQCN): 5ms (25%) — allows rate-reduction events to recover quickly. (3) PFC pauses: 3ms (15%) — requires tight PFC watchdog timers. (4) Retransmissions: 4ms (20%) — allows at most 1 retransmission per 100 iterations. (5) Software overhead (NCCL kernel launch, memory copy, synchronization): 4ms (20%) — bounded by GPU kernel launch latency and PCIe DMA setup. Monitoring: instrument each component with per-iteration counters. Alert if any component exceeds 150% of its budget for 10 consecutive iterations. Capacity planning: at 2048 GPUs, double the ECMP and PFC budgets since path diversity and failure probability scale with node count.'
+  realistic_solution: 'Use the 5% SLA as an extra-latency budget, not as a new AllReduce target. With a 400ms iteration, the total allowed communication overhead beyond the ideal 80ms ring AllReduce is 20ms. A defensible policy split is: ECMP imbalance 4ms, ECN/DCQCN rate reduction 5ms, PFC pauses 3ms, retransmissions 4ms, and host/NCCL software overhead 4ms. This split is not mathematically implied by the inputs; it is an operating budget for observability and alerting. ECN gets the largest slice because rate recovery can affect multiple packets after a mark, PFC is kept smaller because pauses should be rare, and the other buckets get enough budget to diagnose without masking chronic congestion.'
   common_mistake: |
     **The Pitfall:** Setting an aggregate 5% target without allocating sub-budgets.
     **The Rationale:** It's common to define a high-level SLA but fail to instrument the individual network mechanisms that contribute to latency.
     **The Consequence:** When the 5% SLA is violated, the team cannot diagnose whether the root cause is ECMP hashing, PFC pauses, or host software, making the cluster un-debuggable.
   napkin_math: |
-    - **Ideal AllReduce:** $2\text{GB}$ on 1024 GPUs at $50\text{GB/s}$ (ring AllReduce) $= 2 \times 2\text{GB} / 50\text{GB/s} = 80\text{ms}$.
-    - **Total Target Overhead:** $5\%$ of a $400\text{ms}$ iteration = **$20\text{ms}$ total budget**.
-    - **Budget Allocation:**
-      - ECMP imbalance: $4\text{ms}$ (20%)
-      - ECN/DCQCN rate reduction: $5\text{ms}$ (25%)
-      - PFC pauses: $3\text{ms}$ (15%)
-      - Retransmissions: $4\text{ms}$ (20%)
-      - Software overhead (NCCL): $4\text{ms}$ (20%)
-    - **Conclusion:** A 5% overhead target is extremely aggressive (requires shaving ~3-5ms per component) compared to typical 8-12% real-world overheads.
+    **Assumptions & Constraints:**
+    - 1024-H100 cluster running a 400ms training iteration.
+    - 2GB gradient ring AllReduce at 50GB/s ideal speed.
+    - Target overhead: <5% of iteration time.
+
+    **Calculations:**
+    - Ring AllReduce communication time model: 2 * (P-1)/P * message_size / bandwidth.
+    - With P=1024, message_size=2GB, bandwidth=50GB/s: 2 * (1023/1024) * 2GB / 50GB/s = 79.9ms, rounded to the stated 80ms ideal.
+    - Total target overhead beyond the ideal: 5% of a 400ms iteration = 20ms.
+    - Illustrative policy allocation, not a computed requirement:
+      - ECMP imbalance: 4ms (20%)
+      - ECN/DCQCN rate reduction: 5ms (25%)
+      - PFC pauses: 3ms (15%)
+      - Retransmissions: 4ms (20%)
+      - Software overhead (NCCL): 4ms (20%)
+
+    **Conclusion & Interpretation:**
+    - **Conclusion:** The ring formula gives the ideal baseline; the 20ms split is a policy budget used to instrument and diagnose overhead sources per iteration.
 status: published
 provenance: imported
 requires_explanation: true

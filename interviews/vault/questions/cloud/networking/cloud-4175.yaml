@@ -9,21 +9,36 @@ bloom_level: create
 phase: both
 title: Rail-Optimized Network for GPU Clusters
 scenario: You are designing a 512-GPU MI300X cluster's network. Each node has 8 MI300X GPUs connected via Infinity Fabric internally. You must choose between a traditional fat-tree connecting all 64 nodes and a rail-optimized topology where GPU 0 of every node connects to switch rail 0, GPU 1 to rail 1, etc.
-question: "How would you design the rail-optimized topology, what is its switch count vs a fat-tree, and which AllReduce algorithm maps best to it?"
+question: How would you design the rail-optimized topology, what is its switch count vs a fat-tree, and which AllReduce algorithm maps best to it?
 details:
-  realistic_solution: 'Rail-optimized: 8 independent networks (rails), each connecting 64 GPUs (one per rank). Each rail requires only a single 64-port switch = 8 switches total. A non-blocking fat-tree for all 512 GPUs using 64-port switches requires a 2-tier topology: 16 leaf switches + 8 spine switches = 24 switches total. Rail-optimized saves 66% on switches. AllReduce mapping: (1) Intra-node reduce-scatter across 8 GPUs via Infinity Fabric (896 GB/s) — reduces to 1/8 of gradient. (2) Inter-node AllReduce on each rail independently — 64 GPUs per rail, ring or tree AllReduce over the rail''s single switch. Each rail carries only 1/8 of the total gradient, so bandwidth per rail = 1/8 of total. (3) Intra-node all-gather via Infinity Fabric. This hierarchical AllReduce uses Infinity Fabric for the high-bandwidth step and Ethernet/IB for the long-haul step, matching bandwidth to distance.'
+  realistic_solution: 'Rail-optimized: 8 independent networks (rails), each connecting 64 GPUs with the same local rank, so GPU 0 on every node uses rail 0, GPU 1 uses rail 1, and so on. In the simplest 64-port switch design, each rail uses one switch, or 8 switches total. For comparison, a 512-GPU full-bisection fat-tree port-count model with 64-port switches, 32 GPU-facing ports per leaf, and 32 uplinks per leaf needs 16 leaf switches plus 8 spine-switch equivalents, or 24 switches as a lower-bound port-count estimate; a strict Clos implementation with single links and more path diversity can require more switches. The best communication mapping is hierarchical AllReduce: intra-node reduce-scatter across 8 GPUs over Infinity Fabric, inter-node ring/tree AllReduce independently on each rail over 64 GPUs with only 1/8 of the gradient per rail, then intra-node all-gather over Infinity Fabric. This matches fast local bandwidth to high-volume local movement and uses the slower long-haul rails
+    only for reduced shards.'
   common_mistake: |
     **The Pitfall:** Assuming rail-optimized is simply a physical wiring convenience.
     **The Rationale:** Candidates miss that rail-optimization fundamentally changes the AllReduce algorithm by creating independent, contention-free networks per GPU rank.
     **The Consequence:** They fail to exploit hierarchical AllReduce (intra-node fast, inter-node slow), resulting in a sub-optimal communication strategy that bottlenecks on the Ethernet/IB links.
   napkin_math: |
+    **Assumptions & Constraints:**
+    - 512 MI300X GPUs (64 nodes, 8 per node).
+    - 1 GB gradient.
+    - Infinity Fabric: 896 GB/s.
+    - Rail network: 50 GB/s.
+    - Fat-tree count is a simplified full-bisection port-count estimate, not a universal Clos bill of materials.
+    - Timing numbers are rough bandwidth-bound estimates.
+
+    **Calculations:**
     - Rail-optimized: 8 rails * 1 64-port switch per rail = 8 switches.
-    - Fat-tree (non-blocking 512-port using 64-port switches): 16 leaf + 8 spine = 24 switches.
-    - AllReduce for 1 GB gradient (Rail-optimized):
-      - Intra-node reduce-scatter on Infinity Fabric (896 GB/s): 1 GB * (7/8) / 896 GB/s = 0.98 ms.
-      - Inter-node ring on rail (50 GB/s): 2 * 125 MB * (63/64) / 50 GB/s ≈ 4.92 ms.
-      - Intra-node all-gather on IF: 1 GB * (7/8) / 896 GB/s = 0.98 ms.
-    - **Total Rail-Optimized Time: 6.88 ms vs Flat Ring: ~39.9 ms (5.8x faster).**
+    - Fat-tree port-count estimate: 512 GPU ports / 32 GPU-facing ports per leaf = 16 leaves.
+    - Leaf uplinks: 16 * 32 = 512 uplink ports; 512 / 64 = 8 spine-switch equivalents.
+    - Fat-tree lower-bound count: 16 leaf + 8 spine = 24 switches; stricter path-diverse Clos designs may require more.
+    - Standard ring AllReduce time model: 2 * (N - 1) / N * message_size / bandwidth.
+    - Intra-node reduce-scatter on Infinity Fabric: (7/8) * 1 GB / 896 GB/s = 0.98 ms.
+    - Inter-node rail ring: each rail carries 1 GB / 8 = 125 MB; 2 * (63/64) * 125 MB / 50 GB/s = 4.92 ms.
+    - Intra-node all-gather on Infinity Fabric: (7/8) * 1 GB / 896 GB/s = 0.98 ms.
+    - Flat 512-GPU ring over 50 GB/s network: 2 * (511/512) * 1 GB / 50 GB/s = 39.9 ms.
+
+    **Conclusion & Interpretation:**
+    - **Total Rail-Optimized Time: 6.88 ms vs Flat Ring: 39.9 ms.** The speedup comes from moving seven-eighths of the gradient over Infinity Fabric and only one-eighth per rail over the slower network.
 status: published
 provenance: imported
 requires_explanation: true

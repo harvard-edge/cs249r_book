@@ -7,11 +7,11 @@ topic: pruning-sparsity
 competency_area: compute
 bloom_level: evaluate
 phase: training
-title: 'Structured Pruning 50% of MLP Layers in 70B LLM — MI300X Impact'
-scenario: 'A team applies structured pruning to a 70B LLM (80 layers, MLP intermediate_size=28,672 per layer) targeting a substantial weight reduction. They prune 30% of neurons from each MLP layer on MI300X. Note that the model uses a modern SwiGLU MLP containing 3 projection matrices.'
+title: Structured Pruning 30% of MLP Neurons in a 70B LLM on MI300X
+scenario: A team applies structured pruning to a 70B LLM (80 layers, MLP intermediate_size=28,672 per layer) targeting a substantial weight reduction. They prune 30% of neurons from each MLP layer on MI300X. Note that the model uses a modern SwiGLU MLP containing 3 projection matrices.
 question: What parameter reduction, memory savings, and decode throughput speedup result from pruning 30% of MLP neurons in the 70B model?
 details:
-  realistic_solution: 'Original SwiGLU MLP per layer: 3 × d_model × intermediate = 3 × 8192 × 28672 = 704.6M params. 80 layers: 80 × 704.6M = 56.3B MLP params. After 30% pruning: 16.9B params removed. Total model drops from 70B to 53.1B params. Memory: 53.1B × 2B (BF16) = 106.2GB (vs original 140GB). At 5.3 TB/s: decode latency = 106.2GB/5.3TB/s = 20.0ms/token = 50 tok/s vs original 37.9 tok/s. Improvement: 32%. Note: accuracy impact requires significant recovery fine-tuning.'
+  realistic_solution: 'Original SwiGLU MLP per layer: 3 × d_model × intermediate = 3 × 8192 × 28672 = 704.6M params. Across 80 layers, the MLP contains 56.3B of the 70B total parameters; the remaining 13.7B are attention, embeddings, norms, and other non-MLP parameters. Pruning 30% of MLP neurons removes 0.30 × 56.3B = 16.9B parameters, so the total model drops to 53.1B parameters. BF16 weight memory falls from 140GB to 106.2GB, saving 33.8GB. For decode throughput, treat 70B/53.1B = 1.32x as a best-case bandwidth roofline if the pruned weights dominate the per-token traffic and kernels exploit the smaller dense MLPs. Real speedup will be lower if attention, KV-cache traffic, launch overhead, or poorly packed pruned matrices dominate. Accuracy recovery also requires fine-tuning.'
   common_mistake: |
     **The Pitfall:** Expecting throughput to scale linearly with the reduction in raw compute FLOPs.
     **The Rationale:** Engineers accustomed to training bottlenecks naturally evaluate optimizations against compute bounds, completely forgetting that decode-phase inference is fundamentally memory-bandwidth bound.
@@ -20,17 +20,20 @@ details:
     **Assumptions & Constraints:**
     - 70B LLM with 80 layers, SwiGLU MLP (3 matrices). MI300X hardware.
     - Pruning 30% of MLP neurons.
+    - BF16 weights use 2 bytes/parameter.
+    - Decode speedup is a roofline-style upper bound, not an exact measured result.
 
     **Calculations:**
     - Original MLP params: 3 matrices * 8192 * 28672 * 80 layers = 56.3B params.
-    - Pruned MLP (30%): 56.3B * 0.3 = 16.9B params saved.
-    - New Model Size: 70B - 16.9B = 53.1B params.
-    - New Memory: 53.1B * 2B (BF16) = 106.2 GB.
-    - Decode Latency: 106.2 GB / 5.3 TB/s = 20.0 ms/token (50 tok/s).
-    - Speedup: 50 / 37.9 = 1.32x.
+    - Non-MLP params: 70B - 56.3B = 13.7B params.
+    - MLP params removed: 56.3B * 0.30 = 16.9B params.
+    - Remaining MLP params: 56.3B * 0.70 = 39.4B params.
+    - New total model size: 13.7B non-MLP + 39.4B MLP = 53.1B params.
+    - Memory saved: 16.9B * 2B = 33.8GB. New BF16 weight memory: 53.1B * 2B = 106.2GB.
+    - Best-case decode weight-traffic speedup if the smaller dense model remains bandwidth-bound: 70B / 53.1B = 1.32x.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.32x (Memory-Bandwidth-Bound)**. 32% Improvement in decode throughput via latency reduction.
+    - **Result: 16.9B Params and 33.8GB Saved.** The 1.32x decode improvement is an upper-bound bandwidth estimate; measured throughput depends on the fraction of decode time spent in pruned MLP weight traffic versus attention, KV-cache, and runtime overheads.
 status: published
 provenance: imported
 requires_explanation: true

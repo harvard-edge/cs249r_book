@@ -7,11 +7,12 @@ topic: dataset-curation
 competency_area: data
 bloom_level: apply
 phase: training
-title: 'Dataset Curation: Implement a Data Quality Scoring Function'
+title: Size a KenLM Perplexity Scorer for 1B Documents in 6 Hours
 scenario: You need to score 1B text documents for quality before LLM pre-training. Design and quantify a perplexity-based quality scorer using a small 125M KenLM model. The scorer must process the full 1B documents within 6 hours on a 16-node CPU cluster.
-question: "How would you design and size a KenLM perplexity scorer to process 1B documents within 6 hours on a 16-node CPU cluster?"
+question: How would you design and size a KenLM perplexity scorer to process 1B documents within 6 hours on a 16-node CPU cluster?
 details:
-  realistic_solution: KenLM 5-gram model at 125M parameters. Each CPU can score ~10K documents/second. Distribute across 16 nodes × 32 cores = 512 cores. Set quality threshold at perplexity < 200 (tuned on held-out human ratings). Flag and discard documents scoring > 500 perplexity.
+  realistic_solution: |
+    Use a 125M-parameter KenLM 5-gram scorer as a sharded CPU batch job. Split the 1B documents into at least 512 balanced shards, run one worker per core across 16 nodes × 32 cores, stream pre-tokenized or lightly normalized text from local or distributed storage, and write document ID plus perplexity and quality flags to partitioned output. The SLA requires only about 46.3K docs/sec, while 512 cores at 10K docs/sec/core provide about 5.12M docs/sec before I/O, so the 16-node cluster has roughly 111x compute headroom. In practice, throttle to storage capacity, keep CPU utilization high with buffered reads, and tune thresholds on held-out human ratings: accept perplexity < 200, review the middle band, and discard or downweight documents > 500 perplexity. With sharded I/O, the full run should finish well inside 6 hours; if sustained read bandwidth falls below target, stage shards to local disks first.
   common_mistake: |
     **The Pitfall:** Using a GPU-based neural language model for quality scoring.
     **The Rationale:** Assuming all modern NLP tasks require GPUs and deep neural networks.
@@ -21,13 +22,15 @@ details:
        - Workload: 1B documents, ~2KB average size (2TB total).
        - Hardware: 16 nodes * 32 cores = 512 CPUs.
        - Throughput: 10,000 docs/sec per CPU core.
+       - Sustained aggregate storage read bandwidth: assume 10 GB/s after sharding and overhead.
     2. **Calculations:**
        - Required Throughput = 1B docs / (6 hours * 3600) = 46,300 docs/sec.
        - Available Compute = 512 cores * 10,000 docs/sec = 5.12M docs/sec.
        - Compute Time = 1B / 5.12M = ~195 seconds.
-       - I/O Time = 2TB / 10GB/s network = ~200 seconds.
+       - Compute headroom = 5.12M / 46.3K = ~111x the required document rate.
+       - I/O Time = 2TB / 10GB/s = ~200 seconds ideal sustained read time; with 3x scheduling, parsing, and storage overhead, budget ~10 minutes.
     3. **Conclusion & Interpretation:**
-       - **Result: ~10 Minutes Total (I/O-Bound).** CPU compute is more than sufficient; the actual bottleneck is massive distributed storage I/O, entirely succeeding the 6-hour requirement.
+       - **Result: ~10 Minutes Budgeted, Well Under 6 Hours.** CPU scoring capacity is far above the required 46.3K docs/sec, so the design is storage/I/O-bound rather than compute-bound if the corpus is sharded across the 16 nodes.
 status: published
 provenance: imported
 requires_explanation: false

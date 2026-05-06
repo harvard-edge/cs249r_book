@@ -9,9 +9,10 @@ bloom_level: analyze
 phase: inference
 title: H100 Inference Service P99 Latency with Stragglers
 scenario: You are designing a real-time ML inference service for a critical application using a cluster of NVIDIA H100 GPUs. Your service has a strict P99 latency SLA of 100ms. Due to factors like transient network issues, OS scheduler contention, or garbage collection, individual H100s occasionally experience tail latency spikes, causing 1% of requests to take 500ms+ instead of the typical 50ms.
-question: "How would you design your system to effectively monitor, mitigate, and predictably meet the P99 latency SLA?"
+question: How would you design your system to effectively monitor, mitigate, and predictably meet the P99 latency SLA?
 details:
-  realistic_solution: A robust solution involves implementing client-side hedged requests. A request is sent to a primary GPU, and a 'backup' request is sent to a second GPU if the primary doesn't respond within a specific timeout (e.g., P90 latency). Smart load balancing that considers per-GPU latency and granular monitoring of P99 per instance is also required.
+  realistic_solution: |
+    Monitor end-to-end P99 and P99.9 latency, queue age, per-instance straggler rate, cancellation rate, and hedge amplification. Mitigate with adaptive hedged requests: send a backup only after a deadline-aware threshold such as the current P95/P98 fast-path latency, route it to an independent low-queue replica, and cancel duplicate work when either response completes. Tune the threshold from live tail metrics so hedging reduces the 100 ms SLA tail without creating overload. Add load shedding, admission control, and per-instance isolation when straggler rates rise, and use forecasts of queue age and instance health to move traffic before P99 burns the SLA.
   common_mistake: |
     **The Pitfall:** Focusing only on average latency (P50) or suggesting general scaling.
     **The Rationale:** Candidates misinterpret tail latency as a capacity issue rather than an inherent distributed systems probability issue.
@@ -20,16 +21,16 @@ details:
     **Assumptions & Constraints:**
     - Normal latency: 50 ms. SLA: < 100 ms P99.
     - Straggler probability: 1% (0.01) takes > 500 ms.
-    - Mitigation: Hedged requests (send to 2 independent GPUs).
+    - Mitigation: send a hedge at 60 ms to an independent GPU and cancel the loser.
+    - Backup fast-path latency is 50 ms, so a hedge launched at 60 ms completes at about 110 ms.
 
     **Calculations:**
-    - Probability GPU A is a straggler: 0.01.
-    - Probability GPU B is a straggler: 0.01.
-    - Joint probability both fail simultaneously: 0.01 * 0.01 = 0.0001 (0.01%).
-    - Success probability (under 50 ms): 99.99%.
+    - Immediate dual-send: probability both replicas straggle = 0.01 * 0.01 = 0.0001 (0.01%), so straggler-driven latency moves beyond P99.
+    - Delayed hedge at 60 ms: a straggling primary plus a normal backup finishes near 110 ms, which helps availability but may still miss a strict 100 ms SLA.
+    - To meet <100 ms with delayed hedging, the hedge threshold must be <= 50 ms if the backup path is 50 ms, or the backup path must be faster than 40 ms at a 60 ms threshold.
 
     **Conclusion & Interpretation:**
-    - **Result: 99.99% success (Tail-Latency Bound)**. Hedged requests geometrically reduce straggler probability, ensuring 99.99% of requests complete within 50 ms.
+    - **Result: hedging can reduce independent straggler probability to 0.01%, but the timeout must be chosen from the 100 ms latency budget and controlled to avoid extra load.**
 status: published
 provenance: imported
 requires_explanation: false

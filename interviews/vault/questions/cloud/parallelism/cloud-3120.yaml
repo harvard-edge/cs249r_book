@@ -11,23 +11,31 @@ title: Design Interleaved Pipeline Schedule for Reduced Bubble
 scenario: A 48-layer transformer trains on 8 H100 GPUs with standard 1F1B achieving 46.7% bubble ratio (m=8, p=8). You propose interleaved pipeline parallelism with v=2 virtual stages per GPU (each GPU handles 2 non-contiguous layer chunks of 3 layers each). The interleaved bubble ratio formula is (p-1)/(mxv+p-1).
 question: With v=2 interleaving, what are the new bubble ratio, steady-state efficiency, and added communication cost?
 details:
-  realistic_solution: 'Standard 1F1B bubble: (8-1)/(8+8-1) = 7/15 = 46.7%. Interleaved with v=2: (8-1)/(8x2+8-1) = 7/23 = 30.4% — same as GPipe with m=16. Efficiency: 69.6% vs 53.3%. Improvement: 16.3pp. Communication cost: standard 1F1B has 2x(p-1)=14 activation transfers per pipeline pass. Interleaved v=2: 2x(v*p-1)=30 transfers. With NVLink 450 GB/s per direction between H100s and 2M activation elements at BF16 (4MB): each transfer = 4MB/450GB/s = 8.8μs. Extra latency: 16x8.8μs=140.8μs per step — negligible vs 16ms stage time (0.8% overhead).'
-  common_mistake: 'Assuming interleaved scheduling reduces bubble to zero; it reduces bubble ratio by factor v but increases pipeline communication volume at stage boundaries.'
+  realistic_solution: |
+    Standard 1F1B bubble is given as 46.7%, which matches (8-1)/(8+8-1) = 7/15 with m=8 microbatches and p=8 physical stages. With v=2 virtual stages per GPU, use the prompt's interleaved formula with the same physical p and an effective 16 scheduled microbatch slots: (p-1)/(m*v+p-1) = 7/(8*2+8-1) = 7/23 = 30.4%. Steady-state useful efficiency is 1 - 30.4% = 69.6%, versus 53.3% for the non-interleaved schedule. For communication, count activation handoffs across logical stage boundaries for one full forward/backward traversal. The non-interleaved 8-stage pipeline has 2*(8-1) = 14 such handoffs. The interleaved schedule has 16 logical chunks, so a simple worst-case boundary count is 2*(16-1) = 30 handoffs, or 16 additional activation transfers if each virtual boundary crosses GPUs. At 2M BF16 elements = 4MB and 450GB/s NVLink, the added serialized transfer time is 16 * (4MB/450GB/s) = about 142us; real schedules may hide part of this under compute.
+  common_mistake: |
+    **The Pitfall:** Assuming interleaved pipeline scheduling reduces the pipeline bubble to zero.
+    **The Rationale:** While interleaved scheduling reduces the bubble ratio by a factor of v, it also proportionally increases the pipeline communication volume at stage boundaries.
+    **The Consequence:** The expected throughput gains are not realized because the reduction in bubble time is offset by the increased communication latency.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Standard 1F1B bubble: 46.7% (m=8, p=8).
-    - Interleaved v=2 bubble ratio formula: (p-1)/(mxv+p-1).
+    - Standard 1F1B bubble: 46.7% (m=8 microbatches, p=8 physical stages).
+    - Interleaved v=2 bubble ratio formula: (p-1)/(m*v+p-1), with p still the physical stage count.
     - NVLink: 450 GB/s per direction.
     - 2M activation elements at BF16 (4MB).
 
     **Calculations:**
     - Interleaved bubble: (8-1)/(8*2+8-1) = 7/23 = 30.4%.
-    - Bubble reduction: 46.7% - 30.4% = 16.3 percentage points.
-    - Communication overhead: 16 extra transfers * (4MB / 450GB/s) = 16 * 8.8μs = 141μs.
-    - Percentage overhead: 141μs / 16,000μs stage time = 0.8%.
+    - Steady-state efficiency = 1 - 30.4% = 69.6%.
+    - Standard physical-stage handoffs per full forward/backward traversal = 2 * (p-1) = 2 * 7 = 14.
+    - Interleaved logical chunks = v * p = 16.
+    - Worst-case virtual-stage handoffs per traversal = 2 * (v*p-1) = 2 * (16-1) = 30.
+    - Added transfers = 30 - 14 = 16.
+    - Transfer time = 4MB / 450GB/s = 8.9μs.
+    - Added serialized communication cost = 16 * 8.9μs = 142μs per full forward/backward activation traversal, before compute overlap.
 
     **Conclusion & Interpretation:**
-    - **Result: 15.5% net throughput improvement (Pipeline-Efficiency-Bound)**. The reduction in pipeline bubble vastly outweighs the slight increase in communication latency.
+    - **Result: 30.4% bubble ratio, 69.6% steady-state efficiency, and about 142μs of worst-case added serialized communication per full forward/backward activation traversal.**
 status: published
 provenance: imported
 requires_explanation: true

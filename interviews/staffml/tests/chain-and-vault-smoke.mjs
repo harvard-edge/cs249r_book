@@ -128,6 +128,28 @@ async function test6_hierarchy_doesnt_break_runtime(page) {
   }
 }
 
+async function test8_explore_tier_filter(page) {
+  console.log("\n[8] explore page tier filter (Phase 2.3 deferred)");
+  await page.goto(`${BASE}/explore`, { waitUntil: "networkidle", timeout: 15000 });
+  await page.waitForTimeout(1500);
+
+  // The Tier filter dropdown should be present and default to "Primary chains only".
+  const tierSelect = page.locator('select').filter({ hasText: "Primary chains only" }).first();
+  const tierVisible = await tierSelect.isVisible().catch(() => false);
+  record("tier filter dropdown rendered", tierVisible);
+
+  // Switch to "All chains" — secondary-tier questions must become reachable.
+  // We don't assert specific count deltas (corpus changes) — just that the
+  // option exists, switching it doesn't crash, and the page stays interactive.
+  if (tierVisible) {
+    await tierSelect.selectOption("all").catch(() => {});
+    await page.waitForTimeout(700);
+    const errorPresent = await page.getByText(/Error|crash|undefined is not/i)
+      .first().isVisible().catch(() => false);
+    record("explore stays interactive after switching tier=all", !errorPresent);
+  }
+}
+
 async function test7_tier_aware_chain_routing(page) {
   console.log("\n[7] tier-aware chain routing (Phase 2 — primary default, secondary opt-in)");
 
@@ -178,6 +200,7 @@ async function main() {
     await test5_chain_badge_or_indicator(page);
     await test6_hierarchy_doesnt_break_runtime(page);
     await test7_tier_aware_chain_routing(page);
+    await test8_explore_tier_filter(page);
   } finally {
     await browser.close();
   }

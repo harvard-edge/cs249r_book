@@ -7,24 +7,27 @@ topic: collective-communication
 competency_area: networking
 bloom_level: create
 phase: both
-title: The InfiniBand Adaptive Routing Loop
+title: Adaptive Routing Caused NCCL Packet Reordering
 scenario: You are running a 1,000 GPU training job over a massive InfiniBand network. To maximize bandwidth, you enable Adaptive Routing (AR), allowing the network to dynamically send packets down the least congested paths. Throughput improves, but occasionally, NCCL crashes with an unrecoverable timeout error during a global AllReduce. The network cables and switches are perfectly healthy.
-question: "What did Adaptive Routing do to the packets to break NCCL?"
+question: What did Adaptive Routing do to the packets to break NCCL?
 details:
-  realistic_solution: Adaptive Routing caused out-of-order packet delivery that broke NCCL. InfiniBand AR dynamically routes packets down different physical paths based on congestion. Since paths have different latencies, packets arrive out of order. NCCL's AllReduce assumes in-order delivery. When packets arrive out of order, the reduction produces incorrect partial sums, triggering a consistency check timeout. The fix is enabling Adaptive Routing with reordering support (AR-RO).
+  realistic_solution: Adaptive Routing caused packets from the same collective flow to arrive out of order. InfiniBand AR can choose different physical paths as congestion changes, and those paths can have different latency. NCCL collectives and the underlying transport configuration must either preserve packet/message ordering for a flow or explicitly support reordering. If the fabric routes traffic in a way the software stack is not configured to tolerate, progress can stall and NCCL may report an unrecoverable timeout even though no cable or switch has failed. The remedy is to disable AR for the affected traffic class or configure the fabric, service levels, and NCCL/IB transport so ordering is preserved or reordering is handled correctly; it is not simply a generic AR-RO toggle.
   common_mistake: |
     **The Pitfall:** Assuming packets got dropped by a congested switch.
     **The Rationale:** Candidates apply TCP/IP Ethernet intuition to InfiniBand, forgetting that IB uses credit-based flow control and is virtually lossless.
     **The Consequence:** Misdiagnosing the root cause and failing to identify out-of-order delivery as the culprit.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       * Path A: 2 us congestion delay.
-       * Path B: 0 us congestion delay.
-       * 1,000 GPU AllReduce running for 12 hours.
-    2. **Calculations:**
-       * Packet 2 beats Packet 1 by 2 us via Path B.
-       * Billions of packets transmitted.
-    3. **Conclusion & Interpretation:** **Result: 100% Failure Rate (Latency-Bound)**. The statistical probability of a micro-congestion event reordering a critical packet approaches 100% over the run.
+    **Assumptions & Constraints:**
+    - Adaptive Routing may send packets over different network paths.
+    - Different paths can have different queueing delay and propagation latency.
+    - NCCL collectives require the IB transport/fabric configuration to preserve ordering or tolerate reordering.
+
+    **Calculations:**
+    - No probability estimate is needed. A later packet routed over a less congested path can arrive before an earlier packet routed over a slower path.
+    - In a long-running 1,000-GPU AllReduce, even rare ordering violations can stall collective progress if the software stack expects in-order delivery.
+
+    **Conclusion & Interpretation:**
+    - **Result: Ordering-Semantics Failure**. The failure mode is packet/message reordering from adaptive path selection, not packet loss or bad hardware.
 status: published
 provenance: imported
 requires_explanation: false

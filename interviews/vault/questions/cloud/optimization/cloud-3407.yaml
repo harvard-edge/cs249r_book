@@ -8,10 +8,10 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: Diagnosing IO-Bound FlashAttention on TPU v5e
-scenario: 'You are optimizing an LLM training job on a TPU v5e using a FlashAttention-style mechanism. The current implementation uses 64x64 tiles for QKV matrices, with a hidden dimension of 8192 and sequence length of 4096. Despite an IO-aware tiling strategy, profiling indicates the attention layer is significantly IO-bound.'
-question: 'How would you diagnose why 64x64 FlashAttention tiles are IO-bound on TPU v5e, and which metrics would guide you?'
+scenario: You are optimizing an LLM training job on a TPU v5e using a FlashAttention-style mechanism. The current implementation uses 64x64 tiles for QKV matrices, with a hidden dimension of 8192 and sequence length of 4096. Despite an IO-aware tiling strategy, profiling indicates the attention layer is significantly IO-bound.
+question: How would you diagnose why 64x64 FlashAttention tiles are IO-bound on TPU v5e, and which metrics would guide you?
 details:
-  realistic_solution: 'To diagnose, first leverage TPU profiling tools (e.g., TensorBoard''s HBM usage, execution breakdown, memory access patterns, and HBM read/write stalls) to confirm the IO bottleneck. Analyze the HBM bandwidth utilization during attention operations; a truly IO-bound kernel should be saturating or nearly saturating the 1.6 TB/s peak bandwidth. If utilization is low, it points to other issues like poor kernel launch configuration, control flow overhead, or data dependencies preventing full bandwidth utilization. Investigate the chosen tile sizes (64x64) in conjunction with the hidden dimension (8192) and sequence length (4096). Experiment with adjusting tile dimensions (e.g., 128x128, 256x256 for QKV blocks) to find a sweet spot that maximizes data reuse within fast on-chip memories (SRAM) and minimizes HBM accesses, ensuring alignment with TPU''s memory access units. Verify that the ''online softmax'' component of FlashAttention is implemented efficiently, as any recomputation or temporary memory pressure here can also contribute to IO bottlenecks. Examine generated assembly/IR for memory access patterns, looking for uncoalesced access or unexpected spills.'
+  realistic_solution: Use the TPU profiler and TensorBoard trace views to prove the bottleneck before changing tile sizes. Check achieved HBM read/write bandwidth, memory-stall time, MXU utilization, arithmetic intensity, on-chip memory use, and spill or rematerialization counts for the attention program. A true IO-bound 64x64 FlashAttention kernel will show low MXU utilization, intensity below the v5e ridge point, and high HBM traffic from reloading Q/K/V tiles or spilling online-softmax state. If HBM bandwidth is not high, look instead for compiler scheduling, collectives, control-flow, or fusion problems. Only then test tile or fusion changes that fit TPU on-chip memory and vectorization constraints, and verify in the profiler that they reduce HBM bytes per token without introducing spills.
   common_mistake: |
     **The Pitfall:** Having a superficial understanding of IO-aware design, leading to fixed tiling strategies that are not tailored to the specific hardware.
     **The Rationale:** Engineers often focus predominantly on theoretical computational efficiency (FLOPS) without adequately analyzing actual memory bandwidth utilization or the impact of tile dimensions on SRAM residency.
@@ -20,11 +20,12 @@ details:
     1. **Assumptions & Constraints:**
        - TPU v5e Peak Compute: 197 TFLOPS (BF16).
        - TPU v5e Memory Bandwidth: 1.6 TB/s.
+       - Diagnose using measured arithmetic intensity, achieved HBM bandwidth, and stall counters rather than tile size alone.
     2. **Calculations:**
-       - Hardware Ridge Point = 197e12 FLOPs / 1.6e12 Bytes = 123 FLOPs/Byte.
-       - Attention tile effective arithmetic intensity with small 64x64 tiles is often < 30 FLOPs/Byte due to repeated HBM trips.
-       - Required bandwidth for 197 TFLOPS at 20 FLOPs/Byte = 197e12 / 20 = 9.85 TB/s.
-    3. **Conclusion & Interpretation:** **Result: IO-Bound**. Since 9.85 TB/s >> 1.6 TB/s available bandwidth, the 64x64 tile size mathematically guarantees an HBM bandwidth bottleneck.
+       - Hardware Ridge Point = 197e12 FLOPs/s / 1.6e12 bytes/s ≈ 123 FLOPs/byte.
+       - If profiling estimates effective attention intensity near 20 FLOPs/byte after tile reloads and spills, the bandwidth-limited compute ceiling is 20 * 1.6 TB/s = 32 TFLOPS, far below the 197 TFLOPS peak.
+       - At 30 FLOPs/byte, the ceiling is 48 TFLOPS; still below peak, so high HBM utilization plus memory stalls would confirm an IO-bound kernel.
+    3. **Conclusion & Interpretation:** **Result: Likely IO-Bound if Measured Intensity Is Below the Ridge Point**. A 64x64 tile does not prove the bottleneck by itself; confirm it with HBM bandwidth, stall metrics, spills, and arithmetic intensity, then test larger or better-fused tiles.
 status: published
 provenance: imported
 requires_explanation: false

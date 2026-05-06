@@ -8,11 +8,11 @@ competency_area: memory
 bloom_level: apply
 phase: training
 title: Calculate Activation Checkpointing Memory Savings
-scenario: 'You are training a 2B parameter Transformer on a single 80GB A100 GPU using mixed precision (FP16). The model state (weights, gradients, Adam optimizer) consumes 32GB. Your batch size is 32, sequence length is 2048, and the model has 24 layers. Without checkpointing, the forward pass stores 4.5GB of activations per layer. You apply activation checkpointing at every layer boundary, where the boundary tensor size is 256MB.'
-question: 'What is the peak activation memory with layer-boundary checkpointing, and will the 2B model OOM on an 80GB A100?'
+scenario: You are training a 2B parameter Transformer on a single 80GB A100 GPU using mixed precision (FP16). The model state (weights, gradients, Adam optimizer) consumes 32GB. Your batch size is 32, sequence length is 2048, and the model has 24 layers. Without checkpointing, the forward pass stores 4.5GB of activations per layer. You apply activation checkpointing at every layer boundary, where the boundary tensor size is 256MB.
+question: What is the peak activation memory with layer-boundary checkpointing, and will this training step fit on an 80GB A100?
 details:
   realistic_solution: |
-    Calculate the stored checkpoint memory and add the peak memory required to recompute a single layer during the backward pass.
+    Store the layer-boundary checkpoints, then add the peak activation memory needed while recomputing one layer during the backward pass. Under the idealized assumption that recomputation is scheduled one layer at a time and recomputed intermediates do not overlap across layers, the checkpoints use 24 * 256MB = 6.0GB and the extra recompute peak is one layer's 4.5GB. Peak activation memory is therefore about 10.5GB. Adding the 32GB model state gives 42.5GB total, leaving 37.5GB of headroom on an 80GB A100, so the model should not OOM from these components.
   common_mistake: |
     **The Pitfall:** Forgetting to add the memory of the currently executing layer.
     **The Rationale:** Candidates assume only the stored checkpoints consume memory during the backward pass.
@@ -22,15 +22,17 @@ details:
     - Model state: 32GB. 80GB A100 GPU.
     - 24 layers, 4.5GB activations per layer (without checkpointing).
     - Checkpointing at layer boundaries (256MB boundary tensor).
+    - Idealized schedule: one layer is recomputed at a time, with no overlap between recomputed layer activations.
 
     **Calculations:**
     - Stored checkpoints = 24 layers * 0.25GB = 6.0GB.
-    - Recomputation peak = 4.5GB.
-    - Total activation memory = 6.0GB + 4.5GB = 10.5GB.
+    - Recomputation peak = one layer's activations = 4.5GB.
+    - Peak checkpointed activation memory = stored checkpoints + one recomputed layer = 6.0GB + 4.5GB = 10.5GB.
     - Total GPU memory = 32GB (model) + 10.5GB (activations) = 42.5GB.
+    - Headroom = 80GB - 42.5GB = 37.5GB.
 
     **Conclusion & Interpretation:**
-    - **Result: The model will comfortably fit in the 80GB A100 without OOMing (42.5GB total). (Memory-Capacity-Bound Computation)**. Activation checkpointing solves the forward pass bloat.
+    - **Result: about 10.5GB peak activation memory under the idealized non-overlap schedule; 42.5GB total, so no OOM under these assumptions.** A less efficient checkpoint schedule could add extra temporary activation overlap.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,24 +11,30 @@ title: The SolarSentry Dashcam Meltdown
 scenario: You are the Principal Engineer at a startup building the 'SolarSentry', a smart dashcam for cars. The key feature is a 'Sentry Mode' that uses ML to detect threats while the car is parked and turned off.
 question: What dynamic architecture lets SolarSentry detect parked-car threats within thermal and battery constraints?
 details:
-  realistic_solution: 'The architecture must be a dynamic, multi-stage system that treats compute as a budget constrained by thermals, not just performance.'
+  realistic_solution: |
+    Use a tiered sensing and inference architecture. Keep only an ultra-low-power PIR or radar wake sensor always on. When it fires, wake a low-resolution image pipeline and tiny classifier for motion type, distance, and false-positive filtering. Only high-confidence candidates start the full threat model, higher-resolution capture, local recording, and notification path. Add a power manager that enforces battery state-of-charge limits, cabin-temperature limits, and a rolling thermal budget; under heat or low battery it should shorten clips, raise trigger thresholds, reduce frame rate, or fall back to event snapshots. The key design is conditional escalation plus thermal and battery gating, not an always-on full model.
   common_mistake: |
     **The Pitfall:** Proposing a static duty cycle or purely model-centric optimizations like quantization.
     **The Rationale:** Engineers treat the problem as a standard ML efficiency task, underestimating the strict thermal physics of a closed, hot car.
     **The Consequence:** The device either misses critical events while sleeping or rapidly overheats and shuts down, rendering the security feature useless.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Car battery capacity: 60Ah * 12V = 720Wh (670Wh usable).
-    - Power states: PIR sensor (0.01W), Low-res motion (0.5W), Full model (2W).
-    - Trigger rate: 1% of the time.
+    - Car battery capacity: 60Ah * 12V = 720Wh, with 670Wh usable for the example.
+    - Power states: PIR sensor always on (0.01W), low-res motion stage (0.5W), full model stage (2W).
+    - PIR candidates occur 1% of parked time in the design target, so the low-res stage runs for 1% duty cycle.
+    - Of PIR candidates, 10% are high-confidence enough to run the full model, so the full model duty cycle is 0.1% of total parked time.
+    - The stages are conditional: PIR is always on; low-res runs after PIR; full model runs only after a low-res candidate.
 
     **Calculations:**
     - Always-on ML lifespan: 670Wh / 2W = 335 hours (14 days).
-    - Tiered Duty Cycle Average Power: 0.01W + (0.01 * 0.5W) + (0.001 * 2W) = 0.017W.
-    - Tiered lifespan: 670Wh / 0.017W = 39,412 hours.
+    - Low-res average power: 0.01 * 0.5W = 0.005W.
+    - Full-model average power: 0.01 * 0.10 * 2W = 0.002W.
+    - Tiered duty-cycle average power: 0.01W + 0.005W + 0.002W = 0.017W.
+    - Tiered lifespan from battery alone: 670Wh / 0.017W = 39,412 hours under the target event rate.
+    - Thermal guardrail: the 2W full model is allowed only in short bursts; sustained hot-cabin operation should force thresholds, frame rate, or recording duration down.
 
     **Conclusion & Interpretation:**
-    - **Result: 39,412 hours (Power-Bound)**. The multi-stage life extends to 4.5 years, proving a tiered architecture is essential for power-bound systems.
+    - **Result: Battery- and thermal-gated architecture.** Under the stated trigger rates, the tiered design makes average battery draw tiny compared with an always-on full model. Real deployments must cap burst duration and degrade gracefully when cabin temperature or event frequency exceeds the design target.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,7 +8,7 @@ competency_area: latency
 bloom_level: apply
 phase: inference
 title: The Mobile App's Cloud Bottleneck
-scenario: You are a Staff ML Engineer on a mobile team launching an 'AI Retouch' feature. The user's phone sends data to a cloud endpoint that runs a large model on a multi-GPU server, and the result is streamed back. The end-to-end P99 latency target is 500ms, but live measurements show it's closer to 850ms.
+scenario: You are a Staff ML Engineer on a mobile team launching an 'AI Retouch' feature. The user's phone sends data to a cloud endpoint that runs a large model on a multi-GPU server, and the result is streamed back. The end-to-end P99 latency target is 500ms, but live measurements show it is closer to 850ms. Backend tracing isolates 250ms of that time to a 50MB CPU-to-GPU staging step over PCIe Gen5 inside the server.
 question: Why does the AI Retouch backend spend 250ms moving only 50MB over PCIe Gen5?
 details:
   realistic_solution: |
@@ -20,18 +20,19 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Payload size: 50 MB total.
-       - Bus limits: PCIe Gen5 (single transfer latency ~1 µs, bandwidth is immense and a non-factor for 50MB).
-       - Observed Transfer Time: 250 ms (250,000 µs).
+       - PCIe Gen5 x16 usable bandwidth: roughly 50-60 GB/s after overhead.
+       - Observed CPU-to-GPU staging time: 250 ms.
     2. **Calculations:**
-       - Implied number of sequential transfers: 250,000 µs observed latency / 1 µs hardware latency penalty = 250,000 round-trips.
-       - Average payload per transfer: 50 MB / 250,000 transfers = 200 bytes per transfer.
+       - Expected bulk transfer time: 50 MB / 50 GB/s = 0.001 s = 1 ms.
+       - Observed slowdown: 250 ms / 1 ms = 250x slower than a bulk transfer.
+       - If the runtime issued 5,000 serialized copies, each copy would average 50 MB / 5,000 = 10 KB and would need only ~50 µs of synchronization/launch overhead to total 250 ms.
     3. **Conclusion & Interpretation:**
-       **Result: 200 bytes per transfer (I/O Latency-Bound).** The math definitively proves the software is fragmenting the transfer, triggering hundreds of thousands of synchronization barriers.
+       **Result: Latency-Bound Fragmented I/O.** 50MB is too small to explain 250ms through PCIe Gen5 bandwidth; the plausible bottleneck is many small serialized transfers and synchronization barriers.
   options:
-  - The PCIe Gen5 bus is saturated and cannot handle the 50MB transfer load efficiently.
-  - Model execution (400ms) is the primary bottleneck; the transfer time is secondary and should be ignored.
-  - The data is being moved in thousands of small chunks, making the transfer latency-bound.
-  - The server's InfiniBand network is causing contention on the PCIe bus, slowing down the transfer.
+    - The PCIe Gen5 bus is saturated and cannot handle the 50MB transfer load efficiently.
+    - Model execution (400ms) is the primary bottleneck; the transfer time is secondary and should be ignored.
+    - The data is being moved in thousands of small chunks, making the transfer latency-bound.
+    - The server's InfiniBand network is causing contention on the PCIe bus, slowing down the transfer.
   correct_index: 2
 status: published
 provenance: imported

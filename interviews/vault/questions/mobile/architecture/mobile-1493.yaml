@@ -11,23 +11,26 @@ title: Designing Mobile Attention for Hexagon NPU
 scenario: We are deploying a 7B parameter LLM on a flagship mobile device featuring the Qualcomm Hexagon NPU (Snapdragon 8 Gen 3) with a shared 12 GB LPDDR5X memory pool. The product requirements demand a context window of 8K tokens for a chat application, but standard multi-head attention (MHA) exceeds our memory bandwidth and capacity constraints during the decode phase.
 question: How would you design an attention architecture specification that fits within the NPU's capabilities and memory limits while maintaining acceptable generation quality?
 details:
-  realistic_solution: The optimal design replaces MHA with Grouped-Query Attention (GQA) combined with an INT8 KV cache quantization. GQA strikes a balance between the memory bandwidth savings of MQA and the quality of MHA, reducing the KV cache size by a factor of 8 (assuming 32 heads grouped to 4). Quantizing the KV cache to INT8 aligns perfectly with the Hexagon NPU's 45 TOPS INT8 peak performance, significantly reducing memory traffic on the shared LPDDR5X bus during the memory-bound decode phase.
+  realistic_solution: Specify Grouped-Query Attention (GQA) with an INT8 KV cache as a balanced mobile decode design, not as a universal optimum. GQA reduces KV-cache capacity and bandwidth versus MHA while preserving more generation quality than single-KV-head MQA, because several KV groups still represent different attention patterns. The specification should set the number of KV groups, context limit, cache quantization format, and fallback quality checks together, then verify that decode remains memory-feasible on shared LPDDR5X.
   common_mistake: |
     **The Pitfall:** Suggesting standard Multi-Query Attention (MQA) or complex sparse attention patterns.
     **The Rationale:** Candidates propose MQA without considering accuracy degradation for a 7B model, or suggest sparse patterns that map poorly to static tensor operations on an NPU.
     **The Consequence:** Poor generation quality or incredibly low NPU utilization due to unsupported dynamic memory access patterns.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Standard MHA KV Cache (8K tokens, FP16): 4 GB.
-    - GQA ratio: 4 heads instead of 32 (8x reduction).
-    - INT8 Quantization: 2x reduction from FP16.
+    - Example 7B decoder: 32 layers, 32 query heads, 128-dimensional heads.
+    - Context length: 8K tokens.
+    - FP16 KV cache stores key and value tensors: 2 bytes per element.
+    - GQA design: 4 KV heads instead of 32 query heads.
+    - INT8 KV cache: 1 byte per element plus small scale metadata.
 
     **Calculations:**
-    - Total memory reduction factor: 8 x 2 = 16x.
-    - Final GQA INT8 KV Cache: 4 GB / 16 = 256 MB.
+    - MHA FP16 KV cache = 32 layers * 8192 tokens * 2 tensors * 32 heads * 128 dims * 2 bytes ≈ 4.29 GB.
+    - GQA FP16 KV cache with 4 KV heads = 4.29 GB * (4 / 32) ≈ 536 MB.
+    - GQA INT8 KV cache ≈ 536 MB / 2 ≈ 268 MB, before scale metadata.
 
     **Conclusion & Interpretation:**
-    - **Result: 256 MB (Memory-Feasible)**. This perfectly maps to the NPU's INT8 peak performance while saving massive memory bandwidth.
+    - **Result: ~270 MB KV cache (Memory-Feasible)**. The gain comes from reducing cache capacity and LPDDR5X traffic during decode; GQA is preferred over MQA because it keeps more attention diversity and usually preserves quality better.
 status: published
 provenance: imported
 requires_explanation: true

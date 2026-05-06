@@ -12,7 +12,7 @@ scenario: Your LLM serving cluster disaggregates prefill (compute-bound, H100s) 
 question: How would you overlap a 4GB KV-cache transfer over 100 Gbps Ethernet to minimize time-to-first-token in disaggregated serving?
 details:
   realistic_solution: |
-    Implement streaming KV transfer with incremental decode start. Instead of waiting for the full 4GB block, stream the KV cache layer-by-layer as the prefill completes. As each 50MB layer arrives on the decode GPU, immediately begin decode processing for that layer. Pipelining network transfer against decoding significantly masks latency, but the underlying 100 Gbps Ethernet remains an architectural bottleneck that warrants 400 Gbps InfiniBand.
+    Implement streaming KV transfer with incremental decode start. After prefill produces the KV cache, send it layer-by-layer instead of waiting for a monolithic 4GB copy. As each 50MB layer arrives on the decode GPU, immediately run that layer's first-token decode slice while later layers continue transferring. With one transfer stream and one decode stream, transfer is the bottleneck: each layer transfer takes 4ms and each decode slice takes 0.6ms, so TTFT is about 521ms. The 100 Gbps Ethernet link remains the architectural bottleneck; moving to 400 Gbps cuts the transfer stage and makes the pipeline much closer to decode-bound.
   common_mistake: |
     **The Pitfall:** Waiting for the entire KV cache transfer to complete before starting the decode phase.
     **The Rationale:** Engineers default to sequential request processing flows, treating KV cache materialization as an atomic dependency rather than a streamable resource that can be pipelined layer-by-layer.
@@ -28,10 +28,12 @@ details:
     - Sequential Transfer: 4 GB / 12.5 GB/s = 320 ms transfer time.
     - Sequential TTFT: 200ms prefill + 320ms transfer + 48ms decode = 568ms.
     - Pipelined Transfer: 50 MB per layer / 12.5 GB/s = 4 ms per layer.
-    - Pipelined TTFT: 200ms prefill + 4ms (first layer transfer) + (80 * max(4ms, 0.6ms)) = 200 + 4 + 320 = 524ms.
+    - Pipeline model: after prefill, transfer layer 1, decode layer 1 while layer 2 transfers, and continue with one transfer stage and one decode stage.
+    - Critical path after prefill = first transfer + 79 bottleneck slots + final decode slice.
+    - Pipelined TTFT: 200ms + 4ms + 79 * max(4ms, 0.6ms) + 0.6ms = 520.6ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Network-Bound.** Even with layer-by-layer streaming, the 4ms transfer time dominates the 0.6ms decode time per layer. Migrating to a 400 Gbps InfiniBand network drops layer transfer to 1ms, slicing TTFT down to 281ms.
+    - **Result: Network-Bound.** Even with layer-by-layer streaming, the 4ms transfer time dominates the 0.6ms decode time per layer. Migrating to a 400 Gbps InfiniBand network drops layer transfer to 1ms, slicing TTFT down significantly.
 status: published
 provenance: imported
 requires_explanation: true

@@ -7,26 +7,30 @@ topic: memory-hierarchy-design
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: Memory Hierarchy Tradeoffs for LLM Deployment on Qualcomm Cloud AI 100
-scenario: You are tasked with deploying a large language model (LLM) quantized to INT8 on the Qualcomm Cloud AI 100. This device boasts 400 TOPS (Tera Operations Per Second) for INT8, features 32 GB LPDDR4x memory, and operates within a strict 75W power budget. The LLM's parameter count is substantial, exceeding the capacity of typical on-chip caches and fast memories.
-question: How do LPDDR4x capacity, bandwidth, latency, and the 75W power limit constrain real INT8 throughput on Cloud AI 100 for this large LLM?
+title: Memory Hierarchy Tradeoffs for LLM Deployment on an Edge Accelerator
+scenario: You are tasked with deploying a large language model (LLM) quantized to INT8 on an edge inference accelerator. The device offers 400 TOPS INT8 peak compute, 32 GB LPDDR4x memory, about 34 GB/s memory bandwidth, and a strict 75W power budget. The LLM's parameter count is substantial, exceeding the capacity of typical on-chip caches and fast memories.
+question: How do LPDDR4x capacity, bandwidth, latency, and the 75W power limit constrain real INT8 throughput for this large LLM?
 details:
-  realistic_solution: Assess the model's arithmetic intensity mathematically. Recommend aggressive operator fusion, KV-cache tiling, and INT8 downcasting strategies specifically to alleviate the crushing discrepancy between 400 TOPS execution units and narrow 34 GB/s LPDDR4x bus constraints.
+  realistic_solution: |
+    Start with a workload-specific memory model, not peak TOPS alone. A 32B INT8 model would need about 32 GB for weights alone, leaving no practical room in a 32 GB device for KV-cache, activations, runtime buffers, or OS/driver reservations. The 400 TOPS peak also requires very high operational intensity: with 34 GB/s of LPDDR4x bandwidth, the workload would need roughly 11,800 INT8 ops per byte fetched to stay compute-bound. Autoregressive LLM inference often falls below that without strong weight reuse, batching, tiling, and cache locality, while KV-cache traffic grows with context. Fusion, smaller batches, shorter context windows, and weight/KV-cache quantization help, but real throughput is constrained jointly by capacity, bandwidth reuse, memory latency, and the 75W sustained power envelope.
   common_mistake: |
     **The Pitfall:** Overemphasizing peak compute (TOPS) while ignoring memory bandwidth.
     **The Rationale:** Candidates often assume memory access is infinitely fast or ignore the power cost of memory transfers, focusing purely on theoretical INT8 throughput.
     **The Consequence:** An incomplete analysis that misses the real-world operational intensity requirements needed to prevent memory starvation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Compute Capacity: 400 TOPS INT8 (400 * 10^12 Ops/s).
-    - Memory Bandwidth: Peak LPDDR4x bandwidth ≈ 34 GB/s (34 * 10^9 Bytes/s).
+    - Compute capacity: 400 TOPS INT8 peak.
+    - LPDDR4x bandwidth: 34 GB/s peak.
+    - Capacity: 32 GB total for weights, KV-cache, activations, runtime buffers, and OS/driver reservations.
 
     **Calculations:**
-    - Required Operational Intensity (Ops/Byte) to saturate compute = Compute Capacity / Memory Bandwidth.
-    - Operational Intensity = (400 * 10^12 Ops/s) / (34 * 10^9 Bytes/s) = 11,764.7 Ops/Byte.
+    - A 32B-parameter INT8 model is about 32 GB for weights alone, so a 32 GB memory limit cannot hold it plus KV-cache, activations, runtime buffers, and OS/driver reservations.
+    - Operational intensity needed to reach peak compute = 400e12 ops/s / 34e9 bytes/s = about 11,765 ops/byte.
+    - If the decode workload cannot reuse fetched weights and KV blocks enough to approach that intensity, LPDDR4x bandwidth rather than 400 TOPS sets throughput.
+    - The 75W envelope limits sustained memory and compute clocks, so measured bandwidth and TOPS may be below peak during continuous generation.
 
     **Conclusion & Interpretation:**
-    - **Result: ~11,765 Ops/Byte (Memory-Bandwidth-Bound)**. The system requires massive data reuse (fusion/tiling) to avoid memory starvation.
+    - **Result: workload memory-bound unless data reuse is high and the model comfortably fits.** Capacity limits model/context size, bandwidth and reuse determine the achievable token rate, latency hurts small-batch generation, and the 75W limit caps sustained throughput.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,7 @@ title: KV-Cache Quantization to INT8
 scenario: Your Llama 3 70B serving deployment on 4 GPUs can handle 64 concurrent requests at 4K context with BF16 KV-cache. Your PM wants to double concurrency to 128 without adding GPUs. You propose quantizing the KV-cache from BF16 to INT8. Analyze the memory savings and quality impact.
 question: Can INT8 KV-cache quantization double concurrency from 64 to 128 at 4K context, and what quality impact should you expect?
 details:
-  realistic_solution: 'Memory analysis: BF16 KV-cache per request at 4K context = 4096 * 320 KB = 1.31 GB. For 64 requests: 83.9 GB. With INT8: 4096 * 160 KB = 655 MB per request, 64 requests = 41.9 GB. Savings: 42 GB — enough to serve 128 requests (128 * 655 MB = 83.9 GB, same as the original BF16 budget). Quality impact: (1) Attention scores are computed as Q*K^T. INT8 keys introduce ±0.5 LSB error per element. For head_dim=128, the attention logit error is √128 * 0.5 = 5.66 LSB in expectation. Relative to typical attention logit range of ~10-50, this is 11-57% noise — significant. (2) Mitigation: use per-head dynamic quantization (compute scale/zero-point per head per layer) rather than per-tensor. This reduces relative error to <1% for most heads. (3) Empirical results: INT8 KV-cache with per-head quantization shows <0.3% perplexity degradation on short contexts (<4K) but 1-2% on long contexts (>16K) where errors accumulate through many attention steps. For 4K context: acceptable. For 128K: consider FP8 (E4M3) instead.'
+  realistic_solution: 'Memory analysis: BF16 KV-cache per request at 4K context = 4096 x 320 KB = 1,310,720 KB = 1.31 GB. For 64 requests, that is about 83.9 GB. INT8 halves the bytes per token to 160 KB, so one 4K request uses about 655 MB and 128 requests use about 83.9 GB. Thus INT8 can double concurrency if KV cache dominates the memory budget and scheduler/block overheads do not consume the saved memory. Quality impact: INT8 KV-cache is lossy, but per-head or per-channel dynamic scales usually keep 4K-context degradation small. Long-context workloads are more exposed to accumulated quantization error, so validate quality before enabling it globally.'
   common_mistake: |
     **The Pitfall:** Assuming KV-cache quantization is entirely lossless for all sequence lengths.
     **The Rationale:** Candidates equate KV-cache INT8 quantization with standard weight-only quantization techniques, overlooking the autoregressive accumulation of error.
@@ -20,12 +20,14 @@ details:
     1. **Assumptions & Constraints:**
        - Context: 4096 tokens.
        - BF16 Cost: 320 KB/token. INT8 Cost: 160 KB/token.
+       - KV cache is assumed to dominate the incremental memory budget.
     2. **Calculations:**
-       - BF16 Memory (64 req): 4096 * 320 KB * 64 = 83.9 GB.
-       - INT8 Memory (128 req): 4096 * 160 KB * 128 = 83.9 GB.
-       - Error Bound: INT8 ±0.5 LSB. Per-head dynamic relative error <1%.
+       - BF16 per request: 4096 * 320 KB = 1,310,720 KB = 1.31 GB.
+       - BF16 memory for 64 requests: 1.31 GB * 64 = 83.9 GB.
+       - INT8 per request: 4096 * 160 KB = 655,360 KB = 0.655 GB.
+       - INT8 memory for 128 requests: 0.655 GB * 128 = 83.9 GB.
     3. **Conclusion & Interpretation:**
-       - **Result: Memory Capacity-Bound.** Concurrency exactly doubles within the same memory budget, with negligible degradation for short 4K contexts.
+       - **Result: KV-cache-capacity-bound.** INT8 halves KV-cache memory and can double concurrency under the stated memory-dominance assumption, with small but workload-dependent quality risk at 4K context.
 status: published
 provenance: imported
 requires_explanation: false

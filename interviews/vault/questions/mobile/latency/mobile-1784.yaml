@@ -12,21 +12,25 @@ scenario: An on-device LLM assistant on Snapdragon 8 Gen 3 always runs at batch_
 question: How would you explain the utilization gap and propose how to increase decode throughput?
 details:
   realistic_solution: |
-    At batch=1 decode, each token requires loading all 1.5GB model weights once. Memory bandwidth becomes the bottleneck, not compute. Using speculative decoding or smaller quantizations (INT3) increases throughput.
+    At batch=1 decode, the NPU has little parallel work per generated token and spends much of its time waiting on weight, KV-cache, dequantization, and layout traffic. That is why utilization can be low even when user-visible throughput is poor. To increase decode throughput, prioritize mobile-supported memory reductions and data-movement fixes: better weight layout and prefetching, fused dequantization, KV-cache optimization, pruning or distillation to a smaller model, and quantization formats that the Snapdragon stack actually accelerates. Speculative decoding can improve perceived throughput only if the draft model is much cheaper and acceptance is high; it does not remove the memory-bound nature of the target model.
   common_mistake: |
     **The Pitfall:** Increasing batch size to improve NPU utilization.
     **The Rationale:** Candidates apply server-side optimization techniques without realizing that in interactive mobile mode, batch size must remain 1.
     **The Consequence:** Proposing solutions that fundamentally do not apply to the user's workload, failing to address the true memory bandwidth constraint.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model Size: 1.5 GB INT4.
-    - Memory Bandwidth: ~50 GB/s.
-    - NPU Compute: 45 TOPS.
+    - Model size: 1.5 GB INT4.
+    - Approximate memory bandwidth: ~50 GB/s.
+    - Observed decode speed: 10 tok/s.
+    - Simple streaming roofline assumption: up to 1.5 GB of weight traffic per generated token, plus KV-cache and runtime overhead.
 
     **Calculations:**
-    - Theoretical Decode Speed: 1.5 GB / 50 GB/s = 30 ms/token (33 tok/s).
-    - NPU Utilization Limit: (1.5 GB * 2 FLOPs/byte) / 45 TOPS = 6.6% theoretical max.
+    - Ideal memory-only latency: 1.5 GB / 50 GB/s = 30 ms/token, or 33 tok/s.
+    - Observed latency: 1 / 10 tok/s = 100 ms/token.
+    - Effective bandwidth used by weight streaming at observed speed: 1.5 GB * 10 tok/s = 15 GB/s, before KV-cache and overhead.
+    - Gap to ideal memory roofline: 100 ms observed vs 30 ms ideal, so layout, dequantization, cache, and scheduling overheads dominate before peak TOPS is reached.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bandwidth Bound.** The NPU is completely starved waiting for weights; compute optimizations will yield zero benefit.
+    - **Result: Memory and data-movement bound.** Raising peak compute will not fix batch-1 decode by itself; throughput improves by reducing bytes moved per token and making the supported INT4 path more efficient.
 status: published
+provenance: imported

@@ -11,7 +11,7 @@ title: The Autonomous Drone's Latency Crisis
 scenario: You are the lead ML Systems Engineer for a new autonomous delivery drone. The perception system uses two co-packaged accelerator chips on a single board, connected by a high-speed 50 GB/s custom interconnect. The new perception model is a 400MB Vision Transformer that exceeds the 256MB on-chip SRAM of a single accelerator. The drone has a hard real-time deadline of 33ms per frame to detect and avoid obstacles.
 question: Should you use tensor or pipeline parallelism for the 400MB ViT across the two 256MB accelerators, and why?
 details:
-  realistic_solution: Pipeline parallelism is the superior strategy in this edge context. The core issue is the communication overhead relative to the latency budget.
+  realistic_solution: Pipeline parallelism is the preferable strategy in this edge context. The 400MB model cannot fit in one 256MB SRAM, so it must be split, but the split should preserve SRAM headroom for activations, temporary buffers, and runtime metadata while minimizing synchronization. Tensor parallelism can work only if its sharding scheme keeps per-layer collectives small enough for the 33ms frame budget; otherwise, frequent cross-chip synchronization is riskier than sending one boundary activation between contiguous pipeline stages.
   common_mistake: |
     **The Pitfall:** Assuming tensor parallelism is the default solution for all large models.
     **The Rationale:** Engineers accustomed to datacenter environments (NVLink at 900 GB/s) apply the same distributed training intuition to edge devices with 50 GB/s interconnects.
@@ -23,11 +23,12 @@ details:
        - Interconnect: 50 GB/s.
        - Real-time deadline: 33 ms per frame.
     2. **Calculations:**
-       - Pipeline split transfer (e.g., 20 MB activation tensor) = 20 MB / 50 GB/s = 0.4 ms.
-       - Inference compute per chip = 12.5 ms (half of a nominal 25 ms total compute).
-       - Interconnect overhead = 0.4 ms / 12.5 ms = 3.2%.
+       - Minimum model split: 400 MB / 2 = 200 MB per chip, leaving only 56 MB per chip for activations, temporary buffers, and runtime metadata.
+       - Pipeline communication example: one 20 MB boundary activation per frame = 20 MB / 50 GB/s = 0.4 ms.
+       - Tensor-parallel communication example under a simple layer-sharding assumption: if 12 layers each exchange a 20 MB partial activation or reduction result, the wire time is 12 * 0.4 ms = 4.8 ms before collective and launch synchronization overhead.
+       - Communication budget comparison: 0.4 ms is ~1.2% of a 33 ms frame; 4.8 ms is ~14.5% of the frame and the synchronization points can also reduce scheduler slack.
     3. **Conclusion & Interpretation:**
-       - **Result: 0.4 ms transfer time.** Pipeline parallelism adds minimal overhead, perfectly addressing the **Interconnect-Bound** constraints of the edge architecture.
+       - **Result: Pipeline Parallelism Preferred.** Both strategies can split the 400 MB model across two chips, but pipeline parallelism is favored when the layer split leaves enough SRAM headroom and communicates only boundary activations. Tensor parallelism is acceptable only with a sharding plan whose collective traffic and synchronization overhead remain within the 33 ms latency budget.
 status: published
 provenance: imported
 requires_explanation: false

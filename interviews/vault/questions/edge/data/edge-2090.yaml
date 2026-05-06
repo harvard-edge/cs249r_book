@@ -11,7 +11,7 @@ title: 'Edge TPU Storage: Optimizing Data Formats for Real-time Inference Buffer
 scenario: A remote wildlife monitoring system utilizes an edge accelerator (4 TOPS INT8, 2W power budget) for real-time object detection. Due to highly intermittent satellite connectivity, the system must buffer up to 12 hours of processed inference results locally on a small NVMe drive before successful uplink. Each inference produces approximately 10KB of structured metadata and a 50KB cropped image region per frame. The pipeline processes data at 5 FPS.
 question: How would you store and compress 12 hours of inference results at 5 FPS for energy-efficient, reliable local buffering?
 details:
-  realistic_solution: Leverage TFRecord with appropriate compression. TFRecord is designed for efficient serialization of structured data and binary blobs. For compression, GZIP or ZLIB should be favored. While CPU-intensive, these offer superior compression ratios compared to Snappy or LZ4, which is crucial for maximizing the 12-hour buffer capacity. Structuring TFRecords into manageable files optimizes sequential I/O.
+  realistic_solution: Use an append-friendly local buffer made of rotated chunk files, each containing length-prefixed binary records for metadata plus the cropped image bytes, with a small sidecar index for timestamps, object classes, and upload state. Compress images with an image-appropriate codec or quality setting, and use LZ4 or Snappy for metadata/chunk compression when it saves space without burning the 2W power budget; avoid GZIP/ZLIB unless benchmarks show the extra CPU energy is acceptable. Make each chunk independently recoverable with checksums, atomic rename on close, and a write-ahead manifest so power loss does not corrupt the whole 12-hour buffer.
   common_mistake: |
     **The Pitfall:** Defaulting to JSON/CSV or columnar formats like Parquet.
     **The Rationale:** Candidates choose familiar cloud analytics formats without considering edge I/O profiles.
@@ -25,10 +25,12 @@ details:
     **Calculations:**
     - Raw Data Rate: 5 FPS * 60KB = 300 KB/second.
     - Uncompressed Buffer: 300 KB/sec * 3600 sec/hour * 12 hours = ~12.96 GB.
-    - Compressed Buffer (3x GZIP ratio): 12.96 GB / 3 = 4.32 GB.
+    - If cropped images average 2x compression with an image-appropriate codec, image data becomes 50KB / 2 = 25KB per frame.
+    - Metadata plus compressed image payload = 10KB + 25KB = 35KB per frame.
+    - Estimated buffer = 5 FPS * 35KB * 3600 sec/hour * 12 hours = 7.56 GB before chunk indexes and manifests.
 
     **Conclusion & Interpretation:**
-    - **Result: 4.32 GB (Storage-Bound)**. With GZIP compression, the 12-hour buffer safely drops to ~4.3 GB, making local storage highly feasible without blowing the thermal budget.
+    - **Result: about 7.6 GB plus index overhead, storage-feasible but energy-sensitive.** Use image codecs for crops and lightweight chunk compression for metadata; benchmark heavier compression before using it under the 2W budget.
 status: published
 provenance: imported
 requires_explanation: false

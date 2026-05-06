@@ -9,9 +9,9 @@ bloom_level: apply
 phase: both
 title: Calculating Credit Assignment Compute Requirements
 scenario: Your team is training a 1.5-billion parameter Transformer on an 8x NVIDIA A100 node. A researcher proposes solving the credit assignment problem by avoiding backpropagation and instead using parallel finite differences (perturbing each weight slightly and measuring the loss change) to 'perfectly isolate' each weight's contribution. A single forward pass takes 15ms on this node.
-question: "How long would one optimization step take with finite differences versus standard reverse-mode autodiff for the 1.5B-parameter Transformer?"
+question: How long would one optimization step take with finite differences versus standard reverse-mode autodiff for the 1.5B-parameter Transformer?
 details:
-  realistic_solution: Reject the proposal. Finite differences require N+1 forward passes for N parameters, whereas reverse-mode autodiff solves the credit assignment problem for all parameters simultaneously in a single backward pass requiring roughly 2x the compute of the forward pass.
+  realistic_solution: Reject the proposal. Finite differences require about N+1 loss evaluations for N parameters, whereas reverse-mode autodiff obtains gradients for all parameters with one forward pass plus one backward pass. If the backward pass is assumed to cost about 2x a forward pass, a normal training step is about 45ms on this node, while finite differences take about 32.5 days per step even under the optimistic parallelism assumption in the prompt.
   common_mistake: |
     **The Pitfall:** Entertaining the finite difference proposal because "it distributes perfectly" across GPUs.
     **The Rationale:** Candidates fail to recognize that O(N) forward passes for billions of parameters is mathematically absurd, regardless of parallelism.
@@ -19,18 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Parameters: 1.5 billion.
-    - Base forward pass: 15 ms.
-    - Hardware: 8x GPUs (linear scaling assumed).
+    - Base forward pass on the 8x A100 node: 15 ms.
+    - Finite differences require one forward loss evaluation per parameter, plus a baseline; the +1 is negligible at 1.5B.
+    - Reverse-mode step = one forward plus one backward pass.
+    - Assume backward pass costs 2x the forward pass.
 
     **Calculations:**
-    - Finite Differences: Requires N forward passes.
-    - Forward passes needed: 1,500,000,000.
-    - Total time: (1.5e9 passes * 0.015 s) / 8 GPUs = 2,812,500 seconds.
+    - Finite differences: 1.5e9 * 0.015 s = 22,500,000 seconds on the node.
+    - With the proposal's optimistic 8-way independent perturbation parallelism: 22,500,000 / 8 = 2,812,500 seconds.
     - 2,812,500 seconds ≈ 32.5 days.
-    - Backprop time: ~2x forward time = 30 ms. Total step = 45 ms.
+    - Reverse-mode step: 15 ms forward + 30 ms backward = 45 ms.
+    - Slowdown = 2,812,500 s / 0.045 s ≈ 62.5 million times.
 
     **Conclusion & Interpretation:**
-    - **Result: 32.5 days/step (Compute-Bound)**. Finite difference requires 32.5 days per step, making it ~100 million times slower than backprop.
+    - **Result: 32.5 days/step vs 45 ms/step (Compute-Bound)**. Finite differences are roughly 62.5 million times slower under these assumptions.
 status: published
 provenance: imported
 requires_explanation: false

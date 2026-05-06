@@ -7,11 +7,11 @@ topic: communication-computation-overlap
 competency_area: parallelism
 bloom_level: apply
 phase: both
-title: 'Bucket Fusion Order and Its Effect on First-Bucket Overlap Latency'
+title: Bucket Fusion Order and Its Effect on First-Bucket Overlap Latency
 scenario: In DDP, gradient buckets are filled in reverse model order. The first bucket to fill contains the output layer's gradients (~1MB), finishing its AllReduce quickly but starting late. Meanwhile, huge intermediate layer buckets (25MB each) could benefit from earlier AllReduce starts.
 question: How would you form DDP gradient buckets to improve AllReduce overlap for the 1MB output layer and 25MB intermediate layers?
 details:
-  realistic_solution: 'Custom bucket assignment: (1) Group the output layer''s small gradients into the same bucket as the last few intermediate layers. This makes the first bucket larger (25MB) and delays its readiness by only a few ms, but the AllReduce is more bandwidth-efficient. (2) Use DDP''s bucket_cap_mb and find_unused_parameters to control bucketing. (3) Alternative: use gradient_as_bucket_view=True to eliminate buffer copies, and set bucket_cap_mb based on profiling. (4) Advanced: NVIDIA''s Apex DDP allows custom bucket assignments via register_grad_hook_per_bucket.'
+  realistic_solution: 'Custom bucket assignment: (1) Group the output layer''s small gradients into the same bucket as the last few intermediate layers. This makes the first bucket closer to 25MB and delays its readiness by only a few ms, but the AllReduce is more bandwidth-efficient and avoids a latency-dominated tiny collective. (2) In PyTorch DDP, control this with bucket_cap_mb, parameter/module registration order, and profiling-guided bucket sizing; find_unused_parameters is for graph traversal of unused params, not bucket layout. (3) Use gradient_as_bucket_view=True to eliminate buffer copies when compatible. (4) Advanced: use DDP communication hooks for asynchronous reduction, compression, or custom scheduling policy, while keeping bucket boundaries aligned with the backward order.'
   common_mistake: |
     **The Pitfall:** Using the same bucket size for all layers.
     **The Rationale:** The output layer's small gradients create a tiny first bucket that underutilizes AllReduce bandwidth.
@@ -20,14 +20,17 @@ details:
     **Assumptions & Constraints:**
     - AllReduce bandwidth: 900 GB/s.
     - First bucket: 1MB. Optimal first bucket: 25MB.
-    
+    - Each separate collective also pays about 0.05ms of launch/synchronization latency.
+
     **Calculations:**
-    - First Bucket Time: 1MB / 900 GB/s = 0.0011 ms.
-    - Optimal First Bucket Time: 25MB / 900 GB/s = 0.027 ms.
-    - Savings Per Step: ~50 microseconds (by reducing latency overhead of extra calls).
-    
+    - 1MB bandwidth time: 1MB / 900 GB/s = 0.0011 ms.
+    - 25MB bandwidth time: 25MB / 900 GB/s = 0.0278 ms.
+    - Tiny 1MB bucket total is dominated by latency: 0.05ms + 0.0011ms = 0.0511ms.
+    - Fusing the 1MB output gradients into a useful 25MB bucket removes one latency-dominated collective, saving about 0.05ms per exposed step if that call is on the critical path.
+    - Over 200 steps, 0.05ms/step * 200 = 10ms.
+
     **Conclusion & Interpretation:**
-    - **Result: 10ms savings (Latency-Bound)**. Over 200 steps, this saves 10ms of pure communication overhead.
+    - **Result: Latency-Bound Tiny Bucket.** The benefit comes from avoiding an extra small collective and starting larger buckets at better overlap points, not from the bandwidth time of 1MB itself.
 status: published
 provenance: imported
 requires_explanation: false

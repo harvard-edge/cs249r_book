@@ -9,23 +9,29 @@ bloom_level: analyze
 phase: inference
 title: 'Snapdragon NPU LLM Deployment: Cost Analysis'
 scenario: You are deploying a large language model on a mobile device powered by an NPU, which offers 45 TOPS (INT8) and 12 GB of LPDDR5X memory. Your goal is to assess the feasibility of running a 7B parameter LLM.
-question: 'How would you calculate the memory footprint and theoretical sequence length limit for a 7B parameter LLM?'
+question: How would you calculate the memory footprint and theoretical sequence length limit for a 7B parameter LLM?
 details:
-  realistic_solution: 'To optimize for the NPU, one would need to employ techniques such as aggressive quantization (e.g., INT4 or mixed-precision), utilizing fused operations and sparse attention mechanisms, and implementing efficient KV-cache management strategies. Profiling memory bandwidth usage to optimize data movement between LPDDR5X and NPU cores is critical.'
+  realistic_solution: A direct estimate starts with static weights, then reserves memory for the OS/runtime and uses the remaining RAM for KV cache. With INT8 weights, a 7B model needs about 7 GB for parameters. On a 12 GB device with 2 GB reserved, about 3 GB remains for KV cache and activations. Assuming a 32-layer model with hidden size 4096 and FP16 KV cache, each token needs about 32 * 2 * 4096 * 2 = 524,288 bytes, so 3 GB supports roughly 6,100 cached tokens before other activation and allocator overhead. In practice the safe context is lower, so INT4 weights or INT8 KV cache would be needed for longer prompts.
   common_mistake: |
     **The Pitfall:** Underestimating KV-cache memory requirements and ignoring memory access overheads.
     **The Rationale:** Candidates focus heavily on model weights fitting in memory and theoretical NPU TOPS, forgetting that sequence length dynamically consumes massive amounts of RAM and bandwidth.
     **The Consequence:** Deploying a model that immediately OOMs on long inputs or performs at a fraction of theoretical TOPS due to memory stalls.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 7B parameters at INT8 = 7 GB.
-    - 12 GB Total Memory. OS Reserve 2 GB.
+    - 7B parameters quantized to INT8: 1 byte/parameter.
+    - Device RAM: 12 GB; reserve 2 GB for OS/runtime.
+    - Transformer assumption: 32 layers, hidden size 4096, FP16 KV cache.
+    - KV bytes/token = layers * 2 (K,V) * hidden_size * bytes.
 
     **Calculations:**
-    - Available for KV-Cache: 12 GB - 7 GB - 2 GB = 3 GB.
+    - Weight memory = 7B * 1 byte = 7 GB.
+    - Remaining memory = 12 GB - 2 GB - 7 GB = 3 GB.
+    - KV bytes/token = 32 * 2 * 4096 * 2 = 524,288 bytes/token.
+    - Max theoretical cached tokens = 3,000,000,000 / 524,288 ≈ 5,722 tokens.
+    - Using GiB for the 3 GiB remainder gives 3,221,225,472 / 524,288 = 6,144 tokens.
 
     **Conclusion & Interpretation:**
-    - **Result: 3 GB (Memory-Bound)**. 3 GB available for KV-Cache.
+    - **Result: Memory-Capacity Bound.** INT8 weights consume about 7 GB, leaving only about 3 GB for KV cache and activations. The theoretical KV-only limit is roughly 5.7K-6.1K tokens, and the safe production context is lower after runtime buffers.
 status: published
 provenance: imported
 requires_explanation: false

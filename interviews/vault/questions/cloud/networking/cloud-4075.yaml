@@ -11,7 +11,7 @@ title: NIC-Level Traffic Shaping for RDMA Fairness
 scenario: On a multi-tenant 256-GPU cluster, two training jobs share the same physical network. Job A uses 128 GPUs for AllReduce and Job B uses 128 GPUs for pipeline-parallel training. Job A's bursty AllReduce traffic starves Job B's latency-sensitive activation transfers.
 question: How would you design NIC-level traffic shaping so Job A's AllReduce does not starve Job B's latency-sensitive activation transfers?
 details:
-  realistic_solution: 'Push traffic shaping down to the Host Channel Adapter (NIC) using token bucket rate limiters. Throttle Job A''s AllReduce QPs to a hard ceiling (e.g., 300 Gbps) and constrain its maximum burst size (e.g., 32 KB). This explicitly prevents Job A from generating the massive instantaneous incast bursts that overflow switch buffers, guaranteeing Job B maintains uninterrupted, low-latency access to the remaining link bandwidth.'
+  realistic_solution: Push traffic shaping down to the Host Channel Adapter (NIC) using token bucket rate limiters. Throttle Job A's AllReduce QPs to a hard ceiling (e.g., 300 Gbps) and constrain its maximum burst size (e.g., 32 KB). Place Job B's activation QPs in a protected traffic class or explicit reserved share, with DCQCN/PFC settings tuned so the fabric does not pause unrelated latency-sensitive traffic. This explicitly prevents Job A from generating massive instantaneous incast bursts that overflow switch buffers, giving Job B a reserved share of link bandwidth when the shaping policy is enforced.
   common_mistake: |
     **The Pitfall:** Relying strictly on switch-level QoS (Weighted Fair Queueing, strict priority) to manage traffic flows.
     **The Rationale:** Infrastructure engineers default to traditional Top-of-Rack (ToR) switch queuing mechanisms to dictate priority.
@@ -24,12 +24,12 @@ details:
     - Job B: 8MB latency-sensitive activation transfers.
 
     **Calculations:**
-    - Unshaped Incast Burst: 400 Gbps * 60ms = 3 GB payload (overflows switch buffers).
-    - Shaped Job B Reservation: 400 Gbps - 300 Gbps = 100 Gbps guaranteed.
-    - Job B Transfer Latency: 8 MB / (100 Gbps / 8) = 640 μs.
+    - Unshaped Incast Burst: 400 Gbps * 60ms = 24 Gb = 3 GB using decimal GB units.
+    - Shaped Job B Reservation: 400 Gbps - 300 Gbps = 100 Gbps reserved under the policy.
+    - Ideal Job B Serialization Time: 8 MB / (100 Gbps / 8) = 640 μs.
 
     **Conclusion & Interpretation:**
-    - **Result: 640 μs latency (Network-Buffer Bound)**. NIC-level token bucket shaping smooths the incast burst, allowing Job B to cleanly execute 8MB transfers in 640μs.
+    - **Result: 640 μs lower bound under a reserved 100 Gbps share**. NIC-level token bucket shaping smooths Job A's incast burst and makes the 8 MB transfer derivable from the reserved bandwidth, but real end-to-end latency also includes queuing, protocol, and fabric effects.
 status: published
 provenance: imported
 requires_explanation: false

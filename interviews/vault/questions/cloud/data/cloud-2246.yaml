@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: training
 title: The Curriculum Data Mixing Problem
 scenario: 'You are designing the data mixing strategy for a 1 trillion token LLM pre-training run. Your corpus consists of 5 domains: web text (8T tokens), code (2T tokens), scientific papers (500B tokens), books (200B tokens), and math (50B tokens). You need exactly 1T tokens total. A naive approach samples proportionally to availability. However, proportional sampling produces weak math and reasoning.'
-question: "How do you determine the optimal mixture, and what systems constraint makes this problem harder than it appears?"
+question: How do you determine the optimal mixture, and what systems constraint makes this problem harder than it appears?
 details:
-  realistic_solution: 'The optimal mixture requires empirical search because there is no closed-form solution for how domain proportions affect downstream performance. The standard approach: (1) Train small proxy models (1B params, 50B tokens) with different mixtures using a grid or Bayesian optimization over the mixing proportions. (2) Evaluate on a diverse benchmark suite (MMLU, GSM8K, HumanEval, etc.) to find Pareto-optimal mixtures. (3) Apply the winning mixture to the full-scale run. The systems constraint: each domain has a maximum epoch count before overfitting. Math at 50B tokens can be repeated ~4× (200B tokens max) before quality degrades. This creates hard constraints: the mixture must satisfy both the target proportions AND the per-domain epoch limits. This means you need an online curriculum scheduler that tracks per-domain token counts during training and adjusts sampling weights dynamically as small domains hit their repetition limits.'
+  realistic_solution: 'Choose the mixture with empirical proxy sweeps or Bayesian optimization because there is no closed-form mapping from domain proportions to downstream quality. The standard approach: (1) Train small proxy models (1B params, 50B tokens) across candidate mixtures. (2) Evaluate on a diverse benchmark suite (MMLU, GSM8K, HumanEval, etc.) to find Pareto-optimal mixtures. (3) Apply the winning policy to the full-scale run, with guardrails for domain caps. The systems constraint is token-budget and epoch-cap management: each domain has a maximum repeat count before overfitting, so the mixture must satisfy both quality targets and per-domain token limits. Math at 50B available tokens repeated ~4× yields at most 200B math-token draws in this example. You need an online curriculum scheduler that tracks per-domain token counts and adjusts sampling weights dynamically as small domains hit their repetition limits.'
   common_mistake: |
     **The Pitfall:** Upsampling the rare domains to equal proportions.
     **The Rationale:** Assuming equal representation across all domains is optimal without considering domain size limits.
@@ -27,9 +27,11 @@ details:
     - Proxy search time: (20 × 3e20) / (64 × 494.5e12) = 189,585 seconds = ~52.6 hours.
     - Full-scale cost: 70e9 × 1e12 × 6 = 4.2e23 FLOPs.
     - Full-scale time: 4.2e23 / (2000 × 494.5e12) = 424,671 seconds = ~4.9 days.
+    - Math domain cap example: 50B available math tokens x 4 epochs = 200B allowable math-token draws.
+    - In a 1T-token run, a fixed mixture using more than 200B math-token draws would exceed that 4-epoch cap; 20% math exactly consumes the example cap, while lower or staged schedules leave headroom.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound**. The ~52-hour proxy search effectively explores the mixture space, saving potentially weeks of wasted full-scale training.
+    - **Result: Scheduler-Bound**. The FLOP estimates show proxy search is affordable relative to full runs, but the hard systems constraint is bounded per-domain repetition: the scheduler must track domain token counts and dynamically reweight sampling as small domains hit epoch caps.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,26 +8,32 @@ competency_area: optimization
 bloom_level: create
 phase: inference
 title: Ethos-U55 Compiler Tiling for Operator Fallback
-scenario: >
+scenario: |
   You are designing an AOT compilation strategy for the ARM Cortex-M7 + Ethos-U55 (Corstone-300) system. A model contains an unsupported custom activation function sandwiched between two U55-supported Conv2D layers. The intermediate activation is 300 KB, but the system only has 512 KB of shared SRAM, leaving insufficient room for ping-pong buffers.
 question: How can a compiler synthesize tiling and pipelining between the U55 and M7 to avoid spilling a 300 KB activation to external memory?
 details:
-  realistic_solution: >
-    The compiler must implement spatial tiling (strip-mining) and emit a software pipeline. By slicing the graph into smaller execution sub-graphs (e.g., 50 KB tiles), the U55 can compute tile N+1 while the 480 MHz M7 processes the custom activation for tile N. This easily fits within the 512 KB SRAM limit using circular buffers and partially hides the M7's execution latency behind the NPU's throughput.
+  realistic_solution: |
+    The compiler should implement spatial tiling (strip-mining) around the unsupported activation and prove buffer lifetimes for each tile. It can lower the graph into smaller subgraphs, for example 50 KB tiles, with circular SRAM buffers for the U55-produced tile, the M7 fallback tile, and the next U55 input tile. If profiling shows the M7 fallback and U55 kernels can safely overlap without SRAM or DMA contention, the runtime may pipeline adjacent tiles; otherwise the same tiled schedule still avoids full-tensor spilling. The key requirement is a bounded in-SRAM tile arena with runtime validation of ownership, alignment, and producer/consumer ordering.
   common_mistake: |
     **The Pitfall:** Suggesting a naive operator fallback where the full tensor is passed between processors.
     **The Rationale:** Candidates ignore the 512 KB SRAM limit, failing to realize that holding both 300 KB input and 300 KB output tensors requires 600 KB.
     **The Consequence:** The system will suffer an out-of-memory error or disastrous performance from spilling to slow external memory.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Total SRAM: 512 KB. Clock: 480 MHz.
-       - Naive Fallback: 300 KB (in) + 300 KB (out) = 600 KB.
-    2. **Calculations:**
-       - Strip-mining: Slice into 50 KB tiles. 3 buffers = 150 KB.
-       - U55 Tile N+1 (1M MACs @ 256/cycle): ~3,900 cycles (8.1 µs).
-       - M7 Tile N (50K elems @ 10 cycles): 500,000 cycles (1.04 ms).
-    3. **Conclusion & Interpretation:**
-       - **Result: 150 KB SRAM usage.** The pipeline fits in SRAM, but the M7 becomes a severe compute bottleneck, necessitating vectorization to balance the pipeline. **Bottleneck: CPU Fallback Compute.**
+    **Assumptions & Constraints:**
+    - Total SRAM: 512 KB. Clock: 480 MHz.
+    - Naive Fallback: 300 KB (in) + 300 KB (out) = 600 KB.
+    - Tile size must leave room for model arena, DMA descriptors, and scheduler scratch.
+
+    **Calculations:**
+    - Strip-mining: slice the 300 KB activation into 50 KB tiles, requiring 300 / 50 = 6 tiles.
+    - Triple buffering for U55 output, M7 activation, and next U55 input: 3 × 50 KB = 150 KB.
+    - Add 64 KB for DMA descriptors, tile metadata, and alignment guard space: 150 KB + 64 KB = 214 KB.
+    - Remaining SRAM for the rest of the tensor arena and runtime: 512 KB - 214 KB = 298 KB.
+    - This 214 KB arena is the proven bound for the tile handoff buffers and metadata; the rest of the model arena must fit in the remaining 298 KB.
+    - If profiling proves DMA and compute overlap are safe, adjacent tiles can be pipelined with producer/consumer ordering enforced by tile fences; otherwise the same tiled schedule can run sequentially without external spilling.
+
+    **Conclusion & Interpretation:**
+    - **Result: 214 KB bounded handoff arena, leaving 298 KB for the rest of the runtime.** The compiler avoids the impossible 600 KB full-tensor fallback and keeps the handoff in SRAM. The memory proof does not by itself prove a particular three-stage overlap order; overlap should be enabled only after validating DMA, bus, and compute contention.
 status: published
 provenance: imported
 requires_explanation: true

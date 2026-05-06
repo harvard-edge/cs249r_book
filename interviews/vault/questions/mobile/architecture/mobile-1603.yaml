@@ -8,10 +8,11 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: Optimizing On-Device Object Detection for Google Tensor G3
-scenario: 'Your team is developing a new real-time augmented reality application for mobile devices, which relies heavily on on-device object detection. The current baseline object detection model (e.g., a standard ResNet-50 based Faster R-CNN) achieves the required accuracy but is too slow and consumes too much power for real-time operation (targeting <50ms inference latency).'
-question: 'How would you redesign an on-device object detection model to meet sub-50ms latency while preserving accuracy and efficiency?'
+scenario: Your team is developing a new real-time augmented reality application for mobile devices, which relies heavily on on-device object detection. The current baseline object detection model (e.g., a standard ResNet-50 based Faster R-CNN) achieves the required accuracy but is too slow and consumes too much power for real-time operation (targeting <50ms inference latency).
+question: How would you redesign an on-device object detection model to meet sub-50ms latency while preserving accuracy and efficiency?
 details:
-  realistic_solution: 'A realistic solution would involve leveraging a mobile-optimized CNN architecture like MobileNetV3 or EfficientNet (specifically designed for edge devices), incorporating depthwise separable convolutions and inverted residuals to drastically reduce FLOPs and parameter count while maintaining accuracy. The candidate should discuss fine-tuning a pre-trained model for the specific task, utilizing post-training or quantization-aware training to INT8 for efficient execution on the TPU. Furthermore, they should articulate how to map the model operations effectively to the 7.5 TOPS TPU for minimal latency.'
+  realistic_solution: |
+    Replace the two-stage Faster R-CNN style detector with a mobile single-stage detector: MobileNetV3-SSD, YOLO-tiny, EfficientDet-Lite, or a custom anchor-light head on a mobile backbone. Reduce input resolution only as far as accuracy allows, simplify the feature pyramid to the few scales needed by the AR objects, reduce anchor count/classes per location, and use a cheap detection head with fused depthwise and pointwise convolutions. Train with quantization-aware INT8, distill from the accurate baseline, and benchmark pre/post-processing including NMS because those costs can dominate a small detector.
   common_mistake: |
     **The Pitfall:** Proposing to directly quantize the existing large ResNet-50 model without architectural redesign.
     **The Rationale:** Engineers often rely on post-training quantization as a silver bullet for latency, without realizing that macro-architectures built for server GPUs remain inefficient on mobile TPUs.
@@ -19,16 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target Latency: <50ms (0.05s).
-    - TPU Compute: 7.5 TOPS peak (assume conservative 10% utilization = 0.75 TOPS usable).
-    - Model Size Target: INT8 MobileNetV3-small (~2.5M parameters).
+    - TPU Compute: 7.5 TOPS peak; assume 15% sustained utilization for this detector = 1.125 TOPS usable.
+    - Candidate detector: INT8 MobileNetV3-SSD/EfficientDet-Lite class model with about 3-5 GMAC backbone+head cost.
+    - Pre/post-processing and NMS must fit in the same 50ms budget.
 
     **Calculations:**
-    - Max Operations Budget: 0.75 × 10^12 ops/s × 0.05s = 37.5 GFLOPs.
-    - Memory Bandwidth: 2.5MB fits entirely in the TPU's local SRAM cache.
-    - Efficiency Gains: Depthwise separable convolutions reduce FLOPs by 8-9x vs standard ResNet-50.
+    - Compute budget = 1.125e12 ops/s * 0.05s = 56.25 GOPS.
+    - A 5 GMAC detector is roughly 10 GOPS if counting multiply and add separately.
+    - Estimated NPU compute time = 10 GOPS / 1.125 TOPS ≈ 8.9ms.
+    - Allocate 10-15ms for image resize, tensor copies, box decode, and NMS, leaving margin for kernel launch and memory stalls.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound Architecture Optimization**. A MobileNet-based architecture eliminates slow DRAM trips and stays well under the 37.5 GFLOPs budget, easily achieving the **<50ms latency target**.
+    - **Result: Pipeline-Latency Bound.** A mobile single-stage detector with simplified pyramid/head and INT8 QAT can plausibly fit under 50ms, but only if detection overhead and NMS are measured and kept within the non-compute budget.
 status: published
 provenance: imported
 requires_explanation: true

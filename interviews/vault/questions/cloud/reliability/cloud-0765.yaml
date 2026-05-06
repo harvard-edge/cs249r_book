@@ -8,10 +8,10 @@ competency_area: reliability
 bloom_level: create
 phase: training
 title: The Cosmic Ray Divergence
-scenario: 'You are 45 days into a 90-day pre-training run on 4,096 H100 GPUs. The loss curve is smooth, but weekly eval accuracy on a benchmark plateaued 2 weeks ago and is now decreasing. All software checks pass. A hardware engineer suggests a cosmic ray bit flip corrupted a weight weeks ago.'
-question: "How can a cosmic ray bit flip corrupt a model without crashing it, and how do you find which of the 70 billion parameters is wrong?"
+scenario: You are 45 days into a 90-day pre-training run on 4,096 H100 GPUs. The loss curve is smooth, but weekly eval accuracy on a benchmark plateaued 2 weeks ago and is now decreasing. All software checks pass. A hardware engineer suggests a cosmic ray bit flip corrupted a weight weeks ago.
+question: How can a cosmic ray bit flip corrupt a model without crashing it, and how do you find which of the 70 billion parameters is wrong?
 details:
-  realistic_solution: 'Silent Data Corruption (SDC) bypasses ECC because it occurs in logic or unprotected SRAM. A bit flip in a weight''s exponent bits changes the value massively, biasing attention distribution. Training loss decreases as other layers compensate, but capability degrades. Find it by comparing weight statistics against older checkpoints for outliers.'
+  realistic_solution: Silent Data Corruption (SDC) can bypass HBM ECC when it occurs in logic, interconnect, register files, or unprotected SRAM, and it may enter the model state through a bad compute result or checkpoint shard. A bit flip in a BF16 exponent bit can change a weight by orders of magnitude without producing a NaN. You do not find it by scanning 70B parameters manually; isolate it by comparing checkpoint shard hashes, binary-searching between known-good and bad checkpoints, running layer-wise validation/canary activations, and diffing per-layer weight and optimizer statistics to identify the corrupted shard or layer before reloading from a clean checkpoint.
   common_mistake: |
     **The Pitfall:** Assuming ECC memory would catch any bit flip, or that a single weight out of 70 billion can't affect the model.
     **The Rationale:** Candidates don't understand Silent Data Corruption (SDC) in unprotected SRAM/logic, or how a single huge weight can bias attention.
@@ -21,10 +21,11 @@ details:
        - 4,096 GPUs over 45 days. SDC Rate: ~1.5 per 1000 GPU-days.
     2. **Calculations:**
        - Expected SDC events: 4,096 × 45 / 1000 × 1.5 ≈ 276 events.
-       - Weight corruptions: ~1% of events hit weights ≈ 3 corruptions.
-       - Impact of flip: Flipping bit 14 in BF16 multiplies by 2^128 (≈ 3.4e38).
+       - Not every SDC event hits persistent weights; the expected 276 events are a risk budget, not a count of bad parameters.
+       - BF16 layout: 1 sign bit, 8 exponent bits, 7 mantissa bits.
+       - Impact of flip: Changing the highest exponent bit changes the unbiased exponent by 128, so a normal value can scale by 2^128 or 2^-128 depending on direction; lower exponent-bit flips scale by 2^64, 2^32, and so on.
     3. **Conclusion & Interpretation:**
-       **Result: Reliability Bound. A single corrupted weight will completely overwhelm and redirect all attention mass.**
+       **Result: Reliability Bound. Hundreds of expected SDC opportunities over the run justify checkpoint hashes, canary evals, and layer-wise diffs. A corrupted exponent bit can create an extreme outlier, but the practical task is locating the bad checkpoint shard or layer and restoring from a clean state.**
 status: published
 provenance: imported
 requires_explanation: true

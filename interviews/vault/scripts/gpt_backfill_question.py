@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# STATUS (2026-05-03): preserved as a reference pattern — see vault/scripts/DEPRECATED.md
+# §"Preserved for adaptation". OpenAI variant of gemini_backfill_question.py.
+# Useful when the Gemini quota is exhausted or for cross-provider comparison.
+# Verify the OpenAI SDK version + the chat-completions API shape before reuse.
 """Backfill the `question` YAML field across the StaffML corpus with OpenAI.
 
 This is the OpenAI/GPT port of ``gemini_backfill_question.py``. It keeps the

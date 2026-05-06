@@ -8,28 +8,32 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: Multi-Adapter Hot-Swap Serving with S-LoRA
-scenario: 'A serving system hosts 500 LoRA adapters over a single Llama-3 8B base model on 4xH100. Average request rate is 200 QPS with a Zipf distribution (20% of adapters handle 80% of traffic).'
-question: 'How would you load and cache 500 LoRA adapters for the 4xH100 serving system to keep P99 TTFT below 100 ms at 200 QPS?'
+scenario: A serving system hosts 500 LoRA adapters over a single Llama-3 8B base model on 4xH100. Average request rate is 200 QPS with a Zipf distribution (20% of adapters handle 80% of traffic).
+question: How would you load and cache 500 LoRA adapters for the 4xH100 serving system to keep P99 TTFT below 100 ms at 200 QPS?
 details:
-  realistic_solution: 'S-LoRA paged adapter system: maintain a hot-adapter pool in GPU memory (top 100 adapters by request rate = 400MB) and a warm pool on CPU memory (next 200 adapters = 800MB, NVLink-accessible). Cold adapters (remaining 200) stay on NVMe. Serving: for hot adapters, LoRA weights are fused into the compute path with no loading overhead. For warm adapters, NVLink transfer at 900 GB/s: 4MB at 900 GB/s = 4.4us, negligible. For cold adapters: NVMe read at 7 GB/s = 571us + PCIe transfer 64 GB/s = 62us = ~633us total. Prefill for typical prompt (512 tokens) on 8B model: ~10ms. Cold load: 0.6ms, total ~11ms, within 100ms budget.'
+  realistic_solution: 'Use an S-LoRA-style paged adapter cache with three tiers that account for all 500 adapters: keep the top 100 hot adapters resident in GPU memory (100 * 4MB = 400MB), keep the next 200 warm adapters pinned in host memory (800MB), and keep the remaining 200 cold adapters on NVMe with an async promotion path. At request admission, resolve the adapter ID before batching; hot requests enter the next prefill batch immediately, warm requests copy 4MB from pinned memory to GPU in microseconds, and cold requests issue an async NVMe read plus host-to-GPU copy while tokenization and batch assembly run. If the cold adapter is not ready by the batch cutoff, schedule it in the next microbatch rather than blocking the whole batch. This keeps P99 TTFT under 100ms by bounding adapter-load delay and isolating cold misses from hot traffic.'
   common_mistake: |
     **The Pitfall:** Loading all 500 adapters into GPU memory simultaneously.
     **The Rationale:** Candidates might calculate that 500 adapters * 4MB = 2GB, which easily fits in VRAM, ignoring the runtime overhead.
     **The Consequence:** The per-adapter KV cache context and batching overhead will fragment GPU memory and drastically increase scheduling latency.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Zipf distribution: top 20% adapters (100) handle 80% of 200 QPS = 160 QPS. Bottom 80% handle 40 QPS.
-    - Miss rate is 20% = 40 QPS need cold loading.
-    - Cold load: 4MB via NVMe (7 GB/s).
-    - TTFT budget: 100ms. Prefill for 512 tokens on 8B model: ~10ms on H100.
+    - Adapter size: 4MB. Total adapter bytes: 500 * 4MB = 2GB.
+    - Cache policy: 100 hot GPU adapters, 200 warm pinned-host adapters, 200 cold NVMe adapters.
+    - Zipf distribution: top 100 adapters handle 80% of 200 QPS = 160 QPS; the remaining 400 adapters handle 40 QPS.
+    - TTFT budget: 100ms. Typical 512-token prefill on the 8B model is about 10ms once the adapter is resident.
 
     **Calculations:**
-    - NVMe (7 GB/s) handles 1750 loads/sec. Bandwidth is not a bottleneck.
-    - Cold load overhead: 0.6ms.
-    - Total TTFT for cold load: 10ms (prefill) + 0.6ms (load) = 10.6ms.
+    - Hot GPU footprint: 100 * 4MB = 400MB.
+    - Warm host footprint: 200 * 4MB = 800MB.
+    - Cold NVMe footprint: 200 * 4MB = 800MB; all 500 adapters are accounted for.
+    - Warm copy time at 64 GB/s host-to-GPU bandwidth: 4MB / 64 GB/s = 0.063ms.
+    - Cold load path: NVMe read 4MB / 7 GB/s = 0.57ms, plus host-to-GPU copy 0.063ms, plus scheduling overhead. Budget about 2ms for a cold miss.
+    - Critical path for a cold request if not fully overlapped: ~10ms prefill + ~2ms load/scheduling = ~12ms, below the 100ms P99 target.
+    - At 40 QPS for non-hot adapters, raw NVMe demand is at most 40 * 4MB = 160MB/s, far below 7 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: Within TTFT Budget** (At 10.6ms, TTFT is well within the 100ms budget, even with a 3x traffic spike).
+    - **Result: Within TTFT Budget.** The design keeps hot traffic resident, overlaps or defers cold loads at admission time, and has enough NVMe bandwidth that adapter movement is not the P99 bottleneck at 200 QPS.
 status: published
 provenance: imported
 requires_explanation: false

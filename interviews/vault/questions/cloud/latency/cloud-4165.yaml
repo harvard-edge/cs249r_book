@@ -7,27 +7,31 @@ topic: tail-latency
 competency_area: latency
 bloom_level: evaluate
 phase: inference
-title: 'Request Coalescing vs Tail Latency Tradeoff'
-scenario: 'Your inference server coalesces semantically similar requests to share prefill computation. This reduces GPU cost by 40% but increases P99 from 50ms to 120ms because requests wait for similar siblings.'
-question: 'At what request rate does coalescing become net-negative for goodput?'
+title: Request Coalescing vs Tail Latency Tradeoff
+scenario: Your inference server coalesces semantically similar requests to share prefill computation. This reduces GPU cost by 40% but increases P99 from 50ms to 120ms because requests wait for similar siblings.
+question: Under a latency-weighted goodput model, when does request coalescing become net-negative?
 details:
-  realistic_solution: 'Coalescing waits up to T_wait for similar requests. At low arrival rates, requests wait the full T_wait without finding siblings — all cost, no benefit. At high rates, siblings arrive quickly and the amortized compute savings dominate. Break-even analysis: compute saved per coalesced group = 40% × prefill_cost. Latency cost = wait_time × requests_affected. At 100 req/s with 70ms mean wait: 7 requests coalesce in a window, saving 6 × 20ms prefill = 120ms GPU time. But 7 requests each waited 35ms average = 245ms total wait. If SLA = 150ms: at 100 req/s, coalescing causes 15% SLA violations. At 500 req/s: siblings arrive in 5ms, saving 24 × 20ms = 480ms GPU, wait = 2.5ms × 25 = 62.5ms. Net positive above ~300 req/s.'
+  realistic_solution: 'Use one consistent model: coalescing holds a request window open until similar siblings arrive, capped by the observed 70ms P99 latency penalty (120ms - 50ms). With baseline prefill cost of 20ms and 40% compute savings, each coalesced request saves 8ms of GPU time. If arrivals are roughly uniform, the average wait in a 70ms window is 35ms, so coalescing is net-positive only when a window contains enough requests that 8ms × group_size exceeds 35ms × group_size. That cannot happen under this latency-weighted goodput model; the wait cost per request is larger than the compute saved per request. Coalescing only becomes attractive if the wait window shrinks with high arrival rate or the system values GPU milliseconds more than user latency milliseconds. At 5000 req/s and a 5ms window, average wait is 2.5ms, so the 8ms/request compute saving dominates.'
   common_mistake: |
     **The Pitfall:** Evaluating coalescing purely based on GPU compute savings without accounting for the latency penalty.
     **The Rationale:** Engineers often focus on maximizing GPU utilization and throughput efficiency, ignoring the fact that waiting for batch coalescing artificially inflates latency.
     **The Consequence:** At low request rates, the wait times cause massive SLA violations, rendering the throughput savings irrelevant.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Coalescing saves 40% of compute.
-    - Baseline prefill cost: 20ms per request.
-    
+    - Coalescing saves 40% of a 20ms prefill = 8ms GPU time per request.
+    - Observed P99 penalty at low/moderate load is 120ms - 50ms = 70ms, modeled as a 70ms coalescing window.
+    - Uniform arrivals inside a window wait T/2 on average.
+
     **Calculations:**
-    - 100 req/s: 7 siblings. Compute saved: 120ms. Wait cost: 7 * 35ms avg = 245ms. Net: -125ms.
-    - 300 req/s: 6 siblings. Compute saved: 100ms. Wait cost: 6 * 10ms avg = 60ms. Net: +40ms.
-    - 500 req/s: 5 siblings. Compute saved: 80ms. Wait cost: 5 * 5ms avg = 25ms. Net: +55ms.
-    
+    - Expected group size at rate λ and window T: g = λT.
+    - Compute saved per group: 8ms * g.
+    - Latency cost per group: (T/2) * g.
+    - Break-even condition: 8ms * g = (T/2) * g, so T = 16ms. The group size cancels; the key variable is wait time, not request rate alone.
+    - With the observed 70ms window: average wait = 35ms/request > 8ms/request saved, so net = -27ms per request at any rate if the window remains 70ms.
+    - At 5000 req/s with a 5ms adaptive window: average wait = 2.5ms/request, saving = 8ms/request, net = +5.5ms/request. The group size is λT = 5000 * 0.005 = 25 requests.
+
     **Conclusion & Interpretation:**
-    - **Result: Break-even at ~300 req/s (Latency-Bound)**. At low traffic volumes, wait delays dwarf computation savings and destroy the SLO.
+    - **Result: Break-even requires an adaptive wait window of about 16ms or less.** There is no valid fixed request-rate threshold from the given facts; if higher request rate lets the system close the window below 16ms, coalescing becomes net-positive for goodput.
 status: published
 provenance: imported
 requires_explanation: false

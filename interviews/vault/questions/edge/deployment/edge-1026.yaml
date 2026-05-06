@@ -8,10 +8,11 @@ competency_area: deployment
 bloom_level: evaluate
 phase: both
 title: Optimizing FAISS Index Type Selection for Jetson Orin Memory Constraints
-scenario: 'A Jetson Orin RAG system needs to search a 500,000-document corpus with 768-dim embeddings. FAISS IndexFlatL2 (exact search) requires 1.54GB and takes 180ms per query. FAISS IVF100,PQ96 (approximate) requires 180MB and takes 8ms per query but has 12% recall loss at top-10.'
-question: 'Which FAISS index should you use for 500,000 768-dim embeddings on Orin, and what IVF cluster count and nprobe would you choose?'
+scenario: A Jetson Orin RAG system needs to search a 500,000-document corpus with 768-dim embeddings. FAISS IndexFlatL2 (exact search) requires 1.54GB and takes 180ms per query. FAISS IVF100,PQ96 (approximate) requires 180MB and takes 8ms per query but has 12% recall loss at top-10.
+question: Which FAISS index should you use for 500,000 768-dim embeddings on Orin, and what IVF cluster count and nprobe would you choose?
 details:
-  realistic_solution: 'With 32GB available and the full pipeline (3B model at ~3GB INT8 + other overhead ~2GB), the flat index at 1.536GB fits easily. However, 180ms for retrieval is too slow if P95 latency SLA is 500ms. Use IVF1000,Flat (1000 clusters, exact within cluster): memory = flat centroids (1000*768*4=3MB) + flat shards (same 1.536GB) ≈ 1.536GB, but query time with nprobe=50 = 50/1000 * 180ms = 9ms, recall @interviews/vault/questions/tinyml/tinyml-1021.yaml ~95%. This gives near-exact recall with 20x speedup. Alternatively IVF1000,PQ64 at 60MB + 12ms, recall 88%.'
+  realistic_solution: |
+    Use the option that matches the product constraint. IndexFlatL2 is the quality-preserving choice because 1.536GB fits on a 32GB Orin and it has exact top-10 recall, but its 180ms query latency is expensive. If the RAG system needs low retrieval latency and can tolerate the measured 12% top-10 recall loss, choose the provided IVF100,PQ96 index: 100 IVF lists with PQ96 compression and start with nprobe=8, then tune upward only if recall is too low. Do not introduce IVF1000,Flat unless the benchmark set includes it; it is a separate design point with different recall and latency measurements.
   common_mistake: |
     **The Pitfall:** Choosing the approximate index purely based on memory savings.
     **The Rationale:** Candidates see a massive memory reduction and assume it's the right choice without calculating whether the recall loss is acceptable for the downstream LLM quality, or they fail to tune `nprobe` to balance speed vs recall.
@@ -20,14 +21,16 @@ details:
     **Assumptions & Constraints:**
     - IndexFlatL2 Memory: 500,000 * 768 * 4 = 1.536 GB.
     - IndexFlatL2 Query: 180ms.
+    - Provided approximate option: IVF100,PQ96, 180MB, 8ms/query, 12% top-10 recall loss.
 
     **Calculations:**
-    - IVF1000,Flat with `nprobe`=50 searches 50/1000 clusters (5%).
-    - Query time reduction: 0.05 * 180ms = 9ms.
-    - Recall with `nprobe`=50: ~95%.
+    - Memory reduction from Flat to IVF100,PQ96: 1.536GB - 0.180GB = 1.356GB saved.
+    - Latency speedup: 180ms / 8ms = 22.5x faster.
+    - Quality cost: 12% top-10 recall loss relative to exact search.
+    - IVF parameters from the candidate index: `nlist`=100. Choose `nprobe`=8 as the starting point, then increase only if validation shows the 12% recall loss is unacceptable.
 
     **Conclusion & Interpretation:**
-    - **Result: IVF1000,Flat offers near-exact recall with a 20x speedup, fitting easily within memory (Memory-Bandwidth-Bound)**.
+    - **Result: IVF100,PQ96 is the low-latency choice; IndexFlatL2 is the exact-recall choice**. The decision is the explicit 22.5x latency and 1.36GB memory savings versus a measured 12% recall loss, not an unsupported estimate for a different FAISS index.
 status: published
 provenance: imported
 requires_explanation: false

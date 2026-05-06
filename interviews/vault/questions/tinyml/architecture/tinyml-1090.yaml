@@ -11,23 +11,25 @@ title: ESP32-S3 Audio Wake Word System Architecture
 scenario: You are leading the design of an always-on audio wake word detection system for a smart home device using an ESP32-S3 microcontroller. The system needs to continuously listen for a wake word while maintaining a low power profile, triggering a larger cloud-based model via WiFi only when activated. The ESP32-S3 features a 240 MHz dual-core Xtensa processor, 512 KB of internal SRAM, 8 MB of external PSRAM, and vector extensions for INT8 operations.
 question: How should ESP32-S3 manage SRAM, PSRAM, cores, and audio buffers for an always-on wake-word system?
 details:
-  realistic_solution: A robust architecture pins the critical path to internal SRAM while leveraging PSRAM for non-blocking storage. The audio DMA buffer (e.g., 16kHz, 16-bit, 1-second rolling window) and the model's inference arena (activations) must reside in the 512 KB SRAM to utilize the INT8 vector extensions efficiently without memory stalling. The model weights, if they exceed remaining SRAM, should be stored in PSRAM, but ideally, the model is quantized and pruned to fit within the internal memory for true always-on efficiency. One core handles WiFi/BLE and system tasks, while the other is dedicated to the DSP and inference pipeline.
+  realistic_solution: A robust architecture keeps the latency-critical path in internal SRAM while using PSRAM for noncritical storage. Small audio DMA buffers, MFCC working state, and hot inference activations should normally stay in internal SRAM so the INT8 vector path is not stalled. Weights may live in internal SRAM for the always-on model, or in PSRAM/flash for larger fallback or cloud-trigger models if the design can tolerate prefetching, caching, or a slower mode. One core should run WiFi and system work, while the other owns the real-time audio, DSP, and inference loop.
   common_mistake: |
     **The Pitfall:** Loading the entire model into the 8 MB PSRAM.
     **The Rationale:** Candidates ignore the significant latency and power penalties of fetching data from external memory over SPI.
     **The Consequence:** The model suffers from severe memory stalling, missing real-time inference deadlines and consuming excess power.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Audio Buffer (1s): 16 kHz * 2 bytes = 32 KB.
-    - Overhead: RTOS/Networking (~150 KB) + MFCC Buffers (~20 KB) = 170 KB.
+    - One second of 16 kHz, 16-bit mono audio: 16,000 * 2 = 32,000 bytes (~31.25 KiB).
+    - Use smaller ping-pong DMA buffers for the live path, but reserve up to 32 KB if a 1-second rolling window is required.
+    - Overhead: RTOS/Networking (~150 KB) + MFCC buffers (~20 KB) = 170 KB.
     - Total SRAM: 512 KB.
 
     **Calculations:**
-    - Remaining SRAM: 512 - 32 - 170 = 310 KB.
-    - Model Requirement: ~200 KB weights + ~50 KB activations = 250 KB.
+    - Remaining SRAM after audio and system/DSP overhead: 512 - 32 - 170 = 310 KB.
+    - Example always-on model requirement: ~200 KB weights + ~50 KB activations = 250 KB.
+    - Residual margin: 310 - 250 = 60 KB for stack, allocator alignment, DMA descriptors, and safety margin.
 
     **Conclusion & Interpretation:**
-    - **Result: 310 KB remaining (Memory-Bound).** Model and activations perfectly fit within internal SRAM, preventing external PSRAM stalls.
+    - **Result: feasible but tight SRAM placement.** The example model can fit only if the uncounted runtime allocations stay below about 60 KB; otherwise weights or noncritical tensors need PSRAM/flash staging with measured latency. The design goal is not to ban PSRAM, but to keep the always-on real-time working set off slow external memory.
 status: published
 provenance: imported
 requires_explanation: true

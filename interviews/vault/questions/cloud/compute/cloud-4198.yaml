@@ -11,19 +11,24 @@ title: Persistent Kernels for Continuous Batching
 scenario: Traditional CUDA kernels launch, execute, and exit for each batch. For continuous batching inference on MI300X, you want a persistent kernel that stays resident on all 304 CUs, processing new requests as they arrive without kernel launch overhead.
 question: How would you design a persistent MI300X kernel for continuous batching, handling work queues and variable batch sizes?
 details:
-  realistic_solution: Launch one persistent kernel entering an infinite loop, polling a work queue in pinned host memory via unified memory. It eliminates 5-10µs kernel launch overheads per layer, saving ~4.8ms per pass. However, polling burns massive memory bandwidth and should be monitored tightly.
+  realistic_solution: Use a GPU-resident scheduler rather than having every CU poll pinned host memory. Launch a fixed set of persistent workgroups sized to leave room for queues and synchronization state. Keep request descriptors, token state, and ready queues in device memory; the CPU only publishes batched descriptors and rings a lightweight doorbell, while one or a small number of scheduler workgroups pull work into per-CU or per-XCD queues. Workers form microbatches by shape and decode step, run bounded chunks of attention/MLP work, then return partial completions to the device queue. Use atomic counters or ring-buffer head/tail indices for producer-consumer coordination, work stealing for imbalance, and explicit backpressure when queues are full. Termination should use an epoch or shutdown flag checked at safe points, not an unbounded spin in the hot path. Variable batch sizes are handled by bucketing compatible requests and allowing idle workers to steal from other buckets when latency
+    budgets permit.
   common_mistake: |
     **The Pitfall:** Implementing a persistent kernel with a spin-loop on a global memory flag.
     **The Rationale:** It is the simplest way to implement polling, but engineers fail to account for the memory bandwidth saturation and cache contention this causes across 300+ CUs.
     **The Consequence:** The spin-loop consumes massive power and memory bandwidth, ironically degrading the inference performance it was designed to improve.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Kernel launch: 5-10µs * 6 kernels/block * 80 blocks = 2.4-4.8ms.
-       - Baseline decode: 80ms/token.
-       - Polling cost: 200ns per poll.
+       - Baseline decode step launches 6 kernels.
+       - Kernel launch overhead: 5-10 us per launch.
+       - Persistent kernel still runs the same math; it mainly removes launch gaps and improves batching.
+       - Device queue polling is centralized or event/doorbell-driven, not performed by every worker at high frequency.
     2. **Calculations:**
-       - Overhead eliminated = 4.8ms/token.
-       - Throughput Improvement = 4.8ms / 80ms = ~6%.
-       - Wait Overhead at 1MHz = 200ms per second (20%).
+       - Launch overhead removed per decode step: 6 * 5-10 us = 30-60 us.
+       - If the compute portion of a token step is 1.0 ms, launch removal gives at most 30-60 us / 1.0 ms = 3-6% latency reduction.
+       - If the compute portion is 10 ms, the same launch removal is only 0.3-0.6%.
+       - Queue overhead must stay well below the removed 30-60 us; centralized device-side scheduling avoids multiplying polling cost across 304 CUs.
     3. **Conclusion & Interpretation:**
-       - **Result: ~6% throughput improvement, highly sensitive to queue emptiness.** (Launch-Bound)
+       - **Result: Launch- and Queue-Overhead-Bound.** Persistent kernels help when launch gaps and batch churn are material, but the design only works if queue management, backpressure, and work stealing cost less than the launch overhead being removed.
+status: published
+provenance: imported

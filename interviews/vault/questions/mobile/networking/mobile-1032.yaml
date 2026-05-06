@@ -12,7 +12,9 @@ scenario: 'A productivity mobile app runs two simultaneous LLM tasks: a 1B INT4 
 question: How would you analyze whether both can run simultaneously without bandwidth saturation, and specify a token-interleaved schedule?
 details:
   realistic_solution: |
-    Conduct a micro-second level memory bandwidth analysis using `nsys profiling`. Both autoregressive LLM decoding phases are fiercely memory-bandwidth bound. While their *average* bandwidth fits within system limits, their instantaneous burst execution will collide, causing cache thrashing and violating the 25ms TPOT SLA. Implement an explicit time-sliced, token-interleaved scheduler. Block the background summarizer thread using a mutex or OS-level QOS priority while the foreground assistant decodes a token. Once the assistant completes its 25ms burst, context-switch the summarizer to compute its background token in the remaining 75ms of the 100ms window.
+    Do not let both decoders issue full token bursts against LPDDR5X at the same instant. A 3B INT4 assistant has about 1.5GB of weights; meeting a 25ms TPOT target implies up to 60GB/s of token-time memory traffic before KV overhead. A 1B INT4 summarizer has about 0.5GB of weights; if it also tries to finish a token in 25ms it needs another 20GB/s. The combined 80GB/s burst exceeds a 77GB/s bus, so unmanaged simultaneous decode is unsafe.
+
+    Use a foreground-priority token scheduler. Divide time into 25ms assistant slots. At the 77GB/s bus limit, an assistant token needs 1.5/77 = 19.5ms of service, leaving about 5.5ms slack inside each 25ms slot. Over a 100ms window the assistant starts at 0ms, 25ms, 50ms, and 75ms, leaving about 4×5.5 = 22ms of slack. The summarizer needs only 0.5/77 = 6.5ms of full-bus service to produce its one token per 100ms target, so it can run preemptible layer chunks in that slack. If the summarizer kernel cannot be preempted into layer chunks, defer its token until the assistant burst finishes rather than allowing concurrent peak bandwidth contention.
   common_mistake: |
     **The Pitfall:** Treating the two models as temporally independent.
     **The Rationale:** Candidates look at average throughput and assume it applies smoothly across time.
@@ -20,19 +22,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Max System Bandwidth: 77 GB/s.
-    - Foreground Assistant: 1.5 GB weights, TPOT target < 25ms.
-    - Background Summarizer: 500 MB weights, 10 tokens/s (1 token per 100ms window).
+    - Foreground Assistant: 3B INT4 = ~1.5 GB weights, TPOT target < 25ms.
+    - Background Summarizer: 1B INT4 = ~0.5 GB weights, 10 tokens/s (1 token per 100ms window).
 
     **Calculations:**
-    - Assistant burst bandwidth: 1.5 GB / 0.025 s = 60 GB/s peak.
-    - Summarizer burst bandwidth: 500 MB in ~1.5ms = >333 GB/s (physically impossible, requires throttling).
-    - Time-sliced scheduling within 100ms window:
-    - 0 to 25ms: Assistant runs, utilizing 60 GB/s.
-    - 25ms to 100ms (75ms): Summarizer runs, throttled bandwidth = 500 MB / 0.075 s = 6.67 GB/s.
-    - Average bandwidth over 100ms window = (1.5 GB + 0.5 GB) / 0.1 s = 20 GB/s.
+    - Assistant token-time bandwidth at the SLA: 1.5 GB / 0.025 s = 60 GB/s.
+    - Summarizer token-time bandwidth if allowed to burst in the same 25ms slot: 0.5 GB / 0.025 s = 20 GB/s.
+    - Unmanaged overlap: 60 + 20 = 80 GB/s, before KV-cache and activation traffic, which exceeds 77 GB/s.
+    - Minimum assistant service time at 77 GB/s: 1.5 / 77 = 19.5ms.
+    - Minimum summarizer service time at 77 GB/s: 0.5 / 77 = 6.5ms.
+    - Slack per assistant slot: 25ms target - 19.5ms minimum service = 5.5ms.
+    - Token-interleaved 100ms window: assistant starts at 0, 25, 50, and 75ms; summarizer runs preemptible layer chunks during the ~5.5ms slack after each assistant token, accumulating 4 * 5.5 = 22ms of background service per 100ms.
+    - Summarizer service needed for 10 tokens/s: one 0.5GB token per 100ms needs 0.5 / 77 = 6.5ms of full-bus-equivalent service, so 22ms slack is sufficient if kernels are chunkable.
 
     **Conclusion & Interpretation:**
-    - **Result: 60 GB/s peak (Scheduling/Bandwidth-Bound)**. Unmanaged, simultaneous execution creates catastrophic bandwidth spikes. Time-slicing ensures peak bandwidth never exceeds 60 GB/s, comfortably fitting the 77 GB/s hardware limit and satisfying both SLAs.
+    - **Result: token-interleaving required.** The average traffic fits, but simultaneous full-token bursts do not. Foreground-priority interleaving keeps peak bus use under the 77 GB/s limit and gives the background summarizer enough accumulated service time for 10 tokens/s only if it can be preempted into small chunks.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,11 +8,11 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Diagnose low GPU utilization when serving MobileNetV3 on H100
-scenario: 'A production MobileNetV3-Large serving endpoint on H100 shows only 12% GPU-SM utilization in nvidia-smi despite receiving 5,000 QPS. The model processes 224x224 images in BF16. Each request is a single image.'
-question: 'Why is MobileNetV3-Large only reaching 12% SM utilization at 5,000 QPS batch=1 on H100, and how would you fix it?'
+scenario: A production MobileNetV3-Large serving endpoint on H100 shows only 12% GPU-SM utilization in nvidia-smi despite receiving 5,000 QPS. The model processes 224x224 images in BF16. Each request is a single image.
+question: Why is MobileNetV3-Large only reaching 12% SM utilization at 5,000 QPS batch=1 on H100, and how would you fix it?
 details:
   realistic_solution: |
-    At 5K QPS with batch=1, each forward pass takes ~0.8ms at 12% SM util. Root causes: (1) batch size=1 means each 0.22-GFLOP inference is dominated by kernel launch overhead; (2) CPU preprocessing (decode + resize) taking 3–5ms per image; (3) H2D PCIe transfers serializing GPU work. Fix: implement server-side dynamic batching (10ms window → batch=50), move preprocessing to GPU with DALI, use CUDA graphs to fuse kernel launches.
+    At 5K QPS with batch=1, the incoming math work is only about 1.1 TFLOP/s, far below H100 capacity. The 12% SM utilization therefore points to dispatch and pipeline overhead rather than raw compute saturation: many tiny convolutions are launched as small kernels, CPU decode/resize may be gating requests, and host-to-device copies can serialize the path. Fix it by adding server-side dynamic batching within the latency budget, moving preprocessing to GPU or a dedicated CPU pool, using pinned memory and overlapping transfers, and capturing the steady-state graph with CUDA graphs or a serving runtime that fuses launches. Validate with traces before and after: queueing, preprocessing, H2D, kernel launch gaps, and GPU active time should all be measured.
   common_mistake: |
     **The Pitfall:** Arbitrarily increasing batch size without root-cause diagnosis.
     **The Rationale:** Candidates assume batch size always solves utilization, without checking if the bottleneck is CPU preprocessing, Python overhead, or PCIe transfer.
@@ -21,14 +21,16 @@ details:
     **Assumptions & Constraints:**
     - MobileNetV3-Large: 0.22 GFLOPs at batch=1.
     - H100 peak 989 TFLOPS BF16.
+    - Observed SM utilization is a symptom to investigate, not a direct per-request latency model.
 
     **Calculations:**
-    - Actual compute time: 0.22 GFLOPs / 119 TFLOPS (at 12% util) = 1.8 μs. The H100 is idle 99.9% of the time.
-    - With dynamic batching (batch=50): 50 * 0.22 GFLOPs = 11 GFLOPs.
-    - Compute time: 11 GFLOPs / 594 TFLOPS (60% util) = 0.019ms.
+    - Work arriving per second: 5,000 req/s * 0.22 GFLOPs = 1.1 TFLOPs/s, far below H100 peak.
+    - A 10 ms batching window at 5,000 QPS collects about 50 requests, for 50 * 0.22 GFLOPs = 11 GFLOPs per batch.
+    - The batch has 50x more work per launch path than batch=1, which can amortize CPU scheduling, preprocessing, H2D transfer, and kernel launch overhead.
+    - Profile the request path into queueing, decode/resize, H2D copy, kernel execution, and response serialization before attributing the 12% SM utilization to compute saturation.
 
     **Conclusion & Interpretation:**
-    - **Result: GPU utilization jumps to ~50% safely fitting within a 10ms dynamic batching window. (CPU-Bound Preprocessing Overhead)**. Ultra-fast models hit CPU dispatch limits without smart batching.
+    - **Result: Dispatch and Preprocessing Bound**. Dynamic batching can greatly improve occupancy and amortize overhead within the 10 ms queueing budget, but the exact SM utilization must be measured; it does not follow directly from the FLOP count.
 status: published
 provenance: imported
 requires_explanation: true

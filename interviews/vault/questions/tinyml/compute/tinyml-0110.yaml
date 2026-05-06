@@ -8,55 +8,29 @@ competency_area: compute
 bloom_level: evaluate
 phase: inference
 title: The Heterogeneous MCU Scheduling Problem
-scenario: 'You''re deploying a multi-modal anomaly detection system on a heterogeneous
-  MCU. Your system runs two models: a vibration FFT + classifier (compute-heavy, 2M
-  MACs) and a temperature trend LSTM (memory-heavy, 500K MACs but 180 KB of state).'
-question: Which i.MX RT1170 core should run the 2M-MAC vibration classifier and the
-  180 KB-state temperature LSTM?
+scenario: 'You''re deploying a multi-modal anomaly detection system on a heterogeneous MCU. Your system runs two models: a vibration FFT + classifier (compute-heavy, 2M MACs) and a temperature trend LSTM (memory-heavy, 500K MACs but 180 KB of state).'
+question: If both models must complete once per sampling cycle and may run in parallel, which i.MX RT1170 core should run the 2M-MAC vibration classifier and which should run the 180 KB-state temperature LSTM?
 details:
-  realistic_solution: 'Assign by bottleneck type: the vibration classifier (2M MACs,
-    compute-bound) goes on the M7 (1 GHz, FPU, large I/D caches for fast matrix ops)
-    — completes in 1ms. The temperature LSTM (500K MACs but 180 KB state, memory-bound)
-    goes on the M4 (400 MHz, 256 KB SRAM fits the state without cache thrashing) —
-    completes in 5ms. Parallel execution: max(1ms, 5ms) = 5ms per cycle, vs 9ms sequential
-    on M7 alone (LSTM thrashes M7''s cache). Communication via shared SRAM mailbox
-    (16 bytes per message, <1us latency). Energy savings: 78% lower than M7-only (0.30
-    mJ vs 1.35 mJ), plus 1.8x latency improvement.'
-  common_mistake: '**The Pitfall:** Putting both models on the faster M7 core.
-
-    **The Rationale:** Candidates assume the faster core will complete tasks quicker
-    sequentially, ignoring the massive cache thrashing caused by the memory-bound
-    LSTM model.
-
-    **The Consequence:** Wasting the M4 entirely, doubling inference latency, and
-    dramatically increasing energy consumption.
-
-    '
-  napkin_math: '**Assumptions & Constraints:**
-
-    - Models: Vibration (2M MACs, 1ms on M7), LSTM (500K MACs, 180KB state, 5ms on
-    M4).
-
-    - Power: ~150 mW active power.
-
+  realistic_solution: Assign by bottleneck type, subject to memory placement. Run the 2M-MAC vibration classifier on the M7 because it is compute-bound and benefits from the 1 GHz core, FPU, DSP instructions, and caches. Run the temperature LSTM on the M4 only if its 180 KB recurrent state plus working buffers fit in SRAM accessible to that core without starving shared buffers; otherwise the memory plan must be changed before the core assignment is valid. With independent models, parallel execution latency is bounded by the slower of the two scheduled tasks, plus shared-memory handoff overhead. The intended assignment is M7 for the classifier and M4 for the LSTM, but the release-quality justification is memory-fit and contention analysis, not an unsupported fixed energy percentage.
+  common_mistake: |
+    **The Pitfall:** Putting both models on the faster M7 core.
+    **The Rationale:** Candidates assume the faster core will complete tasks quicker sequentially, ignoring the massive cache thrashing caused by the memory-bound LSTM model.
+    **The Consequence:** Wasting the M4 entirely, doubling inference latency, and dramatically increasing energy consumption.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Vibration classifier: 2M MACs, compute-heavy.
+    - Temperature LSTM: 500K MACs, 180 KB recurrent state plus working buffers.
+    - i.MX RT1170 has heterogeneous M7/M4 cores with different compute capability and memory access paths.
+    - The M4 assignment is valid only if the LSTM state and arena fit in SRAM available to the M4 and leave room for communication buffers.
 
     **Calculations:**
-
-    - Parallel Execution: M7 runs classifier (1ms, 150 µJ), M4 runs LSTM (5ms, 150
-    µJ). Total = 5ms, 300 µJ.
-
-    - Sequential (M7 only): Cache-thrashing LSTM takes 8ms + 1ms classifier = 9ms.
-    Total = 9ms * 150 mW = 1350 µJ.
-
-    - Savings: 1350 µJ - 300 µJ = 1050 µJ.
-
+    - Classifier mapping: high MAC count and cache-friendly compute path -> M7.
+    - LSTM mapping: lower MAC count but large recurrent state -> M4 if the 180 KB state plus activation arena fit in M4-accessible SRAM.
+    - Parallel latency model: total cycle time ≈ max(M7 classifier time, M4 LSTM time) + synchronization overhead.
+    - If the LSTM does not fit locally, the plan becomes invalid because shared-memory traffic or external-memory placement can dominate any parallelism benefit.
 
     **Conclusion & Interpretation:**
-
-    - **Result: Heterogeneous Efficiency (Compute-Bound)**. Dual-core scheduling saves
-    78% energy and reduces latency from 9ms to 5ms by avoiding cache thrashing.
-
-    '
+    - **Result: M7 for compute-heavy classifier, M4 for LSTM only after SRAM fit is proven**. The core choice follows bottlenecks and memory placement; unsupported fixed speedup or energy claims should not drive the decision.
 status: published
 provenance: imported
 requires_explanation: false

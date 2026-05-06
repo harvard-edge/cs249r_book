@@ -8,26 +8,30 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: Adversarial Robustness on AMD MI300X in Cloud Deployments
-scenario: 'Your team is deploying a critical, real-time image recognition model to a cloud environment utilizing AMD MI300X accelerators for high-throughput inference. This model is susceptible to adversarial attacks.'
-question: 'How would you design edge detection and MI300X-side defenses against adversarial perturbations, prompt injection, and side-channel attacks?'
+scenario: Your team is deploying a critical, real-time image recognition model to a cloud environment utilizing AMD MI300X accelerators for high-throughput inference. This model is susceptible to adversarial attacks.
+question: How would you design cloud MI300X defenses for adversarial images, prompt injection, and side-channel risk?
 details:
-  realistic_solution: 'Implement a multi-layered defense: pre-processing filters at the ingress, on-device robustness techniques on the MI300X itself, and continuous monitoring for anomaly detection. Leverage MI300X''s high memory bandwidth (5.3 TB/s) for efficient loading of diverse adversarial samples.'
+  realistic_solution: |
+    Use a tiered cloud inference design rather than an edge/device design. Keep always-on checks cheap: authenticated ingress, image normalization, lightweight adversarial-perturbation scoring, model confidence calibration, and rate limiting before requests enter the MI300X inference pool. Run the primary model with adversarial training, randomized smoothing or test-time augmentation only where latency allows, and route low-confidence or high-risk requests to a slower verification path instead of applying heavyweight ensembles to every request. If a scene-language or LLM branch exists, isolate it behind prompt templates, input/output filters, tool allowlists, and retrieval boundaries; do not treat prompt injection as an image-only threat. For side-channel risk, isolate tenants with dedicated MIG-equivalent scheduling boundaries where available, avoid co-locating untrusted workloads, pad or bucket observable timing for sensitive APIs, encrypt data in transit and at rest, and monitor per-tenant latency/HBM anomalies. Use MI300X bandwidth to keep model weights and compact defense metadata resident, not to scan all HBM on the critical path.
   common_mistake: |
     **The Pitfall:** Over-relying on software-only defenses post-inference or neglecting hardware-specific vulnerabilities.
     **The Rationale:** Candidates treat the accelerator as a black-box compute engine, ignoring potential timing attacks or the massive I/O capability that can be harnessed for parallel defenses.
     **The Consequence:** The system remains vulnerable to sophisticated side-channel attacks targeting shared memory, or performance collapses under the weight of sequential software checks.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Target latency: 50ms. Detection overhead: 10ms.
-    - Remaining for inference + I/O = 40ms.
-    - MI300X HBM3 Bandwidth: 5.3 TB/s. Memory: 192GB.
+    - Target latency: 50 ms.
+    - Primary MI300X inference latency: 34 ms p99.
+    - Always-on image normalization and adversarial score: 5 ms p99.
+    - Prompt-injection checks apply only to the optional scene-language branch.
+    - Side-channel mitigations must not require per-request full-HBM scans.
 
     **Calculations:**
-    - Max Transfer Time = 192GB / 5.3 TB/s = ~36ms.
-    - Actual single inference transfer is practically 0ms.
+    - Critical image path = 34 ms + 5 ms = 39 ms, leaving 11 ms of the 50 ms budget.
+    - A 20 ms verifier on every request would make p99 = 39 ms + 20 ms = 59 ms, missing the SLO.
+    - If the verifier runs on 4% of suspicious requests, average added latency is 0.04 * 20 ms = 0.8 ms while risky requests move to a safer path.
 
     **Conclusion & Interpretation:**
-    - **Result: 0ms Transfer (Compute-Bound)**. The massive 5.3 TB/s bandwidth allows for fast loading of adversarial samples, meaning the defense overhead is strictly bound by computational latency.
+    - **Result: 39 ms always-on cloud defense path.** The design should reserve MI300X capacity for primary inference plus compact inline checks, then selectively trigger expensive adversarial, LLM, or side-channel investigations outside the normal latency path.
 status: published
 provenance: imported
 requires_explanation: false

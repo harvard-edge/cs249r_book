@@ -9,25 +9,28 @@ bloom_level: analyze
 phase: inference
 title: 'Extreme Quantization on nRF5340: Architecture Evaluation'
 scenario: You must deploy image classification on a Nordic nRF5340 (128 MHz Cortex-M33, 256 KB SRAM) choosing between Model A (8-bit, 200KB peak SRAM) and Model B (2-bit, 70KB peak SRAM, but drops 5% absolute accuracy).
-question: "How would you systematically evaluate and recommend the best model for the nRF5340, considering performance, resource constraints, and accuracy recovery feasibility?"
+question: How would you systematically evaluate and recommend the best model for the nRF5340, considering performance, resource constraints, and accuracy recovery feasibility?
 details:
-  realistic_solution: Utilize nsys-equivalent embedded profiling (SEGGER SystemView) to capture exact SRAM ceilings. Model A aggressively starves the memory hierarchy, leaving zero room for OS/BLE vectors. Model B natively resolves structural SRAM constraints and allows targeted AWQ/GPTQ Post-Training Quantization accuracy recovery.
+  realistic_solution: Use an on-device evaluation workflow on the nRF5340 rather than relying only on nominal model size. Measure peak SRAM, flash, stack, heap, activation arena, latency, and energy with the RTOS/BLE workload enabled, using tools such as Nordic logging, GPIO timing, SEGGER SystemView, and cycle counters. Compare both models on representative images with the same preprocessing pipeline and record accuracy, latency distribution, and memory headroom. Given the stated numbers, Model A's 200 KB peak SRAM is risky because it leaves only 56 KB for BLE, RTOS, buffers, stack, and future updates. Treat Model B as the safer resource candidate, but release it only if calibration, quantization-aware training, pruning, or distillation can recover the 5% accuracy loss within the measured SRAM and latency budgets. If the accuracy gap cannot be closed, Model A must prove adequate headroom on target or the model architecture should be revised.
   common_mistake: |
-    **The Pitfall:** Focusing isolated decisions solely on theoretical algorithmic parameter sizing while ignoring total system fabric metrics.
-    **The Rationale:** Software engineers severely overlook dynamic intermediate SRAM buffers and rigid multi-stack OS/BLE requirements.
-    **The Consequence:** Unchecked 8-bit model compilation causes catastrophic OOM (Out-of-Memory) pipeline fragmentation.
+    **The Pitfall:** Choosing the smaller 2-bit model solely from its parameter footprint, or choosing the 8-bit model solely from its higher baseline accuracy.
+    **The Rationale:** The real constraint is the measured combination of peak SRAM, latency, BLE/RTOS overhead, and recoverable accuracy on representative data.
+    **The Consequence:** The selected model may either miss the product accuracy target or run out of memory once activation buffers, stacks, radio work, and firmware overhead are included.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Boundary: 256 KB Total SRAM, 128 MHz M33 DSP clock.
-       - Model A: 8-bit, 200 KB footprint, ~50M MAC operations.
-       - Model B: 2-bit, 70 KB footprint.
-    2. **Calculations:**
-       - Remaining footprint Model A: 256 KB - 200 KB = 56 KB (Dangerously tight for OS + BLE + heap).
-       - Remaining footprint Model B: 256 KB - 70 KB = 186 KB (Structurally sound).
-       - 8-bit execution latency (1 MAC/cycle): 50,000,000 cycles / 128 MHz = 0.39 seconds.
-       - 2-bit sub-byte packed execution latency (assuming 2.5x packed SIMD acceleration): 0.39s / 2.5 = ~0.15 seconds.
-    3. **Conclusion & Interpretation:**
-       - **Result: Model B (2-bit) safeguards 186 KB SRAM overhead while yielding ~0.15s latencies, justifying the 5% accuracy delta (Memory-Bound).**
+    **Assumptions & Constraints:**
+    - Boundary: 256 KB Total SRAM, 128 MHz M33 DSP clock.
+    - Model A: 8-bit, 200 KB footprint, ~50M MAC operations.
+    - Model B: 2-bit, 70 KB footprint.
+
+    **Calculations:**
+    - Remaining footprint Model A: 256 KB - 200 KB = 56 KB (Dangerously tight for OS + BLE + heap).
+    - Remaining footprint Model B: 256 KB - 70 KB = 186 KB (Structurally sound).
+    - Model A's 50M MAC count requires on-target timing; 50M MACs is not automatically 50M cycles on a Cortex-M33 because kernel coverage, memory stalls, and DSP utilization matter.
+    - Model B's packed 2-bit representation reduces SRAM pressure, but sub-byte execution may require unpacking or custom kernels, so latency must also be measured on target.
+    - Accuracy decision gate: the 5% absolute drop is acceptable only if representative-data recovery closes it to the product target without consuming the 186 KB headroom.
+
+    **Conclusion & Interpretation:**
+    - **Result: Model B is the resource-safer recommendation only if measured latency passes and accuracy recovery closes the 5% gap.** Otherwise choose a revised architecture or prove that Model A can run with enough SRAM headroom under the full RTOS/BLE workload.
 status: published
 provenance: imported
 requires_explanation: false

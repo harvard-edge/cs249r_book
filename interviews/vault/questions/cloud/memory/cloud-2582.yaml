@@ -7,11 +7,11 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: understand
 phase: both
-title: Cloud Qlora L2 0
+title: QLoRA Memory Budget for Fine-Tuning a 65B Model on a 48 GB GPU
 scenario: A colleague wants to fine-tune a 65B model but only has a single 48 GB GPU. The model normally requires 130 GB in FP16.
 question: How does QLoRA let a 65B model fit and fine-tune on a single 48 GB GPU?
 details:
-  realistic_solution: 'QLoRA combines two techniques: (1) 4-bit NormalFloat (NF4) quantization of the frozen base model: 65B × 0.5 bytes = 32.5 GB — fits in 48 GB. (2) FP16 LoRA adapters: low-rank matrices (rank 16-64) added to each attention layer, typically <1% of total parameters. Only these adapters are trained. During forward pass: 4-bit weights are dequantized to FP16 on-the-fly, multiplied by input, then LoRA adapter output is added. Gradients flow only through the FP16 adapters. Memory: 32.5 GB (quantized base) + ~0.67 GB (adapters) + ~0.67 GB (gradients) + ~4.0 GB (optimizer) + ~10 GB (activations) = ~47.84 GB. Fits on 48 GB GPU.'
+  realistic_solution: 'QLoRA combines two techniques: (1) 4-bit NormalFloat (NF4) quantization of the frozen base model: 65B × 0.5 bytes = 32.5 GB. (2) FP16 LoRA adapters: low-rank matrices added to attention and MLP projections, typically well under 1% of total parameters. Only these adapters are trained. During the forward pass, 4-bit base weights are dequantized for matmuls, the LoRA adapter output is added, and gradients flow only through the adapters. A realistic budget is about 32.5 GB base weights + 0.67 GB adapters + 0.67 GB adapter gradients + 1.34 GB AdamW states + 8 GB activations + 3 GB CUDA/workspace/fragmentation overhead = about 46.2 GB. It can fit on a 48 GB GPU, but the margin is tight and depends on sequence length, batch size, checkpointing, and optimizer implementation.'
   common_mistake: |
     **The Pitfall:** Thinking QLoRA fine-tunes all weights directly in 4-bit precision.
     **The Rationale:** Because the model is loaded in 4-bit, people assume the gradients and optimizer states are also calculated in 4-bit.
@@ -20,17 +20,19 @@ details:
     **Assumptions & Constraints:**
     - 65B base model in NF4 (0.5 bytes/param).
     - LoRA adapters (rank 64 on Q/K/V/O): ~0.67 GB.
-    - Optimizer states: AdamW on adapters.
-    - Activations: ~10 GB.
+    - Optimizer states: AdamW on adapters, about 2x adapter memory for m and v under this simplified budget.
+    - Activations: ~8 GB with checkpointing.
+    - Runtime overhead: ~3 GB for CUDA workspace, temporary buffers, and fragmentation.
 
     **Calculations:**
     - Base Model: 65B * 0.5 bytes = 32.5 GB.
+    - LoRA adapter weights: 0.67 GB.
     - Gradients on adapters: 0.67 GB.
-    - Optimizer states on adapters: 0.67 GB * 6 ≈ 4.0 GB.
-    - Total Memory: 32.5 + 0.67 + 0.67 + 4.0 + 10.0 = 47.84 GB.
+    - Optimizer states on adapters: 0.67 GB * 2 = 1.34 GB.
+    - Total Memory: 32.5 + 0.67 + 0.67 + 1.34 + 8.0 + 3.0 = 46.18 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Optimization (Memory-Bound)**. Total memory of 47.84 GB fits comfortably in 48 GB.
+    - **Result: Memory-Bound Optimization**. The corrected estimate is about 46.2 GB, so QLoRA can fit on 48 GB only with careful activation checkpointing, small batches, and limited overhead.
 status: published
 provenance: imported
 requires_explanation: false

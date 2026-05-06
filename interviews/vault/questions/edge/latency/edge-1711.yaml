@@ -18,15 +18,16 @@ details:
     **The Consequence:** They fail to realize that without local DRAM, host CPU latency from preprocessing (like image resizing or FP32 float conversions) will starve the dataflow accelerator, leaving the pipeline bottlenecked.
   napkin_math: |
     **Assumptions & Constraints:**
-       - Target Latency: 16.6 ms (60 FPS)
-       - 1080p Image (UINT8): 1920 * 1080 * 3 = 6.22 MB
-       - Host CPU Normalization (FP32): ~40 ms
+       - Target latency: 16.6 ms per frame for 60 FPS.
+       - Observed latency: 50 ms per frame, which is 20 FPS.
+       - 1080p UINT8 RGB frame: 1920 * 1080 * 3 = 6.22 MB.
+       - FP32 normalized frame footprint: 6.22 MB * 4 = 24.88 MB.
     **Calculations:**
-       - FP32 Float Image: 6.22 MB * 4 bytes/float = 24.88 MB
-       - CPU-bound pipeline latency: 40 ms (preprocess) + ~8 ms (inference) > 16.6 ms
-       - Fused pipeline latency: 0 ms (host preprocess) + ~9 ms (fused inference) < 16.6 ms
+       - The 50 ms trace is not compute-bound: accelerator idle time is 70%, so accelerator-active time is about 15 ms and host-side stalls account for about 35 ms.
+       - The CPU is spending that stall time expanding 6.22 MB UINT8 frames into 24.88 MB FP32 buffers and normalizing them before the accelerator can stream.
+       - Moving normalization into the graph and using zero-copy DMA removes the extra FP32 host buffer path, so the pipeline can approach the accelerator-active time instead of the 50 ms CPU-bound path.
     **Conclusion & Interpretation:**
-       - **Result: CPU-Bound Preprocessing.** Fusing image normalization into the compiler graph removes the 40 ms CPU bottleneck, allowing the system to achieve 60 FPS.
+       - **Result: ~35 ms host-side stall to remove (CPU-Bound Preprocessing).** Fusing normalization into the compiler graph and streaming UINT8 through zero-copy DMA targets the measured bottleneck and can bring latency near the 16.6 ms 60 FPS budget.
 status: published
 provenance: imported
 requires_explanation: false

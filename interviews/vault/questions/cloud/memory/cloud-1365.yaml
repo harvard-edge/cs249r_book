@@ -7,12 +7,12 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: 'Diagnosing Low SM Utilization in LLM Inference'
-scenario: 'You are profiling an autoregressive LLM inference service running on a single GPU (40GB memory, 2.0 TB/s peak bandwidth). The model has 15 billion parameters loaded in FP16. When serving a single user request (batch size = 1), the service generates 25 tokens per second, but the profiler shows that the GPU''s compute units (SMs) are at less than 5% utilization. An engineer suggests upgrading to the latest cuBLAS library to optimize matrix multiplication kernels.'
-question: 'Why is the GPU at <5% SM utilization for batch-1 decoding, and why won''t a cuBLAS upgrade materially improve tokens/sec?'
+title: Diagnosing Low SM Utilization in LLM Inference
+scenario: You are profiling an autoregressive LLM inference service running on a single GPU (40GB memory, 2.0 TB/s peak bandwidth). The model has 15 billion parameters loaded in FP16. When serving a single user request (batch size = 1), the service generates 25 tokens per second, but the profiler shows that the GPU's compute units (SMs) are at less than 5% utilization. An engineer suggests upgrading to the latest cuBLAS library to optimize matrix multiplication kernels.
+question: Why is the GPU at <5% SM utilization for batch-1 decoding, and why won't a cuBLAS upgrade materially improve tokens/sec?
 details:
   realistic_solution: |
-    The compute units are starved for data due to the memory wall. In autoregressive generation at batch=1, each token requires streaming the entire 30GB of model weights from HBM to SRAM. The observed 25 tokens/s represents ~37.5% effective bandwidth utilization, confirming the system is strictly HBM-bound. Increasing batch size is the primary lever to amortize weight loads.
+    The compute units are underutilized because batch-1 decoding is memory-bandwidth bound, not because the GEMM kernels are the main limiter. Each generated token has low arithmetic intensity: the GPU streams tens of GB of FP16 weights from HBM with little reuse, plus KV-cache and launch overhead. Low SM utilization can therefore coexist with high memory-bandwidth pressure. A cuBLAS upgrade may improve individual kernels at the margin, but it will not materially improve tokens/sec unless the system increases batching, reduces weight traffic, or uses techniques such as quantization/speculative decoding.
   common_mistake: |
     **The Pitfall:** Assuming low SM utilization indicates inefficient compute kernels or CPU bottleneck.
     **The Rationale:** Standard profiling wisdom dictates that low compute utilization means the compute logic itself needs optimization.
@@ -22,14 +22,16 @@ details:
     - 15B parameter model in FP16 = 30 GB weights.
     - GPU memory 40GB, 2.0 TB/s peak bandwidth.
     - Batch size 1, 25 tokens/s generated.
+    - Use one effective full-model weight stream per generated token as a rough lower-bound traffic model, not a precise profiler model.
 
     **Calculations:**
-    - Memory wall: Autoregressive generation requires streaming the entire 30 GB weights per token.
-    - Theoretical max throughput: 2,000 GB/s / 30 GB/token = 66.6 tokens/second.
-    - Current performance: 25 tokens/s represents 25 / 66.6 = 37.5% effective bandwidth utilization.
+    - Approximate lower-bound weight traffic: 30 GB/token * 25 tokens/s = 750 GB/s.
+    - This is already 37.5% of a 2,000 GB/s peak before KV-cache reads/writes, nonideal memory access, kernel launches, and bandwidth-efficiency losses.
+    - Actual traffic can be lower or higher depending on batching, tensor parallelism, quantization, KV-cache size, and weight reuse, so this estimate supports the diagnosis qualitatively rather than proving the exact <5% SM number.
+    - The compute work per token is not enough to keep SMs busy while waiting on those HBM streams, so SM utilization can be very low even when memory is the bottleneck.
 
     **Conclusion & Interpretation:**
-    - **Result: 37.5% bandwidth utilization (Memory-Bound)**. The system is strictly memory-bandwidth bound, meaning compute optimizations (like cuBLAS) yield zero improvement.
+    - **Result: Memory-Dominated Decoding.** The approximate traffic model makes low SM utilization plausible; a cuBLAS upgrade does not address the bandwidth wall, so batching or reducing memory traffic is the real lever.
 status: published
 provenance: imported
 requires_explanation: false

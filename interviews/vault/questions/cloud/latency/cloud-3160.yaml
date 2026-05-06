@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: cloud-3160
 track: cloud
-level: L4
+level: L3
 zone: fluency
 topic: speculative-decoding
 competency_area: latency
@@ -11,21 +11,26 @@ title: Speculative Decoding Acceptance Rate Fundamentals
 scenario: A draft model proposes K=5 tokens speculatively, and the target 70B model verifies them in one forward pass.
 question: If the acceptance rate is alpha=0.8 per token, what is the expected number of accepted tokens per speculation round, and what is the effective speedup over autoregressive decoding?
 details:
-  realistic_solution: 'Tokens are accepted sequentially: token 1 accepted with probability alpha, token 2 accepted with probability alpha (conditional on 1 accepted), etc. Expected accepted tokens E[n] = alpha + alpha^2 + ... + alpha^K + correction = (1 - alpha^(K+1))/(1-alpha) - 1 = (1-0.8^6)/(1-0.8) - 1 = (1-0.262)/0.2 - 1 = 3.69 - 1 = 2.69. Plus 1 token always generated (the first correct token after rejection or end of sequence): E[tokens] = 2.69 + 1 = 3.69 tokens per round. Autoregressive: 1 token per forward pass. Speedup depends on draft model cost. If draft is free: 3.69x. If draft costs 0.1x of target: effective speedup = 3.69 / (1 + 5 x 0.1) = 3.69/1.5 = 2.46x.'
+  realistic_solution: 'Tokens are accepted sequentially: token 1 is accepted with probability alpha, token 2 with probability alpha^2, and so on. Expected accepted draft tokens E[accepted] = alpha + alpha^2 + ... + alpha^K = 0.8 + 0.64 + 0.512 + 0.4096 + 0.32768 = 2.68928. A round emits the accepted prefix plus one target-sampled token: the correction at the first rejection, or the next token if all K draft tokens are accepted. Expected served tokens per target verification pass are therefore 2.68928 + 1 = 3.68928. Against a target-only autoregressive baseline of one target pass per served token, speedup is 3.69x if draft cost is ignored. If the draft costs 0.1 target-pass equivalents per drafted token and the target verifies all K tokens in one pass, cost per round is 1 + 5 x 0.1 = 1.5 target-pass equivalents, so effective speedup is 3.68928 / 1.5 = 2.46x.'
   common_mistake: |
     **The Pitfall:** Computing expected accepted tokens as K * alpha = 4.
     **The Rationale:** Candidates often assume acceptance probabilities are independent across tokens.
     **The Consequence:** Ignoring the fact that rejection at position i means all subsequent positions are rejected, leading to an overestimation of speculative speedup.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Acceptance rate alpha = 0.8 per token.
-       - K = 5 tokens speculatively drafted.
-       - Draft overhead: 5 * 10% = 50% extra cost.
-    2. **Calculations:**
-       - Expected accepted tokens E[n] = (1 - alpha^(K+1))/(1-alpha) - 1 = (1 - 0.8^6) / 0.2 - 1 = 2.69.
-       - Plus 1 token always generated: E[tokens] = 2.69 + 1 = 3.69 tokens per round.
-       - Net effective speedup = 3.69 / 1.5 = 2.46x.
-    3. **Conclusion & Interpretation:** **Result: Compute-Bound**. Factoring in draft overhead, the effective speedup is 2.46x.
+    **Assumptions & Constraints:**
+    - Acceptance rate alpha = 0.8 per token.
+    - K = 5 tokens speculatively drafted.
+    - Draft overhead: 0.1 target-pass equivalents per drafted token, so 5 draft tokens add 0.5 target-pass equivalents to one target verification pass.
+
+    **Calculations:**
+    - Expected accepted draft tokens = alpha + alpha^2 + alpha^3 + alpha^4 + alpha^5.
+    - E[accepted] = 0.8 + 0.64 + 0.512 + 0.4096 + 0.32768 = 2.68928.
+    - Expected served tokens per target verification = E[accepted] + 1 correction/next token = 3.68928.
+    - Ignoring draft cost, speedup versus one-token-per-target-pass decoding = 3.68928x.
+    - Including draft cost, round cost = 1 target verify + 5 * 0.1 draft = 1.5 target-pass equivalents.
+    - Net effective speedup = 3.68928 / 1.5 = 2.46x.
+
+    **Conclusion & Interpretation:** **Result: Compute-Bound**. Ignoring draft cost gives a 3.69x speedup; factoring in 0.5 extra target-pass equivalents of draft work per round gives a 2.46x effective speedup.
 status: published
 provenance: imported
 requires_explanation: false

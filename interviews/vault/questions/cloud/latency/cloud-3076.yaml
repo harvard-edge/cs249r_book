@@ -7,11 +7,11 @@ topic: queueing-theory
 competency_area: latency
 bloom_level: evaluate
 phase: inference
-title: 'Queueing Theory Mastery: Speculative Decoding Impact on Queue Dynamics'
+title: 'Speculative Decoding for LLaMA-70B: M/M/1 vs M/G/1 P99 Latency'
 scenario: 'Analyze how speculative decoding changes the queueing dynamics of an H100 LLaMA-70B inference server. Without speculation: μ=10 req/s, exponential service, ρ=0.8. With speculative decoding (draft model accepts 4 tokens per verify step): μ increases to 35 req/s with near-deterministic service (CV≈0.2).'
-question: How does speculative decoding change M/M/1 to M/G/1 queueing for LLaMA-70B at ρ=0.8, and what P99 latency improvement should you expect?
+question: How does speculative decoding change M/M/1 to M/G/1 queueing for LLaMA-70B, and what approximate P99 improvement should you expect?
 details:
-  realistic_solution: 'Without speculation: M/M/1, ρ=0.8, μ=10. Wq = 0.8/(10*0.2) = 0.4s. W = 0.4 + 0.1 = 0.5s. P99 ≈ 4.6 * 0.5 = 2.3s. With speculation: λ same, μ=35, ρ=λ/35. If λ=8 (same as before): ρ=8/35=0.229. M/G/1 P-K: Wq = λ*E[S²]/(2(1-ρ)). E[S²] = E[S]²(1+CV²) = (1/35)²*(1+0.04) = 0.000849. Wq = 8*0.000849/(2*0.771) = 0.0044s = 4.4ms. W = 4.4ms + 28.6ms = 33ms. P99 ≈ 4.6*33 = 152ms. Improvement: 2300ms → 152ms = 15x.'
+  realistic_solution: 'Without speculation: M/M/1, ρ=0.8, μ=10, so λ=8 req/s. The exact M/M/1 response-time tail is exponential with rate μ-λ=2/s, giving P99 ≈ -ln(0.01)/2 = 2.30s and mean response 0.50s. With speculation, keep λ=8 but use μ=35 and CV=0.2, so ρ=0.229. Pollaczek-Khinchine gives mean queue wait Wq = λE[S²]/(2(1-ρ)) = 4.4ms and mean response ≈33ms. M/G/1 does not give an exact P99 from only mean and CV, so the defensible conclusion is that the system moves from queue-delay-bound to service-time-bound behavior. A practical expectation is an order-of-magnitude P99 reduction, with planning estimates in the low hundreds of milliseconds requiring either measured traces or a chosen service-time distribution.'
   common_mistake: |
     **The Pitfall:** Naively applying M/M/1 queue math to speculative workloads without modeling the deterministic shift in coefficient of variation.
     **The Rationale:** Engineers who remember basic queueing theory assume all inference service times strictly mirror exponential distributions, entirely missing that speculative accept/reject loops compress service times toward a highly deterministic mean.
@@ -22,12 +22,15 @@ details:
     - With Speculation (M/G/1): μ=35, λ=8, ρ=0.229, CV=0.2.
 
     **Calculations:**
-    - M/M/1 Wait (Wq): 0.8 / (10 * 0.2) = 400ms. W = 500ms, P99 = 2.3s.
+    - M/M/1 response tail: P(T > t) = exp(-(μ-λ)t). P99 = -ln(0.01)/(10-8) = 2.30s.
+    - M/M/1 mean wait check: Wq = ρ/(μ-λ) = 0.8/2 = 400ms; mean response W = 500ms.
     - M/G/1 P-K Wq: λ * E[S²] / (2(1-ρ)). E[S²] = (1/35)² * (1 + 0.04) = 0.000849.
-    - Wq = 8 * 0.000849 / (2 * 0.771) = 4.4ms. W = 33ms. P99 = 152ms.
+    - Wq = 8 * 0.000849 / (2 * 0.771) = 4.4ms. Mean response W = 4.4ms + 28.6ms = 33ms.
+    - M/G/1 mean and CV do not determine an exact P99; deriving one requires a specific service-time distribution or trace.
+    - The mean response drops from 500ms to 33ms, a 15x mean-response improvement, and lower CV reduces queueing-tail risk.
 
     **Conclusion & Interpretation:**
-    - **Result: 15x P99 latency improvement (Speculation-Draft-Bound)**. Shifting from Queue-Delay-Bound.
+    - **Result: roughly order-of-magnitude P99 improvement, not an exact closed-form P99.** Speculation raises service rate and reduces service-time variance, shifting the system away from queue-delay-bound behavior.
 status: published
 provenance: imported
 requires_explanation: true

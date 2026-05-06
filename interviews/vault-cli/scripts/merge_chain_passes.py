@@ -37,8 +37,12 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VAULT_DIR = REPO_ROOT / "interviews" / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
+# AI-pipeline staging lives under _pipeline/ (gitignored). The live chain
+# registry is the durable artifact at vault/chains.json.
+# See interviews/CLAUDE.md.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
 DEFAULT_PRIMARY = VAULT_DIR / "chains.json"
-DEFAULT_SECONDARY = VAULT_DIR / "chains.proposed.lenient.json"
+DEFAULT_SECONDARY = PIPELINE_DIR / "chains.proposed.lenient.json"
 DEFAULT_OUTPUT = VAULT_DIR / "chains.json"
 
 ANCHOR_LEVELS = frozenset({"L1", "L2"})

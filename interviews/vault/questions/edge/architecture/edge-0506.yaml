@@ -9,9 +9,9 @@ bloom_level: apply
 phase: training
 title: The Self-Attention Latency Trap
 scenario: Your perception model, a small Vision Transformer (ViT), is running on a Jetson AGX Orin but is taking 45ms per inference, missing the critical 33ms 'hard real-time' deadline for obstacle detection.
-question: Which of the following strategies would you apply to solve this latency crisis while best preserving model quality?
+question: Which listed strategy is the best latency fix while preserving enough obstacle-detection quality for deployment?
 details:
-  realistic_solution: 'Replace the ViT with a CNN built using depthwise separable convolutions. ViT''s quadratic self-attention results in random-access memory patterns and low arithmetic intensity, making it severely memory-bandwidth-bound. CNNs have high spatial locality.'
+  realistic_solution: Replace the ViT with a CNN built using depthwise separable convolutions. For this hard real-time edge workload, the best listed quality-preserving latency fix is to move to an architecture with better hardware locality, then retrain or distill from the ViT to recover accuracy. Aggressive INT4 quantization and a smaller ViT may damage quality while leaving attention-style memory access in place, and MoE does not directly address the single-model memory-bandwidth bottleneck. ViT's quadratic self-attention creates random-access memory patterns and low arithmetic intensity, while CNNs reuse local spatial tiles efficiently.
   common_mistake: |
     **The Pitfall:** Believing that FLOPs are the only metric that matters for latency.
     **The Rationale:** Engineers shrink models with inefficient memory patterns instead of switching to architectures with higher arithmetic intensity.
@@ -19,20 +19,24 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Hardware: Orin (275 TOPS, 204.8 GB/s bandwidth).
-    - ViT attention: O(N² * D) complexity, non-local access.
+    - Current ViT latency: 45ms. Target deadline: 33ms.
+    - ViT attention uses non-local token-to-token access; CNNs reuse local tiles in cache/shared memory.
+    - Example token grid: N = 1,024 tokens, D = 256 channels, FP16 activations.
+    - The 4 MB attention-map estimate is for one materialized score/probability map per layer; if each head materializes its own map, multiply by the number of heads.
 
     **Calculations:**
-    - Standard 3x3 conv (256 in/out): 589,824 MACs.
-    - Depthwise separable 3x3: 67,840 MACs.
-    - Ops reduction: ~8.7x.
+    - Attention score elements per layer: N * N = 1,024 * 1,024 = 1,048,576.
+    - FP16 attention score/probability traffic for one layer-level map write plus one read: 1,048,576 * 2 bytes * 2 = ~4 MB before Q/K/V and output traffic.
+    - Across 12 layers, attention score/probability traffic alone is ~48 MB, and the access pattern is non-local.
+    - A depthwise separable CNN processes local 3x3 neighborhoods, so activations are reused from nearby memory rather than repeatedly materializing global N² attention maps.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound Architecture (Compute-Bound)**. Depthwise convolutions dramatically increase data locality and arithmetic intensity, bringing latency under 33ms.
+    - **Result: Memory-Bandwidth Bottleneck.** The ViT is missing the 33ms deadline because attention creates large non-local memory traffic. A CNN with depthwise separable convolutions is the best listed strategy because it improves locality and reduces memory movement; the final latency still needs end-to-end profiling against the 33ms budget.
   options:
-  - Apply aggressive INT4 quantization to the existing ViT.
-  - Use Neural Architecture Search (NAS) to find a smaller ViT configuration.
-  - Replace the ViT with a CNN built using depthwise separable convolutions.
-  - Implement a Mixture-of-Experts (MoE) layer.
+    - Apply aggressive INT4 quantization to the existing ViT.
+    - Use Neural Architecture Search (NAS) to find a smaller ViT configuration.
+    - Replace the ViT with a CNN built using depthwise separable convolutions.
+    - Implement a Mixture-of-Experts (MoE) layer.
   correct_index: 2
 status: published
 provenance: imported

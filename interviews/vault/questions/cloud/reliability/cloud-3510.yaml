@@ -8,33 +8,35 @@ competency_area: reliability
 bloom_level: analyze
 phase: both
 title: Graceful Degradation for LLM Inference on AMD MI300X
-scenario: 'A financial services company deploys a large language model (LLM) for real-time fraud detection on a cluster of AMD MI300X accelerators. During peak periods, load spikes push GPUs to their limits, causing critical inference requests to time out.'
+scenario: A financial services company deploys a large language model (LLM) for real-time fraud detection on a cluster of AMD MI300X accelerators. During peak periods, load spikes push GPUs to their limits, causing critical inference requests to time out.
 question: How would you design a graceful degradation ladder for MI300X fraud detection, including fallbacks, fail-safe/fail-operational modes, and QoS shedding?
 details:
   realistic_solution: |
-    The solution involves a multi-tier degradation ladder:
-    1. **Normal Operation (L0):** Serve the primary FP16 LLM.
-    2. **Mild Congestion (L1):** Switch to a quantized INT4 version of the same LLM, significantly reducing memory footprint and increasing throughput.
-    3. **High Congestion (L2):** Fall back to a smaller, pre-trained distilled LLM (e.g., 7B parameters) to maintain core fail-operational functionality.
-    4. **Extreme Congestion (L3):** Route requests to a highly optimized heuristic model or a cached 'no fraud detected' default as a fail-safe measure.
+    Use a fraud-specific degradation ladder with explicit risk controls:
+    1. **Normal Operation (L0):** Run the full MI300X fraud model stack for all transactions, including feature joins, graph or sequence features, and the highest-fidelity neural scorer.
+    2. **Mild Congestion (L1):** Keep high-value and high-risk transactions on the full model while routing low-risk traffic to a quantized or distilled fraud scorer with calibrated thresholds.
+    3. **High Congestion (L2):** Use a lightweight model plus rules for low-risk traffic, defer borderline cases to manual review or asynchronous rescoring, and reserve MI300X capacity for transactions with high loss exposure.
+    4. **Extreme Congestion (L3):** Fail operational by approving clearly low-risk transactions with conservative limits, fail safe by blocking or step-up-authenticating high-risk transactions, and shed non-critical analytics or batch scoring before real-time authorization.
+    QoS should be driven by transaction risk, customer impact, regulatory requirements, and timeout budgets rather than by a generic LLM-size ladder.
   common_mistake: |
     **The Pitfall:** Relying solely on horizontal scaling or queuing requests without quality degradation.
     **The Rationale:** Candidates treat inference as an "all-or-nothing" service rather than a flexible computational workload.
     **The Consequence:** Unbounded latency spikes or complete service failure during traffic bursts.
   napkin_math: |
     **Assumptions & Constraints:**
-    - FP16 70B Model: ~140GB VRAM.
-    - INT4 70B Model: ~35GB VRAM.
-    - Fallback 7B FP16 Model: ~14GB VRAM.
-    - MI300X Memory Bandwidth: 5.3 TB/s.
+    - Primary fraud scorer consumes 20 ms p99 on MI300X.
+    - Distilled or quantized scorer consumes 8 ms p99 with slightly lower recall.
+    - Rules-only or cached-risk path consumes 2 ms p99 but has the lowest model fidelity.
+    - Real-time authorization timeout budget is 50 ms end to end.
 
     **Calculations:**
-    - Single-batch FP16 70B read takes 140 GB / 5.3 TB/s = ~26.4 ms per token.
-    - INT4 70B read takes 35 GB / 5.3 TB/s = ~6.6 ms per token.
-    - Fallback 7B FP16 read takes 14 GB / 5.3 TB/s = ~2.6 ms per token.
+    - Switching low-risk transactions from primary to distilled scoring saves 20 ms - 8 ms = 12 ms of accelerator time per request.
+    - Switching clearly low-risk traffic to rules-only saves 20 ms - 2 ms = 18 ms per request, but should be limited to cases with low fraud-loss exposure.
+    - If 40% of traffic is low-risk and moved to the distilled scorer, average accelerator demand falls by 0.40 * (12 / 20) = 24%.
+    - The 50 ms timeout budget leaves room for the 20 ms primary path under normal load, but congestion control must reserve that path for the highest-risk transactions.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.6 ms/token (Memory-Bound)**. Falling back to a 7B model provides roughly 10x lower latency than the primary 70B FP16 model.
+    - **Result: Risk-aware degradation.** The ladder reduces MI300X pressure while preserving fraud controls by prioritizing high-risk transactions, deferring ambiguous cases, and using conservative fail-safe actions when real-time scoring cannot complete.
 status: published
 provenance: imported
 requires_explanation: false

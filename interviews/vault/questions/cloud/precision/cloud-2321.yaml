@@ -8,25 +8,28 @@ competency_area: precision
 bloom_level: analyze
 phase: both
 title: RoPE Embedding Degradation in BF16
-scenario: You are extending a 13B model's context window from 8k to 100k tokens. You deploy the model
-  purely in BF16 to save memory. While short-context tasks work perfectly, retrieval tasks at position
-  > 60,000 fail entirely. Profiling shows the attention maps become smeared and indistinct at high positions.
-question: "Why do retrieval tasks fail beyond position 60,000 with BF16 long-context inference, and how would you fix RoPE computation?"
+scenario: You are extending a 13B model's context window from 8k to 100k tokens. You deploy the model purely in BF16 to save memory. While short-context tasks work perfectly, retrieval tasks at position > 60,000 fail entirely. Profiling shows the attention maps become smeared and indistinct at high positions.
+question: Why do retrieval tasks fail beyond position 60,000 with BF16 long-context inference, and how would you fix RoPE computation?
 details:
-  realistic_solution: The issue is a direct result of BF16's severe lack of mantissa precision (only 7
-    bits). Rotary Position Embedding (RoPE) relies on calculating cos(m * theta) and sin(m * theta) where
-    m is the token position. At large positions (e.g., m = 60,000), representing 'm' in BF16 causes severe
-    truncation. The step size between representable numbers in BF16 at this magnitude is large enough
-    that consecutive token positions map to the exact same BF16 value. Consequently, the model cannot
-    distinguish between adjacent tokens at long contexts. The architecture must compute and apply RoPE
-    in FP32, casting to BF16 only after the positional rotation is complete.
-  common_mistake: Assuming the RoPE base frequency (theta) wasn't scaled properly for long context, leading
-    to out-of-distribution cosine values.
-  napkin_math: BF16 uses 8 exponent bits and only 7 mantissa bits. For position IDs around 65,536 (2^16),
-    the precision gap (machine epsilon) is 2^(16-7) = 2^9 = 512. This means any two token positions within
-    a 512-token window (e.g., 65000 and 65100) are represented as the identical BF16 number. RoPE uses
-    these IDs to calculate rotation angles. If angles are identical, attention collapses. Compute IDs
-    in FP32.
+  realistic_solution: The issue is not that token positions themselves cannot exist as distinct integers. The failure is usually caused by computing RoPE angle products or sin/cos caches in too little precision, and sometimes by using an 8k-trained RoPE scaling scheme outside the range it was calibrated for. RoPE needs accurate values for position * inverse_frequency across many dimensions; building those products and trig tables in BF16 can quantize phases enough that high-position rotations become noisy or aliased, which smears attention. Compute positions, inverse frequencies, angle products, and sin/cos cache construction in FP32, apply a long-context RoPE scaling method that was validated for 100k tokens, and only cast the final rotated activations or cached sin/cos values back to BF16 if accuracy tests allow it.
+  common_mistake: |
+    **The Pitfall:** Assuming the RoPE base frequency (theta) wasn't scaled properly for long context, leading to out-of-distribution cosine values.
+    **The Rationale:** Explanation of the pitfall.
+    **The Consequence:** The consequence of this mistake.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - RoPE uses token position m and inverse frequency w_i to compute sin(m * w_i) and cos(m * w_i).
+    - Positions are integer indices, but the angle products and trig cache are floating-point computations.
+    - Long-context inference at 60k-100k tokens pushes RoPE beyond the original 8k training range unless scaling was designed and validated for that range.
+
+    **Calculations:**
+    - For each RoPE dimension, the phase is phi_i = m * w_i. At m = 60,000, even small relative error in w_i or phi_i becomes a visible absolute phase error after multiplication by m.
+    - If phi_i and the sin/cos table are built in BF16, phase values are rounded before the periodic trig operation; nearby positions or dimensions can receive overly coarse rotations.
+    - FP32 angle construction keeps much finer mantissa precision during m * w_i and sin/cos evaluation, then BF16 can be used later for storage or matmul where tests show it is safe.
+    - If the model was trained for 8k context, extending to 100k also requires an appropriate RoPE scaling/extrapolation method; precision fixes alone may not recover retrieval if the frequency schedule is out of distribution.
+
+    **Conclusion & Interpretation:**
+    - **Result: Degraded Positional Phase Accuracy**. BF16 RoPE angle/cache arithmetic and unvalidated long-context scaling can smear attention at high positions. Build RoPE positions, angles, and sin/cos values in FP32, use a 100k-validated scaling method, then cast outputs back to BF16 only after accuracy validation.
 status: published
 provenance: imported
 requires_explanation: false
@@ -45,6 +48,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- inference
-- bf16
-- long-context
+  - inference
+  - bf16
+  - long-context

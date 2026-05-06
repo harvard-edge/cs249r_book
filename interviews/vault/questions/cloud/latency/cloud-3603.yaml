@@ -11,24 +11,27 @@ title: Work-Conserving Scheduler Analysis for Mixed Priority on MI300X
 scenario: 'An MI300X (192GB HBM3) serves two priority classes: premium (SLA p99<100ms, λ=200/s) and standard (no SLA, λ=800/s). Total service rate µ=1200/s.'
 question: How would you design a preemptive priority queue for premium and standard traffic, and can premium meet p99<100 ms?
 details:
-  realistic_solution: 'Preemptive priority M/M/1/priority: premium queue is served first always. Premium: ρ1=200/1200=0.167. Mean premium wait = 1/(µ(1-ρ1)) = 1/(1200×0.833) = 1ms! p99≈6ms. Standard: ρ2=800/1200=0.667. Mean standard wait = 1/(µ(1-ρ1)(1-ρ_total)) = 1/(1200×0.833×0.167)=6ms, p99≈40ms. Total system ρ=0.833 → stable. Premium SLA of p99<100ms is easily met at 6ms.'
-  common_mistake: 'Using weighted fair queueing with weights 1:4 and assuming premium gets proportional latency improvement; WFQ doesn''t isolate premium from standard load at high utilization.'
+  realistic_solution: 'Use preemptive-resume priority: premium work can interrupt standard work, and standard resumes later. Under the stated exponential-service M/M/1 assumptions, premium is isolated from standard queueing and behaves like an M/M/1 with λ1=200/s and µ=1200/s. Thus ρ1=0.167, mean premium response is 1/(µ-λ1)=1ms, and the exponential response-time tail gives p99≈ln(100)/(µ-λ1)=4.6ms. Total utilization is (200+800)/1200=0.833, so the system is stable. For standard traffic, the preemptive-resume mean approximation is (1/µ)/((1-ρ1)(1-ρ_total)) = 0.833ms/(0.833×0.167) ≈ 6ms. Premium meets p99<100ms under this ideal model, but production validation must check non-exponential service times, preemption overhead, and variance.'
+  common_mistake: |
+    **The Pitfall:** Treating preemptive priority as either weighted fair sharing or absolute zero-latency service for premium requests.
+    **The Rationale:** Preemptive priority removes standard-class interference from premium queueing, but premium requests still queue behind other premium requests and consume finite service time.
+    **The Consequence:** The design either under-isolates premium traffic by using fair sharing, or overstates the SLA margin by ignoring premium self-queueing and service-time variance.
   napkin_math: |
     **Assumptions & Constraints:**
     - Premium traffic (λ1): 200 req/s. SLA: p99 < 100ms.
     - Standard traffic (λ2): 800 req/s.
     - Service rate (µ): 1200 req/s.
     - Scheduler: Preemptive M/M/1 priority queue.
-    
+
     **Calculations:**
     - Premium utilization (ρ1): 200 / 1200 = 0.167.
     - Total utilization (ρ_total): 1000 / 1200 = 0.833.
-    - Premium mean wait time: 1 / (1200 * (1 - 0.167)) = 1 / (1200 * 0.833) = 1ms.
-    - Premium p99 wait time: roughly 6ms.
-    - Standard mean wait time: 1 / (1200 * (1 - 0.167) * (1 - 0.833)) = 6ms (p99 ≈ 40ms).
-    
+    - Premium mean response time under preemptive-resume priority: 1 / (µ - λ1) = 1 / (1200 - 200) = 1ms.
+    - For exponential service, premium response-time tail has rate µ - λ1 = 1000/s, so premium p99 = ln(100) / 1000 = 4.6ms.
+    - Standard mean under the two-class preemptive-resume M/M/1 approximation: (1/1200) / ((1 - 0.167) * (1 - 0.833)) = 0.006s = 6ms.
+
     **Conclusion & Interpretation:**
-    - **Result: 6ms p99 Premium Latency (Queue-Latency Bound)**. The preemptive priority queue mathematically isolates premium traffic from standard bursts, easily crushing the 100ms SLA.
+    - **Result: ~4.6ms premium p99 under ideal M/M/1 assumptions.** Preemptive priority protects premium traffic from standard-class load, but the SLA claim depends on validating service-time tails and preemption overhead in production.
 status: published
 provenance: imported
 requires_explanation: false

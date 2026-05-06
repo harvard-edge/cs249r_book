@@ -9,19 +9,31 @@ bloom_level: apply
 phase: both
 title: Weight vs Output Stationary Dataflow
 scenario: You are designing the computation placement dataflow for a cloud ML accelerator with a 256x256 spatial processing array. You are mapping a projection layer Y = XW, where activations X has shape (M=1024, K=512) and weights W has shape (K=512, N=512).
-question: How many weight-matrix element reads does WS versus OS require for this 256x256 tiled XW layer, and which placement is optimal?
+question: How many weight-matrix element reads does WS versus OS require for this 256x256 tiled XW layer, and which placement minimizes weight reads?
 details:
-  realistic_solution: In Weight-Stationary (WS), the 512x512 weight matrix is divided into four 256x256 tiles. Each tile is loaded into the array once and held stationary while activations stream through, resulting in 262,144 total weight reads. In Output-Stationary (OS), each of the 8 output tiles requires re-reading the corresponding K-dimension slice of W, totaling 1,048,576 weight reads — a 4x increase. WS is therefore optimal for this layer shape.
+  realistic_solution: |
+    In Weight-Stationary (WS), split W into KxN tiles: 2 K-tiles by 2 N-tiles, each 256x256. Load each W tile once, keep it stationary, and stream all four M-tiles of X through it, so total W reads equal the matrix size: 512 * 512 = 262,144 elements.
+
+    In Output-Stationary (OS), the outer loop is over output tiles Y[M_tile, N_tile]. There are 4 M-tiles and 2 N-tiles. For each output tile, partial sums stay stationary while the computation streams the two K-tiles of the corresponding W[:, N_tile] panel, which is 512 * 256 elements. Because OS does not keep that W panel stationary across different M-tiles, the same panel is reread for each of the 4 M-tiles. OS reads = 4 M-tiles * 2 N-tiles * 512 * 256 = 1,048,576 elements. WS minimizes weight reads.
   common_mistake: |
     **The Pitfall:** Assuming memory reads for weights equal the matrix size in all dataflows.
     **The Rationale:** Failing to account for how outer tiling loops force redundant re-reads of weight tiles in Output-Stationary.
     **The Consequence:** Choosing a suboptimal dataflow that bottlenecks on SRAM bandwidth.
   napkin_math: |
-    - **W matrix size:** 512 * 512 = 262,144 elements.
-    - **Weight-Stationary (WS):** W is divided into 4 tiles. Each read once. Total reads = 262,144.
-    - **Output-Stationary (OS):** Y has 8 tiles. Each Y-tile streams the entire K dimension of W.
-    - **OS reads:** 8 * (512 * 256) = 1,048,576.
-    - **Conclusion:** **OS requires 4x more weight reads than WS.**
+    **Assumptions & Constraints:**
+    - W matrix size: 512 * 512 = 262,144 elements.
+    - Array is 256x256 tiles.
+    - M has 1024 / 256 = 4 tiles, K has 512 / 256 = 2 tiles, and N has 512 / 256 = 2 tiles.
+
+    **Calculations:**
+    - Weight-Stationary loop order: for each K tile and N tile, load one 256x256 W tile, then reuse it across all 4 M tiles. Reads = 2 * 2 * 256 * 256 = 262,144.
+    - Output-Stationary loop order: for each M tile and N tile, keep one 256x256 Y tile stationary and stream both K tiles of W for that N tile.
+    - W panel per OS output tile = 512 * 256 = 131,072 elements.
+    - OS output tiles = 4 M-tiles * 2 N-tiles = 8.
+    - OS reads = 8 * 131,072 = 1,048,576.
+
+    **Conclusion & Interpretation:**
+    - **Result: OS requires 4x more weight reads than WS, so WS is optimal when minimizing weight reads.**
 status: published
 provenance: imported
 requires_explanation: true

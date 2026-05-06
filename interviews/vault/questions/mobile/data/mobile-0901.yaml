@@ -8,26 +8,28 @@ competency_area: data
 bloom_level: apply
 phase: training
 title: 'Dataset Curation: Implement Data Versioning for Mobile Federated Learning'
-scenario: 'You run federated learning updates on 5M Tensor G3 (7.5 TOPS, 12GB) devices. Each device may be on a different model version (v1, v2, v3).'
-question: 'How should a federated learning system version-gate devices and data when model versions differ across the fleet?'
+scenario: You run federated learning updates on 5M Tensor G3 (7.5 TOPS, 12GB) devices. Each device may be on a different model version (v1, v2, v3).
+question: How should a federated learning system version-gate devices and data when model versions differ across the fleet?
 details:
-  realistic_solution: 'Use version-gated participation: only devices with model version N participate in round N training. Version metadata stored in 4 bytes per device. Stale devices receive model update before participating. Data provenance: hash of local dataset state per round.'
+  realistic_solution: 'Gate each training round by an explicit eligibility tuple: base model version, adapter schema, feature extractor version, data-policy version, and minimum app build. A device may train only examples whose local provenance was recorded under the same compatible tuple; stale devices can keep serving locally but must update or be assigned to a separate compatibility round before contributing gradients. Uploads should include signed metadata, example-count summaries, and a dataset-state hash, while raw user data stays on device. The aggregator rejects mixed-version updates, records cohort counts by version, and keeps separate lineage for rollback, debugging, and bias audits.'
   common_mistake: |
-    **The Pitfall:** Aggregating gradients from different model versions directly.
-    **The Rationale:** Candidates overlook that different model versions reside in incompatible gradient spaces.
-    **The Consequence:** Aggregation corrupts the global model, and lack of data provenance makes debugging impossible.
+    **The Pitfall:** Checking only the model binary version and ignoring the data and preprocessing versions that produced each local update.
+    **The Rationale:** Candidates treat all devices running v3 as equivalent even when their examples were collected under different app logic, consent policy, tokenizer, or feature extraction code.
+    **The Consequence:** The server accepts statistically incompatible updates, cannot explain regressions by cohort, and may train on data that is outside the intended policy window.
   napkin_math: |
     **Assumptions & Constraints:**
     - Fleet: 5M devices. v1=20% (1M), v2=30% (1.5M), v3=50% (2.5M).
-    - Only v3 devices (2.5M) participate in round N training.
+    - Round N requires base model v3 and data-policy p7.
+    - Among v3 devices, 80% have p7-compatible local data.
 
     **Calculations:**
-    - Send model v3 to 1M v1 + 1.5M v2 = 2.5M devices. Model size 100M params fp16 = 200MB.
-    - Total download: 2.5M * 200MB = 500TB per cycle.
-    - Delta update (changed layers only): 10MB delta * 2.5M = 25TB.
+    - Model-version eligibility: 5M * 50% = 2.5M devices can be considered for the v3 round.
+    - Data-policy eligibility inside that cohort: 2.5M * 80% = 2.0M devices have compatible p7 data.
+    - Excluded devices: 3.0M total = 2.5M on stale model versions + 0.5M on v3 with stale or incompatible data provenance.
+    - Metadata cost is small: 5M devices * 4 bytes model version = 20MB for a fleet snapshot; adding 32-byte dataset hashes for the 2.5M v3 cohort is 80MB.
 
     **Conclusion & Interpretation:**
-    - **Result: $250K per update (Bandwidth-Bound)**. At CDN cost $0.01/GB: 25TB = $250K per update vs $5M for full payload.
+    - **Result: 2.0M eligible devices for round N (Version-and-Provenance-Gated)**. The server should train only on devices whose model and data lineage both match the round contract; stale devices are updated, skipped, or routed to a separate compatible round rather than mixed into the same aggregation.
 status: published
 provenance: imported
 requires_explanation: false

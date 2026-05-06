@@ -19,18 +19,21 @@ details:
     **The Consequence:** The proposed optimization introduces a massive memory bandwidth bottleneck, actually slowing down training throughput despite lowering the FLOP count.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Matrix P: N=8192, 32 heads, 2 bytes (FP16/BF16).
+    - Attention probabilities P shape: heads * N * N = 32 * 8192 * 8192 elements.
+    - P stored in FP16/BF16: 2 bytes per element.
     - Memory Bandwidth (A100): ~2000 GB/s.
     - Compute Throughput (A100): ~312 TFLOPS.
 
     **Calculations:**
-    - P Matrix Size: 32 * 8192^2 * 2 bytes = 4.29 GB.
-    - HBM Access Time (Write + Read): 2 * (4.29 GB / 2000 GB/s) = 4.29 ms.
-    - Recomputation FLOPs: 2 * N^2 * d FLOPs per head = 32 * 2 * 8192^2 * 128 = 550 GFLOPs.
-    - Recomputation Time: 550 GFLOPs / 312 TFLOPS = 1.76 ms.
+    - P size: 32 * 8192^2 * 2 bytes = 4.29 GB.
+    - Caching P adds at least one forward write and one backward read: 2 * 4.29 GB = 8.58 GB of HBM traffic.
+    - HBM time for that traffic: 8.58 GB / 2000 GB/s = 4.29 ms before cache and scheduling overheads.
+    - Recomputing scores QK^T: 32 heads * 2 * 8192^2 * 128 = 549.8 GFLOPs.
+    - Probability formation adds O(32 * 8192^2) softmax work, much smaller than the QK^T matmul term.
+    - Matmul recompute time lower bound: 549.8 GFLOPs / 312 TFLOPS = 1.76 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory Bandwidth-Bound.** Recomputing the attention matrix in fast SRAM takes 1.76 ms, while writing and reading it to HBM takes 4.29 ms. Recomputation is ~2.4x faster despite executing more FLOPs.
+    - **Result: Memory Bandwidth-Bound.** Caching P would add about 8.58 GB of HBM traffic per layer instance, while recomputing the scores/probabilities is compute-heavy but stays on chip. Under these assumptions, recomputation is preferable even though profiler FLOPs increase.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: You are building an on-device personalization system. The system shoul
 question: How would you manage autograd and update scheduling so background personalization does not drain battery?
 details:
   realistic_solution: |
-    Implement lazy learning: only build the computational graph (requires_grad=True) when explicitly scheduled for a learning step. Use torch.no_grad() for all inference. Batch user corrections: collect 32 correction events, then run one backward pass offline (screen off, charging). Use SGD instead of Adam (3x less optimizer state memory = 3x fewer writes to flash) to hit targeted 0.5% battery per hour.
+    Implement lazy learning: only build the computational graph (requires_grad=True) during scheduled learning windows. Run all normal typing inference under torch.no_grad() so no tape is retained. Batch user corrections, then run a bounded update only when policy allows it: charging or high battery, screen off or idle, acceptable thermal state, and a fixed daily/hourly cadence. Use a lightweight optimizer and small adapter or head if needed, but the main battery win is gating and batching the backward passes rather than changing optimizers.
   common_mistake: |
     **The Pitfall:** Running continuous online learning with full autograd tape construction for every sample.
     **The Rationale:** Applying server-side continuous learning patterns directly to mobile without adjusting for power constraints.
@@ -21,15 +21,17 @@ details:
     **Assumptions & Constraints:**
     - Battery: 14.8 Wh (53,280 Joules)
     - Continuous Compute: 5W for 1 hour = 5 Wh
-    - Batched Compute (32 samples): 1 backward pass * 50ms at 5W
+    - Batched Compute: 60 scheduled batches/hour, each 50ms at 5W
 
     **Calculations:**
-    - Continuous Battery Impact: 5 Wh / 14.8 Wh = ~33.7% battery per hour (peak)
-    - Batched Compute Energy: 0.05s * 5W = 0.25 Joules/min = 15 Joules/hour
-    - Batched Battery Impact: 15 J / 53,280 J = 0.028% battery per hour
+    - Continuous Energy: 5W * 3600s = 18,000 J/hour.
+    - Continuous Battery Impact: 18,000 J / 53,280 J = ~33.8% battery per hour.
+    - Batched Energy per Update: 0.05s * 5W = 0.25 J.
+    - Batched Energy per Hour: 60 * 0.25 J = 15 J/hour.
+    - Batched Battery Impact: 15 J / 53,280 J = ~0.028% battery per hour before overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.028% (Power/Thermal-Bound)**. Batched updates use 0.028% battery per hour (negligible).
+    - **Result: Battery-Gated Updates.** Keeping inference under no_grad and limiting training to scheduled batches cuts training compute from continuous 5W drain to roughly 0.03% battery/hour for the update work, leaving room for framework and wakeup overhead under a 0.5%/hour policy.
 status: published
 provenance: imported
 requires_explanation: true

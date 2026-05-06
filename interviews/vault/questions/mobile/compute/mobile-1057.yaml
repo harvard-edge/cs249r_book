@@ -11,27 +11,29 @@ title: 'Mobile Transformer Cost Optimization: Quantization + Speculative for Mob
 scenario: 'A Snapdragon 8 Gen 3 mobile app runs Llama-3-7B INT4 (3.5GB) for chat. P99 = 4.55s for 100 tokens — over 3s SLO. Evaluate two optimizations: (1) switch to INT2 quantization (1.75GB, estimated 2-4% quality loss), (2) apply speculative decoding with a 1B INT4 draft (0.5GB) accepting α=0.75 of 4 draft tokens.'
 question: Which optimization achieves P99 < 3s with minimum quality loss?
 details:
-  realistic_solution: 'INT2: 1.75GB/77=22.75ms/tok. 100 toks: 2.275s < 3s ✓. Quality loss: 2-4% estimated. Speculative: draft 4 tokens: 4*(0.5GB/77)=26ms. Verify 7B INT4: 1*(3.5GB/77)=45.5ms. Total per round: 71.5ms. Expected tokens accepted per round: k*α=4*0.75=3. Plus 1 token (always accept first failed verification or final accepted): ~3.2 tokens per round. Effective ms/token: 71.5/3.2=22.3ms. 100 toks: 2.23s < 3s ✓. Quality: no loss (same 7B model for verification). Recommendation: speculative decoding (22.3ms/tok, 0% quality loss) beats INT2 (22.75ms/tok, 2-4% loss). Spec decoding needs 0.5GB more RAM (1B draft): 3.5+0.5=4.0GB total. Fits in 12GB available.'
+  realistic_solution: 'Use the measured 7B baseline from the scenario: 4.55s for 100 tokens, or 45.5ms/token. INT2 roughly halves weight traffic if kernels are efficient, so it is estimated at about 22.8ms/token, or 2.28s for 100 tokens, but with the stated 2-4% quality loss and kernel risk. For speculative decoding, the 1B draft is about 0.5/3.5 of the target cost, or ~6.5ms/token, so drafting 4 tokens costs ~26ms. Verifying the 4-token block with the 7B target is not a free single-token decode; budget about 1.2x one target step, or ~55ms, because the target evaluates the proposed block in parallel with extra attention work. With k=4 and independent acceptance α=0.75, expected progress with a bonus target token is approximately 1 + α + α^2 + α^3 + α^4 = 3.05 tokens/round. Effective TPOT is (26+55)/3.05 ≈26.6ms, or 2.66s for 100 tokens. Recommendation: speculative decoding meets the 3s SLO with functionally unchanged target-model output distribution when implemented with exact verification/rejection
+    sampling; INT2 also meets the SLO but trades quality for simplicity.'
   common_mistake: |
     **The Pitfall:** Blindly recommending INT2 or speculative decoding without checking constraints.
     **The Rationale:** Candidates ignore that INT2 requires specialized kernels or that speculative decoding may have a low acceptance rate on specific data.
     **The Consequence:** Deploying an optimization that either doesn't run on the hardware or fails to speed up generation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Bandwidth: 77 GB/s.
-    - INT2 Model: 1.75 GB.
-    - Speculative Draft: 4 tokens (0.5 GB model).
+    - Baseline measured latency for 7B INT4: 4.55s / 100 tokens = 45.5 ms/token.
+    - INT2 Model: 1.75 GB, with efficient kernels assumed to roughly halve the baseline TPOT.
+    - Speculative Draft: 4 tokens from a 1B INT4 draft model.
     - Speculative Acceptance: α=0.75.
 
     **Calculations:**
-    - INT2 Speed: 1.75GB / 77GB/s = 22.75 ms/tok. (2.275s for 100 tokens).
-    - Speculative Draft: 4 tokens * (0.5GB / 77GB/s) = 26 ms.
-    - Speculative Verify: 1 token * (3.5GB / 77GB/s) = 45.5 ms. Total round = 71.5 ms.
-    - Speculative Accepted: 4 * 0.75 = 3 tokens. Plus 1 verified token = ~3.2 accepted tokens. Effective rate = 71.5 / 3.2 = ~22.3 ms/tok.
-    - Speculative Speed: 22.3 ms/tok. (2.23s for 100 tokens).
+    - INT2 Speed: 45.5 ms/tok * (1.75GB / 3.5GB) ≈ 22.8 ms/tok. 100 tokens ≈ 2.28s.
+    - Draft TPOT estimate: 45.5 ms * (0.5GB / 3.5GB) ≈ 6.5 ms/tok.
+    - Speculative Draft Cost: 4 * 6.5 ms ≈ 26 ms.
+    - Speculative Verify Cost: about 1.2 target-token equivalents ≈ 55 ms for the proposed block.
+    - Expected tokens advanced: 1 + 0.75 + 0.75^2 + 0.75^3 + 0.75^4 ≈ 3.05 tokens/round.
+    - Effective speculative TPOT: (26 + 55) / 3.05 ≈ 26.6 ms/tok. 100 tokens ≈ 2.66s.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.23s (Memory-Bound)**. Speculative decoding is faster (2.23s) and maintains 100% quality.
+    - **Result: 2.66s speculative decode.** Both options meet P99 < 3s; speculative decoding has lower quality risk when exact target-model verification is used, while INT2 is simpler but accepts the stated 2-4% quality loss.
 status: published
 provenance: imported
 requires_explanation: false

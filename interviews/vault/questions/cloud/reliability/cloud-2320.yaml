@@ -8,27 +8,30 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: FP8 Delayed Scaling Out-of-Bounds in Production
-scenario: 'Your serving infrastructure processes 5,000 QPS using an FP8 E4M3 LLM. To avoid the overhead of dynamically calculating the max of every activation tensor, you implement ''delayed scaling'' using the max scale from the previous N batches. During a sudden shift in user prompts, the model outputs NaNs.'
-question: 'Why does delayed scaling with FP8 E4M3 produce NaNs when prompts shift abruptly, and how would you mitigate it?'
+scenario: Your serving infrastructure processes 5,000 QPS using an FP8 E4M3 LLM. To avoid the overhead of dynamically calculating the max of every activation tensor, you implement 'delayed scaling' using the max scale from the previous N batches. During a sudden shift in user prompts, the model outputs NaNs.
+question: Why does delayed scaling with FP8 E4M3 produce NaNs when prompts shift abruptly, and how would you mitigate it?
 details:
   realistic_solution: |
-    Delayed scaling relies on the assumption that activation distributions change smoothly between consecutive batches. When the prompt distribution shifts abruptly, the actual maximum activation value in the new batch can be significantly larger than the historical maximum used to calculate the scaling factor. Because E4M3 has a very low maximum representable value, applying a scaling factor optimized for smaller historical activations to the new, larger activations pushes them past the format's limit, causing an overflow to NaN. The architectural fix is to either use a safe margin in the delayed scale, switch back to dynamic per-token scaling for highly variable workloads, or use a format with higher dynamic range like E5M2 for problematic layers.
+    Delayed scaling relies on the assumption that activation distributions change smoothly between consecutive batches. When the prompt distribution shifts abruptly, the actual maximum activation value in the new batch can be significantly larger than the historical maximum used to calculate the scaling factor. The stale scale underestimates the new batch's dynamic range, so values that should have triggered a larger scale can quantize outside the E4M3 range. Depending on the implementation, those values may saturate, become Inf, or create invalid downstream arithmetic that appears as NaNs. The architectural fix is to shorten the amax history window, add hysteresis or safety margins, use per-channel/per-token scaling for highly variable layers, or fall back to a higher-range format like E5M2 where needed.
   common_mistake: |
     **The Pitfall:** Assuming unexpected NaNs during text generation are caused by out-of-memory errors or context length limits.
     **The Rationale:** Because NaNs often appear during catastrophic system failures or OOMs, engineers blame infrastructure limits rather than examining the numerical stability of their quantization strategy.
     **The Consequence:** Teams ignore the numerical overflow issue, leading to persistent model crashes whenever user traffic patterns shift abruptly.
   napkin_math: |
     **Assumptions & Constraints:**
-    - FP8 E4M3 maximum representable value is 448.
-    - Historical max activation is 10.0.
+    - FP8 E4M3 maximum representable value is about 448.
+    - Delayed scaling stores a scale from the historical amax of 10.0.
+    - Use scale = historical_amax / fp8_max to map FP8 codes back to real values.
     - New prompt introduces an outlier activation of 15.0.
 
     **Calculations:**
-    - Delayed Scale Calculation: Scale S = 448 / 10.0 = 44.8.
-    - Quantized value = 15.0 * 44.8 = 672.
+    - Stale scale S_old = 10.0 / 448 = 0.0223 real units per FP8 code.
+    - Quantizing the new value with the stale scale gives code = 15.0 / 0.0223 = 672.
+    - 672 exceeds the largest finite E4M3 code range, so the value cannot be represented under S_old.
+    - A current scale would be S_new = 15.0 / 448 = 0.0335, mapping the outlier back to code 448.
 
     **Conclusion & Interpretation:**
-    - **Result: Precision-Bound Overflow** (672 > 448 overflows E4M3 precision, producing NaNs).
+    - **Result: Stale-Scale Out-of-Range Activations**. The abrupt distribution shift makes delayed scaling too aggressive; out-of-range FP8 values may saturate or produce invalid downstream operations, so the scale policy needs a shorter amax window, safety factor, finer-grained scaling, or a higher-range fallback.
 status: published
 provenance: imported
 requires_explanation: true
@@ -47,6 +50,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- inference
-- fp8
-- scaling
+  - inference
+  - fp8
+  - scaling

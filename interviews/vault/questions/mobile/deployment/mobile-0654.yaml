@@ -7,12 +7,18 @@ topic: model-serving-infrastructure
 competency_area: deployment
 bloom_level: create
 phase: inference
-title: The Automotive Co-Pilot Conundrum
+title: Deploying a 7B Automotive LLM Within 2GB
 scenario: You are the tech lead for an AI Co-Pilot in an EV. The goal is a low-latency conversational assistant using a 7B LLM. You have a 10W power budget, 2GB memory budget, and sub-200ms TTFT SLA.
 question: What are the three main pillars of your technical plan to bridge this gap, how do they interact, and what are the expected quantitative gains from each?
 details:
   realistic_solution: |
-    A holistic strategy acknowledging the hardware mismatch. Pillar 1: Knowledge Distillation to reduce the 7B model to 1B. Pillar 2: INT4 W4A16 Quantization to compress weights. Pillar 3: Speculative Decoding to hit the 200ms TTFT SLA.
+    Use three interacting pillars that solve memory first, then latency.
+
+    Pillar 1: model reduction. Distill the 7B model into an automotive 1B-1.5B assistant with retrieval/templates for vehicle-specific facts; this cuts FP16 weights from 14 GB to about 2-3 GB before quantization and removes the impossible raw-7B memory target.
+
+    Pillar 2: resident-memory control. Apply mixed quantization and runtime memory controls: INT4 weight-only quantization for most linear layers, INT8/FP16 for sensitive activations, GQA or MQA, capped context, and paged/quantized KV cache. This cuts deployed weights to roughly 0.5-0.75 GB and leaves about 1.25-1.5 GB for KV cache, activations, runtime buffers, and fragmentation inside the 2 GB process budget.
+
+    Pillar 3: TTFT serving optimization. Use prompt prefill caching, fused kernels, a small draft model for speculative decoding, and deadline-aware cancellation. Distillation makes the model plausible, quantization and KV controls make it resident, and serving optimizations attack TTFT; their exact latency gain must be measured on the target SoC.
   common_mistake: |
     **The Pitfall:** Listing disconnected, individual optimization techniques.
     **The Rationale:** Candidates suggest point solutions like "we'll use INT8" without grasping that a 7B model fundamentally cannot run on 2GB RAM.
@@ -21,11 +27,20 @@ details:
     **Assumptions & Constraints:**
     - Baseline: 7B LLM @ FP16.
     - Memory Budget: 2 GB.
+    - Distilled deployment target: 1.2B parameters.
 
     **Calculations:**
     - Baseline Size: 7B params * 2 bytes = 14 GB.
     - Quantized Size (INT4): 7B params * 0.5 bytes = 3.5 GB.
+    - Distilled FP16 size: 1.2B * 2 bytes = 2.4 GB.
+    - Distilled INT4 weight size: 1.2B * 0.5 bytes = 0.6 GB.
+    - Pillar 1, distillation gain: FP16 weights drop from 14 GB to 2.4 GB, a 5.8x reduction before quantization.
+    - Pillar 2, quantization gain on the distilled model: 2.4 GB FP16 to 0.6 GB INT4 weights, a further 4x weight reduction.
+    - Runtime allowance after distilled INT4 weights: 2.0 GB budget - 0.6 GB weights = 1.4 GB for KV cache, activations, runtime buffers, and fragmentation.
+    - With capped context and GQA/MQA, the design target is to keep those non-weight buffers below 1.4 GB; the exact split must be profiled because the scenario does not specify context length or KV geometry.
+    - Pillar 3, TTFT gain: fused kernels, cached static prompts, and speculative decoding are latency optimizations to close the remaining gap to sub-200ms, but any 160-180ms TTFT number is an illustrative target, not derivable from the provided constraints alone.
 
     **Conclusion & Interpretation:**
-    - **Result: Hard Constraint Violation.** INT4 alone (3.5GB) breaches the 2GB limit. A fundamental architectural shift (distillation, cloud-offloading) is mandatory.
+    - **Result:** INT4 on the raw 7B still breaches the 2GB limit. The deployable plan is distillation to about 1.2B parameters, mixed quantization plus KV-cache controls that leave 1.4GB for non-weight memory, and measured serving optimizations to reach the sub-200ms TTFT SLA.
 status: published
+provenance: imported

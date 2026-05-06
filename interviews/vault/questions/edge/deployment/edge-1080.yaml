@@ -1,17 +1,18 @@
 schema_version: '1.0'
 id: edge-1080
 track: edge
-level: L5
+level: L3
 zone: mastery
 topic: model-format-conversion
 competency_area: deployment
 bloom_level: evaluate
 phase: inference
-title: 'Model Format Conversion: End-to-End ONNX to Hailo-8 Conversion Pipeline Mastery'
-scenario: You are converting a custom PyTorch detection model (30M params) to run on a dataflow accelerator (26 TOPS INT8, 2.5W).
-question: How would you convert the custom PyTorch detector, handle unsupported layers, quantify INT8 accuracy loss, and size the compiled file?
+title: 'Model Format Conversion: Convert a PyTorch Detector to a Static INT8 Dataflow Engine'
+scenario: You are converting a custom PyTorch detection model (30M params, 15 GOPS/frame at 640x640) to run on a dataflow accelerator (26 TOPS INT8, 2.5W). The compiler requires static input shapes and supports only a subset of ONNX operators.
+question: What deployment conversion workflow would you use to export the detector, handle unsupported operators, measure INT8 accuracy loss, and estimate compiled engine size and theoretical throughput?
 details:
-  realistic_solution: 'ONNX export: fix dynamic shapes to static (set batch=1, H=640, W=640) for dataflow compilation. Unsupported activations like GELU must be replaced with RELU6 or SiLU. INT8 PTQ: calibrate on 1000 representative images. The compiled HEF file will be ~20-30MB. The 30M parameter model fits well within the 200MB supported limit.'
+  realistic_solution: Export PyTorch to ONNX with static shapes (batch=1, 640x640) and run onnx.checker plus compiler op-coverage analysis before compiling. Replace or fuse unsupported ops such as GELU, custom NMS, dynamic reshape, or grid generation with supported equivalents; if an op cannot be replaced, fail the conversion with the layer name and fallback path. Calibrate INT8 PTQ on ~1000 representative images, then compare accelerator or simulator outputs against the FP32 PyTorch baseline on a held-out validation set using task metrics (mAP drop, plus per-output MAE/cosine checks). Accept only if the INT8 mAP drop stays within the deployment budget, for example <=1 percentage point. A 30M-parameter INT8 model is about 30MB before compiler metadata; with 20-30% packaging overhead, expect a ~36-39MB compiled engine. Theoretical compute time for 15 GOPS on 26 TOPS is 15/26000 seconds = 0.577ms/frame, so real latency will be set by compiler scheduling, memory traffic, and I/O rather than
+    raw TOPS alone.
   common_mistake: |
     **The Pitfall:** Failing to fix dynamic shapes before ONNX export.
     **The Rationale:** PyTorch handles dynamic shapes natively, but dataflow hardware compilers require strict static allocation.
@@ -20,14 +21,17 @@ details:
     **Assumptions & Constraints:**
     - Model: 30M INT8 parameters, 15 GOPS compute per frame.
     - Hardware: 26 TOPS throughput.
+    - Compiler/package overhead: 20-30% over INT8 weights.
+    - INT8 acceptance gate: <=1 percentage point mAP drop versus FP32 baseline on held-out validation data.
 
     **Calculations:**
-    - Model Size: 30M INT8 params = 30 MB.
-    - Theoretical Compute Limit: 15 GOPS / 26 TOPS = 0.577 ms/frame.
-    - Theoretical FPS: 1000 ms / 0.577 ms = 1733 FPS.
+    - Raw INT8 weights: 30M params * 1 byte = 30 MB.
+    - Compiled engine estimate: 30 MB * 1.2 to 1.3 = 36 to 39 MB.
+    - Theoretical compute time: 15 GOPS / 26,000 GOPS/s = 0.000577s = 0.577 ms/frame.
+    - Theoretical compute-limited throughput: 1 / 0.000577s = 1733 FPS.
 
     **Conclusion & Interpretation:**
-    - **Result: 30 MB / 1733 FPS (Memory-Bound)**. Real throughput will be heavily bounded by memory bandwidth to stream the 30 MB weights, not the massive raw compute headroom.
+    - **Result: ~36-39MB engine and 0.58ms/frame theoretical compute time.** These are sizing bounds, not a latency guarantee; the release decision depends on successful static-shape export, supported-op coverage, and measured INT8 accuracy loss within the stated validation budget.
 status: published
 provenance: imported
 requires_explanation: true

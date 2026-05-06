@@ -8,26 +8,31 @@ competency_area: compute
 bloom_level: evaluate
 phase: inference
 title: ESP32-S3 vs External NPU for Edge AI
-scenario: You are tasked with designing the compute architecture for a smart sensor node that performs continuous keyword spotting and periodic image-based anomaly detection. The baseline hardware is an ESP32-S3 with a 240 MHz dual-core Xtensa processor, 512 KB SRAM, 8 MB PSRAM, and vector extensions for INT8.
-question: How would you design the system architecture, compare the compute tradeoffs, and justify your choice between native ESP32-S3 execution versus an external ASIC/NPU?
+scenario: You are tasked with designing the compute architecture for a smart sensor node that performs continuous keyword spotting and periodic image-based anomaly detection. The baseline hardware is an ESP32-S3 with a 240 MHz dual-core Xtensa processor, 512 KB SRAM, 8 MB PSRAM, and vector extensions for INT8. The keyword-spotting model is 250 KB INT8 and latency-critical. The anomaly model is 25 MMACs and 1.5 MB INT8, runs only after a keyword trigger, and has a 250 ms latency target.
+question: How would you design the system architecture, compare the compute and memory tradeoffs, and justify native ESP32-S3 execution versus an external ASIC/NPU for these two models?
 details:
-  realistic_solution: A strong L5 candidate will evaluate the specific workload demands against the ESP32-S3 capabilities. They should architect a solution that pins the latency-critical keyword spotting model entirely in the fast 512 KB SRAM. For the larger vision model, they would utilize the 8 MB PSRAM and the built-in INT8 vector extensions on the second core. By demonstrating that the native compute overhead and PSRAM bandwidth are adequate for low-framerate tasks, they can justify avoiding the increased BOM cost, SPI latency, and programmability challenges of adding a custom ASIC.
-  common_mistake: Candidates often immediately recommend adding an external NPU/ASIC to offload ML tasks without evaluating if the ESP32-S3's native INT8 vector extensions are sufficient for the workload. Alternatively, they might run both models purely in the 8 MB PSRAM without realizing the severe bandwidth bottleneck compared to the 512 KB SRAM.
+  realistic_solution: A strong L5 candidate separates the always-on and triggered workloads. The 250 KB INT8 keyword-spotting model should be pinned in SRAM with its tensor arena sized so audio deadlines are deterministic. The 1.5 MB anomaly model cannot fit in the 512 KB SRAM, so it must either stream from PSRAM, be tiled with careful buffering, or be compressed/pruned if deterministic latency is required. Native ESP32-S3 execution is acceptable only if the triggered anomaly path meets its latency and energy targets with measured sustained PSRAM bandwidth and realistic INT8 throughput; otherwise an external NPU or a smaller anomaly model is justified. The decision is not based on peak MAC rate alone, because PSRAM traffic and overlap dominate the large model.'
+  common_mistake: |
+    **The Pitfall:** Immediately recommending an external NPU or ASIC to offload ML tasks.
+    **The Rationale:** Candidates often recommend adding an external accelerator without evaluating if the ESP32-S3's native INT8 vector extensions are sufficient for the workload, or they might run both models purely in the 8 MB PSRAM without realizing the severe bandwidth bottleneck compared to the 512 KB SRAM.
+    **The Consequence:** Unnecessary increases in BOM cost, SPI latency, and programmability challenges, or severe performance bottlenecks from improper memory allocation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 240 MHz ESP32-S3 dual-core executes 2 INT8 MACs/cycle with vector extensions.
-    - Peak compute: ~480 MMACs/sec.
+    - 250 KB KWS model fits in SRAM; 1.5 MB anomaly model does not.
+    - Use a sustained whole-model INT8 throughput estimate of ~250 MMAC/s after memory and kernel overhead.
     - Anomaly detection model: 25 MMACs, 1.5 MB size.
-    - 8 MB PSRAM (Octal SPI at 80 MHz): ~40 MB/s.
+    - Use a conservative sustained PSRAM model-read bandwidth of ~20 MB/s unless profiling proves better.
+    - Triggered anomaly latency target: 250 ms.
 
     **Calculations:**
-    - Pure compute time: 25M / 480M = ~52 ms.
-    - Fetch time from PSRAM: 1.5MB / 40MB/s = 37.5 ms.
-    - Total latency per frame: 52 ms + 37.5 ms = 89.5 ms (~90 ms).
-    - Max framerate: 1000 / 90 ≈ 11 fps.
+    - KWS placement: 250 KB model + tensor arena must be kept within the 512 KB SRAM budget.
+    - Anomaly compute time: 25M / 250M = 100 ms.
+    - Anomaly model fetch floor from PSRAM: 1.5 MB / 20 MB/s = 75 ms.
+    - Serialized upper estimate: 100 ms + 75 ms = 175 ms before camera/audio I/O and scheduling overhead.
+    - If measured overlap hides some fetch traffic, latency can be lower; if PSRAM bandwidth is worse or tensors spill, latency can exceed this estimate.
 
     **Conclusion & Interpretation:**
-    - **Result: 90 ms per frame (Memory-Bound)**. Native execution is sufficient for periodic tasks, rendering an external ASIC unnecessary.
+    - **Result: Native ESP32-S3 is plausible but measurement-gated.** It can be justified for a triggered 250 ms anomaly path, while the always-on KWS path must stay in SRAM. Choose an external NPU if profiling shows PSRAM stalls or energy per trigger violates the product budget.
 status: published
 provenance: imported
 requires_explanation: true

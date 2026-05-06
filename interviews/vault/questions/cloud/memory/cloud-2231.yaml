@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: both
 title: The Checkpoint Tiering Strategy
 scenario: 'You are designing the checkpoint system for a 100K-GPU training run of a 1 trillion parameter model. A full checkpoint is ~18 TB. The cluster has three storage tiers: Local NVMe (6 GB/s per node), Lustre parallel filesystem (2 TB/s aggregate), and S3-compatible object storage (100 GB/s aggregate). Using Young-Daly, your optimal checkpoint interval is 12 minutes.'
-question: 'How would you design a tiered checkpoint strategy for the 100K-GPU run with 18 TB checkpoints that keeps GPU idle time under 10 seconds?'
+question: How would you design a tiered checkpoint strategy for the 100K-GPU run with 18 TB checkpoints that keeps GPU idle time under 10 seconds?
 details:
-  realistic_solution: 'Use a three-phase tiered checkpoint pipeline: Phase 1 (synchronous, <2 seconds): Each GPU writes its local shard to host DRAM via PCIe. This is the only phase that blocks training. Phase 2 (asynchronous, ~30 seconds): A background thread flushes the DRAM buffer to local NVMe. Phase 3 (asynchronous, ~3 minutes): A background daemon aggregates per-node NVMe checkpoints and streams them to Lustre, then to S3 for durability. The key insight is that only the PCIe DRAM copy must be synchronous.'
+  realistic_solution: 'Use a tiered checkpoint pipeline where only the GPU-to-host handoff is synchronous. Phase 1 (synchronous, <2 seconds): each GPU copies its ~180 MB shard to host DRAM over PCIe, then the job passes a barrier and resumes training. Phase 2 (asynchronous, <1 second per node): each node flushes its 8 GPU shards, about 1.44 GB, from DRAM to local NVMe at 6 GB/s. Phase 3 (asynchronous, ~9 seconds cluster-wide): background daemons stream the 18 TB checkpoint from NVMe to Lustre at up to 2 TB/s aggregate. Phase 4 (asynchronous, ~3 minutes): Lustre or checkpoint workers copy the same checkpoint to S3-compatible object storage at 100 GB/s for longer-term durability. The key insight is that Lustre and object storage are durability tiers, not synchronous GPU-idle tiers.'
   common_mistake: |
     **The Pitfall:** Trying to write the full 18 TB synchronously to Lustre every 12 minutes.
     **The Rationale:** Lustre is the standard shared filesystem, and synchronous writes are conceptually simpler to implement.
@@ -19,16 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Checkpoint size: 18 TB over 100,000 GPUs (180 MB per GPU).
+    - 8 GPUs/node, so each node flushes 1.44 GB per checkpoint.
     - PCIe bandwidth (GPU to DRAM): 32 GB/s.
-    - Local NVMe: 6 GB/s, Lustre: 2 TB/s.
+    - Local NVMe: 6 GB/s per node, Lustre: 2 TB/s aggregate, S3-compatible object storage: 100 GB/s aggregate.
 
     **Calculations:**
-    - Phase 1 (Sync GPU -> DRAM): 180 MB / 32 GB/s = 5.6ms + barrier sync ≈ 2 seconds. (Training blocked).
-    - Phase 2 (Async DRAM -> NVMe): 180 MB * 8 GPUs/node / 6 GB/s ≈ 240ms.
-    - Phase 3 (Async NVMe -> Lustre): 18 TB / 2 TB/s = 9 seconds (runs in background).
+    - Phase 1 (sync GPU -> DRAM): 180 MB / 32 GB/s = 5.6ms, plus coordination/barrier overhead; budget it as <2s blocked time.
+    - Phase 2 (async DRAM -> NVMe): 180 MB * 8 GPUs/node = 1.44 GB/node; 1.44 GB / 6 GB/s = 0.24s.
+    - Phase 3 (async NVMe -> Lustre): 18 TB / 2 TB/s = 9s.
+    - Phase 4 (async Lustre -> S3): 18 TB / 100 GB/s = 180s = 3 minutes.
 
     **Conclusion & Interpretation:**
-    - **Result: I/O-Pipelined**. Training is only blocked for the ~2 seconds of Phase 1, well under the 10-second requirement.
+    - **Result: I/O-Pipelined**. Training is blocked only for the DRAM handoff, well under 10 seconds; NVMe, Lustre, and object-storage durability proceed in the background.
 status: published
 provenance: imported
 requires_explanation: false

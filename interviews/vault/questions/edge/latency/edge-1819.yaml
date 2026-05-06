@@ -11,7 +11,8 @@ title: Hailo-8 Stream Profiling and Latency Bottleneck Analysis
 scenario: You are designing a high-throughput video analytics pipeline using a host CPU connected to a Hailo-8 accelerator via PCIe. The Hailo-8 is a dataflow accelerator capable of 26 TOPS at INT8 precision, but profiling shows the end-to-end latency is significantly higher than expected and accelerator utilization is poor. Given that the Hailo-8 has no local DRAM and relies on streaming data directly from host memory.
 question: What comprehensive profiling architecture would you specify to determine whether Hailo-8 latency comes from preprocessing, PCIe bandwidth, or dataflow stalls?
 details:
-  realistic_solution: 'The specification must include host-side system profiling (e.g., using perf or eBPF) to measure CPU pre-processing latency and PCIe bus monitoring to track the actual streaming throughput. The candidate should also specify using Hailo''s native profiling tools (nsys profiling equivalent for Hailo) to analyze the compiled dataflow graph, ensuring that the accelerator is not stalling due to data starvation caused by host memory bandwidth limits.'
+  realistic_solution: |
+    Specify a staged profiling plan: time preprocessing separately on the host with perf, eBPF, or application timers; measure PCIe and DMA transfer throughput with host counters and runtime timestamps; and inspect Hailo runtime/profiler outputs for device-side graph timing, queue depth, and dataflow idle time. Attribute latency only after correlating host preprocessing, transfer service time, and accelerator execution/stall counters, so PCIe bandwidth limits are not confused with compute saturation.
   common_mistake: |
     **The Pitfall:** Assuming the bottleneck is the accelerator's compute capacity and pruning the model.
     **The Rationale:** Candidates overlook Hailo-8's lack of local DRAM and fail to profile the host-to-device PCIe streaming rate.
@@ -20,15 +21,16 @@ details:
     **Assumptions & Constraints:**
     - 1080p RGB frame (6.22 MB)
     - Target: 60 FPS
+    - Measured degraded host streaming rate: 150 MB/s
     - Hailo-8 Peak: 26 TOPS
 
     **Calculations:**
-    - Required host streaming rate = 6.22 MB * 60 = 373.2 MB/s
-    - If host memory saturated, streaming drops to 150 MB/s
-    - NPU stall time = (373.2 - 150) / 373.2 = 59.8%
+    - Required input streaming rate = 6.22 MB/frame * 60 frame/s = 373.2 MB/s
+    - Measured bandwidth ratio = 150 MB/s / 373.2 MB/s = 0.402
+    - At 150 MB/s, maximum raw-frame service rate = 150 MB/s / 6.22 MB/frame = 24.1 FPS
 
     **Conclusion & Interpretation:**
-    - **Result: NPU stalls 59.8% of the time (Bandwidth-Bound)**. Insufficient host memory bandwidth causes data starvation.
+    - **Result: Underprovisioned input stream.** The measured host path can only feed about 40% of the 60 FPS target for raw 1080p RGB frames. This proves a transfer/preprocessing bottleneck is plausible, but actual device stall fraction must come from Hailo runtime counters or traces.
 status: published
 provenance: imported
 requires_explanation: true

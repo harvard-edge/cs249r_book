@@ -11,11 +11,12 @@ title: Tensor Arena Planning for Jetson Orin Multi-Model Serving
 scenario: 'Your Jetson Orin (32 GB LPDDR5, 60W) serves 5 TensorRT models concurrently for autonomous driving: perception (2.1 GB GPU memory), tracking (800 MB), prediction (1.2 GB), planning (600 MB), and control (200 MB). Total model memory is 4.9 GB. GPU memory is shared with the system (Linux + display = 4 GB), leaving 28 GB for models. However, memory fragmentation after 24 hours of operation causes allocation failures even though total free memory is sufficient.'
 question: How do you plan memory allocation to prevent fragmentation?
 details:
-  realistic_solution: 'Apply the tensor arena pattern from TinyML at edge scale: pre-allocate a contiguous memory pool at startup and sub-allocate within it. Strategy: (1) Allocate one contiguous GPU memory block of 6 GB at process start (leaves 22 GB for growth). (2) Use a custom allocator (arena/bump allocator) that sub-allocates to each model from this block. Models receive fixed offsets: perception at offset 0, tracking at 2.1 GB, prediction at 2.9 GB, planning at 4.1 GB, control at 4.7 GB. (3) No dynamic allocation after initialization — TensorRT''s IExecutionContext uses pre-allocated device memory for activations. (4) For variable-size inputs (different image resolutions), allocate for the maximum expected size at startup. Waste some memory but eliminate fragmentation. TensorRT supports this via createExecutionContextWithoutDeviceMemory() + manual memory binding.'
+  realistic_solution: 'Apply the tensor arena pattern at edge scale: reserve model memory at startup and keep the serving process from doing repeated cudaMalloc/cudaFree during steady-state inference. Strategy: (1) Allocate a planned GPU memory pool of about 6 GB at process start for the five models, leaving 22 GB of the 28 GB model-available memory outside that pool. (2) Use fixed sub-allocations or a cudaMemPool/custom allocator for engine weights, bindings, scratch buffers, and per-context activation memory sized from TensorRT engine inspection. (3) Create separate TensorRT execution contexts as needed and assign each context its required device memory using the TensorRT API for externally supplied context memory, while still accounting for workspace, optimization profiles, plugins, and variable input sizes. (4) Allocate for the maximum supported shape/profile during startup and fail fast if the pool cannot satisfy it. This reduces fragmentation and makes failures deterministic, but it
+    does not guarantee that unrelated driver, plugin, or system allocations can never fail.'
   common_mistake: |
     **The Pitfall:** Relying on dynamic memory allocation (`cudaMalloc`) during continuous operation.
     **The Rationale:** Candidates assume standard memory management is fine as long as total requested memory is less than total free memory.
-    **The Consequence:** Dynamic allocation creates memory holes over 24 hours, leading to intermittent Out-Of-Memory (OOM) failures and forcing system restarts in safety-critical autonomous driving.
+    **The Consequence:** Dynamic allocation creates memory holes over 24 hours, leading to intermittent Out-Of-Memory (OOM) failures even when aggregate free memory appears sufficient.
   napkin_math: |
     **Assumptions & Constraints:**
     - Jetson Orin LPDDR5: 32 GB.
@@ -24,13 +25,16 @@ details:
     - Dynamic memory fragmentation overhead: 15-25%.
 
     **Calculations:**
-    - Dynamic fragmentation = 15-25% of allocated memory becomes unusable.
-    - 4.9 GB * 20% = 980 MB wasted holes.
-    - Arena allocation approach: 0% fragmentation.
-    - Pre-allocate a contiguous 6 GB block (4.9 GB models + 1.1 GB padding).
+    - Fragmentation headroom at 15-25% of model memory = 4.9 GB * 0.15 to 0.25 = 0.735-1.225 GB.
+    - Pool needed for model memory plus headroom = 4.9 GB + 0.735-1.225 GB = 5.635-6.125 GB.
+    - A 6 GB startup arena gives about 1.1 GB beyond the 4.9 GB model footprint for per-model activation peaks, TensorRT context memory, plugin scratch, and fragmentation margin.
+    - Partition the arena by inspected engine needs, for example reserving fixed regions for perception, tracking, prediction, planning, and control plus a shared workspace region sized for the largest concurrent profile.
+    - This 6 GB estimate is a planning baseline; if TensorRT inspection shows worst-case workspace or variable-shape peaks above the margin, round the pool upward before deployment.
+    - Remaining model-available memory after a 6 GB pool = 28 GB - 6 GB = 22 GB for unrelated workloads, driver reservations, and operating margin.
+    - Steady-state serving avoids repeated cudaMalloc/cudaFree inside the arena, so fragmentation risk is converted into a startup sizing check.
 
     **Conclusion & Interpretation:**
-    - **Result: 22 GB free (Fragmentation Prevented).** This static 6 GB block leaves 22 GB free, guarantees zero allocation failures over 24 hours, and ensures deterministic latency.
+    - **Result: a profiled arena of roughly 6 GB is a defensible starting plan for the five 4.9 GB models.** It provides about 1.1 GB of allocation headroom, keeps 22 GB outside the pool, and makes serving failures deterministic at startup instead of after 24 hours.
 status: published
 provenance: imported
 requires_explanation: true

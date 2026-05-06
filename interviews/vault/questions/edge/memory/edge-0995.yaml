@@ -7,27 +7,30 @@ topic: activation-memory
 competency_area: memory
 bloom_level: analyze
 phase: training
-title: 'Analyzing Activation Memory Footprint for MobileNetV3 on Jetson Orin'
-scenario: 'You are deploying MobileNetV3-Large for real-time image classification on a Jetson Orin (32 GB LPDDR5 shared CPU/GPU memory, 275 TOPS). At inference time with batch size 1 and input resolution 224x224, you need to analyze the peak activation memory during the forward pass to understand whether there is headroom for concurrent CV pipeline tasks using the same LPDDR5 pool.'
-question: 'What peak activation memory should you expect for MobileNetV3-Large on Orin at batch 1 and 224x224 input?'
+title: Analyzing Activation Memory Footprint for MobileNetV3 on Jetson Orin
+scenario: You are deploying MobileNetV3-Large for real-time image classification on a Jetson Orin (32 GB LPDDR5 shared CPU/GPU memory, 275 TOPS). At inference time with batch size 1 and input resolution 224x224, you need to analyze the peak activation memory during the forward pass to understand whether there is headroom for concurrent CV pipeline tasks using the same LPDDR5 pool.
+question: What peak activation memory should you expect for MobileNetV3-Large on Orin at batch 1 and 224x224 input?
 details:
-  realistic_solution: 'The peak activation tensor occurs at the first expansion layer: input 224\u00d7224\u00d716, expanded to 224\u00d7224\u00d716 (expansion factor 1, then filters increase). Worst case at a layer with 112\u00d7112 spatial resolution and 96 channels: tensor = 112\u00d7112\u00d796\u00d74 B = 4.6 MB. With TensorRT, intermediate buffers are reused via memory planning, so peak is bounded by the two largest non-overlapping tensors \u2248 9 MB. Total inference footprint including activations + weights \u2248 20 MB, leaving the vast majority of 32 GB for other pipeline tasks.'
+  realistic_solution: For batch-1 MobileNetV3-Large at 224x224, peak activation memory is driven by early high-resolution feature maps, not by the weight size or TensorRT workspace. A representative largest activation is 112x112x96 in fp32, which is 112 * 112 * 96 * 4 B = 4,816,896 B, about 4.6 MiB or 4.8 MB. During an unfused operator, TensorRT may need the input and output activation live at the same time, so a practical peak activation budget is on the order of the largest few live feature maps, roughly 5-10 MB for batch 1. This directly answers the activation-memory question; weights, engine workspace, and the rest of the 32 GB LPDDR5 pool are separate memory categories.
   common_mistake: |
     **The Pitfall:** Assuming activation memory scales linearly with model parameter count.
     **The Rationale:** Engineers often look at the small weight footprint of MobileNets (~10MB) and assume runtime memory is similarly minuscule.
     **The Consequence:** They fail to account for large intermediate feature maps in early depthwise-separable layers, leading to VRAM under-budgeting if batch sizes or resolutions are increased.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Weights: MobileNetV3 is ~5.4M params = 21.6 MB (fp32) or 10.8 MB (fp16).
-    - Peak Activation: 112 \u00d7 112 \u00d7 96 \u00d7 4 Bytes = 4.8 MB.
+    - Batch size: 1.
+    - Input resolution: 224x224.
+    - Activation precision for the estimate: fp32 (4 bytes).
+    - Representative largest early feature map: 112x112x96.
 
     **Calculations:**
-    - Engine Workspace: TensorRT typical default workspace = 256 MB.
-    - Total GPU memory for inference \u2248 300 MB.
-    - Remaining for concurrent tasks = 32 GB - 300 MB = ~31.7 GB.
+    - Single activation size = 112 * 112 * 96 * 4 B = 4,816,896 B.
+    - In decimal MB: 4,816,896 / 1,000,000 = 4.82 MB.
+    - In MiB: 4,816,896 / 1,048,576 = 4.59 MiB.
+    - If two adjacent large activations must be live together, activation peak is about 2 * 4.8 MB = 9.6 MB before additional small buffers.
 
     **Conclusion & Interpretation:**
-    - **Result: ~31.7 GB (Memory Capacity Bound)**. Vast majority of memory remains for concurrent tasks.
+    - **Result: roughly 5-10 MB peak activation memory (Activation-Memory Bound)**. The batch-1 activation footprint is small relative to 32 GB, but the asked quantity is the live activation peak, not remaining system capacity.
 status: published
 provenance: imported
 requires_explanation: false

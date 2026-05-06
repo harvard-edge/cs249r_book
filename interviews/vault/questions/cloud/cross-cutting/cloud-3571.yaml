@@ -7,11 +7,13 @@ topic: differential-privacy
 competency_area: cross-cutting
 bloom_level: analyze
 phase: both
-title: 'Designing a DP-SGD System with NVIDIA H100 for Federated Learning'
-scenario: 'You are tasked with designing a federated learning system for a highly sensitive medical dataset. The system must use Differential Privacy with DP-SGD to train a large language model. The target hardware for each client and the central server is an NVIDIA H100 GPU (80 GB HBM3).'
-question: 'How would you design the federated DP-SGD architecture on H100s, including epsilon accounting, noise calibration, batch sizing, and privacy monitoring?'
+title: Designing a DP-SGD System with NVIDIA H100 for Federated Learning
+scenario: |
+  You are designing a cross-silo federated learning system for hospitals holding highly sensitive medical data. Each hospital client is a secure training silo with an NVIDIA H100 GPU (80 GB HBM3), and the central coordinator also uses H100s. The privacy model is federated central DP: clients clip local updates, secure aggregation hides individual updates from the server, and calibrated Gaussian noise provides client-level DP for released model updates.
+question: How would you design the federated DP-SGD architecture on H100s, including epsilon accounting, noise calibration, batch sizing, and privacy monitoring?
 details:
-  realistic_solution: 'A robust solution involves dynamic privacy budget allocation and adaptive noise calibration. Implement a privacy accountant (e.g., moments accountant) to track epsilon accurately across multiple training rounds. Leverage the H100''s FP16 capabilities for model training and gradient computations to maximize throughput, while carefully selecting batch sizes and model architectures that fit within the 80GB HBM3. For noise calibration, consider methods that adapt noise based on gradient norms and the chosen privacy mechanism (e.g., Gaussian mechanism) to balance privacy and utility. Utilize secure aggregation protocols to combine gradients from clients while minimizing privacy leakage and communication overhead. Architect the system with a clear separation of concerns for privacy mechanism implementation, training orchestration, and model deployment, using distributed frameworks optimized for GPU communication. Implement continuous monitoring of privacy metrics and model utility to inform adjustments.'
+  realistic_solution: |
+    Use a federated DP-SGD design with clear client and server roles. Each round samples a fraction of eligible clients, runs local microbatches on H100s, clips per-example or per-client updates to a fixed norm C, and sends clipped updates through secure aggregation. The server adds or verifies Gaussian noise calibrated to the clipping norm, sampling rate, number of rounds, and target delta; do not calibrate noise directly to observed gradient norms except when those norms are used only to tune a separately fixed clipping policy. Track privacy with an RDP or moments accountant at the client level across rounds, including subsampling amplification, dropouts, retries, and any evaluation queries. Fit batches using ghost clipping, activation checkpointing, sharding, and gradient accumulation so the 80 GB HBM is not consumed by naive per-sample-gradient tensors. Monitor epsilon burn-down, delta, clipping fraction, client participation, utility metrics, and alerts that stop training before the approved privacy budget is exceeded.
   common_mistake: |
     **The Pitfall:** Ignoring the massive memory inflation caused by DP-SGD's per-sample gradients.
     **The Rationale:** Candidates are used to standard SGD, which accumulates gradients across the batch, requiring only one gradient tensor in memory.
@@ -21,14 +23,17 @@ details:
     - Model Parameters: 7B
     - Precision: FP16 (2 bytes/parameter)
     - GPU Memory: 80 GB (H100)
+    - Local microbatch size for naive DP example: B = 8
 
     **Calculations:**
-    - Standard Gradient Memory = 7B * 2 bytes = 14 GB
-    - DP-SGD Memory Inflation = B * 14 GB (per-sample gradients)
-    - Max Batch Size (B) = 80 GB / 14 GB \approx 5
+    - FP16 parameter tensor size = 7B * 2 bytes = 14 GB.
+    - Training also needs gradients, activations, optimizer state, communication buffers, and framework workspace; optimizer state can dominate if full fine-tuning uses Adam-like state.
+    - A naive per-sample-gradient tensor for B = 8 would add about 8 * 14 GB = 112 GB before activations and optimizer state, exceeding 80 GB by itself.
+    - Modern DP libraries avoid holding that full tensor by computing per-example norms and clipped sums layer-by-layer or with ghost clipping.
+    - The practical batch limit therefore depends on sequence length, activation checkpointing, optimizer choice, sharding, and the DP implementation, not on 80 GB / 14 GB alone.
 
     **Conclusion & Interpretation:**
-    - **Result: Batch Size < 5 (Memory-Bound)**. The system must implement ghost clipping or use memory-efficient libraries to compute clipped gradients without materializing the full B x P tensor.
+    - **Result: naive B = 8 per-sample gradients exceed H100 memory.** The architecture needs ghost clipping, sharding, micro-batching, fixed clipping/noise calibration, and client-level privacy accounting across federated rounds.
 status: published
 provenance: imported
 requires_explanation: true

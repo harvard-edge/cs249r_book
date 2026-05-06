@@ -11,7 +11,10 @@ title: The NPU Context-Switching Tax
 scenario: 'A cloud-managed edge gateway in a smart retail store processes camera streams by running 3 models sequentially per frame: Detection (10ms), Tracking (5ms), and Pose Estimation (15ms). The sum of individual model latencies is 30ms. All three models are perfectly compiled for the edge NPU. However, the measured end-to-end pipeline latency per frame is 80ms, limiting throughput to 12 FPS instead of the expected 33 FPS.'
 question: Why is the three-model edge pipeline 80ms instead of 30ms, and how would you restructure serving to improve throughput?
 details:
-  realistic_solution: 'The hidden latency comes from NPU SRAM weight swapping (Context Switching). Edge NPUs typically have very small on-chip SRAM (e.g., 4MB to 8MB) to save power and die area. \n\nIf the combined weights of the 3 models (e.g., 15MB total) exceed the NPU''s SRAM capacity, the NPU driver must constantly swap model weights in and out of main DRAM for every single frame. This requires tearing down the NPU context, flushing SRAM, copying new weights over the memory bus, and initializing the next model. The hardware-algorithm tradeoff requires restructuring the serving pattern: instead of running the pipeline sequentially per frame (D -> T -> P -> D -> T -> P), you should batch frames per model (e.g., run Detection on 5 frames, then Tracking on 5 frames). This amortizes the context-switching overhead over multiple frames, increasing throughput at the cost of slightly higher pipeline latency for the first frame.'
+  realistic_solution: |
+    The hidden latency comes from deployment-time NPU context switching, not from the compiler quality of the individual models. Each model may run in its advertised 10ms, 5ms, or 15ms once resident, but the sequential per-frame schedule forces the runtime to evict one model context and load the next before each stage. If the three model contexts cannot remain resident together on the NPU, those reloads add memory copies, cache/SRAM flushes, and driver setup time between Detection, Tracking, and Pose.
+
+    Restructure serving around model residency: run multiple frames through Detection while that model is loaded, then run those outputs through Tracking, then Pose, or fuse/merge stages if the model architecture allows it. This amortizes context reloads across a batch of frames and improves throughput, with the tradeoff that the first frame in a microbatch may see slightly higher pipeline latency.
   common_mistake: |
     **The Pitfall:** Blaming Python GIL overhead, image preprocessing, or PCIe transfer times for the camera frames.
     **The Rationale:** Candidates often default to system-level software overheads without considering the hardware realities of accelerator memory hierarchies.
@@ -20,15 +23,16 @@ details:
     **Assumptions & Constraints:**
     - Compute latencies: 10ms + 5ms + 15ms = 30ms.
     - Model size: 5MB each. DRAM BW: 4 GB/s. NPU overhead: 15ms/swap.
+    - Sequential serving invokes three distinct model contexts per frame, so the driver reloads one model context for each Detection, Tracking, and Pose invocation.
 
     **Calculations:**
     - Swap read = 5MB / 4GB/s = 1.25ms.
-    - Total swap cost = 1.25ms + 15ms = 16.25ms.
-    - 3 swaps * 16.25ms = 48.75ms overhead.
+    - Per-model context load cost = 1.25ms + 15ms = 16.25ms.
+    - 3 model invocations * 16.25ms = 48.75ms hidden context-switch overhead.
     - Total latency = 30ms + 48.75ms = 78.75ms (~80ms).
 
     **Conclusion & Interpretation:**
-    - **Result: 48.75ms overhead (Context-Switching Bound)**. Restructuring to batch frames per model amortizes the massive 48.75ms swap overhead.
+    - **Result: ~80ms Total Latency (Context-Switching Bound)**. The measured 80ms is the expected 30ms of compute plus about 50ms of hidden NPU context-switching overhead. Restructuring to batch frames per model amortizes the 48.75ms swap cost across multiple frames.
 status: published
 provenance: imported
 requires_explanation: false

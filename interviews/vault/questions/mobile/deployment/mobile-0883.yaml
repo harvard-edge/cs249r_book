@@ -11,7 +11,7 @@ title: Implementing Background Index Sync for On-Device RAG on Snapdragon 8 Gen 
 scenario: A Snapdragon 8 Gen 3 (45 TOPS, 16GB) productivity app needs to keep an on-device FAISS index synchronized with the user's cloud document store (up to 500 new/updated docs per day). Re-embedding and indexing must happen in the background without impacting the foreground app. The embedding model runs at 200 vectors/second and each document averages 400 tokens.
 question: How would you design the background sync architecture with power and latency constraints to prevent battery drain?
 details:
-  realistic_solution: 'Background sync architecture: (1) Use WorkManager (Android) with battery-not-low constraint. (2) Throttle NPU via aggressive duty cycling to stay under the 2W background power budget. (3) With full NPU power at 12W and idle at 0.5W, a 13% duty cycle maintains a 2W average. (4) Execute embedding in short bursts (e.g., 130ms active, 870ms sleep) to process 26 vectors/second effectively. All 500 documents will finish indexing in under 20 seconds of wall-clock time without triggering thermal or battery alarms.'
+  realistic_solution: Use a constraint-based background sync design. Queue changed documents durably, deduplicate by document version, and process them in resumable batches with WorkManager constraints such as charging or battery-not-low, unmetered network if needed, idle/doze allowances, and thermal headroom. Rate-limit NPU work to a measured background power budget and stop immediately when the foreground app needs compute. With 12W active power and 0.5W idle, a 13% duty cycle is the theoretical maximum for a 2W average, giving an upper-bound embedding rate of about 26 vectors/s before scheduler, wakeup, indexing, and I/O overhead. Treat 500 docs/day as a backlog sizing input, not a deterministic 20-second burst guarantee; persist progress so the job can resume across OS pauses.
   common_mistake: |
     **The Pitfall:** Running background indexing at full NPU power (e.g., 12W).
     **The Rationale:** Maximizing speed without regard for mobile battery limits or thermal profiles.
@@ -26,11 +26,12 @@ details:
     **Calculations:**
     - Duty cycle for 2W average: 2W = (d * 12W) + ((1-d) * 0.5W).
     - Solving for d: 1.5 = 11.5d -> d = 13%.
-    - Effective throughput: 200 vecs/s * 0.13 = 26 vecs/s.
-    - Total sync time: 500 documents / 26 = ~19.2 seconds.
+    - Theoretical active embedding throughput at that duty cycle: 200 vecs/s * 0.13 = 26 vecs/s before OS scheduling, thermal, indexing, and I/O overhead.
+    - Embedding compute lower bound for a full 500-document backlog: 500 / 26 = ~19.2 seconds of idealized eligible wall-clock time.
+    - Real completion time is scheduler-dependent; the architecture must tolerate deferral, pausing, and partial completion.
 
     **Conclusion & Interpretation:**
-    - **Result: ~19.2 seconds (Power-Bound)**. Safely operates in the background within thermal profiles.
+    - **Result: Power- and scheduler-bound.** Duty-cycle math sets an upper-bound processing rate, while WorkManager constraints and thermal state determine when the resumable sync actually runs.
 status: published
 provenance: imported
 requires_explanation: false

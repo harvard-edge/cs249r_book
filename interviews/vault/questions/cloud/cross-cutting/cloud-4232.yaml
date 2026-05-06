@@ -8,29 +8,28 @@ competency_area: cross-cutting
 bloom_level: analyze
 phase: both
 title: PII Detection and Scrubbing Pipeline
-scenario: 'Before training an LLM on 500M web-scraped documents, you must remove PII (names, emails, phone numbers, SSNs, addresses). Your regex-based scrubber catches 92% of PII but misses 8%.'
-question: 'With 500M documents averaging 2 PII instances each, how many PII instances leak through, and what is the defense-in-depth strategy?'
+scenario: Before training an LLM on 500M web-scraped documents, you must remove PII (names, emails, phone numbers, SSNs, addresses). Your regex-based scrubber catches 92% of PII but misses 8%.
+question: With 500M documents averaging 2 PII instances each, how many PII instances leak through, and what is the defense-in-depth strategy?
 details:
-  realistic_solution: 'Leaked PII: 500M docs × 2 PII/doc × 8% miss = 80M PII instances in training data. Defense-in-depth: (1) Layer 1 — Regex scrubbing for structured PII (emails, SSNs, phone numbers). Catch rate: ~99%. (2) Layer 2 — NER model (spaCy, Presidio) for names, addresses, organizations. Catch rate: ~90% for names, ~85% for addresses. Combined with regex: ~97% overall catch rate. (3) Layer 3 — DP-SGD training (ε=8) to prevent memorization of remaining PII. Even if PII exists in training data, DP bounds how much the model can memorize about any individual. (4) Layer 4 — Output filtering: regex + NER on model outputs to catch generated PII at inference time. (5) Layer 5 — Deduplication: remove near-duplicate documents (PII repeated across duplicates is most likely to be memorized). After all layers: residual risk = 500M × 2 × 0.03 × (1 - DP protection) ≈ negligible.'
+  realistic_solution: 'Regex-only leakage is 500M docs × 2 PII/doc × 8% miss rate = 80M PII instances left in the training corpus. That is the direct answer to the leakage estimate. Defense-in-depth should then reduce both training-data exposure and model-output exposure: add NER/contextual detectors for names and addresses, deduplicate near-identical documents before training, sample and manually audit high-risk slices, quarantine or hash detected PII instead of leaving raw values, train with privacy-aware methods when memorization risk is unacceptable, and run regex/NER filters on model outputs. These later layers are risk controls, not a reason to pretend the 92% scrubber leaves only a few leaked instances.'
   common_mistake: |
     **The Pitfall:** Relying solely on regex-based PII detection.
     **The Rationale:** Regex catches structured PII (emails, SSNs) but fails on unstructured PII like names in context (20-30% miss rate) or non-standard addresses.
     **The Consequence:** Believing the data is sanitized while leaking millions of names and addresses into the training corpus.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 500M docs averaging 2 PII instances each.
-    - DP-SGD (ε=8) memorization probability ~10^-4.
+    - 500M documents.
+    - Average of 2 PII instances per document.
+    - Regex scrubber catches 92% and misses 8%.
 
     **Calculations:**
-    - Regex only (92%): 500M * 2 * 0.08 = 80M PII leaked.
-    - Regex + NER (97%): 500M * 2 * 0.03 = 30M PII leaked.
-    - Deduplication: Removes 30% of corpus -> 30M * 0.7 = 21M.
-    - DP-SGD memorization: Expected extractable PII: 21M * 10^-4 = 2,100 instances.
-    - Output filtering (99.5% catch): 2,100 * 0.005 = ~10 instances leaked in production.
-    - Cost of NER: 500M docs * 0.5 ms/doc = 69 hours on 1 GPU. At $3/hr = $207.
+    - Total PII before scrubbing = 500M * 2 = 1B instances.
+    - Missed by regex = 1B * 0.08 = 80M PII instances left in the training corpus.
+    - The 80M figure is training-data residual PII, not an estimate of model-output leakage.
+    - Additional NER, deduplication, DP training, and output filters should be evaluated as separate controls with their own measured catch rates.
 
     **Conclusion & Interpretation:**
-    - **Result: ~10 instances leaked (Privacy-Bound)**. Cost of $207 for NER is worth it for 50M fewer leaks.
+    - **Result: 80M PII instances remain after regex-only scrubbing.** Defense-in-depth is required because corpus leakage and generated-output leakage are different risks.
 status: published
 provenance: imported
 requires_explanation: false

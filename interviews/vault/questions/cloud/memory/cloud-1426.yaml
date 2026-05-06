@@ -7,20 +7,22 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: apply
 phase: both
-title: Quantifying the Integration Bottleneck
-scenario: 'You are deploying a 7-billion parameter auto-regressive language model (FP16) on an accelerator with 1.5 TB/s memory bandwidth and 300 TFLOPS of compute capacity. For single-token generation (batch size = 1), assume HBM memory access costs 40 pJ/byte and compute costs 0.1 pJ/FLOP.'
-question: 'For batch-1 decoding of the 7B FP16 model, what are the time and energy ratios of weight movement versus compute?'
+title: Quantifying Batch-1 LLM Weight Movement Cost
+scenario: You are deploying a 7-billion parameter auto-regressive language model (FP16) on an accelerator with 1.5 TB/s memory bandwidth and 300 TFLOPS of compute capacity. For single-token generation (batch size = 1), assume HBM memory access costs 40 pJ/byte and compute costs 0.1 pJ/FLOP.
+question: For batch-1 decoding of the 7B FP16 model, what are the time and energy ratios of weight movement versus compute?
 details:
-  realistic_solution: 'Calculate the exact data transfer time and energy versus compute time and energy to prove the workload is massively memory-bound. Then, propose solutions like increasing batch size to amortize weight loading, or using weight quantization (e.g., INT4) to reduce the integration bottleneck.'
+  realistic_solution: For batch-1 autoregressive decoding, assume the FP16 weights are effectively streamed from HBM for each generated token rather than reused across a large batch. Streaming 14GB takes about 9.33ms, while the approximate 2 FLOPs per parameter takes about 0.046ms at 300 TFLOPS, so weight movement is roughly 200x slower than compute. Transfer energy is about 560mJ versus 1.4mJ of compute energy, or about 400x higher. Increasing batch size amortizes weight loading, and quantization can reduce the memory cost, but the prompt only proves a strong memory-movement bottleneck rather than making a specific quantization scheme mandatory.
   common_mistake: |
     **The Pitfall:** Focusing purely on the theoretical TFLOPS and compute energy to estimate latency and power draw, entirely ignoring the physical cost of streaming the model.
     **The Rationale:** Engineers optimize the arithmetic loops, unaware that at batch size 1, the GPU operates essentially as a highly inefficient memory-copy machine.
-    **The Consequence:** The deployment vastly under-provisions power and thermal cooling, and misses the mandatory requirement to implement INT8/INT4 weight quantization to survive production limits.
+    **The Consequence:** The deployment vastly under-provisions power and thermal cooling, and misses mitigations such as batching, caching, or INT8/INT4 weight quantization to reduce production memory-movement costs.
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 7B params (FP16 = 14 GB weight size). Batch Size: 1.
+    - Autoregressive decoding assumption: for each generated token, weights are effectively streamed from HBM and are not amortized across a large batch.
     - Accelerator: 1.5 TB/s bandwidth, 300 TFLOPS.
     - Energy parameters: 40 pJ/Byte for transfer, 0.1 pJ/FLOP for compute.
+    - Compute rule of thumb: about 2 FLOPs per parameter per token.
 
     **Calculations:**
     - Transfer Time = 14 GB / 1.5 TB/s ≈ 9.33 ms.
@@ -31,7 +33,7 @@ details:
     - Energy Ratio = 560 mJ / 1.4 mJ = 400x more expensive.
 
     **Conclusion & Interpretation:**
-    - **Result: Massively Memory-Bound (Time & Energy)**. Data movement accounts for >99% of both the latency and power budget. Advanced quantization techniques are non-negotiable to shift the workload closer to the compute ridge point.
+    - **Result: Massively Memory-Movement-Bound.** Weight movement is about 200x slower than compute and about 400x more expensive in energy for batch-1 decoding. Larger batches amortize the stream, and weight quantization can reduce the movement cost.
 status: published
 provenance: imported
 requires_explanation: false

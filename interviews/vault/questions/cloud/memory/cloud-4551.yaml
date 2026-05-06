@@ -8,45 +8,48 @@ competency_area: memory
 bloom_level: create
 phase: both
 title: HBM Sharding for MoE Serving
-scenario: 'An 8-GPU H100 SXM node (80GB HBM3 each) serves an 8x100B parameter MoE model. Traffic patterns show 90% of requests route to just 2 specific experts.'
-question: 'Propose a memory sharding and offloading strategy to maximize throughput for the skewed traffic while supporting full model routing.'
+scenario: An 8-GPU H100 SXM node (80GB HBM3 each) serves an 8x100B parameter MoE model. Traffic patterns show 90% of requests route to just 2 specific experts.
+question: Propose a memory sharding and offloading strategy to maximize throughput for the skewed traffic while supporting full model routing?
 details:
   realistic_solution: |
-    The model in FP16 requires 1.6 TB, vastly exceeding the 640 GB total HBM3. You should pin the 2 hot experts (200B params = 400 GB) directly in the GPUs' HBM3 using tensor parallelism. The remaining 6 cold experts (1.2 TB) must be offloaded to CPU RAM and fetched dynamically via PCIe Gen5 when the 10% routing requests them.
+    The model has 8 experts of 100B parameters each. In FP16 it requires 1.6TB, vastly exceeding the 640GB total HBM3. Pin the 2 hot experts (200B params = 400GB) across the 8 GPUs' HBM using tensor parallelism, and reserve the remaining HBM for the router, shared layers, activations, KV/cache state, communication buffers, and fragmentation. Keep the router/gating network and expert metadata resident on every GPU so routing decisions do not require CPU round trips. Place the 6 cold experts (1.2TB) in CPU RAM or a fast host-memory tier, batch rare routed requests by expert, prefetch the selected cold expert shards after routing, and optionally use spare HBM as a small cache for the next-most-likely cold expert shards. This maximizes throughput for the 90% hot path while preserving correctness for full expert routing.
   common_mistake: |
     **The Pitfall:** Attempting to fit the entire model using naive pipeline parallelism or ignoring the extreme capacity limits of 640GB.
     **The Rationale:** Candidates overlook that the model requires 1.6 TB in FP16, which is far beyond the cluster's physical HBM capacity.
     **The Consequence:** Catastrophic out-of-memory errors on deployment or complete inability to serve the model.
   napkin_math: |
     **Assumptions & Constraints:**
+    - Model: 8 experts * 100B parameters/expert = 800B parameters total.
     - Total HBM Available: 8 GPUs * 80GB = 640GB.
     - Total Model Size: 800B parameters * 2 bytes (FP16) = 1600GB.
     - Hot Experts Size: 2 experts * 100B params * 2 bytes = 400GB.
 
     **Calculations:**
-    - 400GB easily fits in the 640GB HBM.
-    - Remaining 1200GB (6 experts) must be offloaded to CPU RAM via PCIe Gen5 for the 10% rare traffic.
+    - Hot expert weights consume 400GB of the 640GB HBM pool, leaving 240GB for routing layers, activations, KV/cache state if serving autoregressively, framework overhead, and fragmentation.
+    - Cold expert weights: 6 experts * 100B params * 2 bytes = 1200GB, so they cannot fit in the remaining 240GB HBM.
+    - Cold experts must be offloaded to CPU RAM or another host-memory tier and fetched or prefetched for the 10% rare traffic.
+    - Router and placement metadata should remain resident on GPU; cold traffic should be batched by expert so PCIe transfers and tensor-parallel gathers are amortized.
 
     **Conclusion & Interpretation:**
-    - **Result: 400GB pinned (Memory-Bound)**. HBM is insufficient for the full model, necessitating PCIe offloading for the cold experts.
+    - **Result: pin 400GB of hot experts in HBM and offload 1200GB of cold experts.** HBM is insufficient for the full 8-expert model, so throughput comes from keeping the 90% hot route fully resident while using GPU-resident routing, prefetch, batching, and optional spare-HBM caching for cold routes.
 status: published
 provenance: llm-draft
-expected_time_minutes: 12
 requires_explanation: true
+expected_time_minutes: 12
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-design-L6+
+  - gemini-generated
+  - target-design-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

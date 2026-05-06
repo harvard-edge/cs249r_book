@@ -7,31 +7,34 @@ topic: activation-memory
 competency_area: memory
 bloom_level: create
 phase: training
-title: 'On-Device LoRA with Heterogeneous Checkpointing'
-scenario: 'You are designing an on-device continual learning pipeline for a robotic perception agent running on an NVIDIA Jetson Orin. The system must fine-tune an 8-billion parameter vision-transformer (quantized to INT8) via LoRA using streaming batches of 4 high-resolution images. A naive training setup requires 45 GB of activation memory for the backward pass, which severely exceeds the Jetson Orin''s 32 GB LPDDR5 shared memory.'
-question: 'How would you architect LoRA fine-tuning on Orin to fit the 8B INT8 transformer, 45 GB naive activations, 32 GB RAM, and 60W TDP?'
+title: On-Device LoRA with Heterogeneous Checkpointing
+scenario: You are designing an on-device continual learning pipeline for a robotic perception agent running on an NVIDIA Jetson Orin. The system must fine-tune an 8-billion parameter vision-transformer (quantized to INT8) via LoRA using streaming batches of 4 high-resolution images. A naive training setup requires 45 GB of activation memory for the backward pass, which severely exceeds the Jetson Orin's 32 GB LPDDR5 shared memory.
+question: How would you architect LoRA fine-tuning on Orin to fit the 8B INT8 transformer, 45 GB naive activations, 32 GB RAM, and 60W TDP?
 details:
-  realistic_solution: 'The optimal architecture partitions the model across the Orin''s heterogeneous compute. The first 50% of layers are frozen, require no backward pass, and are mapped to the DLA for highly efficient INT8 forward passes with zero activation retention. For the latter 50% mapped to the Ampere GPU, selective gradient checkpointing is applied at transformer block boundaries. This trades a slight increase in compute for a massive reduction in peak activation memory, fully utilizing the 275 TOPS capacity without violating the 60W thermal budget.'
+  realistic_solution: Keep LoRA training on the Orin GPU; do not map training layers to DLA, because DLA is an inference engine and does not support backward passes or weight updates. Use microbatch size 1 with gradient accumulation over 4 images, freeze the INT8 base weights, train only LoRA adapters in FP16/BF16, and apply transformer-block gradient checkpointing to the trainable path. With linear activation scaling, the 45 GB naive batch-4 activation footprint becomes about 11.25 GB at microbatch 1, then about 2.8 GB with 4x checkpointing. Together with 4 GB OS, 8 GB base weights, about 2 GB for LoRA weights/optimizer/gradients, and a small workspace reserve, the peak fits under 32 GB. Cap clocks or duty cycle training so the GPU stays within the 60W envelope.
   common_mistake: |
-    **The Pitfall:** Suggesting aggressive activation offloading to NVMe storage or uniform gradient checkpointing.
-    **The Rationale:** Candidates ignore the PCIe bandwidth bottleneck and latency impact on a 60W edge device, or they recompute purely on the GPU, wasting DLA accelerators.
-    **The Consequence:** The proposed solution still causes thermal throttling or unacceptably slow training times due to massive I/O overhead.
+    **The Pitfall:** Treating DLA as a training accelerator or assuming frozen layers require no activation planning.
+    **The Rationale:** DLA can accelerate supported inference graphs, but LoRA fine-tuning still needs GPU-executed forward/backward computation and gradient flow through the trainable adapters.
+    **The Consequence:** The design appears to fit on paper but fails on Orin because DLA cannot run the backward pass and the memory calculation undercounts activations and optimizer state.
   napkin_math: |
     **Assumptions & Constraints:**
     - Total LPDDR5 Memory: 32 GB.
     - System/OS allocation: ~4 GB.
     - INT8 Model Weights (8B params): 8 GB.
-    - LoRA FP16 weights/optimizer state: ~1 GB.
+    - LoRA FP16/BF16 weights, gradients, and optimizer state: ~2 GB.
     - Naive activation memory for B=4: 45 GB.
+    - Use microbatch size 1 with gradient accumulation to preserve an effective batch of 4.
+    - Use gradient checkpointing with roughly 4x activation-memory reduction.
 
     **Calculations:**
-    - Available memory for activations: 32 - (4 + 8 + 1) = 19 GB.
-    - DLA offload: Freezing the first 50% of layers removes their activation storage requirements entirely, reducing needed memory to 22.5 GB.
-    - Gradient checkpointing: Applying it to the remaining GPU layers (e.g., every 4th layer) reduces the remaining activation memory by 4x: 22.5 GB / 4 = 5.625 GB.
-    - Peak memory footprint: 4 (OS) + 8 (Weights) + 1 (LoRA) + 5.625 (Activations) = 18.625 GB.
+    - Available memory after OS, base weights, and LoRA state: 32 - (4 + 8 + 2) = 18 GB.
+    - Microbatch activation memory: 45 GB / 4 = 11.25 GB.
+    - Checkpointed activation memory: 11.25 GB / 4 = 2.8125 GB.
+    - Peak memory footprint before temporary workspaces: 4 (OS) + 8 (base weights) + 2 (LoRA/optimizer/gradients) + 2.8125 (activations) = 16.8125 GB.
+    - Approximate headroom for CUDA workspaces, dataloader buffers, and fragmentation: 32 - 16.8125 = 15.1875 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: 18.625 GB Peak Footprint (Memory-Capacity Mitigated)**. Fits comfortably within the 32 GB limit without violating the thermal budget.
+    - **Result: about 16.8 GB modeled peak before temporary workspaces, with about 15.2 GB headroom.** This fits by using GPU training, microbatching, gradient accumulation, and checkpointing, while thermal control is handled by capping sustained GPU power under 60W.
 status: published
 provenance: imported
 requires_explanation: true

@@ -7,25 +7,27 @@ topic: model-serving-infrastructure
 competency_area: deployment
 bloom_level: apply
 phase: inference
-title: The Embedding Model Serving
+title: Sizing GPUs for a 335M Embedding Model
 scenario: We're deploying a 335M parameter embedding model for our search engine. Unlike LLMs, there's no autoregressive decode — it's a single forward pass. The team sized the GPU as if it were an LLM workload and provisioned a high-end compute GPU. Is that the right hardware? What's the optimal batch size?
-question: "Is a high-end GPU the right hardware for a 335M embedding model, and what batch size should you target?"
+question: Is a high-end GPU the right hardware for a 335M embedding model, and what batch size should you target?
 details:
   realistic_solution: |
-    Embedding inference is a single forward pass with no autoregressive loop. The workload is compute-bound at moderate batch sizes because the full sequence is processed in parallel (like LLM prefill, not decode). This means: (1) batch size directly increases throughput with near-linear scaling until you hit compute saturation, (2) an A10G ($0.75/hr) at high batch sizes can match H100 throughput-per-dollar because you're not paying for unused HBM bandwidth, and (3) CPU inference (with ONNX Runtime) is viable for low-QPS workloads.
+    Embedding inference is a single forward pass with no autoregressive decode loop, so it should not be sized like low-batch LLM generation. The model weights are small enough that HBM capacity is not the deciding constraint; the practical target is the batch size that saturates matrix multiply throughput without violating latency. Start around batch 32-128 for 512-token inputs, profile latency and GPU utilization, and choose the smallest batch that reaches the throughput knee. A cheaper GPU such as an A10G or L4 can be the right choice if profiling shows adequate throughput-per-dollar; an H100 is only justified for very high QPS, strict latency at small batches, or consolidation across many models. CPU inference can still be viable for low-QPS or offline embedding jobs.
   common_mistake: |
     **The Pitfall:** Treating embedding models exactly like autoregressive LLMs.
     **The Rationale:** Engineers assume all transformers are memory-bandwidth bound, ignoring that embeddings are a single forward pass without the autoregressive decode loop.
     **The Consequence:** Drastic overprovisioning of HBM bandwidth, leading to poor throughput-per-dollar.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - 335M params, FP16 = 670 MB.
-       - Batch size 64, sequence length 512.
+       - 335M params, FP16 = 670 MB of weights.
+       - Batch size 64, sequence length 512, hidden activations and workspaces are a few GB.
+       - Target hardware choice is based on measured throughput-per-dollar, not capacity alone.
     2. **Calculations:**
-       - Total memory footprint = 670 MB (weights) + ~2 GB (activations) < 3 GB.
-       - Compute is fully utilized as a single large parallel matrix multiplication.
+       - Total memory footprint is roughly 0.7 GB weights + 2-4 GB activations/workspace, well below the memory capacity of commodity inference GPUs.
+       - There is no per-output-token weight reload loop, so batching can reuse weights across many examples in dense GEMMs.
+       - At batch 64, the workload is likely compute- or launch-overhead-limited rather than HBM-capacity-limited, but the exact bottleneck depends on model architecture, kernels, sequence length, and latency target.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound**. Since there is no autoregressive decode, the workload is pure dense compute, meaning a cheaper GPU like an A10G maximizes throughput per dollar.
+       - **Result: Profile the Throughput Knee.** A high-end GPU is probably overprovisioned for a 335M embedding model unless QPS is very high. Use moderate batching and pick the cheapest accelerator that meets latency and utilization targets; do not claim H100-vs-A10G economics without benchmark data.
 status: published
 provenance: imported
 requires_explanation: false

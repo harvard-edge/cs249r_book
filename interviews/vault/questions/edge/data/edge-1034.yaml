@@ -1,18 +1,18 @@
 schema_version: '1.0'
-id: 'edge-1034'
-track: 'edge'
-level: 'L4'
-zone: 'implement'
-topic: 'dataset-curation'
-competency_area: 'data'
-bloom_level: 'apply'
-phase: 'training'
+id: edge-1034
+track: edge
+level: L3
+zone: implement
+topic: dataset-curation
+competency_area: data
+bloom_level: apply
+phase: training
 title: 'Dataset Curation: Implement On-Device Data Augmentation Budget for Jetson Orin'
-scenario: 'Data augmentation for online learning is being implemented on a Jetson Orin. The model trains on 64 images/batch at 224x224. The augmentation pipeline must complete within 10ms per batch to not bottleneck the 100ms training step.'
-question: 'How would you implement augmentation for 64-image batches and verify it stays under the 10 ms budget?'
+scenario: Data augmentation for online learning is being implemented on a Jetson Orin. The model trains on 64 images/batch at 224x224. The augmentation pipeline must complete within 10ms per batch to not bottleneck the 100ms training step.
+question: How would you implement augmentation for 64-image batches and verify it stays under the 10 ms budget?
 details:
   realistic_solution: |
-    Utilize hardware-accelerated augmentation frameworks like NVIDIA DALI or torchvision with CUDA backends. These bypass the CPU bottleneck by leveraging the Orin's Ampere GPU to perform vectorized transformations in parallel, easily satisfying the 10 ms batch budget.
+    Implement the augmentation path as a GPU-resident batch pipeline on Orin: decode or stage images into unified-memory tensors, then run fused or batched CUDA/DALI operations for resize, crop, flip, color jitter, normalization, and layout conversion. Preallocate buffers for the 64-image batch, avoid CPU PIL transforms and extra host-device copies, and use CUDA streams so augmentation overlaps with data loading where possible. Verify the 10 ms budget by timing warm runs with CUDA events and Nsight Systems on the target Orin, reporting p50/p95 batch latency and failing the pipeline if p95 augmentation exceeds 10 ms.
   common_mistake: |
     **The Pitfall:** Running augmentation on the CPU while the GPU is idle waiting.
     **The Rationale:** Standard tutorials often demonstrate augmentation using CPU libraries (PIL or standard torchvision), which engineers copy-paste without considering edge CPU bottlenecks.
@@ -21,28 +21,32 @@ details:
     **Assumptions & Constraints:**
     - 64 images per batch, 224x224 resolution.
     - 10 ms target budget.
+    - Augmentation runs entirely on the Orin GPU after the batch is already in unified memory; no PCIe copy is required.
+    - Effective LPDDR5/shared-memory bandwidth for the image read/write path: 68 GB/s.
 
     **Calculations:**
-    - CPU Resize: 0.2 ms/image * 64 = 12.8 ms (Fails budget).
-    - GPU Transfer: (64 * 224 * 224 * 3 bytes) = 9.63 MB. At 68 GB/s = 0.14 ms.
-    - GPU Augmentation Ops: Vectorized transforms ≈ 2 ms.
+    - CPU-only resize baseline: 0.2 ms/image * 64 = 12.8 ms, so CPU augmentation fails the 10 ms budget.
+    - Batch tensor size: 64 * 224 * 224 * 3 bytes = 9.63 MB.
+    - GPU memory traffic for one read plus one write: 2 * 9.63 MB / 68 GB/s = 0.28 ms.
+    - GPU augmentation kernels: vectorized crop/color/flip transforms ≈ 2.0 ms.
+    - GPU pipeline total: 0.28 ms memory traffic + 2.0 ms kernels = 2.28 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: ~2.1 ms Total Latency (Compute-Bound).** Using GPU-accelerated pipelines brings the total latency comfortably below the 10 ms deadline.
-status: 'published'
-provenance: 'imported'
+    - **Result: ~2.3 ms Total Latency (GPU-Pipeline Bound).** The CPU path is excluded because it misses the budget; keeping augmentation on the Orin GPU with shared-memory tensor access stays comfortably below 10 ms.
+status: published
+provenance: imported
 requires_explanation: false
 expected_time_minutes: 6
 validated: true
-validation_status: 'OK'
+validation_status: OK
 validation_date: '2026-04-01'
-validation_model: 'claude-sonnet-4-6'
+validation_model: claude-sonnet-4-6
 math_verified: true
-math_status: 'CORRECT'
+math_status: CORRECT
 math_date: '2026-04-03'
-math_model: 'gemini-3.1-pro-preview'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
-  status: 'not-reviewed'
+  status: not-reviewed
   by: null
   date: null
   notes: null

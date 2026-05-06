@@ -11,7 +11,8 @@ title: Stateless vs Stateful LLM Serving Architecture
 scenario: You are designing a high-availability serving layer for a Llama-3-70B chat application across a fleet of 8xH100 GPU nodes. Each user session averages 20 turns, reaching up to 8,000 tokens of context.
 question: Should the 70B chat service use stateless routing or stateful sticky KV-cache serving, and how do failures change the decision?
 details:
-  realistic_solution: Adopt a fundamentally stateless routing layer coupled with a prefix-caching KV backend (e.g., RadixAttention). This ensures requests can be routed anywhere for high availability and fault tolerance, while the compute penalty of full reprefills is mitigated opportunistically.
+  realistic_solution: |
+    Prefer stateless routing with a shared or replicated prefix-caching KV backend rather than hard sticky KV-cache serving. Sticky routing can reduce happy-path prefill work because a session stays near its live KV cache, but it makes node failure a service-level event: every session pinned to the failed node loses its cache and must reprefill at once. Stateless routing keeps failover possible across healthy nodes, while prefix caching recovers much of the repeated-context benefit without making one node the only place a session can run.
   common_mistake: |
     **The Pitfall:** Instinctively choosing stateful routing (sticky sessions) to save compute.
     **The Rationale:** Optimizing solely for the "happy-path" inference cost without modeling catastrophic distributed failure modes.
@@ -20,12 +21,15 @@ details:
     1. **Assumptions & Constraints:**
        - Model: Llama-3-70B. Context: 8,000 tokens.
        - Stateful Memory Cost: ~2.62 GB KV cache per session.
-       - Stateless Prefill Penalty: ~100ms per 8K token context.
+       - Prefill cost estimate: ~100ms of GPU service time per 8K-token context under the serving benchmark.
+       - Failure model: one node hosts 100 sticky sessions at the moment it fails.
     2. **Calculations:**
-       - Single Node Failure Drop: 100 sessions lost (262 GB of state vaporized).
-       - Rebuild Compute Cost: 100 sessions * 1.12 PFLOPs = 112 PFLOPs.
+       - Sticky KV serving saves prefill on the happy path, but the cache is tied to the node holding the session.
+       - A single sticky-node failure loses 100 * 2.62 GB = 262 GB of live KV state.
+       - If those 100 sessions immediately retry elsewhere, recovery adds about 100 * 100ms = 10 GPU-seconds of burst prefill work before queueing and contention.
+       - Stateless routing with prefix caching may pay some prefill or cache-lookup overhead during normal operation, but any healthy node can accept the retried request and reuse shared prefixes when available.
     3. **Conclusion & Interpretation:**
-       - **Result: Stateless Prefix-Caching.** The fleet must use stateless routing with RadixAttention prefix caching. The 112 PFLOP recovery storm makes stateful sticky routing far too fragile for HA production.
+       - **Result: choose stateless routing with prefix caching for high availability.** Sticky KV-cache serving optimizes the happy path, but failures convert lost node-local cache into hundreds of GB of unrecoverable state and a synchronized reprefill surge.
 status: published
 provenance: imported
 requires_explanation: true

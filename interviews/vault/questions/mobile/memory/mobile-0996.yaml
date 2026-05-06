@@ -7,30 +7,30 @@ topic: model-size-estimation
 competency_area: memory
 bloom_level: evaluate
 phase: inference
-title: 'Model Size Estimation: Diagnose Mobile Performance Degradation from Memory Pressure'
-scenario: A Snapdragon 8 Gen 3 Android app running a 7B INT4 LLM (3.5GB) shows TPOT increasing from 45ms to 180ms after 5 minutes of sustained use, without model changes. Memory monitor shows 14GB of 16GB in use.
+title: Hypothetical Snapdragon 8 Gen 3 LLM TPOT Slowdown from Memory Pressure
+scenario: In a hypothetical stress test on a 16GB Snapdragon 8 Gen 3 reference phone, an Android app running a 7B INT4 LLM (3.5GB) shows TPOT increasing from 45ms to 180ms after 5 minutes of sustained use, without model changes. Memory monitor shows 14GB of 16GB in use.
 question: Why does a 7B INT4 LLM on Snapdragon 8 Gen 3 slow from 45ms to 180ms TPOT after 5 minutes, and how do you fix it?
 details:
-  realistic_solution: '14GB / 16GB = 87.5% memory utilization. Android starts active GC and background process management at >80%. Background GC adds latency spikes: 50-200ms. Memory bandwidth contention: model decode reads 3.5GB/step at 77GB/s = 45ms baseline, but with contention from GC threads: effective bandwidth drops to 20 GB/s -> 175ms. Fix: (1) Reduce KV cache cap from unlimited to 4096 tokens (freeing accumulated KV). (2) Use foreground service with memory lock. Expected fix: 14->10GB -> bandwidth contention resolved -> 45ms TPOT restored.'
+  realistic_solution: 14GB / 16GB = 87.5% memory utilization, which leaves very little headroom for the OS, page cache, graphics buffers, and other app state. In this hypothetical upper-bound example, the 45ms TPOT implies an effective token-time traffic rate near 78 GB/s if the 3.5GB weight footprint is treated as streamed once per token; that is a diagnostic approximation, not a claim that a production Snapdragon path sustains that bandwidth for a 7B model. A plausible root cause is memory pressure from KV-cache growth and allocator fragmentation reducing effective bandwidth or causing reclaim/paging stalls during decode. If the same approximation falls to about 20 GB/s under pressure, token time rises to roughly 175ms, matching the observed 180ms TPOT. Fix by capping or sliding-windowing the KV cache, reducing resident buffers, preallocating stable arenas, and measuring thermal counters separately rather than assuming GC or a foreground service will solve native inference stalls.
   common_mistake: |
-    **The Pitfall:** Assuming TPOT increase is caused by thermal throttling.
-    **The Rationale:** Candidates miss the OS-level memory management behaviors triggered when LPDDR5X utilization exceeds ~85%.
-    **The Consequence:** Applying cooling optimizations instead of fixing the root cause: memory bandwidth contention from GC and swapping.
+    **The Pitfall:** Assuming TPOT increase is only caused by thermal throttling.
+    **The Rationale:** Candidates ignore how KV-cache growth, allocator pressure, paging/reclaim, and competing graphics or app buffers can reduce effective memory bandwidth during sustained decode.
+    **The Consequence:** They chase cooling or CPU GC fixes while the native inference stack continues to stall on memory pressure and bandwidth contention.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: 7B INT4 (3.5 GB).
-    - Optimal Bandwidth: 77 GB/s.
-    - Sustained Use: 5 minutes (10 turns * 512 tokens = 5120 tokens).
+    - Hypothetical stress-test model: 7B INT4 (3.5 GB).
+    - Baseline TPOT: 45ms, interpreted only as an effective weight-streaming approximation.
+    - Sustained use: 5 minutes (10 turns * 512 tokens = 5120 tokens).
 
     **Calculations:**
-    - Baseline Decode: 3.5 GB / 77 GB/s = 45 ms.
+    - Implied baseline effective traffic rate: 3.5 GB / 0.045s = 77.8 GB/s.
     - KV Cache Size: 5120 tokens * 524 KB/token = 2.68 GB.
     - Total Memory Use: 3.5 GB (model) + 2.68 GB (KV) + System > 14 GB (87% util).
-    - Contended Decode: Bandwidth drops to 20 GB/s -> 3.5 GB / 20 GB/s = 175 ms.
-    - Fix Applied: Cap KV to 4096 tokens, freeing ~2 GB.
+    - Contended decode approximation: effective traffic rate drops to 20 GB/s -> 3.5 GB / 20 GB/s = 175 ms.
+    - Fix Applied: Cap KV to 4096 tokens, freeing (5120 - 4096) * 524 KB ~= 0.54 GB and preventing further growth.
 
     **Conclusion & Interpretation:**
-    - **Result: 45 ms (Memory-Bound)**. Freeing KV cache restores memory bandwidth and returns TPOT to 45 ms.
+    - **Result: Memory-pressure bound in the stated stress test.** Capping KV cache and reducing resident state can restore effective throughput toward baseline, but the bandwidth numbers are an upper-bound diagnostic model that must be checked against real device counters.
 status: published
 provenance: imported
 requires_explanation: false

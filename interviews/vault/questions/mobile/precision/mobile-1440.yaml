@@ -7,12 +7,12 @@ topic: extreme-quantization
 competency_area: precision
 bloom_level: evaluate
 phase: inference
-title: 'Sizing W4A8 LLM Deployment on Snapdragon 8 Gen 3 Hexagon NPU'
-scenario: 'Your team is tasked with deploying a 7B parameter LLM for an on-device assistant on a flagship phone. The OS restricts your app''s peak memory to 4 GB for both weights and KV cache.'
-question: 'How would you deploy a 7B LLM with W4A8 quantization under a 4 GB RAM limit, and what is its impact?'
+title: Sizing W4A8 LLM Deployment on a Flagship Phone
+scenario: Your team is tasked with deploying a 7B parameter LLM for an on-device assistant on a flagship phone. The model uses a 32-layer GQA layout with 8 KV heads and 128-dimension heads, and the OS restricts your app's peak memory to 4 GB for both weights and KV cache.
+question: How would you deploy a 7B LLM with W4A8 quantization under a 4 GB RAM limit, and what is its impact?
 details:
   realistic_solution: |
-    W8A8 requires ~7 GB, violating the 4 GB constraint. W4A8 is mandatory purely for memory capacity. The correct architecture involves streaming 4-bit weights from memory, performing on-the-fly decompression to INT8 in the NPU's SRAM, and executing using 45 TOPS INT8 engines.
+    W4A8 is necessary but not automatically sufficient. The deployment must budget weights, KV cache, activations, runtime workspace, and fragmentation under the 4 GB cap. A feasible recipe is 4-bit weight storage with INT8 activations, a capped or sliding context window, preallocated KV cache, and device profiling to verify dequantization and memory traffic. If the required context pushes KV cache beyond the remaining headroom, the correct deployment choice is a smaller model, shorter context, or offloaded/cloud fallback rather than claiming the 7B model fits solely because the weights are 3.5 GB.
   common_mistake: |
     **The Pitfall:** Believing W4A8 doubles compute throughput.
     **The Rationale:** Candidates assume NPU MAC units operate natively on 4-bit, ignoring decompression requirements.
@@ -23,14 +23,22 @@ details:
     - Model: 7B params.
     - Bandwidth: ~64 GB/s.
     - Compute: 45 TOPS INT8.
+    - KV cache from the scenario: 32 layers, 8 KV heads, head_dim 128, FP16 K/V.
+    - Runtime workspace and activations: reserve 200 MB.
 
     **Calculations:**
     - W8A8 Size = 7B * 1 byte = 7 GB (Fails).
-    - W4A8 Size = 7B * 0.5 byte = 3.5 GB (Fits).
-    - Compute Time = 14 GOPs / 45 TOPS = ~0.31 ms.
-    - Memory Fetch = 3.5 GB / 64 GB/s = ~54.6 ms.
+    - W4A8 weight size = 7B * 0.5 byte = 3.5 GB.
+    - KV bytes/token = 2 (K/V) * 32 * 8 * 128 * 2 bytes = 131,072 bytes/token.
+    - 2K-token KV cache = 2048 * 131,072 = 268 MB.
+    - 4K-token KV cache = 4096 * 131,072 = 537 MB.
+    - 2K total = 3.5 GB + 0.268 GB + 0.200 GB = 3.968 GB, leaving almost no margin.
+    - 4K total = 3.5 GB + 0.537 GB + 0.200 GB = 4.237 GB, exceeding the cap.
+    - Dense decode compute lower bound = 2 * 7B = 14 GOP/token; 14 GOP / 45 TOPS = 0.31 ms/token before memory and dequantization overhead.
+    - If profiling shows the full 3.5 GB weight stream is read from DRAM per token, the bandwidth bound is 3.5 GB / 64 GB/s = 54.7 ms/token.
 
     **Conclusion & Interpretation:**
-    - **Result: 54.6 ms (Memory-Bandwidth-Bound)**. Memory fetch time vastly dominates compute time.
+    - **Result: feasible only with a small context and tight residency control**. At 2K context the model barely fits; at 4K it does not. Latency and throughput must be measured from actual per-token DRAM traffic, but the compute lower bound is far below the likely memory/dequantization cost.
 status: published
+provenance: imported
 validated: true

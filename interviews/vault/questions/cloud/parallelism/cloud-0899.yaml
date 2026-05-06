@@ -11,22 +11,25 @@ title: Evaluating Parallelism Mapping Across the Bandwidth Taper
 scenario: 'You are architecting the training topology for a 175B model on H100 nodes. The cluster has a severe bandwidth taper: 900 GB/s intra-node and 50 GB/s inter-node. An engineer proposes spanning Tensor Parallelism (TP) across multiple nodes to pool memory, while keeping Pipeline Parallelism (PP) intra-node to reduce pipeline bubbles.'
 question: Should tensor parallelism span multiple H100 nodes here, or how should TP, PP, and DP be mapped across the cluster?
 details:
-  realistic_solution: Reject the proposal. TP requires blocking All-Reduce operations for every layer, which will bottleneck on the 50 GB/s InfiniBand. The optimal topology maps TP strictly within the node to leverage the 900 GB/s NVLink, and maps PP and Data Parallelism (DP) across nodes.
+  realistic_solution: Reject the proposal. Map TP within each H100 node so per-layer blocking AllReduce uses the 900 GB/s NVLink fabric, map PP across nodes because it moves only stage-boundary activations rather than every layer's tensor shards, and use DP across replicas of the TP/PP mesh. If the model does not fit with intra-node TP alone, increase PP stages or activation/optimizer sharding before spanning TP over the 50 GB/s inter-node fabric. TP across nodes puts the highest-frequency collective on the slowest link and will dominate step time.
   common_mistake: |
-    **The Pitfall:** Spanning Tensor Parallelism across nodes to maximize memory pools.
-    **The Rationale:** Engineers prioritize reducing pipeline bubbles and pooling memory, fundamentally misunderstanding the communication volume of Tensor Parallelism.
-    **The Consequence:** Forcing the highest-volume, blocking All-Reduce operations over the slowest interconnect (InfiniBand), destroying training utilization.
+    **The Pitfall:** Spanning Tensor Parallelism across nodes while keeping Pipeline Parallelism inside a node.
+    **The Rationale:** Engineers prioritize reducing pipeline bubbles and pooling memory, but miss that TP performs blocking collectives every layer while PP mainly sends activations at stage boundaries.
+    **The Consequence:** The design forces the highest-frequency communication over the slowest interconnect instead of reserving inter-node bandwidth for PP and DP traffic.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Interconnects: NVLink = 450 GB/s (unidirectional), InfiniBand = 50 GB/s.
-       - Bandwidth taper: 9x.
+       - Interconnects: NVLink = 900 GB/s effective intra-node bandwidth from the scenario, InfiniBand = 50 GB/s inter-node.
+       - Bandwidth taper: 18x.
        - TP AllReduce volume: ~400 MB per layer.
     2. **Calculations:**
-       - NVLink Latency = 400 MB / 450 GB/s ≈ 0.89 ms per layer.
-       - InfiniBand Latency = 400 MB / 50 GB/s = 8 ms per layer.
-       - Total overhead across 96 layers = 96 * 8 ms = 0.768 seconds of blocking wait per step.
+       - Convert 400 MB to 0.4 GB.
+       - NVLink Latency = 0.4 GB / 900 GB/s = 0.00044 s ≈ 0.44 ms per layer.
+       - InfiniBand Latency = 0.4 GB / 50 GB/s = 0.008 s = 8 ms per layer.
+       - Total inter-node TP overhead across 96 layers = 96 * 8 ms = 0.768 seconds of blocking wait per step.
+       - The same TP traffic inside a node would be 96 * 0.44 ms ≈ 42 ms before collective efficiency effects.
+       - PP across nodes sends activation tensors only between adjacent stages, so it uses the slow link less frequently than TP.
     3. **Conclusion & Interpretation:**
-       - **Result: Network-Bound.** TP must be mapped strictly intra-node to leverage NVLink, while PP should span across nodes because it only requires boundary activation transfers.
+       - **Result: Network-Bound Mapping.** Use TP inside each node, PP across nodes, and DP across replicated TP/PP groups; do not span TP across the 50 GB/s inter-node link unless there is no other memory-feasible mapping.
 status: published
 provenance: imported
 requires_explanation: false

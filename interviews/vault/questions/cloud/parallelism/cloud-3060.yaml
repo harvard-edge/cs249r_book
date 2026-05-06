@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: cloud-3060
 track: cloud
-level: L4
+level: L3
 zone: realization
 topic: pipeline-parallelism
 competency_area: parallelism
@@ -12,7 +12,7 @@ scenario: Size the per-GPU memory requirements for 8-stage pipeline parallelism 
 question: For 8-stage pipeline parallel LLaMA-70B training on 80GB H100s with DP=1, how much memory does each stage need, does it fit, and what headroom remains?
 details:
   realistic_solution: |
-    70B / 8 stages = 8.75B parameters. BF16 Weights = 17.5 GB. BF16 Adam optimizer demands 6 bytes/param = 52.5 GB. Gradients = 17.5 GB. Total = 87.5 GB, causing immediate OOM on an 80 GB limit. ZeRO-3 cannot save you because Data Parallelism degree is 1. The mandatory architectural solution is to implement 8-bit Adam (2 bytes/param = 17.5 GB), bringing total footprint down to ~53 GB and leaving ~27 GB of headroom.
+    LLaMA-70B has 80 layers, so an 8-stage pipeline places 10 layers on each stage. Assuming parameters are roughly uniform by layer, each stage owns 70B * 10/80 = 8.75B parameters. BF16 weights require 17.5GB. BF16 gradients require another 17.5GB. FP32 Adam first and second moment states require 8 bytes/parameter, or 70GB. The per-stage training footprint before activations is 17.5 + 17.5 + 70 = 105GB. On an 80GB H100, headroom is 80 - 105 = -25GB, so the stated configuration does not fit. Because DP=1, ZeRO-2/3 data-parallel sharding does not reduce this footprint; the sizing answer is an OOM by about 25GB before checkpointed activation buffers.
   common_mistake: |
     **The Pitfall:** Forgetting the optimizer state memory entirely, or incorrectly assuming ZeRO can be used when Data Parallelism is 1.
     **The Rationale:** Engineers frequently estimate memory strictly based on weight size (17.5 GB) and falsely conclude it easily fits, neglecting the massive footprint of the Adam optimizer states.
@@ -21,16 +21,18 @@ details:
     **Assumptions & Constraints:**
     - Model: LLaMA-70B (8 stages).
     - GPUs: 80 GB H100. DP=1 (ZeRO cannot be used).
-    - Weights per stage: 70B / 8 = 8.75B parameters.
+    - Layers per stage: 80 / 8 = 10.
+    - Approximate parameters per stage: 70B * 10 / 80 = 8.75B.
 
     **Calculations:**
     - Weights (BF16): 8.75B * 2 bytes = 17.5 GB.
-    - Optimizer State (BF16 Adam): 8.75B * 6 bytes = 52.5 GB.
     - Gradients (BF16): 8.75B * 2 bytes = 17.5 GB.
-    - Total without ZeRO: 17.5 + 52.5 + 17.5 = 87.5 GB (Exceeds 80 GB limit).
+    - Adam optimizer states (FP32 m and v): 8.75B * 8 bytes = 70 GB.
+    - Total before activations: 17.5 + 17.5 + 70 = 105 GB.
+    - Headroom: 80 GB - 105 GB = -25 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory Capacity-Bound.** The standard Adam optimizer states consume 3x the memory of the weights, causing an immediate OOM. Switching to 8-bit Adam reduces optimizer memory to 17.5 GB, bringing total footprint to ~53 GB and allowing the model to safely fit.
+    - **Result: Does not fit.** The per-stage footprint is about 105 GB before activations, leaving -25 GB of headroom on an 80 GB H100.
 status: published
 provenance: imported
 requires_explanation: false

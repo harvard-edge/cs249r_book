@@ -11,11 +11,11 @@ title: Hybrid CPU-Spillover for Flash Spikes
 scenario: An e-commerce platform serves a recommendation model using GPU instances. Baseline traffic is 1,000 RPS handled by 5 GPUs. During flash sales, traffic spikes to 6,000 RPS in 30 seconds. GPUs take 4 minutes to provision, download weights, and warm up. During the last sale, queue buildup caused 40% of requests to breach the 500ms p99 SLA and time out. You can provision CPU instances in 40 seconds (50 RPS capacity per instance, 150ms inference latency).
 question: What is the bottleneck during the 6,000 RPS flash-sale spike, and how would you design CPU spillover to cover the 4-minute GPU warmup?
 details:
-  realistic_solution: 'Implement a hybrid spillover architecture. Route the baseline traffic to the GPU pool for cost efficiency. During a spike, dynamically scale up fast-starting CPU instances (overprovisioning to e.g., 150 instances to actively drain the initial queue build-up) to absorb the overflow. Once the heavier GPU nodes finish their 4-minute provisioning, shift traffic back and spin down the CPUs.'
+  realistic_solution: The bottleneck is GPU provisioning latency, not steady-state model throughput. Keep the 1,000 RPS baseline on the existing GPU pool, maintain a small warm CPU pool, and autoscale fast-starting CPU instances to cover the 5,000 RPS overflow during the 4-minute GPU warmup. Scaling to about 150 CPU instances gives 7,500 RPS overflow capacity, enough to serve the spike and drain the queue created during the 40-second CPU startup window before shifting traffic back to GPUs.
   common_mistake: |
-    **The Pitfall:** Relying purely on GPU auto-scaling with highly aggressive thresholds.
-    **The Rationale:** Dismissing CPUs entirely due to their higher steady-state cost-per-inference and ignoring the provisioning latency gap.
-    **The Consequence:** Unmitigated queue buildup during the 4-minute GPU warmup, leading to catastrophic SLA breaches.
+    **The Pitfall:** Sizing only for eventual GPU capacity and ignoring the 4-minute warmup window.
+    **The Rationale:** Teams often assume GPU autoscaling will arrive quickly enough and fail to reserve fast-starting overflow capacity.
+    **The Consequence:** Requests queue for minutes before GPU nodes are ready, causing p99 latency and timeout failures during the flash-sale peak.
   napkin_math: |
     **Assumptions & Constraints:**
     - Spike overflow: 5,000 RPS.
@@ -24,14 +24,15 @@ details:
     - CPU capacity: 50 RPS per instance.
 
     **Calculations:**
-    - GPU Gap Queue: 5,000 RPS overflow * 240s = 1.2M requests queued.
-    - CPU instances needed for 7,500 RPS capacity: 150 instances.
-    - CPU Gap Queue: 5,000 RPS overflow * 40s = 200K requests queued.
-    - Clearance capability: 8,500 RPS total capacity vs 6,000 RPS demand = 2,500 RPS surplus.
-    - Clearance time: 200K requests / 2,500 RPS = 80 seconds.
+    - GPU-only warmup gap: 5,000 RPS overflow * 240s = 1.2M overflow requests queued.
+    - CPU instances to match overflow: 5,000 RPS / 50 RPS = 100 instances.
+    - CPU instances for drain headroom: 150 instances * 50 RPS = 7,500 RPS overflow capacity.
+    - Queue before CPUs are ready: 5,000 RPS overflow * 40s = 200K requests.
+    - Drain surplus after CPUs start: 7,500 - 5,000 = 2,500 RPS.
+    - Clearance time: 200K requests / 2,500 RPS = 80 seconds, finishing at 40 + 80 = 120 seconds.
 
     **Conclusion & Interpretation:**
-    - **Result: 150 CPUs clear the spike in 80 seconds (Provisioning-Latency-Bound)**. Using fast-starting CPUs prevents catastrophic SLA breaches during GPU warmup.
+    - **Result: Provisioning-Latency-Bound**. About 150 CPU instances cover the 5,000 RPS overflow and clear the startup backlog before the 4-minute GPU warmup completes.
 status: published
 provenance: imported
 requires_explanation: false

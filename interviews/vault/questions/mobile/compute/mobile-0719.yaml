@@ -11,22 +11,24 @@ title: The Mobile GPU Misconception
 scenario: Your team decides to run ML inference on the mobile GPU instead of the NPU, reasoning that 'GPUs are great for ML.' During profiling, your model runs at 18ms on the GPU via TFLite's GPU delegate, but the same model runs at 6ms on the NPU.
 question: Why is the GPU 3× slower than the NPU for this workload?
 details:
-  realistic_solution: 'Mobile GPUs are designed for **graphics rendering**, not ML inference, and three architectural mismatches cause the 3× gap: heavy kernel dispatch overhead, lack of dedicated tensor core primitives, and poor INT8 hardware support requiring FP16 fallback.'
+  realistic_solution: The GPU is slower for this specific workload because the delegated graph does not map cleanly to long, dense GPU kernels. Some ops may be unsupported or run as small shader programs, tensors may need NHWC/NCHW or texture-buffer layout conversions, and intermediate data can bounce through shared memory between delegate partitions. The NPU wins because the same model is mostly covered by its INT8 tensor kernels with fewer graph breaks and better on-chip reuse. The diagnosis should come from delegate partition logs, per-op timing, and memory-transfer counters, not from assuming mobile GPUs are inherently bad at ML.
   common_mistake: |
     **The Pitfall:** Blaming the TFLite GPU delegate software optimization.
     **The Rationale:** Candidates assume that if a GPU is slow, it's because the software stack isn't optimized, ignoring fundamental architectural differences between mobile GPUs (graphics) and NPUs (tensor ops).
     **The Consequence:** Focusing optimization efforts on software layers when the underlying hardware is poorly suited for the task.
   napkin_math: |
     **Assumptions & Constraints:**
-    - NPU: 45 TOPS INT8 at 3W = 15 TOPS/W. INT8 model = 0.6 GOPS.
-    - GPU: 1.5 TFLOPS FP16 at 3W = 0.5 TFLOPS/W. Equivalent FP16 model = 1.2 GFLOPS.
+    - Observed NPU latency: 6ms.
+    - Observed GPU latency: 18ms.
+    - Same model, but the NPU path keeps most ops in one INT8 partition while the GPU delegate has graph breaks and layout conversions.
 
     **Calculations:**
-    - NPU Compute = 0.6 GOPS / 45,000 GOPS = 0.013 ms. Total = 0.013 ms + 5.9 ms dispatch overhead = 6 ms. Energy = 3W * 6 ms = 18 mJ.
-    - GPU Compute = 1.2 GFLOPS / 1,500 GFLOPS = 0.8 ms. Total = 0.8 ms + 17.2 ms dispatch overhead = 18 ms. Energy = 3W * 18 ms = 54 mJ.
+    - NPU path: 5.2ms tensor execution + 0.8ms scheduling/transfer overhead = 6.0ms.
+    - GPU path: 8.0ms shader execution + 4.0ms layout conversions + 3.0ms memory traffic from graph breaks + 3.0ms launch/synchronization overhead = 18.0ms.
+    - Slowdown = 18ms / 6ms = 3x.
 
     **Conclusion & Interpretation:**
-    - **Result: 3x slower and 3x more battery drain (Architecture-bound inefficiency)**. Massive architectural dispatch overhead causes this.
+    - **Result: 3x slower from workload-specific delegation overhead.** The gap is explained by operator coverage, data movement, layout conversion, and memory behavior, not by peak TOPS alone.
 status: published
 provenance: imported
 requires_explanation: false

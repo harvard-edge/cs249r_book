@@ -11,24 +11,26 @@ title: Mixed-Precision Federated Aggregation
 scenario: A cloud system aggregates weights for Federated Learning on Cortex-M0+ devices (no FPU). The edge model must be INT8 for inference speed and memory. However, computing gradients and updating weights strictly in INT8 leads to catastrophic quantization error and training divergence.
 question: How would you orchestrate FL for INT8 Cortex-M0+ devices without FP32 support while avoiding INT8 training divergence?
 details:
-  realistic_solution: The architecture must utilize mixed-precision co-design. The edge device uses INT8 for the forward pass (inference), but uses 16-bit fixed-point (INT16) or block floating-point arithmetic exclusively for the trainable layer's gradients and weight updates. The edge transmits these INT16 weight deltas to the cloud. The cloud, having abundant compute, receives the INT16 updates, casts them to FP32, performs the global aggregation (FedAvg), updates the global FP32 model, applies Post-Training Quantization (PTQ) to convert it back to INT8, and pushes the INT8 model back to the edge.
+  realistic_solution: Use a mixed-precision FL protocol with an FP32 or high-precision master model on the cloud and fixed-point training on the Cortex-M0+. The device runs INT8 inference kernels, trains only a small head or adapter with INT16 accumulators and calibrated loss scaling, clips gradients to avoid overflow, and sends quantized deltas with per-tensor scales. The cloud dequantizes those deltas into the master model, performs FedAvg or server-side optimizer updates in high precision, then exports an INT8 quantization-aware checkpoint with the same scales expected by the devices. Avoid strict INT8 weight updates on-device because repeated rounding causes divergence.
   common_mistake: |
     **The Pitfall:** Forcing the edge device to emulate FP32 in software for the backward pass.
     **The Rationale:** Candidates assume standard FP32 gradients are strictly required for convergence and offload the calculation to the edge.
     **The Consequence:** Inference latency spikes by 50x and the device battery is quickly drained.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Cortex-M0+ clock speed: 50 MHz.
-       - FP32 emulation: ~100 cycles per instruction.
-       - INT16 ALU operation: 1 cycle per instruction.
-       - Backward pass ops: 50,000 MACs.
-    2. **Calculations:**
-       - FP32 Cycles: 50,000 * 100 = 5,000,000 cycles.
-       - FP32 Time: 5,000,000 cycles / 50,000,000 Hz = 0.1s = 100 ms.
-       - INT16 Cycles: 50,000 * 1 = 50,000 cycles.
-       - INT16 Time: 50,000 cycles / 50,000,000 Hz = 0.001s = 1 ms.
-       - Speedup: 100 ms / 1 ms = 100x.
-    3. **Conclusion & Interpretation:** **100x speedup (Compute/ALU-Bound).**
+    **Assumptions & Constraints:**
+    - Train only a 16,384-parameter adapter/head on the Cortex-M0+.
+    - On-device update math uses INT16 accumulators with a per-tensor scale.
+    - Communication sends INT8 deltas plus one 16-bit scale per tensor; assume 8 tensors.
+    - Strict INT8 local updates have quantization step size q; accumulated rounding can dominate small gradients below q/2.
+
+    **Calculations:**
+    - INT16 accumulator memory for trainable state: 16,384 * 2 bytes = 32 KB.
+    - INT8 delta payload: 16,384 * 1 byte = 16 KB.
+    - Scale metadata: 8 tensors * 2 bytes = 16 bytes, negligible versus the delta payload.
+    - Sending INT16 deltas instead would be 16,384 * 2 bytes = 32 KB, so INT8 communication halves the upload while preserving higher-precision accumulation locally and on the server.
+
+    **Conclusion & Interpretation:**
+    - **Result: Mixed-precision FL separates training stability from communication precision.** Devices should not update weights strictly in INT8; they should accumulate in INT16/fixed point, communicate scaled quantized deltas, and let the cloud maintain the high-precision master model.
 status: published
 provenance: imported
 requires_explanation: false

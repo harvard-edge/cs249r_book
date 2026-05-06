@@ -9,13 +9,13 @@ bloom_level: apply
 phase: inference
 title: Control Loop Reconciliations for Gang Scheduling
 scenario: You submit a declarative PyTorchJob custom resource requesting 64 A100 GPUs (8 nodes x 8 GPUs) with strict gang scheduling. The cluster currently has only 40 A100 GPUs available across 5 nodes. The declarative controller triggers a cluster autoscaler scale-up for 3 nodes, which takes 240 seconds to provision in parallel. The controller evaluates the resource state every 15 seconds.
-question: How many reconciliation cycles will observe drift before the 3 autoscaled nodes are ready after 240 seconds?
+question: If the controller performs an immediate reconciliation at t=0 and then every 15 seconds, how many reconciliation cycles observe drift before the 3 autoscaled nodes become ready at t=240s?
 details:
   realistic_solution: |
-    The controller continuously compares the actual state (5 nodes) to the desired state (8 nodes) every 15 seconds. It will observe a drift 16 times before the 3 missing nodes become ready after 240 seconds. Gang scheduling controllers rely on this continuous polling loop.
+    The controller compares the actual state (5 nodes) to the desired state (8 nodes) at t=0 and then every 15 seconds. Before the new nodes become ready at t=240s, it observes drift at t=0, 15, ..., 225 for 16 reconciliation cycles. This is a reconciliation loop over observed cluster state, not a queued request that sleeps until capacity appears.
   common_mistake: |
     **The Pitfall:** Assuming the declarative controller queues the request and sleeps.
-    **The Rationale:** Developers accustomed to imperative programming paradigms often assume task-based pausing (like thread sleep), failing to recognize that declarative orchestration controllers continuously poll and attempt to reconcile state at every tick.
+    **The Rationale:** Developers accustomed to imperative programming paradigms often assume task-based pausing (like thread sleep), failing to recognize that declarative orchestration controllers re-evaluate observed cluster state on each reconciliation tick.
     **The Consequence:** A misunderstanding of how the control plane operates under the hood, leading to incorrect assumptions about API server load and controller throughput constraints during massive scale-ups.
   napkin_math: |
     **Assumptions & Constraints:**
@@ -25,11 +25,12 @@ details:
     - Controller sync period: 15 seconds.
 
     **Calculations:**
-    - Total time waiting: 240 seconds.
-    - Number of polling cycles: 240s / 15s = 16 cycles.
+    - Drift is observed before readiness at t=0, 15, 30, ..., 225.
+    - Count of observations: (225 - 0) / 15 + 1 = 16 cycles.
+    - The t=240s reconciliation is excluded because the autoscaled nodes are ready at that boundary.
 
     **Conclusion & Interpretation:**
-    - **Result: Control-Plane-Bound.** The declarative controller will wake up, observe state drift, and attempt to reconcile exactly 16 times before the autoscaler finally makes the nodes available.
+    - **Result: Control-Plane-Bound.** Under the stated t=0-inclusive convention, the declarative controller observes drift 16 times before the autoscaler makes the nodes available.
 status: published
 provenance: imported
 requires_explanation: false

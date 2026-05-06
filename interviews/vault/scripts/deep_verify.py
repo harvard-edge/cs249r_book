@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# STATUS (2026-05-03): preserved as a reference pattern — see vault/scripts/DEPRECATED.md
+# §"Preserved for adaptation". Unique among the audit scripts: Claude Opus +
+# extended thinking, asks the model to SHOW ITS WORK on every napkin-math claim.
+# Useful as a tiebreaker when audit_corpus_batched.py flags borderline math.
+# Reads the legacy corpus.json — adapt to walk vault/questions/**/*.yaml.
 """Deep math verification using Claude Opus with extended thinking.
 
 Unlike the lightweight verify_math.py (which checks ~25 Qs per call

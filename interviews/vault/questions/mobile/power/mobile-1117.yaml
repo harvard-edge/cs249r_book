@@ -8,10 +8,10 @@ competency_area: power
 bloom_level: apply
 phase: inference
 title: Thermal Throttling in Shared NPU/ISP Pipelines
-scenario: You are deploying a continuous camera processing pipeline on the Samsung Exynos 2400. The system uses shared memory to pass high-resolution frames between the ISP and the dual-core NPU. The mobile device has a strict continuous thermal dissipation limit of 4.0W for the SoC. The ISP and shared memory subsystem consume a constant 1.5W during this workload, and the NPU consumes 3.5W when operating at its peak 34.7 TOPS.
-question: Why does peak Exynos 2400 NPU use throttle in a camera pipeline, and what sustained TOPS fit the remaining thermal headroom?
+scenario: You are deploying a continuous camera processing pipeline on the Samsung Exynos 2400. The system uses shared memory to pass high-resolution frames between the ISP and the dual-core NPU. The mobile device has a strict continuous thermal dissipation limit of 4.0W for the SoC. In high-resolution camera mode, the ISP and shared memory subsystem consume 1.5W for 70% of the session; in preview mode, they consume 0.8W for the remaining 30%. The NPU consumes 3.5W when operating at its peak 34.7 TOPS, and the governor must avoid both instantaneous thermal excursions and long-window overheating.
+question: Why does peak Exynos 2400 NPU use throttle in this camera pipeline, and what NPU TOPS caps should the governor use across high-resolution and preview modes?
 details:
-  realistic_solution: Because the memory is shared across the CPU, GPU, ISP, and NPU, constant data movement from the camera sensor keeps the memory controller active, consuming 1.5W. This leaves only 2.5W of the 4.0W total thermal budget for the NPU. To avoid thermal throttling, the system governor must cap the NPU utilization to match the remaining thermal headroom, reducing the burst performance of 34.7 TOPS down to a lower sustained throughput.
+  realistic_solution: Because the memory is shared across the CPU, GPU, ISP, and NPU, camera data movement keeps the ISP and memory controller active before the NPU does any inference work. In high-resolution mode that baseline is 1.5W, leaving only 2.5W of the 4.0W total thermal budget for the NPU; in preview mode the 0.8W baseline leaves 3.2W. If TOPS is used as a governor proxy, linear power scaling from the 34.7 TOPS, 3.5W peak gives approximate caps of 24.8 TOPS in high-resolution mode and 31.7 TOPS in preview mode. In production, the governor should enforce power/utilization caps and use these TOPS values as capacity estimates rather than precise guarantees.
   common_mistake: |
     **The Pitfall:** Assuming the NPU can utilize the entire SoC thermal budget.
     **The Rationale:** Engineers calculate sustained performance based only on the NPU's peak power.
@@ -19,17 +19,22 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Total SoC Thermal Budget: 4.0W.
-    - ISP & Memory Baseline: 1.5W.
+    - ISP & Memory Baseline: 1.5W in high-resolution mode, 0.8W in preview mode.
     - Peak NPU Power: 3.5W.
     - Peak NPU Performance: 34.7 TOPS.
+    - Use linear TOPS-to-power scaling only as a first-order sustained-capacity estimate.
+    - Governor caps must respect per-mode instantaneous power, not just session-average demand.
 
     **Calculations:**
-    - Available Power for NPU: 4.0W - 1.5W = 2.5W.
-    - Max NPU Utilization: 2.5W / 3.5W = 71.4%.
-    - Max Sustained NPU Performance: 34.7 TOPS x 0.714 = 24.77 TOPS.
+    - High-Resolution NPU Power Cap: 4.0W - 1.5W = 2.5W.
+    - High-Resolution Utilization Cap: 2.5W / 3.5W = 71.4%.
+    - Approximate High-Resolution NPU Cap: 34.7 TOPS x 0.714 = 24.77 TOPS.
+    - Preview NPU Power Cap: 4.0W - 0.8W = 3.2W.
+    - Preview Utilization Cap: 3.2W / 3.5W = 91.4%.
+    - Approximate Preview NPU Cap: 34.7 TOPS x 0.914 = 31.72 TOPS.
 
     **Conclusion & Interpretation:**
-    - **Result: 24.77 Sustained TOPS (Thermal-Bound)**. System-on-Chip shared architectures heavily limit isolated NPU power allowances.
+    - **Result: approximate sustained caps of 24.77 TOPS in high-resolution mode and 31.72 TOPS in preview mode (Thermal-Bound).** The governor should enforce these per-mode power caps because the high-resolution 1.5W ISP/memory baseline limits instantaneous NPU headroom.
 status: published
 provenance: imported
 requires_explanation: false

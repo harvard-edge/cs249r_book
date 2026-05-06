@@ -7,31 +7,30 @@ topic: 3d-parallelism
 competency_area: parallelism
 bloom_level: analyze
 phase: training
-title: The Data Parallelism Scaling Efficiency
+title: Data-Parallel Scaling Across NVLink and InfiniBand
 scenario: You benchmark a 3B model training on A100 GPUs. Going from 1 to 8 GPUs (single node, NVLink) gives a 7.2x speedup — nearly linear. Going from 8 to 64 GPUs (8 nodes, InfiniBand 400 Gbps) gives only 5.2x speedup instead of 8x due to communication overhead.
-question: What explains the sub-linear scaling, and at what GPU count does adding more GPUs actually hurt throughput?
+question: What explains the sub-linear scaling when the job expands from one NVLink node to eight InfiniBand-connected nodes?
 details:
   realistic_solution: |
-    The communication-to-computation ratio determines scaling efficiency. Compute per GPU stays constant (same per-GPU batch size), but AllReduce communication grows with node count. At 8 GPUs, AllReduce uses 600 GB/s NVLink—negligible overhead. At 64 GPUs, AllReduce hits the 50 GB/s InfiniBand wall. The crossover point where adding GPUs hurts is when AllReduce time exceeds the compute time saved by adding one more GPU. Hierarchical AllReduce topologies mask this bottleneck.
+    The scaling drops because the communication path changes from a single NVLink domain to cross-node gradient synchronization over InfiniBand. With the same per-GPU batch size, each GPU still does about the same compute, but every step now includes a slower inter-node AllReduce phase with more latency and less effective bandwidth than the intra-node case. The 5.2x observed gain from 8 to 64 GPUs proves that cross-node collective overhead is material, but it does not by itself identify a precise 64-GPU step time. Hierarchical AllReduce helps by reducing within each node over NVLink first, then exchanging only the reduced chunks across InfiniBand.
   common_mistake: |
     **The Pitfall:** Assuming sub-linear scaling purely means the network bandwidth needs to be upgraded.
     **The Rationale:** Engineers often misdiagnose bandwidth as the sole culprit, forgetting that latency and the shifting communication-to-computation ratio are the fundamental drivers as node counts increase.
     **The Consequence:** Millions are spent upgrading InfiniBand tiers when algorithmic changes (like gradient accumulation, hierarchical collectives, or larger batch sizes) are actually required to mask the latency bounds.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: 3B parameters (6 GB gradients in FP16).
-    - Compute per step per GPU: ~200 ms.
-    - 8 GPUs (NVLink): 450 GB/s unidirectional bandwidth per link.
-    - 64 GPUs (InfiniBand): 50 GB/s bandwidth.
+    - Model: 3B parameters, so FP16 gradients are about 6 GB per synchronized step.
+    - 8 GPUs in one node use NVLink collectives; 64 GPUs across 8 nodes add inter-node InfiniBand collectives.
+    - 64 GPUs (8 nodes): observed 8-to-64 throughput gain is 5.2x, not the ideal 8x.
 
     **Calculations:**
-    - 8-GPU NVLink AllReduce: 2 * 6 GB * (7/8) / 450 GB/s = 23.3 ms.
-    - 8-GPU Efficiency: 200 / (200 + 23.3) = 89.6% (yields ~7.2x speedup).
-    - 64-GPU IB AllReduce (Naive Ring): 2 * 6 GB * (63/64) / 50 GB/s = ~236 ms.
-    - 64-GPU Efficiency: 200 / (200 + 236) = 45.9% (yields ~3.67x speedup relative to 8 nodes).
+    - The 1-to-8 speedup is 7.2x, so single-node efficiency is 7.2 / 8 = 90%.
+    - The 8-to-64 speedup is 5.2x, so cross-node scaling efficiency is 5.2 / 8 = 65%.
+    - The efficiency drop from 90% to 65% is the signal: leaving the NVLink domain exposes inter-node AllReduce latency, bandwidth limits, and synchronization jitter.
+    - The measurements support a qualitative diagnosis of communication overhead. They do not contain enough information to derive a unique 64-GPU step time or a precise millisecond overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: Communication-Bound.** The cross-node InfiniBand latency causes AllReduce time (236ms) to exceed compute time (200ms). Sub-linear scaling demands a shift to hierarchical AllReduce topologies to mask the inter-node bottleneck.
+    - **Result: Inter-node communication-bound.** The sub-linear scaling comes from cross-node collective communication replacing mostly intra-node NVLink traffic. Use hierarchical AllReduce, larger effective batches, gradient accumulation, or topology-aware placement to reduce the exposed synchronization cost.
 status: published
 provenance: imported
 requires_explanation: false

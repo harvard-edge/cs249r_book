@@ -1,27 +1,32 @@
 schema_version: '1.0'
 id: cloud-2931
 track: cloud
-level: L5
+level: L3
 zone: implement
 topic: container-orchestration
 competency_area: deployment
 bloom_level: apply
 phase: inference
-title: Implementing a Custom Kubernetes Scheduler Extender for GPU Topology
+title: Implement a Kubernetes scheduler plugin for H100 GPU topology
 scenario: Your data center has 16-GPU H100 nodes interconnected via NVLink Switch (900 GB/s all-to-all). A multi-node training job spans 4 nodes and must maximize NVLink bandwidth within each node while minimizing cross-node RDMA traffic. The default Kubernetes scheduler is topology-unaware.
 question: How would you implement a Kubernetes scheduler extension that scores H100 nodes by GPU-to-GPU bandwidth topology for the 4-node training job?
 details:
-  realistic_solution: 'Deploy a scheduler extender sidecar that reads GPU topology from `nvidia-smi topo -m` output cached as a ConfigMap per node. Register it in `KubeSchedulerConfiguration.extenders` with `prioritize: true`. The extender scores each node 0–100 based on the number of NVLink P2P paths available between requested GPUs. For 8-GPU H100 nodes with full NVSwitch mesh, all intra-node pairs score 100; cross-socket PCIe paths score 40. The scheduler selects the top-scored node set. Refresh the ConfigMap via a DaemonSet that runs `nvidia-smi topo` every 5 minutes.'
+  realistic_solution: Implement this as a Kubernetes scheduler framework plugin, with a gang scheduler or queueing controller such as Volcano/Kueue coordinating the 4-node job as a group of pods. A DaemonSet collects GPU topology from NVML or `nvidia-smi topo -m` and publishes node labels or a topology CRD. The plugin uses Filter/Score phases to prefer nodes whose requested GPUs have full NVSwitch/NVLink connectivity, scoring each candidate node 0-100 from the available GPU-to-GPU bandwidth matrix. The gang layer reserves or admits the 4 pods together, then aggregates the per-node scores and adds a placement penalty for cross-node RDMA traffic so the job receives four high-scoring nodes rather than four independently scheduled pods. Refresh topology data on node changes and validate placement by checking assigned GPU IDs and measured all-reduce bandwidth.
   common_mistake: |
-    **The Pitfall:** Implementing a full custom scheduler from scratch.
-    **The Rationale:** Candidates assume Kubernetes requires rewriting core components to handle advanced hardware placement.
-    **The Consequence:** Creating an unmaintainable, brittle orchestration fork when standard HTTP webhook extenders already exist for this exact purpose.
+    **The Pitfall:** Scoring one pod at a time and assuming Kubernetes will automatically choose the best 4-node set.
+    **The Rationale:** The default scheduler makes independent pod placement decisions, so a topology-aware node score alone does not provide gang admission or group-level optimization for distributed training.
+    **The Consequence:** The job can land on individually acceptable nodes while still suffering poor cross-node communication or partial allocation delays.
   napkin_math: |
+    **Assumptions & Constraints:**
     - NVLink all-to-all: 900 GB/s.
     - InfiniBand HDR inter-node: 200 Gb/s = 25 GB/s.
+    **Calculations:**
     - Bandwidth ratio: 900 / 25 = 36x difference.
-    - Latency impact: An AllReduce on a 1 GB tensor takes ~1.1 ms intra-node vs ~40 ms over IB.
-    - **Conclusion: Topology-aware scheduling avoids a 36x latency penalty by keeping dense communication entirely within the 16-GPU NVLink domain.**
+    - Raw 1 GB transfer lower bound: 1 GB / 900 GB/s = ~1.1 ms inside the NVLink domain.
+    - Raw 1 GB transfer lower bound over HDR IB: 1 GB / 25 GB/s = ~40 ms before collective algorithm overhead.
+    - A real all-reduce sends more than one raw tensor copy per participant depending on ring/tree algorithm and node count, so these are bandwidth lower bounds, not guaranteed collective latencies.
+    **Conclusion & Interpretation:**
+    - **Topology-aware scheduling avoids the slowest bandwidth path for dense collectives by keeping as much communication as possible within the 16-GPU NVLink domain and minimizing inter-node RDMA traffic.**
 status: published
 provenance: imported
 requires_explanation: false

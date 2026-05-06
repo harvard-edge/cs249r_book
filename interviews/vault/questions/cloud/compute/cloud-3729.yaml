@@ -11,7 +11,7 @@ title: Benchmark MFU vs Achieved FLOPS for Attention vs MLP on H100
 scenario: 'Profile a GPT-3 style model (175B) on H100 during training at batch=8, seq=2048. Separate profiling shows: MLP GEMMs at 67% MFU, attention at 31% MFU, layer norm/dropout at 5% MFU. The overall MFU is 48%.'
 question: Why does attention achieve only 31% MFU versus 67% for MLP GEMMs, and what changes would improve overall MFU?
 details:
-  realistic_solution: 'MLP GEMMs have large square-ish shapes -> high tensor core utilization. Attention QK^T are small GEMMs (especially K=128) -> tensor cores less efficient. Plus, softmax is element-wise. Fix: FlashAttention-2 + increase seq_len per device (longer seqs improve QK^T GEMM shape).'
+  realistic_solution: 'MLP GEMMs have large, tensor-core-friendly shapes, so they reach 67% MFU. Attention is lower at 31% because QK^T and PV operate per head with small head_dim, softmax is bandwidth/elementwise heavy, and unfused kernels add reads, writes, and synchronization. Overall MFU is reported as 48%; do not invent component weights unless the profiler provides FLOP shares. Improvements: use FlashAttention-style fused kernels, fuse/drop redundant attention epilogues, increase per-device sequence or batch shapes when memory allows, and reduce padding or imbalance so attention kernels run on denser tiles.'
   common_mistake: |
     **The Pitfall:** Assuming attention achieves similar MFU to MLP simply because both involve large matrix multiplications.
     **The Rationale:** Candidates fail to break down the specific dimensions of the GEMMs or the non-matmul overhead in attention.
@@ -20,15 +20,17 @@ details:
     **Assumptions & Constraints:**
     - Model: 175B GPT-3.
     - Setup: batch=8, seq=2048.
-    - MFU by layer: MLP=67%, Attention=31%, Other=5%.
+    - MFU by component: MLP=67%, Attention=31%, Other=5%.
+    - Overall MFU is measured separately as 48%; component FLOP weights are not provided.
 
     **Calculations:**
-    - MLP GEMMs: M=16384 (batch*seq), K=12288, N=49152. Large shapes drive high Tensor Core utilization (67%).
-    - Attention GEMMs (QK^T): M=2048, K=128 (head_dim), N=2048. Small inner dimension heavily throttles Tensor Cores (31%).
-    - Weighted total MFU: (0.5 * 67%) + (0.4 * 31%) + (0.1 * 5%) = 33.5% + 12.4% + 0.5% = 46.4% (~48% observed).
+    - MLP GEMMs: M=16384 (batch*seq), K=12288, N=49152. Large shapes drive high tensor core utilization (67%).
+    - Attention GEMMs per head: QK^T uses sequence-by-head_dim-by-sequence shapes, with K=head_dim=128. The small inner dimension and per-head tiling reduce tensor core efficiency.
+    - Softmax, masking, dropout, and score/value movement add non-GEMM memory traffic, further lowering attention MFU to 31%.
+    - Overall MFU remains the measured 48%; without FLOP-share weights, the component MFUs should not be recombined into a fabricated weighted total.
 
     **Conclusion & Interpretation:**
-    - **Result: 31% MFU (Compute-Utilization Bottleneck)**. Small attention GEMMs fail to saturate Tensor Cores, creating a bottleneck correctable via longer sequences.
+    - **Result: Attention Is the Main Utilization Bottleneck.** The 31% attention MFU is a component result, while overall MFU is the measured 48%. Fused attention kernels, better tiling/fusion, and larger dense per-device sequence or batch shapes are the concrete ways to raise overall MFU.
 status: published
 provenance: imported
 requires_explanation: false

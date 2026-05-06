@@ -12,25 +12,27 @@ scenario: To accelerate a 2B parameter LLM on a mobile SoC, your team implements
 question: Why does this time-saving algorithm lead to catastrophic memory failure on a mobile device, and what specific hardware constraint is being violated?
 details:
   realistic_solution: |
-    The failure is caused by the explosive growth of the KV Cache due to rejected speculative tokens. With speculative decoding (k=4), you compute and store keys and values for all 4 tokens before verification. If the main model rejects tokens, the KV cache data for those rejected tokens becomes wasted space in the pre-allocated contiguous buffer. This unreclaimed memory accumulates rapidly over hundreds of steps, breaching the strict OS Jetsam limit and forcing termination.
+    The failure is caused by peak memory pressure, not by permanently storing every rejected token in the main model's KV cache. During speculative decoding, the mobile runtime may hold the draft model, main model, current KV cache, candidate-token activations, verification buffers, and temporary KV state at the same time. Rejected tokens should be discarded or rolled back, but their transient buffers still raise the peak footprint. On a tight mobile budget, that peak can exceed the OS Jetsam limit even when steady-state accepted-token KV growth would fit.
   common_mistake: |
     **The Pitfall:** Blaming a software memory leak or the draft model's size.
-    **The Rationale:** Candidates fail to realize that speculative decoding fundamentally trades memory capacity (storing unverified KV states) for latency reduction, a trade that breaks down on memory-constrained edge hardware.
-    **The Consequence:** Wasting time debugging application code when the core algorithm is mathematically incompatible with the mobile memory budget.
+    **The Rationale:** Candidates miss that speculative decoding trades extra transient buffers and duplicated model state for latency reduction.
+    **The Consequence:** Wasting time debugging only application leaks while the implementation's peak working set continues to violate the mobile memory budget.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 2B model KV cache per token: ~4MB.
-    - OS Memory budget: ~2GB.
-    - Speculative decoding k=4, 75% rejection rate (1 token accepted).
+    - 2B main model resident memory plus runtime buffers: ~1.2GB.
+    - Accepted-token KV cache after 200 tokens: 200 * 4 MB = 800 MB.
+    - Speculative verification width: k=4 candidate tokens.
+    - Transient verification workspace: about 4 candidate tokens * 4 MB/token = 16 MB, plus activation/scratch buffers.
+    - OS Jetsam budget for the app: ~2GB.
 
     **Calculations:**
-    - Standard decoding (200 steps): 200 tokens * 4 MB = 800 MB (Under 2GB budget).
-    - Speculative decoding (200 steps): Each step writes 4 tokens to cache.
-    - Total data: 200 steps * 4 tokens/step * 4 MB/token = 3200 MB (3.2 GB).
-    - 3.2 GB > 2.0 GB OS budget.
+    - Standard steady footprint after 200 accepted tokens: 1.2GB + 800 MB = 2.0GB.
+    - Speculative peak footprint: 2.0GB + 16 MB candidate KV + activation/scratch duplication.
+    - Even a modest extra 100-200 MB of verification scratch pushes the app over a 2GB Jetsam threshold.
+    - Rejected tokens do not need to remain in the committed KV cache; the failure is the temporary peak while verifying them.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.2 GB (Memory Capacity)**. Speculative decoding increases memory pressure by 4x, triggering Jetsam eviction.
+    - **Result: steady-state near 2GB plus transient speculative buffers (Peak-Memory Capacity)**. Speculative decoding can trigger Jetsam by exceeding peak mobile memory headroom, not by universally multiplying persistent KV cache by 4x.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,10 +8,10 @@ competency_area: power
 bloom_level: apply
 phase: both
 title: Power Distribution Unit Over-Subscription in GPU Clusters
-scenario: 'You are commissioning a new H100 training cluster. The datacenter vendor offers PDUs rated at 30 kW continuous and 36 kW peak (20% oversubscription for 10-second bursts). Your deployment uses 3x 8xH100 nodes per rack, each node rated at 8 kW TDP. A cluster benchmarking team reports that during the first minute of large-model training, all GPUs ramp from idle to full TDP simultaneously.'
-question: 'Can a 30 kW continuous, 36 kW peak PDU handle three 8 kW H100 nodes ramping simultaneously, and what soft-start policy should you use?'
+scenario: You are commissioning a new H100 training cluster. The datacenter vendor offers PDUs rated at 30 kW continuous and 36 kW peak (20% oversubscription for 10-second bursts). Your deployment uses 3x 8xH100 nodes per rack, each node rated at 8 kW TDP. A cluster benchmarking team reports that during the first minute of large-model training, all GPUs ramp from idle to full TDP simultaneously.
+question: Can a 30 kW continuous, 36 kW peak PDU handle three 8 kW H100 nodes ramping simultaneously, and what soft-start policy should you use?
 details:
-  realistic_solution: 'Steady state: 3 × 8 kW = 24 kW, well within 30 kW continuous. But simultaneous power-on inrush: each node can spike to ~12 kW for 200ms (1.5× TDP). Three nodes simultaneously: 3 × 12 kW = 36 kW = exactly the PDU peak limit, with zero margin. Risk: any additional overhead (networking, CPUs ramping) tips the PDU over. Soft-start policy: stagger job launch across nodes with 5-second delays. In SLURM, use --begin with per-node stagger or implement a prolog script that delays GPU power-on by node_rank × 5s. Reduces simultaneous peak to max 2 nodes = 24 kW inrush, leaving 12 kW headroom.'
+  realistic_solution: 'Steady state: 3 * 8 kW = 24 kW, which is within the 30 kW continuous rating. Simultaneous ramp is the problem: if each node spikes to about 12 kW for its inrush interval, then three nodes ramping together draw 36 kW, exactly the PDU peak rating with no margin for CPUs, NICs, fans, or meter tolerance. Treat that as not recommended even though it equals the published burst limit. Use a soft-start policy that guarantees at most one node is in the inrush interval at a time: delay each node by at least the measured inrush duration, with operational margin. If the burst lasts 200ms, a 1s or larger stagger is enough; a 5s stagger is conservative.'
   common_mistake: |
     **The Pitfall:** Assuming the PDU peak rating is perfectly safe for a simultaneous all-node power ramp.
     **The Rationale:** Engineers look at the steady-state 24 kW and assume the 36 kW peak handles all transients without issue.
@@ -24,10 +24,12 @@ details:
 
     **Calculations:**
     - Simultaneous inrush spike: 3 * 12 kW = 36 kW = 100% of 36 kW PDU peak.
-    - With staggered start (5s delay): max 1 node inrush + 2 steady-state = 12 + 16 = 28 kW.
+    - Simultaneous inrush has 0 kW margin against the peak rating.
+    - Sequential ramp with at most 1 node inrush: 12 kW + 2 * 8 kW = 28 kW.
+    - Margin while staggered: 36 kW - 28 kW = 8 kW to peak, and 30 kW - 28 kW = 2 kW to continuous.
 
     **Conclusion & Interpretation:**
-    - **Result: 28 kW Peak (Safe Staggered Soft-Start)**. Staggering nodes reduces the peak to 28 kW (93% of continuous, 78% of peak), preventing PDU shutdown.
+    - **Result: Simultaneous Ramp Has Zero Margin**. The PDU can only barely tolerate all three nodes ramping together, so ramp nodes sequentially and space starts by more than the inrush duration.
 status: published
 provenance: imported
 requires_explanation: false

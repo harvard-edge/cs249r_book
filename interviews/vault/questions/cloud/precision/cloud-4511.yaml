@@ -9,45 +9,47 @@ bloom_level: create
 phase: both
 title: Asymmetric INT8 Quantization Kernels
 scenario: You are implementing weight-only asymmetric INT8 quantization for a dense LLM layer to run on A100 Tensor Cores.
-question: Derive the basic mathematical formulation to convert FP16 weights to INT8, and explain how they are dequantized during the GEMM.
+question: Derive weight-only asymmetric INT8 quantization for FP16 weights and explain dequantization during GEMM?
 details:
-  realistic_solution: 'Compute the scale S = (W_max - W_min) / 255 and zero-point Z = round(-W_min / S). The quantized weight is Q = round(W / S) + Z. Inside the GEMM kernel, load Q, instantly dequantize via W_approx = S * (Q - Z), and perform the multiply-accumulate in FP16.'
+  realistic_solution: For weight-only asymmetric quantization, compute the scale S = (W_max - W_min) / 255 and zero-point Z = round(-W_min / S) for a weight group or channel. Store each weight as Q = clamp(round(W / S) + Z, 0, 255). Inside the GEMM kernel, load Q plus its scale and zero-point, dequantize in registers with W_approx = S * (Q - Z), and multiply with higher-precision activations using FP16 accumulation or Tensor Core execution. This reduces weight storage and weight-read bandwidth, while activations and accumulation remain higher precision.
   common_mistake: |
     **The Pitfall:** Assuming symmetric quantization (omitting the zero-point) or attempting to do the GEMM entirely in INT8.
     **The Rationale:** Candidates simplify the math too much or misunderstand the hardware constraints of mixed-precision tensor cores.
     **The Consequence:** The model suffers severe accuracy degradation due to unhandled asymmetric weight distributions, or fails to execute efficiently.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Source format: FP16 weights.
-    - Target format: INT8 quantized weights (0 to 255).
-    - Execution hardware: FP16 Tensor Cores.
+    - Source format: FP16 weights only.
+    - Target storage: asymmetric unsigned INT8 weights (0 to 255).
+    - Activations and accumulation remain higher precision.
+    - Execution hardware dequantizes weights for FP16 Tensor Core GEMM.
 
     **Calculations:**
     - Scale (S) = (W_max - W_min) / 255.
     - Zero-Point (Z) = round(-W_min / S).
-    - Quantize: Q = round(W / S) + Z.
+    - Quantize weights: Q = clamp(round(W / S) + Z, 0, 255).
     - Dequantize (in kernel): W_approx = S * (Q - Z).
+    - Storage change for weights: FP16 uses 2B/value; INT8 uses 1B/value plus scale/zero-point overhead per group.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory bandwidth halved (Memory-Bound Mitigated)**. By dynamically dequantizing back to FP16 in registers, the GEMM executes accurately using FP16 Tensor Cores while saving memory bandwidth.
+    - **Result: Weight Bandwidth Reduced.** Weight-only INT8 can nearly halve weight storage/read bandwidth before metadata overhead, but it does not halve activation bandwidth or all GEMM memory traffic.
 status: published
 provenance: llm-draft
-expected_time_minutes: 12
 requires_explanation: true
+expected_time_minutes: 12
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-implement-L6+
+  - gemini-generated
+  - target-implement-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

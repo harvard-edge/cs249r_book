@@ -11,7 +11,7 @@ title: INT8 Quantization Bias on Cloud AI 100
 scenario: You are deploying a fraud detection model on an on-premise Qualcomm Cloud AI 100 accelerator (32 GB LPDDR4x, 400 TOPS INT8, 75W). To utilize the peak 400 TOPS INT8 compute, you apply uniform post-training quantization using global min/max activation values. Post-deployment, the False Positive Rate for a minority subgroup (Group B) increases by 12%, violating equalized odds, while the majority group (Group A) sees no degradation.
 question: Why does global uniform INT8 quantization on the Cloud AI 100 raise Group B's false positive rate while Group A is unaffected?
 details:
-  realistic_solution: 'Uniform INT8 quantization maps the FP32 range into 256 discrete bins based on the global distribution, which is dominated by Group A. Group B''s critical features likely occupy a narrow, long-tail region of the activation range, resulting in those features being compressed into very few INT8 bins. This precision loss destroys Group B''s predictive signal. The tradeoff is throughput vs. fairness: using KL-divergence calibration or keeping sensitive layers in FP16 would improve subgroup fairness but reduce the effective TOPS and increase power consumption.'
+  realistic_solution: 'Uniform INT8 quantization maps the FP32 range into 256 discrete bins based on the global distribution, which is dominated by Group A. Group B''s critical features likely occupy a narrow, long-tail region of the activation range, resulting in those features being compressed into relatively few INT8 intervals. That loss of resolution is a plausible mechanism for increasing Group B''s false positive rate. Group A remains stable because its features span many bins and retain enough separation after quantization. The tradeoff is throughput vs. fairness: using KL-divergence calibration or keeping sensitive layers in FP16 would improve subgroup fairness but reduce the effective TOPS and increase power consumption.'
   common_mistake: |
     **The Pitfall:** Blaming original training data imbalance while ignoring the INT8 quantization process.
     **The Rationale:** Candidates assume model fairness relies solely on data.
@@ -19,17 +19,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Global FP32 activation range is [0.0, 10.0].
-    - Uniform INT8 quantization into 256 discrete bins.
+    - Uniform affine INT8 quantization into 256 representable codes.
+    - For a [0, 10] range, there are 255 intervals between endpoint codes.
     - Group A features span [1.0, 9.0].
     - Group B features are in a narrow tail [0.0, 0.5].
 
     **Calculations:**
-    - Uniform Step Size is 10.0 / 255 = 0.039 per bin.
-    - Group A Utilization is 8.0 / 0.039 = ~205 bins.
-    - Group B Utilization is 0.5 / 0.039 = ~12 bins (4.7% of total capacity).
+    - Uniform Step Size is 10.0 / 255 = 0.039 activation units per code step.
+    - Group A coverage is 8.0 / 0.039 = ~205 code intervals.
+    - Group B coverage is 0.5 / 0.039 = ~13 code intervals, about 5% of the code range.
+    - Relative coverage: 205 / 13 = ~16x more code intervals for Group A's feature span.
 
     **Conclusion & Interpretation:**
-    - **Result: ~12 bins (Precision-Bound)**. This 17x disparity in bin allocation destroys Group B's predictive signal, significantly raising its False Positive Rate.
+    - **Result: ~13 quantization intervals for Group B's tail (Precision-Bound)**. The narrow subgroup feature range is represented coarsely, while Group A's broader feature span retains separation across many intervals. This plausibly explains the subgroup FPR increase without proving quantization is the only cause.
 status: published
 provenance: imported
 requires_explanation: false
@@ -39,7 +41,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- reasoning_competency and reasoning_mode are not specified.
+  - reasoning_competency and reasoning_mode are not specified.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

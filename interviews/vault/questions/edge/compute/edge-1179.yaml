@@ -11,7 +11,7 @@ title: 'Edge Transformer Cost Evaluation: Quantized vs Full Transformer on Jetso
 scenario: You must choose between deploying BERT-base (110M params) at FP16 vs INT8 on a Jetson Orin (32GB LPDDR5, 275 TOPS INT8) for a document triage system.
 question: Which is better for a real-time document triage system requiring P99 < 50ms, considering throughput, memory footprint, and latency at batch=1?
 details:
-  realistic_solution: INT8 is vastly superior. At batch size 1, transformer execution is severely memory-bandwidth bound. FP16 weights (220MB) take ~2.15ms to stream from DRAM, easily beating the 50ms deadline. However, INT8 halves this memory footprint to 110MB (~1.07ms latency), doubles energy efficiency, and unlocks massive batching throughput (9800/s vs 4900/s) at virtually zero accuracy degradation for classification tasks.
+  realistic_solution: INT8 is usually the better batch=1 edge choice if calibration preserves document-triage accuracy, because it halves the BERT-base weight footprint from about 220 MB to 110 MB and reduces the minimum DRAM traffic and energy per inference. FP16 may still be the correct choice if INT8 causes unacceptable accuracy loss or if the deployed runtime is dominated by activations, attention kernels, tokenization, or launch overhead rather than weight bandwidth. The decision should be made from measured end-to-end P99 latency and throughput under the target TensorRT/DLA/GPU runtime; the napkin math only shows that INT8 has a better memory-bandwidth lower bound and both formats have enough headroom for a 50ms SLO in this simplified model.
   common_mistake: |
     **The Pitfall:** Assuming the bottleneck is compute and picking based on TOPS.
     **The Rationale:** Failing to check the arithmetic intensity of batch=1 execution, relying on compute-bound profiling tools instead of memory bandwidth.
@@ -22,13 +22,16 @@ details:
     - Orin: 102.4 GB/s effective memory bandwidth, 60W.
 
     **Calculations:**
-    - FP16 Size: 220 MB. Transfer Time: 220 MB / 102.4 GB/s = 2.15 ms.
-    - INT8 Size: 110 MB. Transfer Time: 110 MB / 102.4 GB/s = 1.07 ms.
-    - Energy (FP16): 60W * 0.00215s = 129 mJ.
-    - Energy (INT8): 60W * 0.00107s = 64.2 mJ.
+    - FP16 weight size: 110M params * 2 bytes = 220 MB.
+    - INT8 weight size: 110M params * 1 byte = 110 MB.
+    - Decimal-unit lower-bound transfer time, FP16: 220 MB / 102.4 GB/s = 0.220 GB / 102.4 GB/s = 2.15 ms.
+    - Decimal-unit lower-bound transfer time, INT8: 110 MB / 102.4 GB/s = 0.110 GB / 102.4 GB/s = 1.07 ms.
+    - Lower-bound energy at 60W, FP16: 60W * 0.00215s = 129 mJ.
+    - Lower-bound energy at 60W, INT8: 60W * 0.00107s = 64.2 mJ.
+    - Full inference latency must add activation traffic, attention/FFN compute, kernel/runtime overhead, and any CPU preprocessing.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.07 ms vs 2.15 ms (Memory-Bandwidth Bound)**. Both models crush the 50ms SLO, but INT8 consumes half the energy and memory.
+    - **Result: INT8 is preferred if measured accuracy is acceptable (Memory-Bandwidth Sensitive)**. The simplified weight-streaming lower bound is 1.07 ms for INT8 versus 2.15 ms for FP16, but final P99 and throughput must be validated end-to-end rather than inferred from parameter size alone.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,11 +7,11 @@ topic: pipeline-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: 'Interleaved Pipeline Schedule to Reduce Bubble'
-scenario: 'You have a 64-layer GPT model split across 8 MI300X GPUs. Using the standard GPipe schedule with m=16 micro-batches gives a 30% bubble.'
-question: 'How would an interleaved 1F1B schedule with virtual stages change the bubble fraction and memory use for the 8-stage, m=16 pipeline?'
+title: Interleaved Pipeline Schedule to Reduce Bubble
+scenario: You have a 64-layer GPT model split across 8 MI300X GPUs. Using the standard GPipe schedule with m=16 micro-batches gives a 30% bubble.
+question: How would an interleaved 1F1B schedule with virtual stages change the bubble fraction and memory use for the 8-stage, m=16 pipeline?
 details:
-  realistic_solution: 'Use interleaved 1F1B with v=2 virtual stages: each GPU holds 2 non-contiguous model chunks (e.g., layers 1-8 and 33-40). Combine with selective activation checkpointing to stay within 192GB MI300X HBM3.'
+  realistic_solution: 'Use interleaved 1F1B with v=2 virtual stages: each GPU holds 2 non-contiguous model chunks (e.g., layers 1-8 and 33-40). The schedule roughly halves the 1F1B pipeline bubble compared with a non-interleaved 8-stage schedule; for p=8, m=16, v=2, the common approximation is idle fraction ≈ (p-1)/(m×v) = 7/32 ≈ 22%, with exact utilization depending on fill/drain accounting. Memory use increases because each rank has more in-flight activation chunks, so combine interleaving with selective activation checkpointing rather than assuming a fixed 4× activation increase.'
   common_mistake: |
     **The Pitfall:** Assuming the interleaved 1F1B schedule is a pure win without evaluating memory constraints.
     **The Rationale:** Candidates see the bubble reduction math but forget that interleaved schedules require storing more in-flight micro-batch activations.
@@ -22,10 +22,12 @@ details:
     - Hardware: MI300X (192GB HBM3).
 
     **Calculations:**
-    - GPipe bubble: (p-1)/(m+p-1) = 7 / 23 = 30.4%.
-    - Interleaved 1F1B bubble: (p-1)/(m×v+p-1) = 7 / 39 = 17.9%.
-    - Memory overhead: Standard stores m=16 activations/stage. Interleaved stores 2×v micro-batch activations, leading to 4x more peak activations.
+    - GPipe-style fill/drain bubble: (p-1)/(m+p-1) = 7 / 23 = 30.4%.
+    - Interleaved 1F1B approximation: virtual chunks reduce bubble by about v, so idle fraction ≈ (p-1)/(m×v) = 7 / 32 = 21.9%.
+    - Exact bubble depends on the implementation's warmup, drain, and model-chunk ordering; the safe claim is a material reduction from ~30% to roughly the low-20% range, not a guaranteed 17.9%.
+    - Memory overhead: interleaving increases the number of in-flight activation chunks per rank, but the peak factor depends on schedule overlap and checkpointing. It should be measured or bounded during profiling rather than assumed to be 4×.
 
     **Conclusion & Interpretation:**
-    - **Result: 17.9% bubble fraction (Memory-Bound vs Compute-Bound)**. Bubble is reduced by 41%, but requires 4x more peak activations.
+    - **Result: roughly ~22% bubble fraction (Schedule-Bound)**. Interleaving improves utilization, while activation memory rises qualitatively and should be controlled with checkpointing.
 status: published
+provenance: imported

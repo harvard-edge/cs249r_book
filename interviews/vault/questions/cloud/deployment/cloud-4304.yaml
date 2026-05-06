@@ -7,11 +7,11 @@ topic: disaggregated-serving
 competency_area: deployment
 bloom_level: analyze
 phase: inference
-title: 'Variable Output Length and Decode Pool Imbalance'
+title: Variable Output Length and Decode Pool Imbalance
 scenario: 'Your decode pool uses static round-robin assignment: each incoming prefill completion is assigned to the next decode GPU in sequence. You observe that some decode GPUs are at 95% memory utilization while others sit at 40%. Users with long outputs (>2000 tokens) report degraded TPOT.'
-question: 'Why does round-robin assignment create such extreme decode memory imbalance, and how would you redesign the system to rebalance work?'
+question: Why does round-robin assignment create such extreme decode memory imbalance, and how would you redesign the system to rebalance work?
 details:
-  realistic_solution: 'Round-robin does not account for output length variance. A 2000-token output occupies a KV slot for 2000 steps; a 50-token output frees its slot in 50 steps. If requests arrive in bursts where long outputs cluster on the same GPU (e.g., during batch processing jobs), those GPUs fill up while others stay empty. Solutions: (1) Least-loaded-first assignment at transfer time: assign each new KV to the decode GPU with the most free HBM KV blocks. (2) Work-stealing: decode GPUs at <30% utilization advertise capacity; overloaded GPUs migrate completed KV sequences mid-flight to underloaded neighbors (requires live KV transfer over InfiniBand — same mechanism as prefill→decode transfer). (3) Output length prediction: use a draft model or heuristic to estimate output length at prefill time and bin requests into short/long queues served by different decode GPU subsets.'
+  realistic_solution: Round-robin does not account for output length variance. A 2000-token output occupies KV blocks for 2000 decode steps; a 50-token output frees its blocks quickly. If long outputs cluster on the same GPU, those GPUs fill while others stay empty. Redesign assignment as least-loaded-first at prefill-to-decode transfer time, using free HBM KV blocks and active-token debt rather than request count. Add output length prediction to route short and long jobs into separate queues. Work stealing is useful for newly admitted or paused sequences; live migration of active KV can help only if the serving stack explicitly supports safe KV transfer and rescheduling.
   common_mistake: |
     **The Pitfall:** Adding more decode GPUs to the cluster to fix the imbalance.
     **The Rationale:** Treating the symptom (high utilization on some GPUs) rather than the root cause (unaware load balancing).
@@ -19,16 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - System Setup: 10 decode GPUs, 38 GB KV pool each.
-    - Request Rate: 500 req/s (50 req/s per GPU).
+    - Request Rate: 500 req/s total, averaging 50 req/s per GPU.
     - Long Jobs: 10% of jobs are long (>2000 tokens), pinning ~188 MB KV each.
+    - Examine a 10-second burst window.
 
     **Calculations:**
-    - Expected Long Jobs per GPU: 5 long jobs/s (940 MB/s KV allocation).
-    - Imbalance Accumulation: Binomial clustering can cause a GPU to receive +3σ extra long jobs.
-    - Local Pressure: +1.2 GB extra pressure locally while other GPUs sit empty.
+    - Total long-job arrival rate: 500 req/s × 10% = 50 long jobs/s across the cluster.
+    - Expected long-job arrival rate per GPU: 50 / 10 = 5 long jobs/s.
+    - In 10 seconds, expected long jobs per GPU: μ = 50.
+    - Standard deviation for one GPU under random assignment: σ ≈ sqrt(500 × 0.1 × 0.9 × 0.1) = 2.1 long jobs.
+    - A +3σ burst is about 6 extra long jobs on one GPU.
+    - Extra pinned KV from that burst: 6 × 188 MB = 1.13 GB, and the pressure persists for thousands of decode steps.
 
     **Conclusion & Interpretation:**
-    - **Result: Severe KV cache imbalance (Memory-Bound)**. Round-robin assignment ignores sequence length variance, causing localized OOMs and TPOT degradation.
+    - **Result: KV Cache Imbalance (Memory-Bound)**. Round-robin balances arrivals, not long-lived KV occupancy, so even modest clustering of long outputs creates persistent local memory pressure and TPOT degradation.
 status: published
 provenance: imported
 requires_explanation: false

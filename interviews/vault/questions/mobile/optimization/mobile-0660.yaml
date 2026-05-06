@@ -11,16 +11,26 @@ title: The On-Device Copilot Power Budget
 scenario: You are the new Lead ML Systems Engineer for the flagship smartphone division, tasked with creating a revolutionary, always-on, on-device AI assistant. The goal is to rival server-based models in quality, but run entirely on the phone's hardware.
 question: What multi-model speculative decoding system can meet the always-on phone assistant's latency and power targets?
 details:
-  realistic_solution: The correct approach is to design a multi-model system that decouples the latency-critical path from the accuracy-critical path, using **speculative decoding** as the core architectural pattern.
+  realistic_solution: The correct approach is a speculative decoding pipeline with a small always-resident draft model and a larger target model used for batched verification. A 100M INT4 draft model proposes short blocks of tokens on the low-power NPU path, while the 1.5B target model wakes only to verify 4-8 drafted tokens at a time and correct the first mismatch. The system should tune draft size, block length, and acceptance thresholds so the draft is cheap enough to run continuously, the target amortizes each wake-up over several accepted tokens, and low-confidence or sensitive requests fall back to direct target decoding.
   common_mistake: |
-    **The Pitfall:** Relying on INT4 quantization of a single large model as a complete solution.
-    **The Rationale:** Candidates fail to recognize that a single model is physically incapable of being both extremely fast/low-power and highly accurate.
-    **The Consequence:** The resulting single model either drains the battery entirely or produces low-quality, unusable responses.
+    **The Pitfall:** Choosing a draft model that is almost as expensive as the target, or verifying only one token per target wake-up.
+    **The Rationale:** Speculative decoding only helps when the draft is much cheaper and the target verification pass amortizes its cost over multiple accepted tokens.
+    **The Consequence:** The phone pays the overhead of two models while getting little latency or energy benefit, so the assistant still misses its power budget.
   napkin_math: |
-    1. **Single Model Failure:** A 1.5B model at INT4 requires ~850ms latency and high power, failing the always-on requirement.
-    2. **Draft Model:** A tiny 100M parameter draft model runs at ~50ms and minimal power to generate candidate tokens.
-    3. **Target Model:** The 1.5B target model wakes up only to verify multiple candidate tokens in parallel.
-    4. **System Success:** Speculative decoding bridges the ~20x average power gap by keeping the large model asleep for the majority of token generation.
+    **Assumptions & Constraints:**
+    - Single target decoding: 1.5B INT4 model takes ~850 ms/token when invoked token-by-token.
+    - Draft model: 100M INT4 model proposes one token in ~50 ms.
+    - Verification policy: draft 4 tokens, then verify the 4-token block with the 1.5B target in one ~350 ms batched pass.
+    - Expected acceptance: ~3 of 4 drafted tokens are accepted on common assistant queries.
+
+    **Calculations:**
+    - Direct target decoding for 3 accepted tokens: 3 * 850 ms = 2550 ms.
+    - Speculative block cost: 4 * 50 ms draft + 350 ms target verification = 550 ms.
+    - Useful throughput improvement for accepted tokens: 2550 ms / 550 ms ≈ 4.6x for this block.
+    - Energy improves only if the draft runs on the low-power path and the target wake-up is amortized over accepted tokens; it is not a fixed 20x guarantee.
+
+    **Conclusion & Interpretation:**
+    - **Result: Multi-model speculative decoding is feasible when acceptance is high and verification is batched.** The design bridges latency and energy by making cheap draft work the common path and using the large model as an amortized verifier, not as a continuously running generator.
 status: published
 provenance: imported
 requires_explanation: true

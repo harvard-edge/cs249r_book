@@ -1,30 +1,33 @@
 schema_version: '1.0'
 id: cloud-4103
 track: cloud
-level: L6+
+level: L4
 zone: mastery
 topic: model-tensor-parallelism
 competency_area: parallelism
 bloom_level: evaluate
 phase: training
-title: 'Debugging TP Numerical Divergence'
-scenario: 'After switching from TP=1 to TP=4 on MI300X, your 30B model''s training loss diverges after 500 steps. Loss curves match perfectly for the first 200 steps, then gradually separate.'
-question: 'After switching from TP=1 to TP=4, what are the most likely causes of loss divergence after 500 steps, and how would you systematically debug it?'
+title: Debugging TP Numerical Divergence
+scenario: After switching from TP=1 to TP=4 on MI300X, your 30B model's training loss diverges after 500 steps. Loss curves match perfectly for the first 200 steps, then gradually separate.
+question: After switching from TP=1 to TP=4, what are the most likely causes of loss divergence after 500 steps, and how would you systematically debug it?
 details:
-  realistic_solution: 'Root causes: (1) AllReduce non-determinism: FP32/BF16 addition is not associative. Different reduction trees accumulate different errors. Fix: deterministic NCCL. (2) Dropout seed mismatch: replicated regions need identical seeds, partitioned need independent. (3) Gradient scaler mismatch.'
+  realistic_solution: 'Most likely TP-specific causes are: reduction-order sensitivity in AllReduce, RNG/seed mismatches across replicated and partitioned regions, incorrect sharding or gather/scatter semantics, gradient accumulation or loss-scaling differences, and optimizer-state partitioning that is not numerically equivalent to TP=1. Debug systematically: first run short TP=1 and TP=4 jobs with dropout disabled and deterministic kernels where available; then compare layer-by-layer activations, logits, gradients, and optimizer updates at fixed checkpoints; verify TP shard shapes and reconstruction against the TP=1 tensors; check RNG streams for dropout and initialization; confirm gradient scaling, clipping, accumulation, and optimizer update order; finally vary precision and collective settings to separate small deterministic drift from a real implementation bug.'
   common_mistake: |
     **The Pitfall:** Blaming NCCL bugs or hardware errors.
     **The Rationale:** It's a natural inclination to assume a system issue when changing parallelism changes the outcome.
     **The Consequence:** The most common cause, non-deterministic floating-point reduction order in AllReduce which accumulates different rounding errors, is ignored.
   napkin_math: |
     **Assumptions & Constraints:**
-    - BF16 mantissa: 7 bits (relative precision ~1/128 ≈ 0.8%).
-    - TP=4 reduction over 500 steps.
+    - Switching TP changes collective order, RNG partitioning, and sharding paths.
+    - Floating-point reductions are non-associative, but the resulting drift is workload-dependent.
 
     **Calculations:**
-    - Random walk accumulated error over N steps = sqrt(N) × base_error.
-    - Error at 500 steps = sqrt(500) × 0.8% = 22.3 × 0.8% = ~17.8%.
+    - There is no valid single-number bound from BF16 mantissa bits alone.
+    - Compare TP=1 and TP=4 at step 0, then after one forward/backward/update.
+    - If tensors match at step 1 but diverge later, test RNG, accumulation, optimizer, precision, and collective determinism in isolation.
+    - If tensors differ at step 1, inspect sharding, gather/scatter, scaling, and per-layer communication immediately.
 
     **Conclusion & Interpretation:**
-    - **Result: 17.8% relative error (FP-Non-Associativity-Bound)**. Accumulated error severely perturbs gradients.
+    - **Result: Qualitative Numerical Debugging.** Small reduction-order drift can amplify during training, but a 500-step divergence should be debugged by isolating TP-specific equivalence errors before blaming hardware or NCCL.
 status: published
+provenance: imported

@@ -8,24 +8,28 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: Quantization Speedup Failure at Large Batch
-scenario: "Your team serves a 7B parameter LLM on a single NVIDIA A100. To increase maximum throughput for offline processing, you apply W8A8 quantization. You test it with a large batch size of 512. Profiling shows less than a 5% increase in token generation throughput compared to the FP16 baseline."
-question: "Why does W8A8 quantization improve token throughput by less than 5% at batch size 512 despite double the theoretical INT8 peak TOPS?"
+scenario: Your team serves a 7B parameter LLM on a single NVIDIA A100. To increase maximum throughput for offline processing, you apply W8A8 quantization. You test it with a large batch size of 512. Profiling shows less than a 5% increase in token generation throughput compared to the FP16 baseline.
+question: Why does W8A8 quantization improve token throughput by less than 5% at batch size 512 despite double the theoretical INT8 peak TOPS?
 details:
-  realistic_solution: "At a batch size of 512, the workload is firmly in the compute-bound regime of the Roofline model. While INT8 has double the theoretical peak TOPS of FP16 on the A100, achieving that peak requires specialized, highly optimized INT8 matrix multiplication kernels. The compute overhead of dynamically quantizing activations, dequantizing the accumulator outputs, and potentially lower hardware utilization of the available INT8 kernels effectively negate the theoretical compute advantage over mature, highly optimized FP16 cuBLAS kernels."
+  realistic_solution: At a batch size of 512, the workload is firmly in the compute-bound regime of the Roofline model. While INT8 has double the theoretical peak TOPS of FP16 on the A100, achieving that peak requires specialized, highly optimized INT8 matrix multiplication kernels. The compute overhead of dynamically quantizing activations, dequantizing the accumulator outputs, and potentially lower hardware utilization of the available INT8 kernels effectively negate the theoretical compute advantage over mature, highly optimized FP16 cuBLAS kernels.
   common_mistake: |
     **The Pitfall:** Assuming that halving precision automatically doubles throughput across all batch sizes.
     **The Rationale:** Ignoring arithmetic intensity and the actual hardware utilization efficiency of INT8 GEMM kernels versus highly optimized FP16 kernels.
     **The Consequence:** Wasting engineering effort on quantization pipelines for batch workloads that see zero speedup due to compute bottlenecks and poor kernel efficiency.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Batch=512, 7B parameters.
-       - A100 Ridge Point: 312 TFLOPS / 2.0 TB/s = 156 FLOPs/Byte.
-    2. **Calculations:**
-       - Arithmetic Intensity (AI): (2 * 512 * 7B) / 7GB = 1024 FLOPs/Byte.
-       - Constraint: Since 1024 >> 156, the workload is strictly compute-bound.
-       - Kernel Utilization: FP16 cuBLAS achieves 75% util (234 TFLOPS). INT8 kernels suffer from quantization overhead, achieving only 35% util (218 TOPS).
-    3. **Conclusion & Interpretation:**
-       **The INT8 kernel fails to outpace the mature FP16 kernel in a compute-bound regime. Result: Compute-Bound.**
+    **Assumptions & Constraints:**
+    - Batch size is 512, so the dominant projection GEMMs reuse each weight across many rows.
+    - A100 FP16 ridge point: 312 TFLOPS / 2.0 TB/s = 156 FLOPs/Byte.
+    - A100 INT8 theoretical peak is about 2x FP16, but realized throughput depends on kernel utilization and quantization overhead.
+
+    **Calculations:**
+    - For a large GEMM, weight-side arithmetic intensity is approximately B FLOPs/Byte for FP16 weights because each weight byte is reused across the batch.
+    - At B = 512, AI is on the order of 512 FLOPs/Byte before accounting for activation traffic, which is still well above the 156 FLOPs/Byte ridge point.
+    - The workload is therefore compute-bound, not HBM-bandwidth-bound.
+    - If mature FP16 kernels achieve about 75% of 312 TFLOPS = 234 TFLOPS, while W8A8 kernels plus quantize/dequantize overhead realize about 35% of a 624 TOPS peak = 218 TOPS effective, INT8 does not materially outpace FP16.
+
+    **Conclusion & Interpretation:**
+    - **Result: Compute-Bound.** At batch 512, weight reuse already moves the workload above the roofline ridge point, so INT8's theoretical TOPS advantage can be erased by lower kernel efficiency and quantization overhead.
 status: published
 provenance: imported
 requires_explanation: false

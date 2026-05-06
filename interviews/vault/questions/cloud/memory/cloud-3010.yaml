@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: cloud-3010
 track: cloud
-level: L5
+level: L1
 zone: specification
 topic: kv-cache-management
 competency_area: memory
@@ -9,22 +9,33 @@ bloom_level: create
 phase: inference
 title: 'KV-Cache: Specification — KV Cache Budget for Multi-Model Serving'
 scenario: 'Write the KV cache specification for a multi-model serving setup on a single H100: Model A (7B, 30 concurrent) and Model B (3B, 70 concurrent). Both use bf16. Define memory partitioning, priority policy, and overflow handling.'
-question: What per-token KV-cache size should the single-H100 multi-model setup budget for its GQA-8 models?
+question: For two GQA-8 models on a single H100 budgeting 128 KiB/token and up to 2048 active tokens per request, what KV-cache partitioning, priority policy, and overflow handling should you use?
 details:
-  realistic_solution: 'KV cache per token = 2 * 32 * 8 * 128 * 2B = 131,072 bytes ≈ 128KB (not 40KB).'
+  realistic_solution: Reserve memory first for model weights, then partition the remaining HBM by each model's concurrency target. Model A needs 30 * 2048 * 128 KiB = 7.5 GiB of KV cache; Model B needs 70 * 2048 * 128 KiB = 17.5 GiB. With about 18.6 GiB for bf16 weights, 25 GiB for protected KV reservations, and a 5 GiB runtime/fragmentation reserve, an 80 GiB H100 leaves 31.4 GiB. Expose 25 GiB as a shared overflow pool and keep 6.4 GiB unallocated as an OOM guard. Give Model A priority for overflow pages, cap Model B overflow first, and reject or queue requests once a model reaches both its reservation and its overflow cap.
   common_mistake: |
     **The Pitfall:** Miscalculating the per-token KV cache size or failing to account for multi-model HBM sharing.
     **The Rationale:** Candidates forget the factor of 2 for K and V, or fail to specify eviction policies when one model's requests surge.
     **The Consequence:** Out-of-memory errors (OOMs) in production when concurrent requests exceed the shared HBM boundary.
   napkin_math: |
     **Assumptions & Constraints:**
-    - GQA-8 model (32 layers, 8 KV heads, head_dim=128, FP16/BF16 2 bytes)
+    - GQA-8 model (32 layers, 8 KV heads, head_dim=128, FP16/BF16 2 bytes).
+    - Model A: 30 concurrent requests, 2048 active tokens/request.
+    - Model B: 70 concurrent requests, 2048 active tokens/request.
+    - Approximate weights: 7B bf16 = 14GB and 3B bf16 = 6GB, or about 18.6GiB total.
+    - Runtime/fragmentation reserve: 5GiB minimum.
 
     **Calculations:**
-    - KV per token = 32 layers * 2 (K,V) * 8 heads * 128 dim * 2 bytes = 131,072 bytes = 128 KiB (~128KB)
+    - KV per token = 32 layers * 2 (K,V) * 8 heads * 128 dim * 2 bytes = 131,072 bytes = 128 KiB.
+    - Model A reservation = 30 * 2048 * 128 KiB = 7.5 GiB.
+    - Model B reservation = 70 * 2048 * 128 KiB = 17.5 GiB.
+    - Protected KV reservations = 7.5GiB + 17.5GiB = 25GiB.
+    - Baseline HBM = 18.6GiB weights + 25GiB protected KV + 5GiB reserve = 48.6GiB.
+    - Remaining before additional safety headroom = 80GiB - 48.6GiB = 31.4GiB.
+    - Concrete policy: expose 25.0GiB as shared overflow pages and reserve 6.4GiB as an OOM guard, so 25.0GiB + 6.4GiB = 31.4GiB.
+    - Cap Model B overflow first and admit Model A overflow ahead of Model B during contention.
 
     **Conclusion & Interpretation:**
-    - **Result: 128KB/token (Memory-Bound)**. The accurate 128KB/token baseline is mandatory to define the single HBM partition across multiple concurrent models.
+    - **Result: Partitioned KV policy**. Guarantee the 7.5GiB and 17.5GiB reservations, expose 25GiB of shared overflow, keep 6.4GiB as guard space, prefer high-priority Model A traffic during contention, and queue or shed Model B overflow before either model can evict protected KV pages from the other.
 status: published
 provenance: imported
 requires_explanation: true
@@ -38,7 +49,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- Model B KV per token arithmetic is incorrect (32*2*8*128*2 = 128KB, not 32KB)
+  - Model B KV per token arithmetic is incorrect (32*2*8*128*2 = 128KB, not 32KB)
 human_reviewed:
   status: not-reviewed
   by: null

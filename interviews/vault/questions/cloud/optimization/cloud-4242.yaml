@@ -11,7 +11,7 @@ title: 'Tracing vs. capture: choosing between torch.jit.trace and torch.compile 
 scenario: Your team has an inference cluster serving a BERT-based NLP model. You need to choose between torch.jit.trace, torch.jit.script, and torch.compile for production deployment. The model has some data-dependent control flow in its tokenizer post-processing but the core transformer is static.
 question: Which PyTorch graph/deployment path would you use for the static BERT transformer and data-dependent post-processing?
 details:
-  realistic_solution: Use torch.compile for the transformer backbone (handles dynamic shapes natively, best performance on modern hardware via TorchInductor). Use torch.jit.script for the post-processing logic with control flow (script captures all branches symbolically). Alternatively, factor the model so the traced portion has no branching. Validate with torch.jit.verify_usages() and test across diverse inputs.
+  realistic_solution: Use torch.compile for the static transformer backbone when the deployment runtime supports TorchInductor and you can warm up the expected input shapes; torch.jit.trace is also acceptable only for a branch-free static subgraph, but it will bake in the path seen during tracing. Use torch.jit.script for the tokenizer post-processing because it has data-dependent control flow and must preserve alternate branches. Keep the components factored so trace/compile never covers branching Python logic, and test diverse inputs that exercise each post-processing branch.
   common_mistake: |
     **The Pitfall:** Using `torch.jit.trace` on a model with data-dependent control flow.
     **The Rationale:** Candidates fail to understand that tracing only records the execution path for a specific input and bakes that path into the graph.
@@ -25,9 +25,11 @@ details:
 
     **Calculations:**
     - Compile saves: (8 - 4.5) ms * 1000 = 3500 ms/second.
+    - At full utilization, that equals 3.5 GPU-seconds of service work saved per wall-clock second.
+    - Actual GPU count reduction depends on batching, utilization headroom, and latency SLOs.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound.** 3.5 fewer GPUs needed at scale per second of compute saved.
+    - **Result: Lower per-request service cost.** The speedup is substantial, but these numbers alone do not prove the workload is compute-bound or guarantee a 3.5-GPU capacity reduction.
 status: published
 provenance: imported
 requires_explanation: true

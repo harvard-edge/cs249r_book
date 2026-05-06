@@ -44,6 +44,31 @@ interviews/vault/
 └── exemplar-gaps.yaml       ← Phase-0 coverage audit output
 ```
 
+### Pipeline artifacts: `_pipeline/` (gitignored)
+
+LLM-driven tooling (chain proposals, gap detection, draft scorecards,
+audit traces) writes intermediate outputs to `_pipeline/` — the
+directory is gitignored as a unit. Only durable corpus artifacts
+(chains.json, id-registry.yaml, questions/) belong in git; pipeline
+runs are reproducible from the live tooling on demand and would
+otherwise pollute history with byte-stable LLM noise.
+
+```
+interviews/vault/_pipeline/                  ← gitignored
+├── chains.proposed.json                      ← build_chains_with_gemini.py
+├── chains.proposed.lenient.json              ← build_chains_with_gemini.py --mode lenient
+├── gaps.proposed.json                        ← gap-detection sidecar (strict)
+├── gaps.proposed.lenient.json                ← gap-detection sidecar (lenient)
+├── draft-validation-scorecard.json           ← validate_drafts.py output
+└── runs/
+    ├── AUDIT_REPORT.md                       ← latest audit_chains_with_gemini.py rollup
+    └── <UTC-timestamp>/                      ← per-run audit traces
+```
+
+When adding a new pipeline tool, route default outputs through the
+`PIPELINE_DIR` constant (`vault/_pipeline/`) and never commit anything
+under it.
+
 ## Quick commands
 
 ```bash

@@ -11,23 +11,27 @@ title: Pruning Tradeoffs for Dataflow Edge Accelerators
 scenario: You are deploying a 4-camera surround-view object detection system on a single Hailo-8 accelerator. The system must process 120 total frames per second (30 FPS per camera). The Hailo-8 provides 26 TOPS INT8 compute within a 2.5W envelope, but has no local DRAM, relying on continuous data streaming from host memory. To fit within the PCIe bandwidth and thermal limits, you must aggressively prune the base model.
 question: For the 4-camera Hailo-8 detector, would you use unstructured pruning or structured channel pruning to fit PCIe and 2.5W limits?
 details:
-  realistic_solution: Exclusively use structured pruning (such as channel or filter pruning). Structured pruning physically reduces the tensor dimensions, shrinking the computational footprint and proportionally reducing the raw bytes that must be streamed from host memory. This aligns perfectly with the dataflow spatial array, lowering host-to-device bandwidth contention.
+  realistic_solution: Use structured channel or filter pruning for the deployment graph. On this Hailo-style dataflow target, unstructured sparsity may reduce checkpoint size, but it is not useful for latency or PCIe bandwidth unless the compiler and hardware can exploit sparse encodings. Structured pruning physically reduces dense tensor dimensions, so the compiled graph streams fewer activation bytes and performs fewer dense MACs. Validate the pruned model with the compiler, then tune the pruning ratio against accuracy, 120 FPS throughput, PCIe bandwidth, and the 2.5W envelope.
   common_mistake: |
     **The Pitfall:** Assuming unstructured pruning yields proportional latency/bandwidth improvements.
     **The Rationale:** Candidates forget that dataflow accelerators lack specialized sparse-index decoding hardware.
-    **The Consequence:** Unstructured sparse tensors are padded, streamed, and computed as dense matrices, providing exactly zero performance or memory bandwidth benefit.
+    **The Consequence:** Unstructured sparse tensors are often padded, streamed, and computed as dense matrices on this class of accelerator, so the expected latency and bandwidth gains do not materialize.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Base compute: 24 TOPS at 120 FPS.
+    - Dense base workload demand: 24 TOPS at 120 FPS.
     - Base bandwidth: 1.8 GB/s.
     - Dataflow accelerators treat unstructured sparsity as dense.
+    - Candidate structured pruning removes 50% of channels in the dominant convolution blocks.
 
     **Calculations:**
-    - 80% unstructured sparsity: Bandwidth = 1.8 GB/s, Compute = 24 TOPS.
-    - 50% structured channel pruning: Compute drops 4x to 6 TOPS.
-    - Memory footprint scales down 2x.
-    - Bandwidth drops to 900 MB/s.
+    - Unsupported unstructured sparsity at deployment: effective bandwidth remains ~1.8 GB/s and effective compute remains ~24 TOPS because dense tensors are still streamed/computed.
+    - Compute headroom before pruning: 26 TOPS - 24 TOPS = 2 TOPS, only ~8% margin.
+    - 50% structured channel pruning reduces activation/channel width by ~2x, so streaming bandwidth becomes 1.8 GB/s * 0.5 = 0.9 GB/s.
+    - For conv layers where both input and output channels are halved, MACs scale by 0.5 * 0.5 = 0.25.
+    - If the dominant dense conv workload follows that scaling, demand falls from 24 TOPS to about 24 * 0.25 = 6 TOPS.
+    - Compute utilization after pruning estimate: 6 / 26 = ~23%.
 
     **Conclusion & Interpretation:**
-    - **Result: 900 MB/s (Memory-Bandwidth Bound)**. Structured pruning halves the streaming bandwidth to 900 MB/s, fitting constraints.
+    - **Result: Structured Pruning Fits the Edge Budget.** Unstructured sparsity is not a reliable deployment win here; structured channel pruning directly reduces dense tensor widths, activation traffic, and MAC demand, making it the deployable option for the 120 FPS, 2.5W Hailo target.
 status: published
+provenance: imported

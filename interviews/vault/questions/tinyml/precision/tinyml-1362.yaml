@@ -1,17 +1,17 @@
 schema_version: '1.0'
 id: tinyml-1362
 track: tinyml
-level: L5
+level: L4
 zone: specification
 topic: quantization-fundamentals
 competency_area: precision
 bloom_level: analyze
 phase: inference
-title: 'Optimizing a Quantized TinyML Model for Resource-Constrained ARM Cortex-M4'
-scenario: 'You are tasked with deploying a small convolutional neural network (CNN) for a voice activity detection (VAD) task onto an ARM Cortex-M4 microcontroller (specifically, an STM32F4 running at 168 MHz with 256 KB SRAM and no FPU). The original model was trained using floating-point (FP32) arithmetic. Due to the strict memory, computational constraints, and the absence of a dedicated floating-point unit, you must implement a robust quantization strategy.'
-question: 'How should you quantize a Cortex-M4 voice activity CNN to preserve accuracy while avoiding FPU emulation?'
+title: Optimizing a Quantized TinyML Model for Resource-Constrained ARM Cortex-M4
+scenario: You are tasked with deploying a small convolutional neural network (CNN) for a voice activity detection (VAD) task onto an ARM Cortex-M4 microcontroller (specifically, an STM32F4 running at 168 MHz with 256 KB SRAM and no FPU). One representative convolution layer has 64 input channels, 64 output channels, and a 3x3 kernel. The original model was trained using floating-point (FP32) arithmetic. Due to the strict memory, computational constraints, and the absence of a dedicated floating-point unit, you must implement a robust quantization strategy.
+question: How should you quantize a Cortex-M4 voice activity CNN to preserve accuracy while avoiding FPU emulation?
 details:
-  realistic_solution: 'A pragmatic and realistic solution involves utilizing INT8 asymmetric per-channel quantization for weights and per-tensor asymmetric quantization for activations. Initially, Post-Training Quantization (PTQ) with a small, representative calibration dataset should be performed to establish baseline performance and identify sensitive layers. If accuracy is insufficient, Quantization-Aware Training (QAT) would be employed. Zero-point arithmetic is essential for accurately mapping floating-point ranges to integer types and must be implemented correctly. For the ARM Cortex-M4 without FPU, leveraging a library like CMSIS-NN is critical, as it provides highly optimized integer-only kernels for common neural network operations, taking advantage of ARM''s DSP extensions (e.g., SIMD instructions for efficient MAC operations). Careful design of the quantization process must account for the accumulation bit-width (e.g., 32-bit accumulators for convolutions) to prevent overflow during multiply-accumulate operations, followed by appropriate requantization and shifting to the next layer''s input range.'
+  realistic_solution: A pragmatic solution is to target an INT8 integer-only deployment supported by the MCU inference stack, such as CMSIS-NN kernels on Cortex-M4. Start with post-training quantization using a representative VAD calibration set, measure accuracy and latency, and inspect sensitive layers. Use the quantization scheme supported by the deployment stack, commonly symmetric INT8 activations with per-tensor scales and symmetric per-channel or per-tensor INT8 weights; asymmetric zero-points may be useful when the runtime supports them efficiently, but they should not force floating-point correction paths. If PTQ loses too much accuracy, use quantization-aware training with the same rounding, scaling, and accumulator behavior expected on-device. Keep accumulations in 32-bit integers and verify per-layer accumulator bounds.
   common_mistake: |
     **The Pitfall:** Naively applying per-tensor symmetric quantization without a representative calibration dataset.
     **The Rationale:** Candidates often underestimate the "no FPU" constraint or overlook the crucial role of zero-point arithmetic in asymmetric quantization.
@@ -19,16 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Hardware: ARM Cortex-M4 with 256 KB SRAM, no FPU.
-    - Model layer: 64x64x3x3 CNN layer.
-    - INT8 MAC multiplies two 8-bit numbers to a 16-bit result.
+    - Model layer: 64 input channels, 64 output channels, 3x3 kernel.
+    - Signed INT8 MAC uses values in roughly [-127, 127] with 32-bit accumulation.
 
     **Calculations:**
-    - FP32 Memory: 64 * 64 * 3 * 3 * 4 bytes = 147,456 bytes (~144 KB).
-    - INT8 Memory: 64 * 64 * 3 * 3 * 1 byte = 36,864 bytes (~36 KB).
-    - Overflow Check: Maximum sum across 64 input channels is 64 * 255 * 255 = 4,161,600.
+    - Weight count: 64 output channels * 64 input channels * 3 * 3 = 36,864 weights.
+    - FP32 weight memory: 36,864 * 4 bytes = 147,456 bytes (~144 KB).
+    - INT8 weight memory: 36,864 * 1 byte = 36,864 bytes (~36 KB), plus small scale/zero-point metadata.
+    - Per-output dot product for one output channel at one spatial location: 64 input channels * 3 * 3 = 576 MACs.
+    - Worst-case signed INT8 accumulator magnitude: 576 * 127 * 127 = 9,290,304, well below the int32 limit of 2,147,483,647.
 
     **Conclusion & Interpretation:**
-    - **Result: 36 KB and ~4.1M max sum (Memory-Capacity-Bound)**. Memory is reduced by 4x to fit SRAM, and 32-bit accumulators safely prevent overflow.
+    - **Result: 36 KB weights and ~9.3M worst-case per-output dot product.** INT8 cuts this layer's weight storage by 4x, and 32-bit accumulators are sufficient for each output-channel/spatial-location dot product under signed INT8 assumptions.
 status: published
 provenance: imported
 requires_explanation: true

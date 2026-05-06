@@ -8,24 +8,39 @@ competency_area: latency
 bloom_level: create
 phase: both
 title: The Interactive Coding Assistant SLO Catastrophe
-scenario: 'You are the Staff ML Systems Engineer designing the serving infrastructure for a new AI coding
-  assistant. The service uses a 70B parameter model and has strict, product-driven SLOs: P99 Time-To-First-Token
-  (TTFT) must be under 500ms, and sustained Time-Per-Output-Token (TPOT) must be under 50ms. Your initial
-  deployment uses 8 server nodes, each with two H100 GPUs (16 GPUs total) using tensor parallelism (TP=2).
-  The system uses static batching. Under light load, performance is acceptable. However, as you approach
-  the target peak load of 200 concurrent users, the P99 TTFT skyrockets to over 10 seconds, and the service
-  is unusable. You correctly identify Head-of-Line blocking as the culprit and propose migrating to a
-  continuous batching engine. The Head of Infrastructure is skeptical about the migration cost and asks
-  you to prove it''s necessary and sufficient.'
-question: "How would you prove static batching cannot meet the 500 ms TTFT and size capacity under continuous batching?"
+scenario: 'You are the Staff ML Systems Engineer designing the serving infrastructure for a new AI coding assistant. The service uses a 70B parameter model and has strict, product-driven SLOs: P99 Time-To-First-Token (TTFT) must be under 500ms, and sustained Time-Per-Output-Token (TPOT) must be under 50ms. Your initial deployment uses 8 server nodes, each with two H100 GPUs (16 GPUs total) using tensor parallelism (TP=2). The system uses static batching. Under light load, performance is acceptable. However, as you approach the target peak load of 200 concurrent users, the P99 TTFT skyrockets to over 10 seconds, and the service is unusable. You correctly identify Head-of-Line blocking as the culprit and propose migrating to a continuous batching engine. The Head of Infrastructure is skeptical about the migration cost and asks you to prove it''s necessary and sufficient.'
+question: How would you prove static batching cannot meet the 500 ms TTFT and size capacity under continuous batching?
 details:
-  realistic_solution: 'The correct answer has two parts: proving static batching is inadequate and then
-    calculating the true capacity under a continuous batching regime.'
-  common_mistake: Engineers often focus only on the aggregate throughput of the system (e.g., total tokens/sec
-    across all users), see high GPU utilization, and assume the system is efficient. They neglect the
-    queueing delay experienced by new requests (the ''waiting in line'' cost), which dominates the user-perceived
-    latency (P99 TTFT) in a static batching system. They mistake high system throughput for low user latency.
-  napkin_math: "### Part 1: Static Batching - Why TTFT Fails\nWith static batching, new requests must wait for the current batch to finish. For a 70B model at TP=2 on H100, TPOT is ~20ms. If the average generation is 500 tokens, a batch takes 10 seconds to complete. A new request could wait up to 10 seconds, drastically violating the 500ms TTFT SLO.\n\n### Part 2: Continuous Batching Capacity\nContinuous batching uses iteration-level scheduling, allowing new requests to join the batch at the next decode step. The system's capacity is constrained by KV cache memory. A 70B model in FP16 is 140GB. Each H100 (80GB) holds 70GB of weights (140GB total / 2). This leaves ~10GB per GPU for KV cache and activations, or 20GB total across the TP=2 replica. At ~2.5MB total per token, 20GB supports ~8,000 tokens in flight per replica. With 8 replicas, the 200 concurrent users are distributed as 25 users per replica. With 25 users generating an average of 300 tokens, the total KV cache demand per replica is 7,500 tokens. This perfectly fits within the 8,000-token VRAM budget per replica, proving continuous batching is both necessary for latency and sufficient for capacity."
+  realistic_solution: |
+    Prove the migration with two separate arguments. First, static batching violates TTFT because new requests wait for the current fixed batch to finish all remaining decode steps before admission; queueing alone can exceed 500 ms even if each token step is fast. Continuous batching addresses this by admitting new prefills between decode iterations and by scheduling decode one token at a time. Second, size capacity per TP=2 replica: verify that the 70B weights fit with runtime reserve, derive the KV-cache budget for the 200-user peak across 8 replicas, and check that the per-step decode time stays below the 50ms TPOT target. Under the stated assumptions, continuous batching is necessary for TTFT and plausibly sized for the peak, but final sufficiency still requires load-test evidence for burstiness and P99 queueing.
+  common_mistake: |
+    **The Pitfall:** Focusing only on the aggregate throughput of the system and ignoring queueing delays.
+    **The Rationale:** Engineers see high GPU utilization and assume the system is efficient, mistaking high system throughput for low user latency.
+    **The Consequence:** The queueing delay experienced by new requests dominates the user-perceived latency, drastically violating the P99 TTFT SLO.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 8 server nodes, each a TP=2 replica on two 80 GB H100s: 8 replicas total.
+    - 70B FP16 weights = 140 GB total. With TP=2, each GPU holds an approximate 70 GB weight shard for inference.
+    - Reserve ~6 GB/GPU for CUDA graphs, allocator fragmentation, activations, NCCL buffers, and runtime workspace.
+    - Planning free memory after weights and runtime reserve = 80 GB - 70 GB - 6 GB = 4 GB/GPU.
+    - Planning KV cache budget per TP=2 replica = 4 GB/GPU * 2 GPUs = 8 GB.
+    - KV cache cost is parameterized at ~0.5 MB/token per replica. This is a planning estimate for the deployed 70B architecture after TP sharding, derived from 2 KV tensors * layers * KV hidden width * 2 bytes, plus implementation overhead.
+    - Peak load = 200 concurrent users, evenly routed to 8 replicas = 25 users/replica.
+    - Active context budget per user at peak = 300 prompt tokens + 200 generated tokens = 500 tokens.
+    - Static batch cycle under load contains 25 active users per replica and each user may generate up to 200 output tokens.
+    - A continuous-batching decode step for the active set costs ~20 ms, which is below the 50ms TPOT SLO.
+
+    **Calculations:**
+    - Static batching TTFT proof: define the admission rule as "new requests join only after the current fixed batch completes all remaining decode steps." A request arriving just after a 200-token decode batch starts waits 200 * 20 ms = ~4 s before prefill even starts, far above the 500 ms TTFT SLO.
+    - Continuous batching memory capacity: 8 GB KV / 0.5 MB per token = ~16,000 tokens/replica.
+    - Peak tokens in flight: 25 users/replica * 500 tokens/user = 12,500 tokens/replica.
+    - Memory headroom: 16,000 - 12,500 = 3,500 tokens/replica, about 28%.
+    - TPOT check: one decode step advances every active sequence by one token in ~20ms, so each user sees ~20ms/token, better than the 50ms TPOT SLO.
+    - Per-replica decode capacity at 25 active users: each 20ms step emits 25 user-visible tokens, or 25 / 0.020 = 1,250 aggregate output tokens/s while preserving ~20ms/user TPOT.
+    - Cluster capacity check: 8 replicas * 25 users/replica = 200 concurrent users.
+
+    **Conclusion & Interpretation:**
+    - **Result: Static batching fails TTFT; continuous batching is the right capacity plan under these assumptions.** The 8-replica cluster has enough planning KV memory and decode throughput for 200 users with modest headroom, but P99 sufficiency must be confirmed with bursty-arrival load tests and scheduler/KV-cache limits.
 status: published
 provenance: imported
 requires_explanation: true

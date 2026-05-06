@@ -9,25 +9,30 @@ bloom_level: analyze
 phase: training
 title: Mitigating Cold Start Cascading Failures
 scenario: A 30B parameter LLM service experiences a sudden traffic spike from 500 to 3,000 QPS. The Kubernetes HPA instantly scales pods from 50 to 300. However, each pod must download a 60GB weight file from S3 on startup. During this time, existing pods are overwhelmed, requests time out, and new pods are failing their readiness probes and crash-looping.
-question: "How would you redesign autoscaling so 60GB model weights don't make new pods crash-loop during the 3,000 QPS spike?"
+question: How would you redesign autoscaling so 60GB model weights don't make new pods crash-loop during the 3,000 QPS spike?
 details:
-  realistic_solution: 'Design a multi-tier weight caching and pre-fetching architecture. 1) Implement a Kubernetes DaemonSet to cache the 60GB weights on the underlying Node''s local NVMe storage using a hostPath volume. 2) When pods scale up, they mount the hostPath, reducing weight load time to local disk read speeds. 3) Decouple the health checks: Use a startup probe to allow weight loading without failing liveness, and a readiness probe that only passes once the model is in VRAM. 4) Use request queueing (circuit breaking) at the gateway to fast-fail excess traffic rather than overwhelming the baseline pods.'
+  realistic_solution: 'Design a multi-tier weight caching and pre-fetching architecture. 1) Implement a Kubernetes DaemonSet or node bootstrap job that seeds and verifies the 60GB weights on each node''s local NVMe storage before model pods are scheduled there. 2) When pods scale up, they mount the verified hostPath cache, reducing weight load time to local disk read speeds and avoiding a thundering herd against S3. 3) Decouple the health checks: Use a startup probe to allow weight loading without failing liveness, and a readiness probe that only passes once the model is in VRAM. 4) Use request queueing and circuit breaking at the gateway to shed or delay excess traffic rather than overwhelming the baseline pods.'
   common_mistake: |
     **The Pitfall:** Increasing the readiness probe initial delay to 10 minutes to stop the crashloop.
     **The Rationale:** Trying to give the pods enough time to download the 60GB weights over a saturated network.
-    **The Consequence:** The crashloop stops, but the new pods are useless for 10 minutes, leaving the existing 50 pods to take down the service under the traffic spike.
+    **The Consequence:** The symptom is only masked. The new pods still do not serve traffic for minutes, and liveness/startup failures or resource pressure can still restart them while the existing 50 pods take down the service under the spike.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Weight file: 60GB.
-       - S3 Node Bandwidth Limit: 5 Gbps = 625 MB/s.
-       - Network Contention: 250 pods scaling simultaneously.
-       - Local NVMe Read Speed: 3,000 MB/s.
-    2. **Calculations:**
-       - Ideal Network Download Time: 60 GB / 625 MB/s = 96 seconds.
-       - Contended Download Time: 250 pods sharing 625 MB/s -> ~2.5 MB/s per pod -> 24,000 seconds (OOM/CrashLoop).
-       - Local NVMe Load Time: 60 GB / 3000 MB/s = 20 seconds.
-    3. **Conclusion & Interpretation:**
-       - **Result: I/O-Bound Cascading Failure.** Caching weights on local NVMe reduces startup time drastically and bypasses the saturated network.
+    **Assumptions & Constraints:**
+    - Weight file: 60GB per pod.
+    - Scale-out wave: 300 target pods - 50 existing pods = 250 cold-starting pods.
+    - Plausible shared egress into the cluster during the wave: 50 Gbps = 6.25 GB/s.
+    - Local NVMe read speed after node-level prefetch: 3,000 MB/s = 3 GB/s.
+
+    **Calculations:**
+    - Total cold-start download demand: 250 pods * 60GB = 15,000GB.
+    - If all pods pull from object storage at once, shared-network lower bound: 15,000GB / 6.25 GB/s = 2,400 seconds, or about 40 minutes.
+    - Average per-pod bandwidth in that wave: 6.25 GB/s / 250 = 0.025 GB/s = 25 MB/s.
+    - Per-pod download time at that average rate: 60GB / 25 MB/s = 2,400 seconds.
+    - With a verified local NVMe cache, per-pod weight load time: 60GB / 3 GB/s = 20 seconds.
+    - While cold pods are loading, 50 existing pods must absorb 3,000 QPS instead of the previous 500 QPS, a 6x per-pod load increase.
+
+    **Conclusion & Interpretation:**
+    - **Result: I/O-Bound Cascading Failure.** Simultaneous object-store pulls keep new pods unavailable for minutes, overload existing pods, and make probes fail. Node-local prefetch plus startup/readiness probes reduces the hot-path weight load from roughly 40 minutes of contended download time to about 20 seconds of local I/O.
 status: published
 provenance: imported
 requires_explanation: false

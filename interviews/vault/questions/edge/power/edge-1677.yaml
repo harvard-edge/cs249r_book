@@ -7,28 +7,33 @@ topic: thermal-management
 competency_area: power
 bloom_level: create
 phase: both
-title: 'Architecting Thermal Resilient Video Analytics'
-scenario: 'You are designing an on-premise video analytics appliance for a non-climate-controlled factory floor using a chassis with two Qualcomm Cloud AI 100 accelerators. The ambient temperature frequently reaches 45°C, causing the cards to hit their 75W TDP limits faster and thermally throttle their sustained performance from 400 TOPS INT8 down to 250 TOPS.'
-question: 'How would you schedule 30 HD camera streams across two Cloud AI 100 cards to meet latency SLAs under 45°C thermal throttling?'
+title: Architecting Thermal Resilient Video Analytics
+scenario: You are designing an on-premise video analytics appliance for a non-climate-controlled factory floor using a chassis with two Qualcomm Cloud AI 100 accelerators. The ambient temperature frequently reaches 45°C, causing the cards to hit their 75W TDP limits faster and thermally throttle their sustained performance from 400 TOPS INT8 down to 250 TOPS.
+question: How would you schedule 30 HD camera streams across two Cloud AI 100 cards to meet latency SLAs under 45°C thermal throttling?
 details:
-  realistic_solution: 'A robust L6+ design involves a dynamic, thermal-aware orchestrator that monitors die temperatures and gracefully degrades accuracy or framerate. The system should implement a model cascade: routing frames to a smaller, cooler fallback INT8 model when thermal headroom drops, ensuring latency SLAs are strictly met. Furthermore, by optimizing memory access patterns and maximizing batching within the 32 GB LPDDR4x, the system reduces the power spent on memory I/O, shifting the 75W power budget back to the compute cores to sustain higher overall TOPS.'
+  realistic_solution: Use a thermal-aware scheduler with explicit per-card admission control. At 45°C, budget each Cloud AI 100 at 250 TOPS sustained and assign 15 streams per card only if the model mix fits that cap. A safe full-rate card policy is 7 streams on the 700 GOP primary model and 8 on the 400 GOP fallback model; allow an eighth primary stream only if measured thermal slack permits. Run fixed microbatches sized to the SLA, keep model residency pinned on both cards, monitor die temperature and queue age, and rebalance by moving whole camera streams rather than individual frames. If queue age grows, demote low-priority streams to fallback or reduced analytics frequency before admitting more work.
   common_mistake: |
     **The Pitfall:** Designing static load balancers or ignoring memory bandwidth heat generation.
     **The Rationale:** Candidates assume performance remains constant or fail to realize that high memory bandwidth utilization significantly contributes to the overall thermal envelope.
     **The Consequence:** The system hits thermal limits under load, causing massive latency spikes as queues back up, violating the SLA.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Total theoretical compute = 2 * 400 TOPS = 800 TOPS at 150W.
-    - Throttled compute at 45°C = 2 * 250 TOPS = 500 TOPS.
+    - Use the scenario's sustained figures: 400 TOPS/card nominal, 250 TOPS/card throttled at 45°C.
+    - Throttled compute at 45°C = 2 * 250 TOPS = 500 TOPS total.
     - Processing 30 streams at 30 FPS = 900 frames/sec.
+    - Primary model cost: 700 GOP/frame. Fallback model cost: 400 GOP/frame.
 
     **Calculations:**
-    - Allowed compute per frame = 500 TOPS / 900 = ~555 GOPs/frame.
-    - Primary model required: 700 GOPs -> Requires 630 TOPS (exceeds 500 TOPS budget).
-    - Fallback model: 400 GOPs.
+    - Sustained budget per frame = 500 TOP/s / 900 FPS = 0.556 TOP/frame = 556 GOP/frame.
+    - Primary model demand = 900 FPS * 700 GOP/frame = 630 TOP/s, which exceeds the 500 TOP/s throttled budget.
+    - Per-card primary demand at 15 streams/card = 15 * 30 * 700 GOP = 315 TOP/s, above the 250 TOP/s/card sustained budget.
+    - Fallback demand = 900 FPS * 400 GOP/frame = 360 TOP/s total, or 180 TOP/s/card, leaving 70 TOP/s/card headroom.
+    - If x of 30 streams stay on primary and the rest use fallback, demand = 30 * (700x + 400(30 - x)) GOP/s = 360 TOP/s + 9x TOP/s.
+    - Throttled budget constraint: 360 + 9x <= 500, so x <= 15.5 streams total.
+    - Balanced per-card policy: 8 primary + 7 fallback streams/card costs 8 * 30 * 700 + 7 * 30 * 400 = 252 TOP/s/card, slightly above the 250 TOP/s cap; use 7 primary + 8 fallback for margin at 7 * 30 * 700 + 8 * 30 * 400 = 243 TOP/s/card, or allow one card to run 8 primary only if measured slack permits.
 
     **Conclusion & Interpretation:**
-    - **Result: 400 GOPs Fallback (Thermal-Bound)**. Switching to a smaller 400 GOPs model or dropping to 20 FPS stays under the thermal limit while preserving the SLA.
+    - **Result: Thermal-Aware Mixed Model Scheduling**. Under the 500 TOP/s sustained limit, all-primary inference is infeasible; a safe full-rate schedule keeps about 14 primary streams and 16 fallback streams across the two cards, with demotion thresholds tied to queue age and measured thermal margin.
 status: published
 provenance: imported
 requires_explanation: true

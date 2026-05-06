@@ -7,30 +7,28 @@ topic: model-serving-infrastructure
 competency_area: deployment
 bloom_level: analyze
 phase: inference
-title: 'Edge TPU Multi-Model Cache Thrashing'
-scenario: 'You are deploying a cascaded vision pipeline (Object Detection followed by Image Classification) on a Google Coral Edge TPU (4 TOPS INT8, 2W power budget, USB 3.0 interface). The inference server loads Model A (Detection, 5.5MB INT8) and Model B (Classification, 4.5MB INT8), executing them sequentially for each incoming video frame. Despite the 4 TOPS capability, the system is suffering from severe latency bottlenecks, and profiling reveals the TPU is idle for over 80% of the inference cycle.'
-question: 'How would you diagnose the Coral cascade''s 80% idle time and fix SRAM weight thrashing between the 5.5MB and 4.5MB models?'
+title: Edge TPU Multi-Model Cache Thrashing
+scenario: You are deploying a cascaded vision pipeline (Object Detection followed by Image Classification) on a Google Coral Edge TPU (4 TOPS INT8, 2W power budget, USB 3.0 interface). The inference server loads Model A (Detection, 5.5MB INT8) and Model B (Classification, 4.5MB INT8), executing them sequentially for each incoming video frame. Despite the 4 TOPS capability, the system is suffering from severe latency bottlenecks, and profiling reveals the TPU is idle for over 80% of the inference cycle.
+question: How would you diagnose the Coral cascade's 80% idle time and fix SRAM weight thrashing between the 5.5MB and 4.5MB models?
 details:
-  realistic_solution: 'The Google Coral Edge TPU has exactly 8MB of on-chip SRAM for parameter caching. Because Model A (5.5MB) and Model B (4.5MB) combined require 10MB, they exceed the SRAM limit. The serving infrastructure is forced to evict and reload weights across the USB 3.0 bus for every single step of the cascade, causing parameter thrashing. The solution is either implementing temporal batching in the inference server (run Model A for 10 frames, then Model B) to amortize load times, or aggressively pruning Model B to <2.5MB so both models fit entirely in the 8MB SRAM.'
+  realistic_solution: Diagnose the 80% idle time by separating TPU compute from model invocation, model-switch, and host-to-device transfer time in the profiler. The most likely mechanism is repeated reload or cache thrashing between the 5.5 MB detector and 4.5 MB classifier, causing the TPU to wait for model state instead of executing. Confirm model residency with runtime traces, then keep both compiled models resident if supported, reduce one or both footprints, merge compatible stages into one compiled graph, or gate the classifier so it runs only on frames with detections.
   common_mistake: |
     **The Pitfall:** Assuming the bottleneck is CPU pre-processing, image transfer latency over USB, or unsupported operators falling back to the CPU.
     **The Rationale:** Engineers often suggest multithreading the CPU or resizing inputs without analyzing the physical memory constraints and model loading behavior of the specific accelerator.
     **The Consequence:** Wasting time optimizing host code while the hardware accelerator remains severely starved for weights.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Coral Edge TPU SRAM Capacity: 8MB.
     - Combined Models: 5.5MB + 4.5MB = 10MB.
     - USB 3.0 bandwidth: ~400 MB/s.
-    - TPU compute capacity: 4 TOPS (~1.5 ms per model).
+    - Profiling reports TPU idle for over 80% of the inference cycle.
 
     **Calculations:**
-    - Transfer Penalty per Frame (10MB over USB): 10MB / 400 MB/s = 25 ms loading time.
-    - Unoptimized Latency: 25 ms (loading) + 3 ms (compute) = 28 ms (~35 FPS). TPU is idle for ~89% of the time.
-    - Optimized Solution: Prune Model B to 2MB. Combined size = 7.5MB (<8MB).
-    - Optimized Latency: 0 ms loading + 3 ms compute = 3 ms (~333 FPS).
+    - If profiler traces show the two models being reloaded or transferred per frame, the moved model state is 10MB and transfer time alone is 10MB / 400 MB/s = 25 ms.
+    - 80% idle means only 20% of each inference cycle is useful TPU execution; for a 25 ms transfer-dominated wait, compute is a minority of total latency.
+    - Keeping both models resident, merging stages, or reducing model size helps if it removes that measured reload/cache-pressure path while preserving the per-frame A-then-B cascade.
 
     **Conclusion & Interpretation:**
-    - **Result: 3 ms optimized latency (Memory-Bandwidth Bound)**. Shrinking the models to fit within the 8MB SRAM eliminates the USB parameter caching thrashing, yielding a 9x improvement.
+    - **Result: Likely Model Reload/Cache Thrashing (Memory/Serving Bound)**. The direct fix is to verify residency, then co-reside, merge, or shrink the cascade models so frame latency is not dominated by model switching.
 status: published
 provenance: imported
 requires_explanation: true

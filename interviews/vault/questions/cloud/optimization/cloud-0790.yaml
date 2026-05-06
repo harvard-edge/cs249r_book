@@ -8,10 +8,10 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: The Compilation Wall
-scenario: "You migrate a PyTorch model to a custom AI accelerator. The hardware is cheaper per TFLOPS than a GPU, but the first epoch takes 48 hours to start, and training is 3x slower. Your sequence lengths vary slightly per batch."
-question: "What is killing your performance and causing the 48-hour start time?"
+scenario: You migrate a PyTorch model to a custom AI accelerator. The hardware is cheaper per TFLOPS than a GPU, but the first epoch takes 48 hours to start, and training is 3x slower. Your sequence lengths vary slightly per batch.
+question: What is killing your performance and causing the 48-hour start time?
 details:
-  realistic_solution: "You hit the Graph Compilation Wall. Unlike GPUs which execute eagerly, accelerators like Trainium/TPU rely on compilers (XLA/Neuron) to map code into static graphs for systolic arrays. The '48 hours' was the initial compilation. Because your sequence lengths vary, the compiler triggers a Re-compile (JIT Thrashing) on every batch, destroying throughput. The fix is to use Static Padding: pad all sequences to a fixed power-of-two length to reuse the same compiled graph."
+  realistic_solution: 'You hit the Graph Compilation Wall. Unlike GPUs which execute eagerly, accelerators like Trainium/TPU rely on compilers (XLA/Neuron) to map code into static graphs for systolic arrays. The 48-hour startup is the compiler building thousands of shape-specialized graphs before the first epoch can run. The 3x steady-state slowdown comes from recurring recompiles or cache misses as slightly different sequence lengths appear. The fix is shape discipline: bucket lengths into a small number of static shapes, pad within each bucket, precompile those graphs, and reject accidental dynamic dimensions in the input pipeline.'
   common_mistake: |
     **The Pitfall:** Assuming custom silicon just has slower interconnects or poor drivers compared to NVIDIA.
     **The Rationale:** Engineers are used to eager execution on GPUs and don't realize XLA/Neuron compiles static graphs.
@@ -20,12 +20,17 @@ details:
     1. **Assumptions & Constraints:**
        - XLA Compile Time: ~30s.
        - Execution Time: ~0.5s.
-       - Dynamic shapes cause a 5% cache miss rate for compilation.
+       - Dynamic sequence lengths create enough distinct graph shapes to account for the observed 48-hour compile wall.
+       - During training, remaining shape misses cause a cache miss rate high enough to match the observed 3x slowdown.
     2. **Calculations:**
-       - Recompile Overhead: 30s / 0.5s = 60x overhead per step.
-       - Average Step (5% recompile): (0.95 * 0.5s) + (0.05 * 30.5s) = 2.0s.
+       - Implied startup graph count: 48 hours * 3,600s/hour / 30s per compile = 5,760 shape-specialized graphs.
+       - Cache-hit step: 0.5s.
+       - Cache-miss step: 30s compile + 0.5s execution = 30.5s.
+       - To produce the stated 3x slowdown, average step time is 3 * 0.5s = 1.5s.
+       - Implied cache miss rate r: (1-r)*0.5s + r*30.5s = 1.5s, so r = 1.0/30.0 ≈ 3.3%.
+       - Throughput retained: 0.5s / 1.5s = 33%; throughput loss is ~67%.
     3. **Conclusion & Interpretation:**
-       **Even a 5% dynamic shape variance cuts throughput by 75%. Result: JIT-Overhead-Bound.**
+       **Result: Shape-Compilation-Bound.** Thousands of initial shape compilations explain the 48-hour start, and only a ~3.3% dynamic-shape cache miss rate can produce the stated 3x steady-state slowdown; length bucketing and static padding prevent both symptoms.
 status: published
 provenance: imported
 requires_explanation: false

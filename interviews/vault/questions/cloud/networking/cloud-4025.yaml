@@ -7,11 +7,11 @@ topic: congestion-control
 competency_area: networking
 bloom_level: apply
 phase: both
-title: NCCL NET_PLUGIN Congestion Tuning
+title: NCCL Network Plugin Congestion Tuning
 scenario: Your 256-GPU cluster's AllReduce throughput dropped 30% after a NCCL version upgrade. Profiling shows excessive retransmissions on the RoCE fabric. The new NCCL version changed default congestion parameters from NCCL_IB_TIMEOUT=18 to 14, and NCCL_IB_RETRY_CNT=7 to 3.
 question: How did lowering NCCL_IB_TIMEOUT to 14 and NCCL_IB_RETRY_CNT to 3 cause retransmissions, and what values should you use?
 details:
-  realistic_solution: 'NCCL_IB_TIMEOUT specifies the local ACK timeout as 4.096µs × 2^timeout_value. Value 18 = 4.096µs × 2^18 = 1.07 seconds. Value 14 = 4.096µs × 2^14 = 67ms. In a congested 256-GPU cluster, AllReduce tail latencies can reach 100-200ms due to PFC pauses and DCQCN rate reduction. With a 67ms timeout, these legitimate delays trigger false retransmission timeouts, flooding the fabric with duplicate packets and worsening congestion — a positive feedback loop. Optimal settings: NCCL_IB_TIMEOUT=22 (17.2 seconds — generous, since real failures are detected by the subnet manager), NCCL_IB_RETRY_CNT=7 (maximum retries before error). Also set NCCL_IB_QPS_PER_CONNECTION=4 to spread traffic across multiple QPs, reducing per-QP congestion. And NCCL_ALGO=Ring for this cluster size since tree AllReduce at 256 GPUs creates more incast than ring.'
+  realistic_solution: NCCL_IB_TIMEOUT specifies the local ACK timeout as 4.096us * 2^timeout_value. Value 18 is about 1.07s, while value 14 is about 67ms. In a congested 256-GPU cluster, AllReduce tail latencies can reach 100-200ms because of PFC pauses and DCQCN rate reduction, so a 67ms timeout can misclassify legitimate delay as loss and trigger retransmissions. Lowering NCCL_IB_RETRY_CNT from 7 to 3 compounds the problem by surfacing transient congestion as failure after fewer retries. Use a timeout above observed p99.9 fabric pause time and keep enough retries for transient congestion; NCCL_IB_TIMEOUT=18 or higher and NCCL_IB_RETRY_CNT=7 are reasonable starting points, while NCCL_IB_TIMEOUT=22 is a conservative cluster-dependent choice rather than a universal optimum.
   common_mistake: |
     **The Pitfall:** Misunderstanding the exponential nature of IB timeout values and setting them too low to "fail fast."
     **The Rationale:** Engineers assume timeout values are linear or in milliseconds, not realizing that dropping the value by 4 (from 18 to 14) actually reduces the timeout by 16x.
@@ -23,12 +23,14 @@ details:
 
     **Calculations:**
     - Timeout Formula: 4.096 µs * 2^timeout_value.
-    - Old Timeout (18): 4.096 µs * 2^18 = 1,073 ms.
-    - New Timeout (14): 4.096 µs * 2^14 = 67 ms.
-    - Wasted Traffic: Legitimate p99 delays hit ~150ms, triggering false timeouts and retransmitting ~800 MB/min.
+    - Old Timeout (18): 4.096us * 2^18 = 1.074s = 1,074ms.
+    - New Timeout (14): 4.096us * 2^14 = 67.1ms.
+    - Timeout reduction: 1,074ms / 67.1ms = 16x shorter.
+    - If legitimate p99 delays are 100-200ms, timeout 14 fires before the delayed ACK can arrive.
+    - Retry count reduction from 7 to 3 cuts tolerance for repeated transient stalls by more than half.
 
     **Conclusion & Interpretation:**
-    - **Result: 67ms timeout causes collapse (False-Positive-Bound)**. Misinterpreting normal IB pauses as drops.
+    - **Result: Timeout 14 plus retry count 3 makes transient 100-200ms congestion look like packet loss or failure (False-Positive-Bound)**. Tune timeout and retries above measured tail pause times instead of treating one value as universally optimal.
 status: published
 provenance: imported
 requires_explanation: false

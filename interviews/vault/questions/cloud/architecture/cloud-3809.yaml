@@ -11,7 +11,8 @@ title: 'Expert Choice Routing: Inverting the Selection'
 scenario: In standard MoE, tokens choose experts (top-k). In Expert Choice routing, experts independently select their top-k tokens from the batch.
 question: How do Token Choice and Expert Choice routing compare on load balancing, token drops, and adaptive expert computation per token?
 details:
-  realistic_solution: 'Token Choice (standard): Each token selects top-k experts. Problem: popular experts overflow (token dropping), unpopular experts underflow (wasted capacity). Needs capacity factor + load-balancing loss. Expert Choice: Each expert independently selects its top-k tokens based on router scores. Benefits: (1) Perfect load balance by construction — every expert processes exactly k tokens. (2) No capacity factor needed. (3) Important tokens (high router scores) can be selected by many experts, receiving more computation — an adaptive compute mechanism. Drawbacks: (1) Some tokens may be selected by zero experts (especially in small batches) — a different kind of ''dropping.'' (2) Cannot be used autoregressively (future tokens aren''t available for expert selection). (3) Variable computation per token makes latency unpredictable for inference. (4) Token-level parallelism is harder — different tokens receive different amounts of compute, complicating batched execution. Expert Choice excels for training (all tokens available) but is impractical for autoregressive inference.'
+  realistic_solution: 'Token Choice (standard): Each token selects top-k experts. Problem: popular experts overflow (token dropping), unpopular experts underflow (wasted capacity). Needs capacity factor + load-balancing loss. Expert Choice: Each expert independently selects its top-k tokens based on router scores. Benefits: (1) Expert-level load is balanced by construction — every expert processes its quota. (2) No capacity factor is needed for expert overflow. (3) Important tokens (high router scores) can be selected by many experts, receiving more computation — an adaptive compute mechanism. Drawbacks: (1) Some tokens may be selected by zero experts (especially in small batches) — a different kind of ''dropping.'' (2) Cannot be used autoregressively (future tokens aren''t available for expert selection). (3) Variable computation per token makes latency unpredictable for inference. (4) Token-level parallelism is harder — different tokens receive different amounts of compute, complicating
+    batched execution. Expert Choice excels for training (all tokens available) but is impractical for autoregressive inference.'
   common_mistake: |
     **The Pitfall:** Thinking Expert Choice eliminates the need for load-balancing mechanisms entirely without trade-offs.
     **The Rationale:** Assuming perfect expert capacity utilization means all tokens are processed optimally.
@@ -22,12 +23,12 @@ details:
     - Expert Choice: 8 experts select 64 tokens each = 512 total assignments.
 
     **Calculations:**
-    - Token Choice: Expected 64 per expert, but variance causes overflow drops (~5% at capacity 1.25).
-    - Expert Choice: Exactly 64 per expert (perfect hardware load balance).
-    - Individual tokens in Expert Choice receive 0 to 8 expert assignments.
+    - Token Choice: expected load is 512 / 8 = 64 assignments per expert, but the realized load varies with router scores. Overflow depends on the distribution and capacity factor, not on the expected count alone.
+    - Expert Choice: exactly 64 assignments per expert when each expert quota is 64, so expert-side work is balanced by construction.
+    - Expert Choice does not imply every token is selected. Individual tokens can receive 0 to 8 expert assignments.
 
     **Conclusion & Interpretation:**
-    - **Result: Load-Balance Bound.** Expert Choice guarantees perfect hardware load balancing but results in highly variable compute-per-token and dropped tokens.
+    - **Result: Expert-side load balance.** Expert Choice fixes per-expert assignment counts, but token-level compute is variable and some tokens may receive no expert.
 status: published
 provenance: imported
 requires_explanation: false

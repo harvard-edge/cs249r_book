@@ -7,28 +7,31 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: create
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Design Memory Bandwidth Architecture for Mobile Multi-Model Inference'
-scenario: 'You need to design a memory bandwidth-aware scheduling system for a mobile SoC (16GB LPDDR5X, 77 GB/s) running 3 concurrent ML tasks: speech recognition (2GB/s), LLM assistant (76GB/s during decode), and camera depth estimation (15GB/s).'
+title: LPDDR5X Bandwidth Scheduling for Mobile Multi-Model Inference
+scenario: 'You need to design a memory bandwidth-aware scheduling system for a mobile SoC (16GB LPDDR5X, 77 GB/s) running 3 concurrent ML tasks: speech recognition (2GB/s), LLM assistant (55GB/s peak bursts during decode), and camera depth estimation (15GB/s).'
 question: How should a scheduler prevent memory bandwidth saturation across concurrent speech, LLM, and depth tasks?
 details:
-  realistic_solution: Implement a priority-based memory bandwidth scheduler that preempts non-critical tasks during peak LLM decode phases. Since the LLM decode strictly saturates the bus, suspend depth estimation dynamically, allowing speech recognition to run simultaneously.
+  realistic_solution: Implement a priority-based memory bandwidth scheduler that reserves bandwidth for latency-critical streams and keeps a headroom target instead of packing the bus to 100%. With 77 GB/s total LPDDR5X bandwidth and 3 GB/s system overhead, about 74 GB/s is available to ML workloads; use an 85% scheduling budget of about 63 GB/s to absorb bursts and measurement error. Speech gets a guaranteed 2 GB/s slice. During LLM decode bursts, run LLM plus speech (57 GB/s) and suspend or downsample depth. During prefill gaps or lower LLM demand, admit depth if the measured rolling bandwidth stays under the budget. If LLM demand rises, throttle decode cadence before violating the speech reserve.
   common_mistake: |
     **The Pitfall:** Designing a simple time-sliced scheduler without tracking peak memory bandwidth demands.
     **The Rationale:** Candidates treat concurrency purely as a CPU/NPU sharing problem rather than an LPDDR5X bus capacity problem.
-    **The Consequence:** Scheduling the LLM alongside depth estimation, resulting in 93 GB/s of demand on a 74 GB/s bus, causing immediate stalls and stuttering.
+    **The Consequence:** Scheduling the LLM alongside depth estimation leaves almost no headroom, causing stalls and stuttering when real bursts exceed the average estimate.
   napkin_math: |
     **Assumptions & Constraints:**
     - Total Bus Limit: 77 GB/s.
-    - System Overhead: 3 GB/s (74 GB/s available).
-    - Task demands: Speech (2 GB/s), Depth (15 GB/s), LLM (76 GB/s peak).
+    - System Overhead: 3 GB/s, so 74 GB/s is available to ML workloads.
+    - Scheduling target: 85% of available ML bandwidth, about 63 GB/s.
+    - Task demands: Speech (2 GB/s), Depth (15 GB/s), LLM (55 GB/s peak burst).
 
     **Calculations:**
-    - Simultaneous Collision: 2 GB/s + 15 GB/s + 76 GB/s = 93 GB/s.
-    - Deficit: 93 GB/s - 74 GB/s = 19 GB/s overload.
-    - Pipelined Schedule (LLM + Speech): 76 GB/s + 2 GB/s = 78 GB/s.
+    - All tasks together: 2 GB/s + 15 GB/s + 55 GB/s = 72 GB/s.
+    - Physical headroom if all run: 74 GB/s - 72 GB/s = 2 GB/s, too little for bursty mobile workloads.
+    - Headroom-policy overload: 72 GB/s - 63 GB/s = 9 GB/s over the scheduler budget.
+    - LLM + speech only: 55 GB/s + 2 GB/s = 57 GB/s, which fits under the 63 GB/s budget.
+    - Depth can run when LLM is idle, throttled, or below about 46 GB/s because 46 + 15 + 2 = 63 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: 19 GB/s overload (Bandwidth-Bound)**. The scheduler must suspend the 15 GB/s depth task to allow LLM decode to proceed without extreme LPDDR thrashing.
+    - **Result: Bandwidth-aware scheduling, not full concurrency.** The scheduler should reserve speech, allow LLM decode bursts with depth suspended, and admit depth only when measured LLM bandwidth leaves enough headroom under the 63 GB/s policy budget.
 status: published
 provenance: imported
 requires_explanation: true

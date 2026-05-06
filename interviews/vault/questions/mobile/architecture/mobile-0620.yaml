@@ -11,22 +11,23 @@ title: The JNI Boundary Crossing
 scenario: You write a highly optimized C++ inference engine using XNNPACK for Android. Your Java app calls `runInference(float[] image)` natively via JNI. The C++ code executes in 5ms. However, the app measures 18ms per frame.
 question: What is JNI doing that consumes 13ms of overhead?
 details:
-  realistic_solution: JNI's `GetByteArrayElements` implicitly copies the entire Java byte array into native memory (6.2 MB for 1080p). After inference, results are copied back. Two 6.2 MB memcpy operations on a mobile CPU cache architecture take ~12ms, plus JNI GC pinning overhead. The systemic fix utilizes a `DirectByteBuffer` for zero-copy memory sharing, or allocates a persistent `AHardwareBuffer`, eliminating the massive memory movement and dropping overhead to <0.5ms.
+  realistic_solution: JNI is spending the time marshalling a large Java array across the Java/native boundary, not in the native function call itself. `GetByteArrayElements` may either pin or copy depending on the VM and GC state, but for a large per-frame image it can require moving megabytes into native-accessible memory before XNNPACK runs. The systemic fix is to pass a persistent `DirectByteBuffer` or platform buffer such as `AHardwareBuffer` so the Java and native code share storage instead of rematerializing the frame every call.
   common_mistake: |
     **The Pitfall:** Blaming JNI function call overhead instead of memory marshalling.
     **The Rationale:** Developers assume crossing the Java/native boundary is fundamentally slow due to context switching.
-    **The Consequence:** They spend time optimizing function arguments rather than addressing the massive 24.8 MB memory copy operation, which is easily solved by using zero-copy buffers.
+    **The Consequence:** They spend time optimizing function arguments rather than addressing the multi-megabyte memory movement, which is better solved by using zero-copy or persistent shared buffers.
   napkin_math: |
     **Assumptions & Constraints:**
     - 1080p RGB image size: 1920 * 1080 * 3 bytes ≈ 6.22 MB.
-    - JNI copies data in and out of native heap.
+    - JNI may copy the input array into native-accessible memory; this model counts one input copy.
 
     **Calculations:**
-    - JNI array copy requires reading and writing (in and out): 6.22 MB * 2 = 12.44 MB per copy.
-    - Total data moved across boundaries: 12.44 MB * 2 = 24.88 MB.
+    - Copying the input requires reading 6.22 MB from the Java heap and writing 6.22 MB into the native buffer.
+    - Total memory traffic for one input marshal: 6.22 MB * 2 = 12.44 MB.
+    - A measured overhead of 13ms is therefore dominated by repeated large-frame marshalling, cache disruption, and possible GC pin/copy coordination, not by the JNI call dispatch.
 
     **Conclusion & Interpretation:**
-    - **Result: 24.88 MB memcpy (Memory-Bandwidth-Bound)**. The 13ms overhead is entirely memory-bandwidth-bound due to redundant data marshalling.
+    - **Result: ~12.44 MB of input-copy traffic per frame (Memory-Movement-Bound)**. The right diagnosis is Java/native array marshalling; output copy-back is possible for some APIs but is not established by this prompt.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,7 @@ title: The Tokenizer Overhead Spikes
 scenario: Your LLM inference server is utilizing a 70B model on an H100. P99 latency suddenly spikes. You look at the GPU utilization metrics, and the GPU is sitting at 0% for 50 milliseconds before every generation request.
 question: What CPU-bound process is blocking the GPU from doing its job?
 details:
-  realistic_solution: 'You are hitting the **Tokenizer CPU Bottleneck**. A slow Python BPE tokenizer might process 100,000 tokens per second. A 5,000-token prompt takes 50ms to tokenize. However, the H100 prefilling that same prompt for a 70B model takes ~1.4 seconds, so the 50ms tokenizer overhead is small relative to prefill. The real issue is that tokenization is **synchronous and blocking**: the GPU sits completely idle while the CPU tokenizes. The fix is to use a fast Rust-based tokenizer and run tokenization asynchronously.'
+  realistic_solution: You are hitting the **Tokenizer CPU Bottleneck**. A slow Python BPE tokenizer might process 100,000 tokens per second, so a 5,000-token prompt takes about 50ms to tokenize. The key symptom is not the absolute size of 50ms; it is that tokenization is synchronous and blocking, so the GPU has no work queued and sits at 0% before every request. The fix is to use a fast Rust-based tokenizer, pre-tokenize where possible, and run tokenization asynchronously so CPU preprocessing overlaps with GPU prefill/decode.
   common_mistake: |
     **The Pitfall:** Blaming the delay on PCIe bus transfer times.
     **The Rationale:** Candidates know that moving data between CPU and GPU takes time and often overestimate the latency of small transfers.
@@ -19,17 +19,16 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - CPU Tokenizer speed: 100,000 tokens/sec. Prompt: 5,000 tokens.
-    - Prefill Compute: 70B model, 5,000 tokens. H100 at 989 TFLOPS (50% utilization).
+    - Request arrival rate example: 1,000 req/min.
 
     **Calculations:**
     - Tokenizer Latency = 5,000 / 100,000 = 50 ms.
-    - Prefill Compute Required = 2 * 70B * 5,000 = 700 TFLOPs.
-    - Prefill Time = 700 TFLOPs / (989 TFLOPS * 0.5) ≈ 1.4 seconds (1,400 ms).
-    - Tokenizer Overhead = 50 ms, completely blocking the GPU.
-    - Idle Time at 1,000 req/min = 1,000 * 50 ms = 50 seconds per minute (83% stall).
+    - If tokenization is on the critical path, the GPU sees a 50 ms no-work gap before each request regardless of how fast the later prefill is.
+    - At 1,000 req/min, serialized tokenizer work is 1,000 * 50 ms = 50,000 ms = 50 CPU-seconds of tokenizer work per wall-clock minute.
+    - That load is about 50 / 60 = 83% of one CPU core, or several cores if tokenization is parallelized imperfectly. It is not automatically 83% GPU idle unless requests are strictly serialized end-to-end.
 
     **Conclusion & Interpretation:**
-    - **Result: 83% Stall (CPU-Bound)**. The GPU is stalled 83% of the time due to synchronous CPU tokenization, necessitating an asynchronous Rust-based tokenizer.
+    - **Result: CPU Preprocessing Stall.** The GPU idle gap is caused by synchronous tokenization blocking request submission; remove it by overlapping tokenization with GPU work and using a faster tokenizer implementation.
 status: published
 provenance: imported
 requires_explanation: false

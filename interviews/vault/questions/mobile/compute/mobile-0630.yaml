@@ -9,26 +9,30 @@ bloom_level: evaluate
 phase: inference
 title: The Speculative Pruning Paradox
 scenario: Your team is tasked with deploying a 3-billion parameter generative language model on a flagship mobile phone (like one with a Snapdragon 8 Gen 3 SoC). The goal is interactive, real-time generation. The initial FP16 model is too slow, taking over 50ms per token.
-question: Why does combining unstructured pruning with speculative decoding make the mobile LLM worse than speculative decoding alone?
+question: Why does pruning the draft model before combining it with speculative decoding make the mobile LLM worse than speculative decoding alone?
 details:
-  realistic_solution: 'The core failure is a negative feedback loop between the two optimizations. Speculative decoding''s speedup is entirely dependent on the *acceptance rate* of the draft model''s tokens. By applying 50% unstructured pruning to the main ''verifier'' model, the team severely damaged its accuracy and changed its internal representations.'
+  realistic_solution: The core failure is a negative feedback loop between the two optimizations. Speculative decoding's speedup depends on the acceptance rate of the draft model's proposed tokens. Applying heavy unstructured pruning to the draft model may not speed it up on mobile hardware, because sparse weights are hard to exploit efficiently, but it can reduce draft quality enough that the main verifier rejects more proposals. Once acceptance falls, the verifier is invoked almost as often as normal decoding and the speculative speedup collapses.
   common_mistake: |
     **The Pitfall:** Focusing only on the theoretical benefit of each optimization in isolation.
-    **The Rationale:** Candidates blame the draft model for being 'too dumb' or state pruning doesn't speed up mobile NPUs, ignoring the interaction between the two.
-    **The Consequence:** Missing the systemic failure where the pruned model's degraded accuracy destroys the acceptance rate required by speculative decoding.
+    **The Rationale:** Candidates state that pruning does not speed up mobile NPUs, but stop before explaining how the degraded draft distribution changes verifier acceptance.
+    **The Consequence:** Missing the systemic failure where the pruned draft model destroys the acceptance rate required by speculative decoding.
   napkin_math: |
     **Assumptions & Constraints:**
     - Baseline: 3B model at FP16, latency 50 ms/token.
     - Speculative decoding draft model latency: 5 ms/token, K=5.
-    - Speculative decoding verification: 55 ms, acceptance ~80%.
-    - Pruning effect: 0 speedup, but degrades draft acceptance rate to ~30%.
+    - Verifier cost is outcome-dependent: a batched verify pass has fixed setup cost plus token-dependent work for accepted and rejected draft tokens.
+    - Unpruned draft acceptance: ~80%, so most passes accept about 4 of 5 proposals.
+    - Pruned draft acceptance: ~30%, so most passes accept only about 1-2 proposals before falling back to verifier-driven decoding.
+    - Unstructured pruning gives no reliable mobile speedup for the draft model.
 
     **Calculations:**
-    - Speculative latency: 80 ms / 5 tokens = 16 ms/token.
-    - Combined latency: 80 ms / 2.5 tokens = 32 ms/token.
+    - Draft proposal time remains about 5 * 5ms = 25ms because sparse pruning does not map to a faster dense mobile kernel.
+    - With ~80% acceptance, the verifier amortizes one batched pass across roughly 4 accepted tokens, so the draft cost contributes only about 25ms / 4 = 6.25ms per accepted token plus an amortized verifier cost.
+    - With ~30% acceptance, the same draft work amortizes across only about 1.5 accepted tokens, so draft overhead rises to about 25ms / 1.5 = 16.7ms per accepted token before counting the extra verifier work caused by rejections.
+    - The verifier also does less useful work per pass when proposals are rejected early, so throughput becomes bounded by acceptance rate rather than by the nominal K-token batch size.
 
     **Conclusion & Interpretation:**
-    - **Result: 32 ms/token (Accuracy-Bound).** Combining unstructured pruning ruins speculative decoding acceptance rates.
+    - **Result: acceptance-rate-bound throughput collapse.** Pruning the draft model reduces token quality without a reliable mobile latency win, so fewer accepted tokens amortize each draft and verifier pass. The system can regress toward baseline decoding even if the exact ms/token depends on the verifier implementation.
 status: published
 provenance: imported
 requires_explanation: false

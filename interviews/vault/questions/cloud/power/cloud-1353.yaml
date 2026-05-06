@@ -11,21 +11,24 @@ title: Evaluating Discrepancies in GPU Power Measurement Techniques
 scenario: You are evaluating the energy efficiency of a novel sparse attention mechanism on a cluster of 8x NVIDIA H100 GPUs. A software-level profiling tool relying on 1Hz polling via `nvidia-smi` reports a 15% energy reduction per iteration compared to dense attention. However, the facility-level PDU (Power Distribution Unit) meters show only a 3% reduction in total power draw during the job.
 question: Which measurement should you trust for microsecond GPU energy, and what should drive power-aware scheduling for the 8-H100 cluster?
 details:
-  realistic_solution: 'Evaluate power using dedicated on-chip hardware power counters (e.g., accessed via NVIDIA DCGM or in-band NVML registers) that integrate power over the exact kernel execution time at microsecond resolution. The facility meter captures total system overhead, while software polling aliases the data. The hardware counters provide the true isolated GPU energy ground truth for scheduling decisions.'
+  realistic_solution: Trust hardware GPU-side energy telemetry integrated over kernel execution windows, not 1Hz software polling, for microsecond-scale GPU energy attribution. NVML/DCGM are useful access paths for vendor telemetry, but they are not magic ground truth unless the underlying counters and sampling window match the kernel. The 15% software-polling saving likely aliases short kernels and excludes CPU, memory, fan, PSU, and idle overhead, while the 3% PDU saving is a whole-node validation signal. Scheduling should be driven by GPU energy telemetry at kernel timescales, constrained and audited against node-level PDU power budgets.
   common_mistake: |
     **The Pitfall:** Trusting low-frequency software polling for highly dynamic microsecond-level workloads.
     **The Rationale:** Candidates fail to realize that a 1Hz to 10Hz sampling rate completely aliases sub-millisecond kernel power spikes and deep idle states.
     **The Consequence:** Massive inaccuracies in integrated energy estimations lead to incorrect conclusions about architectural efficiency.
   napkin_math: |
     **Assumptions & Constraints:**
-    - H100 sparse attention kernel duration 400\u03bcs, `nvidia-smi` polling at 1Hz (1,000,000\u03bcs)
+    - H100 sparse attention kernel duration = 400 microseconds.
+    - 1Hz polling window = 1,000,000 microseconds.
+    - 10Hz polling window = 100,000 microseconds.
 
     **Calculations:**
-    - Even at 10Hz (100,000\u03bcs), 400\u03bcs is 0.4% of the window
-    - 1 - 0.004 = 0.996 (99.6% missed)
+    - At 1Hz, coverage = 400 / 1,000,000 = 0.0004 = 0.04%, so 99.96% of the window is outside the event.
+    - At 10Hz, coverage = 400 / 100,000 = 0.004 = 0.4%, so 99.6% of the window is outside the event.
+    - Both polling rates are too coarse to resolve the transient kernel energy.
 
     **Conclusion & Interpretation:**
-    - **Result: 99.6% missed (Measurement-Bound)**. Aliasing. Polling misses 99.6% of transient power variance, mandating hardware counters for accuracy.
+    - **Result: Polling-Alias Bound.** 1Hz and 10Hz polling both smear a 400 microsecond kernel across much larger windows, so the 15% software-only saving should not be treated as whole-job energy reduction. Scheduling should use kernel-timescale GPU telemetry plus PDU data for whole-node effects.
 status: published
 provenance: imported
 requires_explanation: false

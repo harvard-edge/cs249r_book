@@ -11,19 +11,22 @@ title: NUMA Effects in MI300X Multi-XCD Workloads
 scenario: A distributed training run on MI300X shows 15% lower MFU than expected on H100 despite MI300X having higher raw bandwidth.
 question: How would you diagnose and fix NUMA-related MFU loss on MI300X versus H100?
 details:
-  realistic_solution: Profile cross-XCD fabric traffic via `nsys profiling`. Ensure weight matrices are allocated NUMA-locally per XCD. Use HIP memory advice to pin tensors, and partition layers so each XCD owns complete shards, minimizing Infinity Fabric hops.
+  realistic_solution: Profile cross-XCD fabric traffic with ROCm tools such as rocprof or Omniperf. Check whether weights, activations, or optimizer shards are being read remotely across XCDs. Use HIP memory advice and placement controls to keep tensors local to the XCDs that consume them, and partition layers or shards so each XCD owns complete hot working sets rather than repeatedly traversing Infinity Fabric.
   common_mistake: |
     **The Pitfall:** Comparing aggregate bandwidth numbers directly between architectures.
     **The Rationale:** Candidates forget that MI300X's 5.3 TB/s is partitioned across 8 XCDs, unlike H100's monolithic memory.
     **The Consequence:** Failing to apply necessary NUMA-aware tensor pinning and memory placement, resulting in severe cross-fabric performance penalties.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - MI300X local BW: 5.3 TB/s across 8 XCDs.
-       - H100 monolithic BW: 3.35 TB/s available to all SMs.
-    2. **Calculations:**
-       - MI300X local BW per XCD: 5.3 TB/s / 8 = 662 GB/s.
-       - NUMA Penalty: If 30% of accesses are cross-XCD (2x latency penalty), effective BW per XCD ≈ (662 * 0.7) + (331 * 0.3) = 562 GB/s.
-    3. **Conclusion & Interpretation:**
-       - **The NUMA penalty drops effective bandwidth drastically below the H100's flat 3.35 TB/s, explaining the 15% MFU loss.**
-       - **Result: Memory-Bandwidth-Bound**
+    **Assumptions & Constraints:**
+    - MI300X has high aggregate HBM bandwidth, but remote XCD accesses add fabric hops and do not behave like local HBM.
+    - The observed symptom is 15% lower MFU than expected.
+
+    **Calculations:**
+    - First-order diagnostic: measure remote-access share, not just aggregate HBM bandwidth.
+    - If 30% of hot reads are remote and each remote read takes about 1.5-2x local latency, the average access-latency multiplier is 0.70 * 1.0 + 0.30 * 1.5 to 0.70 * 1.0 + 0.30 * 2.0 = 1.15x to 1.30x.
+    - A 15-30% memory-stall increase is large enough to explain a 15% MFU gap when the kernel is memory-sensitive.
+
+    **Conclusion & Interpretation:**
+    - **Result: diagnose remote-read fraction before comparing peak bandwidth.** Fix placement and sharding to reduce fabric hops; do not model a latency penalty as a direct aggregate-bandwidth divisor or compare per-XCD and whole-GPU bandwidth ceilings.
 status: published
+provenance: imported

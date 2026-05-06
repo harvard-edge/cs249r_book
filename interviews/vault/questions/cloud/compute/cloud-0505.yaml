@@ -7,11 +7,11 @@ topic: roofline-analysis
 competency_area: compute
 bloom_level: analyze
 phase: both
-title: The Profiling Crisis
-scenario: 'You''ve deployed a custom recommendation model. The profiling dashboard shows you are achieving 120 TFLOPS out of a possible 989 TFLOPS on an H100 GPU. Your tech lead suggests buying a faster GPU to fix the latency.'
-question: 'Why is your tech lead wrong to suggest buying a faster GPU when achieving 120 TFLOPS out of 989 peak?'
+title: H100 Roofline Diagnosis for Recommendation Inference
+scenario: You've deployed a custom recommendation model. The profiling dashboard shows you are achieving 120 TFLOPS out of a possible 989 TFLOPS on an H100 GPU, while the HBM bandwidth counter is already near the 3.35 TB/s hardware limit. Your tech lead suggests buying a faster GPU to fix the latency.
+question: Why is your tech lead wrong to suggest buying a faster GPU when achieving 120 TFLOPS out of 989 peak?
 details:
-  realistic_solution: 'The tech lead hasn''t checked the Arithmetic Intensity (Ops/Bytes). The model achieves 120 TFLOPS on an H100 with 989 TFLOPS peak — only 12% utilization. This implies the workload''s arithmetic intensity ≈ 120 / 3.35 = 36 Ops/Byte, which is far below the H100''s ridge point of 295 Ops/Byte. The workload is memory-bandwidth-bound. A faster GPU with 1,500 TFLOPS peak but the same 3.35 TB/s bandwidth would still cap at 36 × 3.35 = 120 TFLOPS — identical performance. The correct fix is either: (1) increase memory bandwidth (e.g., upgrade to a GPU with more HBM bandwidth), (2) reduce bytes moved per operation (quantize weights), or (3) increase arithmetic intensity by batching more requests.'
+  realistic_solution: The tech lead is wrong because the profile says the workload is already saturating HBM bandwidth, not ALUs. The H100 ridge point is 989 TFLOPS / 3.35 TB/s ≈ 295 FLOP/byte. Over a one-second profiling window, the workload performs about 120e12 FLOPs while moving about 3.35e12 bytes from HBM, so its measured operational intensity is about 36 FLOP/byte. That is far below the ridge point, so the roofline cap is memory bandwidth. A faster GPU with more peak TFLOPS but the same memory bandwidth would not materially improve latency. Better fixes are reducing bytes moved per request, increasing batching/reuse, quantizing, or using hardware with more HBM bandwidth.
   common_mistake: |
     **The Pitfall:** Assuming the GPU isn't fully utilized because it's starved for compute.
     **The Rationale:** Candidates see low TFLOPS utilization and blindly assume throwing more ALUs at the problem will help.
@@ -20,11 +20,12 @@ details:
     1. **Assumptions & Constraints:**
        - H100 peak compute: 989 TFLOPS.
        - H100 memory bandwidth: 3.35 TB/s.
-       - Observed throughput: 120 TFLOPS.
+       - In a 1-second profiling window, observed work is about 120e12 FLOPs.
+       - In the same window, observed HBM traffic is about 3.35e12 bytes, near the hardware limit.
     2. **Calculations:**
-       - Ridge Point = 989 TFLOPS / 3.35 TB/s = 295 Ops/Byte.
-       - Estimated Arithmetic Intensity = 120 TFLOPS / 3.35 TB/s = 36 Ops/Byte.
-    3. **Conclusion & Interpretation:** **Result: Memory-Bound**. 36 Ops/Byte is far below the 295 Ops/Byte ridge point. A faster GPU with the same memory bandwidth will yield identical performance.
+       - Ridge Point = 989e12 FLOP/s / 3.35e12 Byte/s = 295 FLOP/Byte.
+       - Workload Operational Intensity = work / bytes moved = 120e12 FLOPs / 3.35e12 bytes = 36 FLOP/Byte.
+    3. **Conclusion & Interpretation:** **Result: Memory-Bound**. The measured 36 FLOP/Byte is far below the 295 FLOP/Byte ridge point, so adding compute without adding memory bandwidth is unlikely to improve latency.
 status: published
 provenance: imported
 requires_explanation: false

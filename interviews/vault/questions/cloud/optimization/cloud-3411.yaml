@@ -11,25 +11,29 @@ title: Optimizing LLM Inference Latency with Speculative Decoding on NVIDIA H100
 scenario: Your team is optimizing the inference latency of a large autoregressive language model deployed on NVIDIA H100 GPUs using speculative decoding.
 question: How does draft-verify speculative decoding use H100 bandwidth and FP16 compute, and how would you choose the draft model?
 details:
-  realistic_solution: 'Select a lightweight, highly optimized draft model that leverages the H100''s FP16 dense TFLOPS for rapid generation. The main model leverages the 3.35 TB/s HBM bandwidth to perform parallel verification. Continuously monitor and iterate on the draft model to maintain high acceptance rates.'
+  realistic_solution: Choose the draft model by measuring accepted tokens per second, not by draft speed alone. On H100, the target model can verify a short block in parallel using high FP16 throughput, but each target pass still reads weights and KV data through HBM. A good draft model should be cheap enough that draft generation is a small fraction of target verification time, while accurate enough that most blocks accept a long prefix. Reject candidates whose lower acceptance rate causes frequent fallback target passes, even if they are very fast.
   common_mistake: |
     **The Pitfall:** Choosing a draft model that is either too large or too inaccurate.
     **The Rationale:** Candidates fail to balance the overhead of draft generation against the acceptance rate.
     **The Consequence:** The overhead negates latency benefits, or low acceptance rates cause frequent fallbacks to the slower main model, effectively increasing perceived latency.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Baseline time per token: 100ms.
-    - Speculative draft step: 20ms. Verify step: 30ms.
-    - Acceptance rate: 75% (0.75). Draft tokens generated: 4.
+    - Baseline target-model time per token: 100 ms.
+    - Draft block time for 4 proposed tokens: 20 ms.
+    - Target verification time for the 4-token block: 30 ms.
+    - Per-token acceptance probability: p = 0.75. Draft tokens per block: K = 4.
+    - If the first rejected token is emitted by the target during verification, emitted tokens per block equal accepted prefix length plus one fallback token unless all K tokens are accepted.
 
     **Calculations:**
-    - Expected accepted tokens per step: (1 - 0.75^5) / (1 - 0.75) = 3.05 tokens.
-    - Speculative total step time: 20ms + 30ms = 50ms.
-    - Effective time per token: 50ms / 3.05 = 16.4ms.
-    - Speedup: 100ms / 16.4ms = 6.1x.
+    - Expected accepted prefix length: E_accept = p + p^2 + p^3 + p^4 = 0.75 + 0.5625 + 0.4219 + 0.3164 = 2.05 accepted draft tokens.
+    - Probability of a rejection within the block: 1 - p^4 = 1 - 0.3164 = 0.6836.
+    - Expected emitted tokens per block: E_emit = E_accept + (1 - p^4) = 2.05 + 0.6836 = 2.73 tokens.
+    - Speculative block time: 20 ms + 30 ms = 50 ms.
+    - Effective latency: 50 ms / 2.73 = 18.3 ms per emitted token.
+    - Idealized speedup: 100 ms / 18.3 ms = 5.5x before queueing, sampling, and implementation overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 6.1x latency speedup (Latency-Bound)**. Optimizes decoding by trading excess compute for fewer memory-bound steps.
+    - **Result: acceptance must justify draft cost.** Select the draft model that minimizes verified latency per emitted token on H100; high bandwidth and FP16 compute help verification, but they do not rescue a draft model with poor acceptance or high generation cost.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,25 +8,31 @@ competency_area: memory
 bloom_level: evaluate
 phase: training
 title: On-Device Fine-Tuning Memory Strategy
-scenario: We are implementing continuous on-device fine-tuning for a visual anomaly detection model deployed on an NVIDIA Jetson Orin. However, a standard training forward-pass for a high-resolution batch consumes too much memory, threatening to OOM when the factory control software is running.
+scenario: We are implementing continuous on-device fine-tuning for a visual anomaly detection model deployed on an NVIDIA Jetson AGX Orin 32GB with LPDDR5 unified memory. However, a standard training forward-pass for a high-resolution batch consumes too much memory, threatening to OOM when the factory control software is running.
 question: How would you use freezing and gradient checkpointing to fine-tune on Jetson Orin without OOMing 32 GB shared memory?
 details:
-  realistic_solution: 'Architect a hybrid approach: freeze early, high-resolution feature extractor layers to permanently drop their forward-pass activations, and apply selective gradient checkpointing to the remaining trainable layers. Evaluate the tradeoff by identifying layers where the activation-size-to-compute ratio is highest, ensuring re-computation does not thermal throttle the 60W Orin.'
+  realistic_solution: 'Architect a hybrid approach: freeze early, high-resolution feature extractor layers to permanently drop their backward activations, and apply selective gradient checkpointing only to trainable layers with high activation-size-to-recompute-cost ratios. The goal is to keep the training payload inside the usable memory left after OS and factory processes while avoiding enough extra recompute to risk sustained thermal throttling on the Orin.'
   common_mistake: |
     **The Pitfall:** Blindly applying aggressive gradient checkpointing across all layers.
     **The Rationale:** Candidates prioritize lowering memory footprint at all costs to fix the OOM error.
-    **The Consequence:** They cause massive re-compute overhead that completely saturates the Jetson Orin's Ampere GPU, inevitably leading to thermal throttling and failing to meet real-time operational constraints.
+    **The Consequence:** They cause massive re-compute overhead that can saturate the Jetson Orin's Ampere GPU, increasing thermal-throttling risk and failing to meet real-time operational constraints.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware Limit: 32 GB shared memory, 60W TDP
-       - Standard Training Demand: 25 GB FP16 + 10 GB OS = 35 GB
-    2. **Calculations:**
-       - Initial State: 35 GB (Fails > 32 GB hard limit)
-       - Freezing Optimization: Dropping 70% of layers' activations cuts footprint to ~7.5 GB.
-       - Selective Checkpointing: Remaining 30% cuts footprint further to ~2 GB.
-       - Optimized Total: 2 GB + 10 GB (OS) = 12 GB
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory Capacity-Bound.** Applying freezing and targeted checkpointing shrinks the active payload to 12 GB. This aggressively sidesteps the 32 GB shared boundary, averting an OOM crash without driving unrecoverable 60W thermal load from over-recomputation.
+    **Assumptions & Constraints:**
+    - Hardware limit: 32 GB LPDDR5 unified memory.
+    - OS and factory control processes reserve 10 GB.
+    - Usable fine-tuning budget = 32 GB - 10 GB = 22 GB.
+    - Standard training payload uses about 25 GB, mostly FP16 activations plus optimizer state.
+
+    **Calculations:**
+    - Initial total memory = 10 GB reserved + 25 GB training payload = 35 GB, which OOMs.
+    - Freeze early feature extractor layers: remove about 8 GB of stored backward activations.
+    - Remaining payload after freezing = 25 GB - 8 GB = 17 GB.
+    - Selective checkpointing on trainable high-activation blocks saves another about 6 GB.
+    - Optimized training payload = 17 GB - 6 GB = 11 GB.
+    - Optimized total memory = 10 GB reserved + 11 GB payload = 21 GB.
+
+    **Conclusion & Interpretation:**
+    - **Result: 21 GB < 32 GB and 11 GB < 22 GB usable budget (Memory-Feasible).** Freezing provides the largest activation reduction, while targeted checkpointing closes the remaining gap without applying recompute everywhere.
 status: published
 provenance: imported
 requires_explanation: true

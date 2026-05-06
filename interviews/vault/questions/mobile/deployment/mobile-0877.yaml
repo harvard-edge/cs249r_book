@@ -11,7 +11,7 @@ title: Evaluating Speculative Decoding Viability for On-Device LLM on Snapdragon
 scenario: A Snapdragon 8 Gen 3 app runs a 3B LLM at 8 tok/s for compound AI generation. A team proposes speculative decoding using a 68M draft model (120 tok/s) with a target acceptance rate of 0.8 per draft token and 4 draft tokens per verification step.
 question: How would you evaluate whether speculative decoding provides a net speedup given the verification overhead on mobile hardware?
 details:
-  realistic_solution: 'Speculative decoding speedup formula: expected speedup = (1 - α^(k+1)) / ((1-α) * (1 + k * cost_ratio)) where α=0.8 acceptance rate, k=4 draft tokens, cost_ratio = draft_model_time / target_model_time. Draft: 68M at 120 tok/s → 8.3ms per token. Target: 3B at 8 tok/s → 125ms per token. Cost ratio: 8.3/125 = 0.066. Expected accepted per step: (1-0.8^5)/(1-0.8) = (1-0.328)/0.2 = 3.36 tokens per verification. Time per step: 4*8.3ms + 125ms = 33.2+125 = 158.2ms for 3.36 tokens. Effective rate: 3.36/158.2ms = 21.2 tok/s — 2.65x speedup. Significant!'
+  realistic_solution: Evaluate one speculative step directly. The draft model proposes 4 tokens at 120 tok/s, costing 4 * 8.3ms = 33.2ms. With per-token acceptance alpha=0.8 and only 4 proposed tokens, the expected emitted tokens from the verified block are 1 + 0.8 + 0.8^2 + 0.8^3 = 2.952 tokens. If the 3B target is memory-bound enough that verifying the 4-token block costs about one target forward pass, verification costs ~125ms. Total step time is 158.2ms, so throughput is 2.952 / 0.1582 = 18.7 tok/s, or 2.34x over the 8 tok/s baseline. The key deployment question is whether block verification really costs one target pass on this mobile stack; if it scales with the number of verified tokens, most of the speedup disappears.
   common_mistake: |
     **The Pitfall:** Calculating speculative decoding speedups using cloud-hardware formulas and assuming linear speedup based solely on parameter count.
     **The Rationale:** Engineers ignore that on a mobile device, a batch=1 generation is entirely memory-bandwidth bound; fetching the 3B weights once takes the same time whether checking 1 token or 5 tokens.
@@ -26,11 +26,11 @@ details:
        - Draft Time: 4 * 8.3ms = 33.2ms.
        - Verification Time (Target): 125ms (Memory-bound; batch size 1 to 5 takes same time).
        - Total Step Time: 33.2ms + 125ms = 158.2ms.
-       - Expected Accepted Tokens: (1 - 0.8^5) / (1 - 0.8) = 3.36 tokens.
-       - Effective Throughput: 3.36 tokens / 158.2ms = 21.2 tok/s.
-       - Net Speedup: 21.2 / 8 = 2.65x.
+       - Expected emitted tokens for a 4-token block: 1 + 0.8 + 0.8^2 + 0.8^3 = 2.952 tokens.
+       - Effective Throughput: 2.952 tokens / 158.2ms = 18.7 tok/s.
+       - Net Speedup: 18.7 / 8 = 2.34x.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound Speedup. Speculative decoding works well because the 3B model is heavily memory-bound, meaning verifying 4 tokens costs the same memory bandwidth as generating 1.**
+       - **Result: Memory-bound verification speedup.** The 2.34x estimate is valid only under the key mobile assumption that verifying the 4-token block costs approximately one target forward pass because target weight bandwidth dominates.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,9 +7,9 @@ topic: model-serving-infrastructure
 competency_area: deployment
 bloom_level: evaluate
 phase: inference
-title: 'The Straggler Log Rotation'
-scenario: 'Your 512-GPU training job occasionally stalls for exactly 60 seconds. The hardware is healthy, no preemptions occurred, and the network is uncongested. You eventually trace the stall to a cron job running on the Linux host OS of a single node.'
-question: 'What is the cron job doing that halts the entire cluster?'
+title: The Straggler Log Rotation
+scenario: Your 512-GPU training job occasionally stalls for exactly 60 seconds. The hardware is healthy, no preemptions occurred, and the network is uncongested. You eventually trace the stall to a cron job running on the Linux host OS of a single node.
+question: What is the cron job doing that halts the entire cluster?
 details:
   realistic_solution: 'The cron job runs `logrotate` on one node, which calls `sync()` or `fsync()` to flush log files to disk. If the logging volume is large, this can stall the filesystem I/O for up to 60 seconds, blocking the NCCL daemon''s progress thread on that node. Since AllReduce is a collective operation requiring all 512 GPUs to participate, the other 511 GPUs reach the synchronization barrier and wait. The entire cluster is held hostage by one node''s disk I/O. The fix: move log rotation to a separate filesystem, use async I/O, or schedule logrotate outside training windows.'
   common_mistake: |
@@ -23,12 +23,12 @@ details:
     - 989 TFLOPS peak compute.
 
     **Calculations:**
-    - Compute lost: 512 GPUs * 60s = 30,720 GPU-seconds (8.53 GPU-hours).
-    - Cost: 8.53 hours * $4.00 = ~$34 wasted per stall.
-    - Wasted compute: 8.53 hours * 3600 seconds/hour * 989 TFLOPS = ~30 ExaFLOPs.
+    - Idle time lost: 512 GPUs * 60s = 30,720 GPU-seconds = 8.53 aggregate GPU-hours.
+    - Cost: 8.53 GPU-hours * $4.00/GPU-hour = ~$34 wasted per stall.
+    - Peak compute capacity idled: 8.53 GPU-hours * 989 TFLOP/s per GPU = ~8,435 TFLOP/s-hours = ~8.4 PFLOP-hours.
 
     **Conclusion & Interpretation:**
-    - **Result: ~30 ExaFLOPs wasted (I/O-Bound)**. The global all-reduce barrier forces all 512 GPUs to idle due to a single node's I/O stall.
+    - **Result: 30,720 GPU-seconds, or about 8.4 PFLOP-hours of peak compute capacity, sit idle.** The global all-reduce barrier forces all 512 GPUs to wait due to a single node's I/O stall.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,11 +8,11 @@ competency_area: memory
 bloom_level: apply
 phase: inference
 title: 'KV-Cache: Fluency — Decode Throughput vs Context Length Trade-off on A17 Pro'
-scenario: 'For a 1B INT4 LLM on an NPU with 68 GB/s unified memory, you are evaluating autoregressive decode throughput at context lengths of 256, 1024, and 4096. The model has 24 layers, 8 KV heads, and a head dimension of 128.'
-question: 'How does KV cache bandwidth degradation affect decode throughput across 256, 1024, and 4096 context tokens?'
+scenario: For a 1B INT4 LLM on an NPU with 68 GB/s unified memory, you are evaluating autoregressive decode throughput at context lengths of 256, 1024, and 4096. The model has 24 layers, 8 KV heads, and a head dimension of 128.
+question: How does KV cache bandwidth degradation affect decode throughput across 256, 1024, and 4096 context tokens?
 details:
   realistic_solution: |
-    Autoregressive decode time per token is strictly bounded by memory bandwidth. While the model weight loading time remains constant per step, the KV cache read size grows linearly with sequence length, eventually dominating the memory bus and crushing throughput.
+    Autoregressive decode has a fixed per-token weight-traffic floor plus KV-cache traffic that grows linearly with context length. With these dimensions, the 1B INT4 weight traffic is about 7.35 ms per token at 68 GB/s. KV reads add about 0.36 ms at 256 tokens, 1.45 ms at 1024 tokens, and 5.78 ms at 4096 tokens, so estimated throughput falls from about 130 tok/s to 114 tok/s to 76 tok/s. The trend is what matters: longer context consumes more memory bandwidth each decode step, even if compute and scheduling overheads also contribute in production.
   common_mistake: |
     **The Pitfall:** Calculating only KV cache bandwidth while completely omitting the massive, static model weight loading overhead.
     **The Rationale:** Candidates tunnel-vision on the scaling context variable and forget the baseline cost of loading the full LLM weights per step.
@@ -21,17 +21,20 @@ details:
     **Assumptions & Constraints:**
     - 1B INT4 model = 500 MB.
     - Bandwidth = 68 GB/s.
-    - KV footprint = 24 * 2 * 8 * 128 * 2 bytes = 98.3 KB/token.
+    - KV footprint = 24 * 2 * 8 * 128 * 2 bytes = 98,304 bytes/token = 96.0 KiB/token.
 
     **Calculations:**
     - Weight load = 500 MB / 68 GB/s = 7.35ms.
-    - Context 256 KV = 25.2 MB (0.37ms).
-    - Total 256 = 7.72ms (128 tokens/sec).
-    - Context 4096 KV = 402 MB (5.91ms).
-    - Total 4096 = 13.26ms (75 tokens/sec).
+    - Context 256 KV = 24.0 MiB = 25.2 MB; KV traffic time = 0.36ms.
+    - Total 256 = 7.71ms (~130 tokens/sec).
+    - Context 1024 KV = 96.0 MiB = 100.7 MB; KV traffic time = 1.45ms.
+    - Total 1024 = 8.80ms (~114 tokens/sec).
+    - Context 4096 KV = 384.0 MiB = 402.7 MB; KV traffic time = 5.78ms.
+    - Total 4096 = 13.13ms (~76 tokens/sec).
+    - Crossover where KV bytes equal 500 MB weights: 500,000,000 / 98,304 = ~5086 tokens.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bandwidth-Bound**. KV cache fetches surpass model weight fetches exactly at 5086 tokens.
+    - **Result: Context-Dependent Bandwidth Cost**. KV cache traffic is below the weight-traffic floor at 256, 1024, and 4096 tokens, but it grows linearly and reaches the same byte count as the 500 MB model weight stream at about 5086 tokens.
 status: published
 provenance: imported
 requires_explanation: false

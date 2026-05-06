@@ -8,31 +8,33 @@ competency_area: deployment
 bloom_level: create
 phase: inference
 title: Architecting a Multi-Model On-Device AI Assistant
-scenario: You're designing an on-device AI assistant that must simultaneously support
-  wake word, ASR, a 3B parameter LLM, TTS, and real-time vision. All five models cannot
-  fit in device memory simultaneously.
-question: How should the system orchestrate and schedule the wake word, ASR, 3B LLM,
-  TTS, and vision models given the memory constraints?
+scenario: You're designing an on-device AI assistant that must simultaneously support wake word, ASR, a 3B parameter LLM, TTS, and real-time vision. All five models cannot fit in device memory simultaneously.
+question: How should the system orchestrate and schedule the wake word, ASR, 3B LLM, TTS, and vision models given the memory constraints?
 details:
-  realistic_solution: 'Design a **state-machine-driven model orchestrator** that loads
-    models on-demand based on the conversation state:'
-  common_mistake: '**The Pitfall:** Assuming all models can be kept permanently resident
-    in RAM.
+  realistic_solution: |
+    Design a state-machine-driven model orchestrator with explicit residency rules. The wake-word detector stays resident on the always-on DSP/NPU island. On wake, the scheduler loads ASR and keeps audio streaming buffers small; while ASR is decoding the first partial transcript, it prefetches the 3B LLM weights and allocates the KV cache. Once the final transcript is available, ASR is unloaded or demoted, the LLM becomes the foreground model, and TTS streams from a small resident decoder or loads only after the first LLM tokens arrive. Vision is event-gated: keep a lightweight detector or frame sampler resident, but load the full vision encoder only when the user asks a visual question or the sensor trigger is high confidence. ASR and the full vision encoder should not be resident with the LLM unless memory pressure is low; they share a scratch arena and are scheduled in mutually exclusive slots. The scheduler should support priorities, cancellation, and warm pools so an urgent wake/ASR path can evict vision or a stale LLM session before exceeding the app memory budget.
+  common_mistake: |
+    **The Pitfall:** Assuming all models can be kept permanently resident in RAM.
+    **The Rationale:** Engineers sum up weights and mathematically fit them within the 8 GB total RAM spec.
+    **The Consequence:** Ignoring OS overhead, activation buffers, and KV-caches, causing the OS to aggressively kill the app.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Safe peak app resident limit: 2.5 GB within an 8 GB phone after OS, UI, runtime buffers, and fragmentation.
+    - Wake-word model: 20 MB always resident on low-power island.
+    - ASR: 200 MB weights + 100 MB streaming buffers = 300 MB while listening.
+    - Quantized 3B LLM: 1.7 GB weights + 300 MB KV/activation arena = 2.0 GB while generating.
+    - Full vision encoder: 600 MB weights + 250 MB frame/activation arena = 850 MB when active.
+    - Storage bandwidth for cold loads: about 3 GB/s.
 
-    **The Rationale:** Engineers sum up weights and mathematically fit them within
-    the 8 GB total RAM spec.
+    **Calculations:**
+    - Wake + ASR state: 20 MB + 300 MB = 320 MB resident.
+    - LLM response state after ASR eviction: 20 MB + 2.0 GB + 150 MB TTS = 2.17 GB resident, under the 2.5 GB peak limit.
+    - Vision question state cannot keep everything resident: 20 MB + 2.0 GB LLM + 850 MB vision = 2.87 GB, so the scheduler must run vision first, cache compact embeddings, unload vision, then run the LLM.
+    - Cold-load ASR: 200 MB / 3 GB/s = 67 ms; cold-load LLM: 1.7 GB / 3 GB/s = 567 ms. Starting the LLM prefetch during about 600 ms of ASR streaming hides most of that load time.
+    - Perceived voice path: 50 ms wake confirmation + 600 ms ASR streaming/prefetch overlap + 45 ms first LLM token + 100 ms TTS startup = about 795 ms.
 
-    **The Consequence:** Ignoring OS overhead, activation buffers, and KV-caches,
-    causing the OS to aggressively kill the app.
-
-    '
-  napkin_math: "1. **Assumptions & Constraints:**\n   - Device total RAM: 8 GB (~4\
-    \ GB app budget safely).\n   - Peak resident memory limit: 2.5 GB.\n   - I/O Bandwidth:\
-    \ ~3 GB/s NVMe.\n2. **Calculations:**\n   - State transition loads: ASR (200 MB\
-    \ / 3 GB/s = 67 ms), LLM (1.7 GB / 3 GB/s = 567 ms).\n   - Total Perceived Latency:\
-    \ 50 ms (wake) + ~500 ms (streaming) + 200 ms (LLM pre-load) + 45 ms (first token)\
-    \ = ~800 ms.\n3. **Conclusion & Interpretation:**\n   - **Result: ~800 ms Latency\
-    \ (State-Machine Orchestration).**\n"
+    **Conclusion & Interpretation:**
+    - **Result:** The publishable answer is the scheduling policy, not a claim that all models fit. Keep wake word resident, overlap ASR with LLM prefetch, evict ASR before LLM generation, gate full vision, and serialize vision embeddings into the LLM path to stay under the 2.5 GB peak.
 status: published
 provenance: imported
 requires_explanation: true

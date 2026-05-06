@@ -8,10 +8,10 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: 'Model Format Conversion: Compare INT8 vs. INT4 CoreML Quantization on A17 Pro'
-scenario: A 1B-parameter LLM is being prepared for on-device deployment on A17 Pro (35 TOPS Neural Engine, 8GB). CoreML supports both INT8 (8 bits per weight) and INT4 (4 bits per weight) weight compression.
-question: How would you compare model size, inference latency, and accuracy for a 50-token generation task?
+scenario: A 1B-parameter LLM is being prepared for on-device deployment on A17 Pro (35 TOPS Neural Engine, 8GB). CoreML supports both INT8 (8 bits per weight) and INT4 (4 bits per weight) weight compression. For this estimate, assume decode is bandwidth-bound and the compressed weights are effectively read once per generated token.
+question: Under that bandwidth-bound decode assumption, how would you compare model size, per-token inference latency, 50-token decode latency, KV-cache headroom, and accuracy for INT8 versus INT4?
 details:
-  realistic_solution: 'INT8: 1B × 1 byte = 1GB model. INT4: 1B × 0.5 bytes = 500MB model. Decode BW-limited: INT8 bandwidth = 1GB/token. INT4 = 500MB/token. Neural Engine eff BW ~68 GB/s. INT8: 1/68 = 14.7ms/token. INT4: 0.5/68 = 7.35ms/token. Accuracy: INT4 PTQ causes ~1-2% accuracy drop on benchmarks vs INT8. For 50 tokens: INT8 735ms, INT4 367ms. INT4 2× faster, fits 500MB in 8GB with more headroom for KV cache.'
+  realistic_solution: 'INT8 weights are 1B × 1 byte = 1GB; INT4 weights are 1B × 0.5 bytes = 500MB. Under the explicit decode assumption that compressed weights are read once per generated token and the effective bandwidth is 68 GB/s, INT8 has a lower-bound TPOT of 1GB / 68GB/s = 14.7ms/token and INT4 has 0.5GB / 68GB/s = 7.35ms/token. For 50 generated tokens, decode time is about 735ms for INT8 and 368ms for INT4 before additional sampling, KV, and scheduler overhead. KV cache for 50 tokens is small relative to model weights, but INT4 frees about 500MB of RAM for longer context and avoids memory pressure. Accuracy is the tradeoff: INT4 post-training quantization often needs calibration or QAT and may lose roughly 1-2% on sensitive benchmarks compared with INT8.'
   common_mistake: |
     **The Pitfall:** Assuming INT4 is exactly 2× faster than INT8 overall.
     **The Rationale:** Candidates ignore the fact that the Neural Engine may dequantize INT4 to INT8 before compute.
@@ -21,14 +21,15 @@ details:
     - Model: 1B parameters. Generation length: 50 tokens.
     - A17 Pro Neural Engine bandwidth: 68 GB/s.
     - INT8 size: 1GB; INT4 size: 500MB.
+    - Decode model: compressed weights are read once per generated token.
 
     **Calculations:**
-    - Decode INT8: 1 GB / 68 GB/s = 14.7 ms/tok -> 735 ms for 50 tokens.
-    - Decode INT4: 0.5 GB / 68 GB/s = 7.35 ms/tok -> 367 ms for 50 tokens.
-    - KV cache at 50 tokens: ~20 MB.
+       - Decode INT8: 1 GB / 68 GB/s = 14.7 ms/tok -> 735 ms for 50 tokens.
+       - Decode INT4: 0.5 GB / 68 GB/s = 7.35 ms/tok -> 367 ms for 50 tokens.
+    - KV cache at 50 tokens is small compared with weights; if the model uses 32 layers, hidden 2048, FP16 KV, it is about 32 * 2 * 50 * 2048 * 2 bytes = 13MB.
 
     **Conclusion & Interpretation:**
-    - **Result: 367 ms latency for INT4 (Memory Bandwidth-Bound).** INT4 halves generation time and memory footprint.
+    - **Result: INT4 is about 500MB smaller and has a 7.35ms/token bandwidth lower bound versus 14.7ms/token for INT8.** The 2x latency improvement applies only under the stated per-token weight-read assumption; actual speedup may be smaller if dequantization, compute, or scheduler overhead dominates.
 status: published
 provenance: imported
 requires_explanation: false

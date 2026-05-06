@@ -11,24 +11,25 @@ title: 'Ethical LLM Deployment on H100s: Performance vs. Responsible AI'
 scenario: Your team is deploying a large-scale generative AI model for critical customer support interactions. It needs to process 10,000 requests per second with a p99 latency target of 200ms.
 question: How would you integrate guardrails, model cards, and impact assessments while meeting 10,000 RPS and 200 ms p99?
 details:
-  realistic_solution: 'Design a multi-layered guardrail system utilizing dedicated capacity or asynchronous processing. Develop a comprehensive, version-controlled model card. Implement a continuous impact assessment framework collecting telemetry on model behavior, integrated into the CI/CD pipeline.'
+  realistic_solution: Design a multi-layered guardrail system with fast synchronous checks on the 200 ms p99 path and asynchronous deeper review for logging, audits, and impact assessment. Keep model cards version-controlled with model, prompt, policy, data, evaluation, and known-limit metadata, and gate releases through impact-assessment signoff. Run safety classifiers on dedicated capacity sized from measured throughput rather than a fixed GPU count, with batching limits, backpressure, fallback policies, and telemetry for latency, false positives, false negatives, and subgroup outcomes.
   common_mistake: |
-    **The Pitfall:** Focusing solely on optimizing for inference performance and cost, treating responsible AI as an afterthought.
-    **The Rationale:** Engineers often treat guardrails as simple API calls without modeling the compute overhead of robust safety models.
-    **The Consequence:** Failing to allocate sufficient compute/storage for impact assessment, resulting in massive latency regressions.
+    **The Pitfall:** Focusing solely on the base model and ignoring the system architecture for guardrails and logging.
+    **The Rationale:** Engineers often treat guardrails as simple API calls without architecting asynchronous processing or dedicated (even if small) GPU pools.
+    **The Consequence:** Running guardrails synchronously on the main generation GPUs causes latency regressions that breach the strict 200ms p99 SLA.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Inference takes 100ms per request -> ~10 QPS per GPU.
-    - 1B param safety classifier requires ~2 TFLOPS/token.
-    - Checking 100 tokens = 200 TFLOPS/request.
+    - Base model capacity must sustain 10,000 RPS with p99 <= 200ms.
+    - If measured base-model throughput is 10 RPS/GPU at the required latency, base capacity is about 1,000 GPUs before redundancy.
+    - Guardrail classifier sizing must use measured tokens/request, batching, and achieved throughput, not parameter count alone.
 
     **Calculations:**
-    - Base GPUs: 10,000 / 10 = 1,000 GPUs.
-    - Guardrail throughput: ~5 req/s per GPU.
-    - Guardrail GPUs: 10,000 / 5 = 2,000 GPUs.
-    - Total GPUs: 1,000 + 2,000 = 3,000 GPUs.
-    - Data Logging: 10,000 QPS * 1 KB = 10 MB/s = ~25 TB/month.
+    - Base capacity example: 10,000 RPS / 10 RPS per GPU = 1,000 GPUs, then add regional and failure-domain headroom.
+    - Synchronous guardrails must fit inside the 200ms budget, so use cheap policy checks, prompt/output filters, cached allow/deny decisions, and a small classifier only when benchmarked p99 allows it.
+    - Asynchronous guardrails can run slower toxicity, privacy, jailbreak, red-team, and subgroup-fairness reviews without blocking the response path.
+    - Logging volume example: 10,000 RPS * 1 KB = 10 MB/s. Over 30 days, 10 MB/s * 2,592,000s = 25.9 TB decimal before replication, indexes, and retention overhead.
+    - Model-card and impact-assessment artifacts should be keyed by model/prompt/policy version so incidents and release gates can be audited without adding request-path latency.
 
     **Conclusion & Interpretation:**
-    - **Result: 2,000 extra GPUs (Compute-Bound)**. 2,000 dedicated GPUs needed just for guardrails.
+    - **Result: Architecture and Measurement Drive the SLA.** Keep only measured low-latency guardrails synchronous, move deeper governance checks asynchronous, and size dedicated guardrail capacity from benchmarked throughput rather than a misleading fixed GPU count.
 status: published
+provenance: imported

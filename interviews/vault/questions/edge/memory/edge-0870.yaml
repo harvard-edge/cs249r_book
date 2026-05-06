@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: edge-0870
 track: edge
-level: L6+
+level: L4
 zone: diagnosis
 topic: vram-budgeting
 competency_area: memory
@@ -11,7 +11,8 @@ title: OOM from Implicit Runtime Layout Transposes
 scenario: An edge gateway (4GB unified RAM) runs a 200MB FP16 Transformer model via an edge inference runtime. Theoretical peak activation memory is 120MB, yet inference crashes with an OOM error. Profiling reveals peak memory spikes to 3.5GB during self-attention layers.
 question: What causes the 3.5GB attention memory spike despite 120MB theoretical activations, and how would you fix it?
 details:
-  realistic_solution: The failure stems from the interaction between dynamic tensor shapes, the runtime's memory arena, and implicit layout conversions. The model was exported from PyTorch in NCHW layout, but the edge runtime's optimized matrix multiplication kernels (e.g., using specific DSP intrinsics or Tensor Cores) strictly require NHWC or blocked layouts. Because the model uses dynamic sequence lengths, the runtime compiler cannot perform a static end-to-end layout optimization pass. Instead, it dynamically injects explicit `Transpose` nodes before and after *every* MatMul in the attention blocks. The framework's memory planner must allocate separate buffers for the input, the transposed input, the output, and the transposed output simultaneously. With dynamic shapes, the memory arena cannot safely reuse memory across these layers and defaults to worst-case eager allocations, leading to massive OOM due to quadratic attention tensors being copied multiple times. The fix is to run an offline graph optimization pass to convert the entire model to NHWC before deployment, and provide a fixed-bucket shape profile so the runtime can statically plan and reuse memory arenas.
+  realistic_solution: The failure stems from the interaction between dynamic tensor shapes, the runtime's memory arena, and implicit layout conversions. The model was exported from PyTorch in NCHW layout, but the edge runtime's optimized matrix multiplication kernels (e.g., using specific DSP intrinsics or Tensor Cores) strictly require NHWC or blocked layouts. Because the model uses dynamic sequence lengths, the runtime compiler cannot perform a static end-to-end layout optimization pass. Instead, it dynamically injects explicit `Transpose` nodes before and after *every* MatMul in the attention blocks. The framework's memory planner must allocate separate buffers for the input, the transposed input, the output, and the transposed output simultaneously. With dynamic shapes, the memory arena cannot safely reuse memory across these layers and defaults to worst-case eager allocations, leading to massive OOM due to quadratic attention tensors being copied multiple times. The fix is to run an
+    offline graph optimization pass to convert the entire model to NHWC before deployment, and provide a fixed-bucket shape profile so the runtime can statically plan and reuse memory arenas.
   common_mistake: |
     **The Pitfall:** Assuming the OOM is caused by a memory leak or OS fragmentation.
     **The Rationale:** Engineers trust the theoretical activation footprint and blame the host environment rather than inspecting the runtime execution graph.
@@ -34,7 +35,7 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
+  - Reasoning competency, knowledge area, and mode are marked as 'None'; these should be classified appropriately.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

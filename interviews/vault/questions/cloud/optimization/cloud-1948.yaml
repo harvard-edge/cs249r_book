@@ -18,17 +18,18 @@ details:
     **The Consequence:** The team wastes massive engineering hours pruning the model architecture and quantizing weights to fit in smaller VRAM blocks, achieving absolutely nothing since the host's 256GB RAM keeps crashing during JIT translation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Dynamic lengths: 128 to 8192 tokens.
+    - Dynamic lengths: 128 to 8192 tokens with data-dependent branches.
     - 256GB host RAM limit.
+    - Each unique shape/control-flow trace can require a separate compiled graph and optimizer IR.
 
     **Calculations:**
-    - Dynamic Matrix: Sequence varying 128 to 8192 yields 8,065 distinct shapes.
-    - Compiler Footprint: 50MB of host memory per unique shape IR.
-    - Combinatorial Explosion: 8,065 * 50MB = 403 GB RAM (Exceeds 256GB host).
-    - Bucketing: 5 fixed sizes * 50MB = 250 MB.
+    - If production traffic exposes 2,000 unique length/branch traces and each graph IR averages 150MB, host compilation demand is 2,000 * 150MB = 300GB.
+    - 300GB exceeds the 256GB host limit before codegen workspaces and compiler overhead.
+    - Bucketing lengths to {512, 1024, 2048, 4096, 8192} bounds the shape count to 5.
+    - Using structured control flow prevents Python loop unrolling from multiplying graph count; 5 * 150MB = 750MB of shape IR before normal compiler overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 250 MB footprint (Host-RAM-Bound)**. Bucketing eliminates the JIT compilation crash.
+    - **Result: Host-RAM-Bound.** The failure is caused by unbounded graph specialization on the host; bucketing plus compiler-native control flow bounds the compiled graph set and keeps memory far below 256GB.
 status: published
 provenance: imported
 requires_explanation: false

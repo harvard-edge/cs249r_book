@@ -7,26 +7,30 @@ topic: recommendation-systems-engineering
 competency_area: architecture
 bloom_level: understand
 phase: inference
-title: Precision vs Recall Tradeoff in Multi-Stage Retrieval Pipeline
-scenario: 'A 3-stage recommendation pipeline (retrieval -> light rank -> heavy rank) outputs 20 final items from 1M candidates. An SRE notices that 30% of the 20 final items were not in the top 10K retrieved by the retrieval stage. This means the retrieval stage has 70% recall @10K.'
-question: Is this acceptable?
+title: Retrieval Recall at 10K in Multi-Stage Recommendations
+scenario: A 3-stage recommendation pipeline (retrieval -> light rank -> heavy rank) outputs 20 final items from 1M candidates. An SRE notices that 30% of the 20 final items were not in the top 10K retrieved by the retrieval stage. This means the retrieval stage has 70% recall @10K.
+question: Given a launch gate of under 1% NDCG loss versus 50K oracle retrieval, is 70% recall@10K sufficient?
 details:
-  realistic_solution: 'Interpreting retrieval recall: if 70% recall @10K means 30% of the optimal final-20 items are missed by retrieval, the question is whether those missed items would have changed the final ranking. If the missed items are marginally relevant (rank 21-50 in the oracle ranking), the impact on final quality is small. If missed items include the top-1 item in 10% of queries, that is a severe quality failure. Analysis approach: (1) Compute recall for different K values (100, 1K, 10K). If recall @1K = 50% and recall @10K = 70%, the recall curve is shallow — need a better retrieval model. (2) Quality impact: run offline experiment with oracle retrieval (send top-50K to ranker). Compare final NDCG vs 10K retrieval NDCG. If delta < 1%: 70% recall is acceptable. (3) In practice: 70% recall @10K is considered low for production systems. Target: >90% recall @1K for a well-tuned two-tower model.'
+  realistic_solution: Do not launch on recall@10K alone. The stated gate is final-quality loss, so run the heavy ranker with normal 10K retrieval and with a 50K oracle-style candidate set, then compare NDCG and the relevant business metric. If the 10K pipeline is within 1% NDCG loss and guardrail metrics are neutral, 70% recall@10K can be accepted temporarily while retrieval is improved. If the NDCG loss is 1% or more, or the missing items include highly ranked oracle winners, the retrieval stage is blocking launch. The follow-up work is to inspect recall@1K, recall@10K, and recall@50K curves by segment, because 70% recall@10K with a flat recall curve usually means the retrieval model or indexing features need improvement.
   common_mistake: |
     **The Pitfall:** Treating retrieval recall as an isolated system-level metric.
     **The Rationale:** Assuming high recall directly translates to high final ranking quality without evaluating the full pipeline's final metric (NDCG).
     **The Consequence:** Wasting resources optimizing retrieval recall when missed items have negligible impact on final ranking.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Oracle experiment improves final NDCG by 2%. Revenue correlates: 2% NDCG -> 0.5% CTR increase.
-    - Scale: 100K QPS, $0.50 CPC.
-    
+    - The heavy ranker produces 20 final items.
+    - Retrieval recall @10K is 70%, so 30% of the heavy ranker's chosen final items were unavailable to the normal pipeline.
+    - Offline oracle retrieval can pass a larger candidate set, such as 50K, to estimate quality loss.
+
     **Calculations:**
-    - Revenue Impact: 100K * 0.005 * $0.50 = $250/sec = $21.6M/day.
-    - Training Cost: 1 GPU-week = ~$500.
-    
+    - Missed final items per request: 20 * 30% = 6 items.
+    - Current retrieved final items per request: 20 - 6 = 14 items.
+    - Launch check: run the same rankers with 10K retrieval and with 50K oracle-style retrieval, then compute NDCG loss = (NDCG_50K - NDCG_10K) / NDCG_50K.
+    - Decision rule: launch only if NDCG loss < 1% and guardrail metrics are neutral; otherwise improve retrieval before launch.
+    - Interpretation of the six missed items depends on rank position: missing six low-utility tail items may pass the NDCG gate, but missing top-ranked oracle items usually fails it.
+
     **Conclusion & Interpretation:**
-    - **Result: $21.6M/day Revenue Loss (Quality-Bound)**. The massive revenue impact trivially justifies the $500 training cost to improve model recall.
+    - **Result: Gate on final quality, not recall alone.** At 70% recall@10K, the system excludes about 6 of the oracle final-20 items per request; it is sufficient only if the measured 10K-vs-50K NDCG loss stays under 1%.
 status: published
 provenance: imported
 requires_explanation: false

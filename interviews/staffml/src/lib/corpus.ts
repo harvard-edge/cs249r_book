@@ -521,18 +521,20 @@ function shouldUseStaticDetails(): boolean {
 
 async function getStaticFullDetail(id: string, summary: Question): Promise<Question | undefined> {
   if (!_staticDetailsCache) {
-    // Function-constructor dynamic import: hides the path from Turbopack's
-    // static analyzer so prod builds don't require corpus.json to exist.
-    // corpus.json is materialized on disk only when a contributor runs
-    // `vault build --local-json` locally with NEXT_PUBLIC_VAULT_FALLBACK=
-    // static. If the file is missing at runtime, the import rejects and
-    // the caller surfaces an error to the UI.
-    const dynImport = new Function(
-      "p",
-      "return import(p)",
-    ) as (p: string) => Promise<{ default: Question[] }>;
-    const mod = await dynImport("../data/corpus.json");
-    _staticDetailsCache = new Map(mod.default.map((q) => [q.id, q]));
+    // Fetch corpus.json from /data/corpus.json (served from public/). This
+    // file is written by `vault build --local-json` and exists only in local
+    // dev. Production deploys neither emit nor bundle it; the worker fetch
+    // path handles those. If the file is missing at runtime the fetch fails
+    // and the caller surfaces an error to the UI.
+    const res = await fetch("/data/corpus.json");
+    if (!res.ok) {
+      throw new Error(
+        `Static corpus.json not available at /data/corpus.json (status ${res.status}). ` +
+        "Run \`vault build --local-json\` from the repo root to regenerate it.",
+      );
+    }
+    const data = (await res.json()) as Question[];
+    _staticDetailsCache = new Map(data.map((q) => [q.id, q]));
   }
   const full = _staticDetailsCache.get(id);
   if (!full) return undefined;

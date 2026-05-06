@@ -9,25 +9,31 @@ bloom_level: analyze
 phase: inference
 title: The On-Device LLM Feasibility Check
 scenario: Your PM saw Apple's on-device LLM demo and wants you to ship a 3B parameter chatbot in your app by next quarter.
-question: Walk through the feasibility analysis — memory, compute, latency, and battery — to assess whether a 3B on-device chatbot can meet phone constraints.
+question: Walk through the feasibility analysis — memory, compute, latency, and battery — to assess whether a 3B on-device chatbot can meet phone constraints?
 details:
-  realistic_solution: 'Walk through each constraint: Memory: ~1.5 GB (INT4 weights) + ~0.2 GB quantization metadata ≈ 1.7 GB ✓. Decode: ~29ms/token → ~34 tok/s ✓. Prefill: 88ms for 512 tokens ✓. Battery: 1% per ~26 conversations ✓. App size: 1.5 GB model (download on WiFi, not in app bundle). Feasible'
+  realistic_solution: |
+    Walk through each constraint and keep the conclusion conditional. INT4 weights are about 1.5 GB, but runtime memory also includes quantization metadata, KV cache, activations, and framework buffers, so a realistic short-context budget is closer to 2.0-2.4 GB. Decode latency cannot be proven from weight bandwidth alone; use benchmarked tok/s on the target NPU/GPU and account for thermal throttling. A 3B chatbot can be feasible for short contexts if the model is aggressively quantized, downloaded outside the app bundle, uses a bounded context window, and maintains acceptable sustained performance. It is not automatically feasible for long conversations or continuous use.
   common_mistake: |
     **The Pitfall:** Dismissing the request entirely by stating "3B parameters is too big for a phone — it's impossible."
     **The Rationale:** Engineers often anchor on FP16 or FP32 sizes, assuming a 3B model requires 6GB+ of RAM, which exceeds mobile app memory limits.
     **The Consequence:** The PM is given an overly pessimistic assessment, missing the opportunity to leverage INT4 quantization and NPU offloading which makes it feasible, albeit constrained.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Model: 3B parameters, INT4 quantization (0.5 bytes/param).
-       - Hardware: A17 Pro (51.2 GB/s memory bandwidth, 35 TOPS, 1.5W NPU power).
-       - Phone Battery: ~40,000 Joules.
-    2. **Calculations:**
-       - Memory: 3B * 0.5 bytes = 1.5 GB weights.
-       - Decode Time (Memory-Bound): 1.5 GB / 51.2 GB/s = 29.3ms/token (~34.1 tok/sec).
-       - Prefill Compute: 512 tokens * 3B params * 2 OPS/MAC = 3.07 TOPS. At 35 TOPS, prefill = 3.07 / 35 = 87.7ms.
-       - Energy: 1.5W * 10s inference = 15 Joules. 1% battery = 400J (400J / 15J ≈ 26 chats).
-    3. **Conclusion & Interpretation:**
-       - **Result: Feasible. The model meets memory, latency, and power constraints under INT4 quantization.**
+    **Assumptions & Constraints:**
+    - Model: 3B parameters, INT4 quantization (0.5 bytes/param).
+    - Runtime budget must include weights, quantization metadata, KV cache, activations, and framework buffers.
+    - Short chat context: 1,024 tokens, with KV cache around 0.25-0.5 GB depending on architecture and cache precision.
+    - Sustained NPU/GPU power during generation: roughly 1.5-3W, workload-dependent.
+
+    **Calculations:**
+    - Weights: 3B * 0.5 bytes = 1.5 GB.
+    - Metadata/scales plus allocator overhead: roughly 0.2-0.4 GB.
+    - KV cache and activations for a short context: roughly 0.3-0.5 GB.
+    - Working memory estimate: 1.5 GB + 0.2-0.4 GB + 0.3-0.5 GB = about 2.0-2.4 GB.
+    - Weight-streaming lower bound: 1.5 GB / 51.2 GB/s = 29 ms/token, but real decode latency may be higher or lower depending on cache reuse, NPU kernels, memory stalls, and thermal limits.
+    - Energy example: 2W sustained for a 10s answer = 20J. A 40,000J battery has about 400J per 1%, so this is about 0.05% battery per short answer before display, radio, and thermal overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Conditionally feasible.** A 3B INT4 chatbot can fit and feel responsive for short contexts on a high-end phone, but the release decision depends on measured sustained tok/s, bounded context length, memory headroom, and thermal behavior rather than weights-only math.
 status: published
 provenance: imported
 requires_explanation: false

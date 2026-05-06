@@ -9,9 +9,10 @@ bloom_level: evaluate
 phase: inference
 title: 'Kernel Fusion: Evaluate Quantized Attention Fusion on A17 Pro'
 scenario: 'You are evaluating two attention implementations for a 3B LLM on an A17 Pro: (A) FP16 attention with no fusion, and (B) INT8 quantized attention with QK^T+softmax+V fusion for a 512-token sequence.'
-question: 'How do FP16 unfused attention and INT8 fused attention compare for memory, latency, and accuracy?'
+question: How do FP16 unfused attention and INT8 fused attention compare for memory, latency, and accuracy?
 details:
-  realistic_solution: 'Attention memory: QK^T matrix = seq² × heads × bytes. For short sequences (512), this may fit in L2 cache. By leveraging FlashAttention-style SRAM fusion, the INT8 fused implementation eliminates the need to materialize the QK^T matrix in unified memory, drastically reducing the bandwidth requirement.'
+  realistic_solution: |
+    FP16 unfused attention materializes larger Q, K, V, score, and output tensors, so it uses more memory traffic and may pay extra launch or graph-boundary overhead. INT8 fused attention reduces Q/K/V bytes and avoids writing the full QK^T score matrix to unified memory, so latency should usually improve when attention is memory-bound; the release decision should be based on measured p50/p95 latency for the same sequence length, not TOPS alone. The tradeoff is numerical: INT8 attention can change softmax scores and value accumulation, so accept it only if perplexity, task accuracy, and long-context regression tests stay within the product's quality budget.
   common_mistake: |
     **The Pitfall:** Assuming INT8 attention merely provides a 2x compute speedup over FP16.
     **The Rationale:** Engineers scale TOPS linearly with precision without analyzing the memory bandwidth bottlenecks of the attention matrix.
@@ -22,11 +23,16 @@ details:
        - A17 Pro ANE bandwidth: ~68 GB/s.
        - 28 attention layers.
     2. **Calculations:**
-       - (A) FP16 Unfused: Reads Q, K, V (12 MB) + writes QK^T (16.8 MB) + reads QK^T (16.8 MB) + writes output (4 MB) = 49.6 MB per layer. At 68 GB/s = 0.73 ms.
-       - (B) INT8 Fused: Reads Q, K, V (6 MB) + writes output (4 MB) = 10 MB per layer. At 68 GB/s = 0.15 ms.
-       - Total latency: (A) 28 * 0.73 ms = 20.4 ms vs (B) 28 * 0.15 ms = 4.2 ms.
+       - Per-layer Q, K, V elements: 512 * 32 * 128 * 3 = 6,291,456 elements.
+       - FP16 Q/K/V bytes: 6,291,456 * 2 = ~12.6 MB.
+       - QK^T score elements: 32 * 512 * 512 = 8,388,608 elements.
+       - FP16 score matrix write + read if materialized: 8,388,608 * 2 bytes * 2 = ~33.6 MB.
+       - FP16 output write: 512 * 32 * 128 * 2 = ~4.2 MB.
+       - Approximate FP16 unfused traffic for these tensors: 12.6 + 33.6 + 4.2 = ~50.4 MB/layer, excluding cache effects and other reads.
+       - INT8 fused attention can read Q/K/V at roughly half the bytes for quantized tensors and avoid materializing the 33.6 MB score read/write path, but it may still need scales, dequantization, and higher-precision accumulation.
+       - Decision criterion: choose INT8 fused attention only if measured latency improves at seq=512 and quality regression is within the model release threshold.
     3. **Conclusion & Interpretation:**
-       - **Result: 4.9x speedup (Memory Bandwidth-Bound vs SRAM Fused).**
+       - **Result: Lower Memory Traffic, Likely Lower Latency, Accuracy Risk.** INT8 fused attention removes the largest materialized attention buffer in this estimate and should reduce latency on a memory-bound mobile runtime, but it ships only if measured latency improves and attention-quality regressions stay within tolerance.
 status: published
 provenance: imported
 requires_explanation: false

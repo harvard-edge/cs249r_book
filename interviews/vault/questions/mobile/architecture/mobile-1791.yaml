@@ -11,25 +11,31 @@ title: Multi-Task Model Specification for On-Device AI Assistant on A17 Pro
 scenario: You need to specify the architecture of an on-device AI assistant for iPhone 15 Pro that must handle speech recognition (streaming, <200ms latency), intent classification (50ms), and response generation (LLM, 10-15 tok/s) with a total memory budget of strictly 1.5GB.
 question: Which model sizes, quantization levels, and execution units fit ASR, intent, and LLM generation in 1.5 GB on iPhone 15 Pro?
 details:
-  realistic_solution: 'Speech recognition: Whisper-small (244M params) → INT4 = 122MB, runs on ANE. Streaming: chunk-based (1s windows), ANE throughput = 35 TOPS, Whisper-small 2.3 GFLOP/s = 0.066ms chunk → well within 200ms real-time. Intent classification: lightweight BERT-mini (11M params) INT8 = 11MB, runs on ANE concurrently. Response LLM: Phi-2 2.7B INT4 = 1.35GB — large but fits budget. Execution: Whisper on ANE (streaming background), intent on ANE (post-ASR, 50ms), LLM on CPU/ANE hybrid (decode). Pipeline: ASR feeds intent feeds LLM. No model is running simultaneously at full capacity.'
+  realistic_solution: |
+    A fitting architecture should use a small streaming ASR model, a tiny intent classifier, and a sub-2B response model rather than trying to keep Whisper-small plus Phi-2 resident. One concrete fit is a ~40M streaming ASR encoder at INT8 on the Neural Engine (~40 MB weights), a ~10M intent model at INT8 on the Neural Engine (~10 MB), and a ~1.1B LLM at 4-bit on CPU/GPU or ANE where operator support is proven (~620 MB weights). Reserve roughly 250 MB for KV cache at the chosen context cap, 250 MB for Core ML/runtime buffers and activations, and 100 MB for tokenizers and glue code. That totals about 1.27 GB, leaving about 230 MB margin inside 1.5 GB; larger LLMs such as Phi-2 INT4 do not fit once runtime memory is counted.
   common_mistake: |
     **The Pitfall:** Designing three separate full-size models that compete for memory simultaneously.
     **The Rationale:** Treating each pipeline step in isolation rather than optimizing for the system's shared memory budget.
     **The Consequence:** The combined memory footprint causes severe OOM crashes or massive latency from page faults.
   napkin_math: |
     **Assumptions & Constraints:**
-    - iPhone 15 Pro, strictly 1.5GB total memory budget.
-    - ASR, Intent, and LLM models.
+    - iPhone 15 Pro, strictly 1.5GB total resident memory budget.
+    - ASR target: streaming model under 200 ms.
+    - Intent target: 50 ms.
+    - LLM target: 10-15 tok/s with a capped context.
 
     **Calculations:**
-    - Whisper-small INT4 = 122MB.
-    - BERT-mini INT8 = 11MB.
-    - Phi-2 INT4 = 1350MB.
-    - Total = 122MB + 11MB + 1350MB = 1483MB.
-    - Latency: ASR (200ms) + intent (50ms) + first token (300ms) = 550ms response start.
+    - ASR: 40M INT8 = about 40 MB weights.
+    - Intent: 10M INT8 = about 10 MB weights.
+    - LLM: 1.1B 4-bit with group metadata = about 620 MB weights.
+    - KV cache at the capped context: about 250 MB.
+    - Core ML/runtime buffers and activations: about 250 MB.
+    - Tokenizers and app glue: about 100 MB.
+    - Total resident estimate = 40 + 10 + 620 + 250 + 250 + 100 = 1270 MB.
+    - Headroom = 1500 MB - 1270 MB = 230 MB.
 
     **Conclusion & Interpretation:**
-    - **Result: 1483MB (Memory-Capacity Bound)**. Total fits the budget of 1500MB without simultaneous execution.
+    - **Result: a small ASR + tiny intent + 1.1B 4-bit LLM can fit.** Keep ASR and intent on the Neural Engine, run LLM decode on the best measured CPU/GPU/ANE path, cap context, and reject the larger Phi-2-style stack because it leaves no resident-memory headroom.
 status: published
 provenance: imported
 requires_explanation: true

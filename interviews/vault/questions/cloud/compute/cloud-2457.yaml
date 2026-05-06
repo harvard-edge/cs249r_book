@@ -17,9 +17,18 @@ details:
     **The Rationale:** Caching saves massive compute time immediately, blinding engineers to memory constraints.
     **The Consequence:** Ignoring that persistent cache blocks consume VRAM permanently, lowering the available pool for dynamic generation and peak batch sizes.
   napkin_math: |
-    1. **Assumptions & Constraints:** 1500 tokens, 70B model, 320 KB/token footprint. Cluster load = 200 QPS.
-    2. **Calculations:** Memory Cost = 1500 tokens × 320 KB/token = 480 MB VRAM per replica. Compute Saved = 1500 tokens × 70B params × 2 FLOPs = 210 TFLOPs per request. Total Savings at 200 QPS = 210 TFLOPs × 200 = 42 PFLOPs of cluster compute.
-    3. **Conclusion & Interpretation:** **Result: 42 PFLOPs saved globally offsets 480 MB VRAM cost. Compute-Bound without caching.**
+    1. **Assumptions & Constraints:**
+       - Shared prefix length: 1500 tokens.
+       - Llama-3-70B-style KV layout: 80 layers, 8 KV heads, 128 head_dim, FP16.
+       - Cluster load: 200 QPS.
+    2. **Calculations:**
+       - KV footprint per token = 2 (K,V) * 80 layers * 8 KV heads * 128 head_dim * 2 bytes = 327,680 bytes ≈ 320 KiB/token.
+       - Prefix-cache memory cost = 1500 * 327,680 bytes = 491,520,000 bytes ≈ 492 MB per replica.
+       - The cached KV represents the output of the full 1500-token prefix prefill, including attention over the prefix and layer MLP/projection work.
+       - Prefix caching avoids recomputing that shared prefix on cache hits; the exact FLOPs saved depend on model architecture, implementation, and prompt batching, so it should be measured from profiler counters rather than inferred from a simple parameter-count formula.
+       - At 200 QPS and high prefix-cache hit rate, even a millisecond-scale prefill saving per request becomes a large fleet-level throughput gain; the 492 MB persistent VRAM cost is the concrete capacity tradeoff to budget per replica.
+    3. **Conclusion & Interpretation:**
+       - **Result: Compute-Memory Tradeoff.** Prefix caching can remove a large amount of repeated prefill work, but it consumes persistent VRAM per replica and the two resources should be evaluated separately against throughput, batch-size, and cache-hit-rate targets.
 status: published
 provenance: imported
 requires_explanation: false

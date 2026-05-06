@@ -9,22 +9,29 @@ bloom_level: analyze
 phase: inference
 title: 'Edge Queueing Theory Diagnosis: Jetson Orin Pipeline Latency Spike'
 scenario: 'A Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W) autonomous drone shows intermittent 500ms latency spikes on its obstacle detection pipeline (normal P50: 15ms, SLO: 50ms). Average GPU utilization is 35%. The spikes correlate with IMU data logging every 500ms.'
-question: 'What root cause explains the 500 ms obstacle-detection spikes despite 35% GPU utilization, and how much latency can the fix remove?'
+question: What root cause explains the 500 ms obstacle-detection spikes despite 35% GPU utilization, and how much latency can the fix remove?
 details:
-  realistic_solution: 'Memory bus contention caused by DMA burst writes to eMMC. The OS flushes the IMU data to flash in 32MB bursts. During the eMMC write, the shared LPDDR5 bus stalls the GPU memory requests. Fix: use asynchronous DMA with pinned memory or a separate DMA controller to eliminate the 300ms stall.'
-  common_mistake: 'Blaming the GPU because it is running the inference model, leading engineers to waste time optimizing the inference model or TensorRT execution contexts instead of fixing the I/O bottleneck.'
+  realistic_solution: The root cause is synchronous storage I/O and memory-bus contention, not GPU compute. The IMU samples are small, but the logger or filesystem flushes dirty pages/journal data to eMMC in a much larger 32MB burst every 500ms. At 100MB/s that burst occupies the memory/storage path for about 320ms, starving GPU memory requests and causing a large part of the 500ms obstacle-detection spike. Fixing the logger with asynchronous buffered writes, pinned memory, lower flush granularity, or a separate DMA/storage path can remove the computed 320ms blocking component; if the synchronous flush is the only spike source, it can reduce the observed 500ms spike back near the 15ms baseline, removing roughly 485ms end-to-end.
+  common_mistake: |
+    **The Pitfall:** Blaming the GPU because it is running the inference model.
+    **The Rationale:** Engineers instinctively assume the inference processor is at fault when observing latency spikes.
+    **The Consequence:** Time is wasted optimizing the inference model or TensorRT execution contexts instead of fixing the actual I/O bottleneck.
   napkin_math: |
     **Assumptions & Constraints:**
-    - IMU logging: 500ms * 1kHz * 24 bytes = 12KB data.
-    - SD card write: OS flushes 32MB blocks. eMMC bandwidth = 100MB/s.
+    - IMU logging payload: 500ms * 1kHz * 24 bytes = 12KB data.
+    - Filesystem/eMMC behavior: small synchronous writes trigger a dirty-page or journal flush in a 32MB burst.
+    - eMMC bandwidth = 100MB/s.
     - GPU inference time: 14ms per frame.
+    - Observed spike: 500ms, normal P50: 15ms.
 
     **Calculations:**
-    - Burst time: 32MB / 100MB/s = 320ms.
-    - Missed frames queued behind DMA: 320ms / 14ms ≈ 22 frames.
+    - IMU payload alone is only 12KB, so it cannot explain a 500ms stall by bandwidth.
+    - Blocking flush time = 32MB / 100MB/s = 320ms.
+    - Remaining observed spike above the computed flush can come from queued frames, scheduler delay, and recovery after the blocked memory path.
+    - Maximum observed latency reduction if the synchronous flush path is eliminated = 500ms - 15ms ≈ 485ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 320ms Stall (I/O-Bound)**. Fixing the DMA contention by logging asynchronously entirely eliminates the 320ms memory bus stall.
+    - **Result: at least a 320ms removable I/O stall, and up to about 485ms end-to-end reduction if the flush is the sole spike source.** The fix should remove synchronous eMMC flush contention from the inference critical path.
 status: published
 provenance: imported
 requires_explanation: false

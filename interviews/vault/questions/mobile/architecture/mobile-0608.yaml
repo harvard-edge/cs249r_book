@@ -11,24 +11,25 @@ title: The Streaming ASR Trade-off
 scenario: You are building live captions for a video calling app. Your team is debating between Whisper-small (244M params, non-streaming) and a custom RNN-T model (30M params, streaming). The PM demands 'the best accuracy' and points to Whisper's benchmark scores.
 question: Why might the smaller RNN-T model be the right choice for live mobile captions despite lower benchmark accuracy?
 details:
-  realistic_solution: 'Whisper is a purely sequence-to-sequence transformer that mandates caching 30-second audio chunks. For real-time mobile captions, this inherently enforces a multi-second latency floor, traps 488 MB in RAM permanently, and induces extreme 5W compute spikes. RNN-T processes streaming frames continuously, eliminating the temporal buffer and stabilizing the thermal envelope.'
+  realistic_solution: Whisper is a sequence-to-sequence transformer optimized around chunked transcription, so it can impose a chunking latency floor and a much larger mobile memory footprint than its weights alone. The 244M FP16 weights are about 488MB before activations, audio buffers, decoder state, KV/cache-like runtime buffers, and framework overhead. RNN-T processes streaming frames continuously, so it can deliver partial captions with much lower perceived latency and a smaller steady-state footprint. The smaller model may be the right product choice even with lower benchmark accuracy, though accuracy and language coverage still matter.
   common_mistake: |
     **The Pitfall:** Blindly selecting the model with the highest cloud benchmark accuracy without analyzing on-device mechanics.
     **The Rationale:** Ignoring strict mobile constraints regarding memory pinning, thermal spiking, and the definition of "real-time."
     **The Consequence:** Shipping an unworkable feature with massive latency delays, severe thermal throttling, and background app evictions due to memory bloat.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Whisper-small: 244M params (FP16), 30s chunk requirement, 5W peak burst.
-    - RNN-T: 30M params (FP16), streaming (200ms latency), 0.5W continuous.
+    - Whisper-small: 244M params (FP16), chunked/non-streaming deployment behavior.
+    - RNN-T: 30M params (FP16), streaming with ~200ms partial-result latency.
+    - Runtime memory includes weights plus activations, buffers, decoder state, and framework overhead.
 
     **Calculations:**
-    - Whisper RAM Footprint: 244M * 2 bytes = 488 MB.
-    - RNN-T RAM Footprint: 30M * 2 bytes = 60 MB.
-    - Whisper Average Power: 5W peak * 10% compute duty cycle = 0.5W avg.
-    - RNN-T Average Power: 0.5W peak * 100% compute duty cycle = 0.5W avg.
+    - Whisper weight size: 244M * 2 bytes = 488 MB before runtime overhead.
+    - RNN-T weight size: 30M * 2 bytes = 60 MB before runtime overhead.
+    - Weight-memory delta: 488 MB - 60 MB = 428 MB, and the total runtime delta is likely larger once chunk buffers and activations are included.
+    - Latency comparison: chunked Whisper can require waiting on multi-second audio windows, while streaming RNN-T can emit partial captions around ~200ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 60 MB (Latency-Bound)**. The RNN-T is strictly superior for mobile systems; it reduces latency by 150x and frees 428 MB of RAM while enforcing an identical thermal average.
+    - **Result: Streaming latency and footprint dominate.** RNN-T is often the better mobile live-caption choice because it trades some benchmark accuracy for lower latency, smaller memory pressure, and steadier resource use. The math supports a large weight-footprint advantage, not a proof of identical thermal load or strict superiority in every product setting.
 status: published
 provenance: imported
 requires_explanation: false

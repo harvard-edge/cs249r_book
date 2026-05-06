@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: both
 title: Activation Checkpointing Granularity Trade-off for 405B Model Training on H100
 scenario: Training Llama-3-405B on 512 GPUs. Without activation checkpointing, peak activation memory per GPU exceeds 80GB. With full checkpointing, recomputation overhead is 33%. With selective checkpointing, recomputation is 15%.
-question: Analyze the memory-compute trade-off and determine whether you should use full or selective activation checkpointing.
+question: Analyze the memory-compute trade-off and determine whether you should use full or selective activation checkpointing?
 details:
-  realistic_solution: 'Full checkpointing: save only layer inputs, recompute all activations in backward. Saves: all intermediate activations per layer (~4GB × 128 layers / 512 GPUs = 1GB). Cost: 33% more FLOPs. Selective checkpointing (checkpoint only attention): attention activations are large (seq²×heads) and expensive to recompute. MLP activations are small and cheap. Strategy: checkpoint attention (save softmax output), don''t checkpoint MLP. Memory savings: attention activations: 32 heads × 8192² × 2B = 4GB per layer → with checkpointing saves 4GB per layer. MLP activations: 8192×32768×2B = 536MB per layer — recompute. Selective saves attention activation (60% of savings) at 15% recomputation cost vs full checkpointing 100% savings at 33% cost. Selective is 33% more compute-efficient per memory saved.'
+  realistic_solution: Use selective activation checkpointing if the memory target can be met, because it buys most of the activation-memory relief at much lower recomputation cost. Full checkpointing saves the full intermediate activation set but costs 33% extra compute. Selective checkpointing saves about 60% of the activation memory at 15% extra compute by checkpointing the high-memory components and avoiding unnecessary recomputation of cheaper components. The efficiency ratio is 100/33 = 3.03 units of memory saved per compute-overhead point for full checkpointing versus 60/15 = 4.0 for selective checkpointing. Selective is therefore 4.0/3.03 = 1.32x, or about 32%, more compute-efficient per unit of activation memory saved. If selective does not fit within 80GB, then fall back to full checkpointing; otherwise selective is the clear recommendation.
   common_mistake: |
     **The Pitfall:** Applying uniform full checkpointing without recognizing component differences.
     **The Rationale:** Candidates assume all layers or components have similar recomputation costs and memory footprints.
@@ -22,12 +22,12 @@ details:
     - Selective checkpointing (attention only): 15% FLOPs overhead, saves ~60% of activation memory.
 
     **Calculations:**
-    - Full Efficiency Ratio: 100% savings / 33% overhead = 3.03% memory saved per % compute.
-    - Selective Efficiency Ratio: 60% savings / 15% overhead = 4.0% memory saved per % compute.
+    - Full Efficiency Ratio: 100 units saved / 33 overhead points = 3.03 memory-saved units per overhead point.
+    - Selective Efficiency Ratio: 60 units saved / 15 overhead points = 4.0 memory-saved units per overhead point.
     - Efficiency Gain: 4.0 / 3.03 = 1.32 (32% more efficient).
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Efficiency-Bound**. Selective checkpointing is 32% more compute-efficient per memory byte saved, prioritizing large attention tensors over cheap MLP layers.
+    - **Result: Selective checkpointing is preferred when it fits**. It is about 32% more compute-efficient per unit of activation memory saved; use full checkpointing only if selective checkpointing still exceeds the per-GPU memory budget.
 status: published
 provenance: imported
 requires_explanation: false

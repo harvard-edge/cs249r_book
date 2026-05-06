@@ -9,14 +9,14 @@ bloom_level: create
 phase: both
 title: H100 Data Loading Pipeline Creation
 scenario: A GPU requires 5000 images/sec to saturate its tensor cores. Images are stored as 150KB JPEGs on NVMe drives.
-question: Design the data pipeline throughput requirements for storage read, CPU decoding, and PCIe Gen5 transfer to prevent GPU starvation.
+question: Design the data pipeline throughput requirements for storage read, CPU decoding, and PCIe Gen5 transfer to prevent GPU starvation?
 visual:
   kind: svg
   path: cloud-4518.svg
   alt: Horizontal bar chart showing throughput jumps from Storage to CPU to PCIe to GPU.
   caption: H100 Computer Vision Pipeline Bandwidth Stages.
 details:
-  realistic_solution: 'At 5000 img/sec and 150KB/img, storage must read at least 750 MB/s. CPU threads must decode 5000 JPEGs/sec into raw FP16 tensors. The PCIe bus must then transfer the uncompressed bytes. Memory pinning is required to achieve this PCIe throughput without page fault overhead.'
+  realistic_solution: At 5000 img/sec and 150KB/img, storage must sustain at least 750 MB/s of JPEG reads before filesystem and shuffle overhead. CPU decoding must sustain 5000 JPEGs/sec into 3 x 224 x 224 FP16 tensors. Each decoded tensor is 301,056 bytes, so host-to-device transfer is about 1.51 GB/s decimal, or 1.40 GiB/s. PCIe Gen5 has ample bandwidth for that payload; the design risk is usually storage fan-out, CPU decode throughput, and maintaining an asynchronous pinned-memory staging path so the GPU is never waiting on decode or copy completion.
   common_mistake: |
     **The Pitfall:** Calculating bandwidth based on the compressed JPEG size.
     **The Rationale:** Candidates look at the storage size (150KB) and assume this is the data payload traversing the PCIe bus.
@@ -24,32 +24,35 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target rate: 5000 images/sec.
-    - Image dims: 3 channels x 224 x 224 (FP16).
+    - JPEG size: 150 KB compressed, treated as decimal KB for storage sizing.
+    - Decoded tensor shape: 3 channels x 224 x 224, FP16 (2 bytes/element).
 
     **Calculations:**
-    - Raw tensor size: 3 x 224 x 224 x 2 bytes = ~301 KB.
-    - PCIe transfer requirement: 5000 x 301 KB = 1.5 GB/s.
+    - Storage read rate: 5000 img/s x 150 KB/img = 750,000 KB/s = 750 MB/s.
+    - Decode throughput: CPU pipeline must produce at least 5000 decoded tensors/sec.
+    - Raw tensor size: 3 x 224 x 224 x 2 bytes = 301,056 bytes = 294 KiB = 0.301 MB.
+    - PCIe transfer requirement: 5000 x 301,056 bytes = 1,505,280,000 bytes/s = 1.51 GB/s decimal (~1.40 GiB/s).
 
     **Conclusion & Interpretation:**
-    - **Result: 1.5 GB/s (PCIe-Bandwidth-Bound)**. ~1.5 GB/s PCIe transfer is required post-decoding.
+    - **Result: 750 MB/s storage, 5000 decodes/sec, and ~1.5 GB/s PCIe transfer.** PCIe Gen5 is unlikely to be the bottleneck at this image size; storage/decode and copy overlap are the critical budgets.
 status: published
 provenance: llm-draft
-expected_time_minutes: 12
 requires_explanation: true
+expected_time_minutes: 12
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-fluency-L6+
+  - gemini-generated
+  - target-fluency-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

@@ -11,24 +11,26 @@ title: Flash Attention Backward Pass Memory Recomputation
 scenario: During training a 13B model with seq_len=16384, you notice that Flash Attention uses more FLOPs than standard attention during the backward pass. A colleague suggests reverting to standard attention for training to reduce compute.
 question: Should you revert from Flash Attention to standard attention to reduce backward-pass FLOPs at seq_len=16384, and why?
 details:
-  realistic_solution: Flash Attention backward recomputes the attention matrix (2x FLOPs for backward vs forward), but this is the only way to train with long sequences. The FLOP overhead is ~1.1-1.3x vs standard attention backward, but the memory saving enables training at all. Use gradient checkpointing at layer boundaries to further reduce peak memory.
+  realistic_solution: Do not revert just to reduce backward-pass FLOPs. Flash Attention avoids materializing the full N×N attention matrix, so at seq_len=16384 it usually reduces peak memory enough to make long-context training practical. Standard attention can train in principle, but it may require tens of GiB of per-layer attention activation memory and can become infeasible once other activations, gradients, dropout masks, and allocator overhead are included. The extra recomputation in Flash Attention backward is normally a better tradeoff than the peak-memory blowup of standard attention. Use gradient checkpointing at layer boundaries to further reduce peak memory.
   common_mistake: |
     **The Pitfall:** Comparing only FLOPs without accounting for memory capacity constraints.
     **The Rationale:** Standard attention has fewer FLOPs in the backward pass, making it seem computationally cheaper on paper.
     **The Consequence:** At seq_len=16384, the N×N matrix is massive, resulting in an immediate Out-Of-Memory (OOM) error that makes training physically impossible.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Sequence Length (N) = 16,384.
-       - 13B model: 40 layers, 40 heads = 1,600 total heads.
-       - Data format: 2 bytes (FP16/BF16).
-       - Available Capacity = 80 GB.
-    2. **Calculations:**
-       - Standard Attention Memory (softmax QK^T): 16384^2 * 2 bytes = 536.8 MB per head.
-       - Total Standard Memory: 1,600 heads * 536.8 MB = 858,880 MB (~858 GB).
-       - Flash Attention Memory (Q, K, V, O only, 128 dim): 16384 * 128 * 2 bytes * 4 tensors = 16.7 MB per head.
-       - Total Flash Memory: 1,600 heads * 16.7 MB = 26,720 MB (~26 GB).
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bound (OOM without Flash Attention).** 858 GB heavily exceeds the 80 GB HBM capacity, making FLOP considerations secondary.
+    **Assumptions & Constraints:**
+    - Sequence Length (N) = 16,384.
+    - 13B model example: 40 heads per layer, d_head=128.
+    - Data format: 2 bytes (FP16/BF16).
+    - Peak memory should be estimated per active layer, not by summing all heads across all layers as if every attention matrix is live at once.
+
+    **Calculations:**
+    - Standard attention probability matrix per head: 16384^2 * 2 bytes = 512 MiB.
+    - Standard attention probability matrix per layer: 512 MiB * 40 heads = 20 GiB, before Q/K/V/O activations, dropout masks, gradients, allocator overhead, and other layer activations.
+    - Flash Attention does not save the full NxN matrix; Q/K/V/O per layer are about 16384 * 40 * 128 * 2 bytes * 4 tensors = 640 MiB.
+    - Flash Attention also saves small per-row softmax statistics, roughly 16384 * 40 * 2 FP32 values ≈ 5 MiB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Peak-memory-bound training.** Standard attention can require tens of GiB of peak activation memory for a single layer at this sequence length, while Flash Attention keeps the per-layer attention footprint around the activation tensors plus small statistics. The extra backward FLOPs are usually worth the large peak-memory reduction.
 status: published
 provenance: imported
 requires_explanation: false

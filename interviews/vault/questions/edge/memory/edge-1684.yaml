@@ -7,27 +7,35 @@ topic: activation-memory
 competency_area: memory
 bloom_level: analyze
 phase: training
-title: 'On-Device LoRA Gradient Checkpointing Tradeoffs'
-scenario: 'We are implementing on-premise LoRA fine-tuning for a 7B parameter LLM on a single Qualcomm Cloud AI 100 inference accelerator to personalize a customer service bot. The accelerator features 32 GB of LPDDR4x memory, 400 TOPS INT8 compute, and a strict 75W power envelope. During the forward pass with a sequence length of 4096 and a batch size of 2, the system runs out of memory before the backward pass can begin.'
-question: 'How would you diagnose this bottleneck and quantify the compute-memory tradeoff of applying gradient checkpointing to fit the workload within the hardware constraints?'
+title: On-Device LoRA Gradient Checkpointing Tradeoffs
+scenario: We are implementing on-premise LoRA fine-tuning for a 7B parameter LLM on a 32 GB edge training accelerator with FP16 tensor cores and a strict 75W power envelope. During the forward pass with a sequence length of 4096 and a batch size of 2, the system runs out of memory before the backward pass can begin.
+question: How would you quantify activation checkpointing so this LoRA fine-tuning job fits in 32 GB?
 details:
-  realistic_solution: 'A strong candidate will identify that storing all intermediate activations for the entire network exceeds the remaining memory capacity of the accelerator. The correct approach is to implement gradient checkpointing (activation recomputation) at specific layer boundaries, leveraging the ample 400 TOPS compute to handle the extra forward pass while drastically reducing peak memory.'
-  common_mistake: 'Immediately suggesting reducing batch size or sequence length without analytically quantifying the activation memory footprint, severely degrading training quality.'
+  realistic_solution: |
+    A strong candidate first separates static memory from training-time memory: quantized base weights, LoRA adapters, optimizer state for only the adapters, gradients, activations, and runtime workspace. The bottleneck is saved FP16 activations across 32 transformer layers at batch 2 and sequence length 4096, not the LoRA weights. Apply activation checkpointing at transformer block boundaries so only checkpoints and the current recompute window are live; this trades roughly one extra forward recomputation per checkpointed segment for a large reduction in peak activation memory. If the accelerator lacks backward support, the correct diagnosis is to move training to a training-capable device rather than pretending inference-only INT8 engines can run LoRA backpropagation.
+  common_mistake: |
+    **The Pitfall:** Immediately suggesting reducing batch size or sequence length without analytically quantifying the activation memory footprint.
+    **The Rationale:** Candidates often default to generic hyperparameter tuning without understanding the specific activation memory bottleneck caused by the long sequence length.
+    **The Consequence:** This leads to severely degrading training quality or context length capabilities, failing to leverage available compute to trade for memory.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hardware: 32 GB LPDDR4x memory, 400 TOPS INT8.
-    - Model: 7B INT8 model weights (7 GB), 32 layers.
+    - Hardware: 32 GB memory on a training-capable edge accelerator.
+    - Model: 7B base weights stored in 8-bit form (7 GB), 32 layers.
     - Workload: FP16 activations, batch=2, seq_len=4096, hidden=4096.
+    - Approximate saved activation factor: 6 FP16 hidden-sized tensors per layer.
+    - LoRA adapters, gradients, optimizer state, and runtime workspace reserve: 6 GB.
 
     **Calculations:**
-    - Base memory remaining: 32 GB - 7 GB = 25 GB.
-    - FP16 activation memory per layer: ~34 bytes/token * 2 * 4096 * 4096 ≈ 1.14 GB per layer.
-    - Total memory without checkpointing: 7 GB weights + (32 * 1.14 GB) = 43.5 GB (OOM).
-    - With checkpointing every 6 layers (√32): Peak activation memory = (36.5 GB / 6) + (1.14 GB * 6) ≈ 12.9 GB.
-    - Total peak memory with checkpointing: 7 GB + 12.9 GB = 19.9 GB.
+    - One FP16 hidden tensor = batch * seq * hidden * 2 bytes = 2 * 4096 * 4096 * 2 = 67.1 MB.
+    - Saved activations per layer = 6 * 67.1 MB = 402.7 MB.
+    - Without checkpointing: 32 * 402.7 MB = 12.9 GB activations.
+    - Total without checkpointing: 7 GB weights + 6 GB reserve + 12.9 GB activations = 25.9 GB before attention temporaries, leaving too little headroom.
+    - Checkpoint every 4 layers: retain 8 block-boundary tensors = 8 * 67.1 MB = 0.54 GB, plus recompute window 4 * 402.7 MB = 1.61 GB, for about 2.15 GB peak saved activations.
+    - Total with checkpointing: 7 GB + 6 GB + 2.15 GB = 15.15 GB before attention temporaries, leaving about 16.85 GB for temporary attention/workspace.
+    - Recompute cost: checkpointed backward reruns most forward blocks once, adding roughly 25-35% step time depending on kernel overlap.
 
     **Conclusion & Interpretation:**
-    - **Result: 19.9 GB (Compute-Bound Tradeoff)**. Gradient checkpointing sacrifices compute to effectively fit the training workload within the 32 GB limit.
+    - **Result: about 15.2 GB persistent peak before attention temporaries (Compute-Memory Tradeoff)**. Checkpointing makes the job plausible on 32 GB by spending roughly 25-35% more compute to save about 10.7 GB of activation memory.
 status: published
 provenance: imported
 requires_explanation: false

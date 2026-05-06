@@ -11,7 +11,7 @@ title: Evaluating Sequential Storage Patterns for Distributed Training
 scenario: Your team is training a ViT-L model on an 8-node cluster using a shared parallel file system (Lustre) backed by NVMe SSDs capable of 200 GB/s aggregate bandwidth. The training pipeline currently reads individual 500KB JPEG images from a flat directory of 500 million files. Network metrics show low utilization, yet GPUs are consistently starved for data.
 question: Why are 64 GPUs starved while reading 500M individual 500KB JPEGs from Lustre, and what data layout should you use?
 details:
-  realistic_solution: "Repack the individual JPEGs into large, contiguous 1GB-2GB shard files (e.g., using WebDataset tar archives or TFRecords). This shifts the storage workload from metadata-heavy random IOPS to pure sequential IO, allowing the file system to operate at its peak sequential throughput and easily saturate the required GPU ingestion rate."
+  realistic_solution: The starvation is caused by metadata and small-file IOPS, not by the 200 GB/s aggregate data bandwidth. Reading 500M individual JPEGs forces Lustre to serve lookups, opens, closes, and small random reads at the image rate, so GPUs wait even while network throughput looks low. Repack the corpus into large 1GB-2GB sequential shards such as WebDataset tar archives or TFRecords, then shuffle at the shard and sample level; this removes most metadata pressure but still needs enough decode and augmentation throughput to saturate the GPUs.
   common_mistake: |
     **The Pitfall:** Assuming the bottleneck is raw network bandwidth or CPU decoding speed.
     **The Rationale:** Ignoring the metadata overhead of standard file systems when dealing with millions of small files.
@@ -25,11 +25,13 @@ details:
     **Calculations:**
     - Demand: 64 \times 500 = 32,000 imgs/sec.
     - Required Bandwidth: 32,000 \times 500 KB = 16 GB/s.
-    - IOPS Bottleneck: 10,000 IOPS \times 500 KB = 5 GB/s (hard wall).
-    - Solution (1GB Shards): 1GB shard = 2000 images. Requires only 16 file opens/sec.
+    - Small-file metadata demand: one lookup/open per image means ~32,000 file operations/sec, exceeding a ~10,000 IOPS metadata limit before data bandwidth is saturated.
+    - Total corpus size check: 500M * 500KB = 250,000,000,000KB, or about 250TB decimal.
+    - Solution (1GB shards): 1GB / 500KB ≈ 2,048 images per shard, so 500M images become about 244,000 shards instead of 500M files.
+    - At 32,000 images/sec, sequential 1GB shards require roughly 32,000 / 2,048 ≈ 16 shard transitions/sec while reads proceed sequentially.
 
     **Conclusion & Interpretation:**
-    - **Result: 16 GB/s sequential reads (Metadata-IOPS-Bound)**. Millions of small files saturate the metadata server at 5 GB/s. Sharding unlocks 16 GB/s sequential reads.
+    - **Result: Metadata-IOPS-Bound**. Hundreds of millions of small files overwhelm metadata operations even though only 16 GB/s of data bandwidth is required. Sharding cuts file operations at training time from image-rate opens to shard-rate sequential reads, but final throughput still depends on decoding and data-loader parallelism.
 status: published
 provenance: imported
 requires_explanation: false

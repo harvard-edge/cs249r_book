@@ -9,7 +9,7 @@ bloom_level: analyze
 phase: inference
 title: NPU Garbage Predictions After CPU Preprocessing
 scenario: A 480 MHz Cortex-M7 computes MFCCs in a 16 KB DMA buffer, then triggers the Ethos-U55 NPU. CPU logs match expected features, but the NPU infers completely random garbage predictions.
-question: "Why does Ethos-U55 read random features after the M7 computes MFCCs in a 16 KB DMA buffer?"
+question: Why does Ethos-U55 read random features after the M7 computes MFCCs in a 16 KB DMA buffer?
 details:
   realistic_solution: The architecture suffers a catastrophic cache coherency violation. The Cortex-M7 retains the processed MFCCs inside its L1 Write-Back D-cache. The independent Ethos-U55 NPU bus master fetches raw, stale uninitialized data directly from Main SRAM. Explicit software D-cache invalidation/flushing is mandatory.
   common_mistake: |
@@ -20,14 +20,14 @@ details:
     1. **Assumptions & Constraints:**
        - Buffer size: 16 KB DMA vector.
        - CPU: Cortex-M7 at 480 MHz (32 bytes/cache line).
-       - NPU Execution: 5M Ops at 512 Ops/cycle.
+       - M7 uses a write-back D-cache; the Ethos-U55 reads main SRAM as an independent bus master.
     2. **Calculations:**
        - Cache lines required: 16,384 bytes / 32 bytes/line = 512 cache lines.
-       - D-cache flush penalty: 512 lines * ~2 cycles/line = 1,024 CPU cycles.
-       - Flush temporal cost: 1,024 cycles / 480 MHz = ~2.1 μs.
-       - NPU execution cost: 5M OPs / 512 Ops/cycle = 9,765 cycles (~20 μs).
+       - After CPU preprocessing writes MFCCs, the CPU must clean the affected cache lines before starting an NPU read.
+       - If the NPU or DMA later writes data that the CPU will read, the CPU must invalidate those destination lines before consuming them.
+       - The maintenance cost is implementation-dependent across cache controller, memory bus, and line state, so it should be measured on target rather than assumed to be a fixed 2 cycles per line.
     3. **Conclusion & Interpretation:**
-       - **Result: D-cache flushing resolves coherency and costs only 2.1 μs (<10% overhead) compared to execution (Coherency-Bound).**
+       - **Result: cache-maintenance bug, not an arithmetic performance limit.** The diagnostic fix is explicit clean-before-NPU-read and invalidate-before-CPU-read on the exact 16 KB buffer range; do not rely on sleeps or precise overhead claims unless measured on the board.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,28 +7,36 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: evaluate
 phase: both
-title: 'Network Bandwidth Bottlenecks: Master Full Communication Analysis for 3D-Parallel LLM Training'
-scenario: 'You are analyzing a 3D-parallel training setup (TP-4, PP-4, DP-8) for a 70B model on 128 H100 GPUs (8-GPU nodes, NVLink 900GB/s, 200Gb/s IB).'
-question: 'What are the specific TP, PP, and DP communication costs per step, and which dominates the 3D-parallel setup?'
+title: 3D-Parallel TP PP DP Communication Bottlenecks
+scenario: You are analyzing a 3D-parallel training setup (TP-4, PP-4, DP-8) for a 70B model on 128 H100 GPUs (8-GPU nodes, NVLink 900GB/s, 200Gb/s IB).
+question: What are the specific TP, PP, and DP communication costs per step, and which dominates the 3D-parallel setup?
 details:
-  realistic_solution: 'TP-4 (within node, NVLink): per layer, 4 all-reduces of shape [batch, seq, hidden] = 4×[1, 2048, 8192]×2B = 134MB per step × 80 layers = 10.7GB total. NVLink 900GB/s/4: each layer''s TP all-reduce: 134MB/225GB/s = 0.6ms/layer × 80 = 48ms. PP bubble: 4 pipeline stages, 1 micro-batch (Gpipe). Bubble fraction: (PP-1)/PP=75%. Fix: interleaved 1F1B (v=4) with 8 micro-batches: bubble overhead = (PP-1)/(v×M) = 3/32 = 9.4%. DP AllReduce: 70B/16 params × 2B = 8.75GB per GPU. Ring AllReduce over 8 DP: 8.75GB × 2 × 7/8 = 15.31GB. At 25GB/s per GPU IB: 15.31GB / 25GB/s = 612ms. PP bubble: 200ms×9.4%=18.8ms. Dominant: DP AllReduce (612ms) >> TP comm (48ms) >> PP bubble (18ms).'
+  realistic_solution: 'Assume TP-4 is intra-node over NVLink, using 225GB/s as a per-rank effective collective bandwidth derived from the 900GB/s node fabric, while PP-4 and DP-8 traffic that crosses nodes runs over 200Gb/s InfiniBand, or 25GB/s. PP uses interleaved 1F1B with v=4 and M=8 micro-batches. A [1,2048,8192] FP16 activation tensor is 33.6MB. For TP, one TP-4 ring all-reduce moves 2*(4-1)/4*33.6MB = 50.3MB per rank. Each GPU owns 80/PP = 20 layers; with about 4 TP collectives per layer and 8 micro-batches per step, TP traffic is 50.3MB*4*20*8 = 32.2GB per rank per step. At 225GB/s effective intra-node bandwidth, that is about 143ms, before overlap. For PP, each boundary sends the activation forward and its gradient backward: 2*33.6MB*8 = 537.6MB per step, or about 21.5ms on a 25GB/s inter-node link; the 1F1B bubble is separately (PP-1)/(v*M) = 3/32 = 9.4%, or 18.8ms on a 200ms compute step. For DP, each GPU owns 70B/(TP*PP) = 4.375B params, or 8.75GB of FP16 gradients. Using a no-overlap
+    payload/bandwidth ring estimate, DP-8 AllReduce over 8 DP ranks moves 8.75GB*2*7/8 = 15.31GB per rank. At 25GB/s per GPU IB, DP sync takes 612ms. Dominant: DP AllReduce (612ms) > TP collectives (~143ms before overlap) > PP boundary communication (~22ms) and PP bubble (~19ms).'
   common_mistake: |
     **The Pitfall:** Analyzing each parallelism dimension independently.
     **The Rationale:** Failing to recognize that TP and PP run synchronously within a micro-batch, while DP communication spans the slower inter-node fabric.
     **The Consequence:** Misidentifying the bottleneck and optimizing the wrong parallel dimension, such as trying to reduce the PP bubble when DP AllReduce is taking 30x longer.
   napkin_math: |
     **Assumptions & Constraints:**
-    - TP-4 on NVLink (225 GB/s effective). PP-4 interleaved 1F1B (v=4, M=8).
-    - DP-8 on InfiniBand (25 GB/s).
-    - Step time: 200ms. 70B model.
+    - TP-4 stays intra-node on NVLink; use 225 GB/s as an effective per-rank collective bandwidth, not raw device bandwidth.
+    - PP-4 uses interleaved 1F1B (v=4, M=8).
+    - PP and DP crossing nodes use InfiniBand (200 Gbps = 25 GB/s).
+    - DP timing uses a simple ring payload/bandwidth estimate with no compute overlap.
+    - Step time: 200ms compute estimate. 70B model with 80 layers and 8 micro-batches/step.
 
     **Calculations:**
-    - TP-4 (NVLink): 10.7GB total / 225 GB/s = ~48ms.
-    - PP Bubble: Overhead = 3/32 (9.4%). For 200ms step = ~18.8ms.
-    - DP AllReduce: 15.31GB over IB. 15.31GB / 25 GB/s = 612.5ms.
+    - TP activation tensor: 1 * 2048 * 8192 * 2 bytes = 33.6MB.
+    - TP-4 ring volume per all-reduce: 2 * (4-1)/4 * 33.6MB = 50.3MB per rank.
+    - Per-GPU TP layers per step: 80 layers / PP-4 * 8 micro-batches = 160 layer-visits.
+    - TP traffic per GPU per step: 50.3MB * 4 all-reduces/layer * 160 = 32.2GB. Time = 32.2GB / 225GB/s = ~143ms.
+    - PP boundary communication per step: 2 directions * 33.6MB * 8 micro-batches = 537.6MB. Time on IB = 0.538GB / 25GB/s = ~21.5ms.
+    - PP bubble: Overhead = 3/32 (9.4%). For 200ms compute = ~18.8ms.
+    - DP gradient shard per GPU: 70B / (TP 4 * PP 4) * 2 bytes = 8.75GB.
+    - DP-8 ring volume under the no-overlap convention: 8.75GB * 2 * (8-1)/8 = 15.31GB. Time = 15.31GB / 25GB/s = 612.5ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 612.5ms (Bandwidth-Bound)**. DP AllReduce across the slower inter-node fabric entirely dominates both TP and PP communication overheads.
+    - **Result: 612.5ms DP AllReduce (Bandwidth-Bound)**. With per-step units kept consistent, DP communication across the slower inter-node fabric dominates TP communication, PP boundary sends, and PP bubble overhead.
 status: published
 provenance: imported
 requires_explanation: true

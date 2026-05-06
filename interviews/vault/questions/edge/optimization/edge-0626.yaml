@@ -7,12 +7,12 @@ topic: speculative-decoding
 competency_area: optimization
 bloom_level: create
 phase: inference
-title: 'The Speculative Braking Rationale Failure'
+title: The Speculative Braking Rationale Failure
 scenario: As the Staff Engineer for a new active safety feature, you've been asked to design a system that uses a 1B-parameter LLM to generate a human-readable rationale before an Automated Emergency Braking (AEB) event occurs. The rationale is for logging and future analysis. The entire AEB decision loop has a hard real-time budget of 33ms. The team has already quantized the 1B model to INT8 and deployed it to a Hailo-8-like accelerator (on-chip SRAM). However, initial tests show that generating even the first few tokens takes over 100ms. The sequential, auto-regressive nature of the LLM is the bottleneck.
 question: What three-point plan gets the 1B-parameter rationale generator under 15ms despite autoregressive decoding?
 details:
   realistic_solution: |
-    The core problem is the memory wall of auto-regressive decoding. We hit a latency floor determined by loading the model weights for every single token. The plan must break this sequential dependency using Speculative Decoding to verify multiple tokens simultaneously while using on-chip SRAM.
+    Keep the AEB control path independent of the rationale generator, then make the rationale path a bounded best-effort sidecar. First, keep the 1B INT8 model resident on the accelerator so weights are not copied from DRAM for every token. Second, use a much smaller draft model to propose a short fixed-length rationale sketch. Third, verify the draft tokens in one parallel pass with the 1B model and fall back to a compact template if verification cannot finish inside the 15ms side budget.
   common_mistake: |
     **The Pitfall:** Suggesting "use a much smaller model" or "batch the sensor inputs."
     **The Rationale:** Batching is a standard throughput optimization but fails for single-batch real-time latency.
@@ -22,22 +22,21 @@ details:
     - Model Size: 1B parameters INT8 = 1 GB.
     - Memory Bandwidth: ~2.5 GB/s (system RAM).
     - SRAM Bandwidth: ~100 GB/s.
-    - Speculative Decoding (k=5 tokens).
+    - Speculative Decoding: draft and verify k=5 tokens.
 
     **Calculations:**
-    - DRAM Load Time: 1 GB / 2.5 GB/s = 400 ms per token.
-    - SRAM Load Time: 1 GB / 100 GB/s = 10 ms per token.
-    - Speculative Draft Time: ~1 ms for 5 tokens.
-    - Speculative Verification: 10 ms to verify 5 tokens.
-    - Total Time for 5 Tokens: ~11 ms.
+    - One-time cold DRAM load: 1 GB / 2.5 GB/s = 400 ms, so the model must be preloaded before the braking event.
+    - If resident, one full streamed verification pass over 1 GB of weights has a lower bound of 1 GB / 100 GB/s = 10 ms before compute and activation overhead.
+    - Greedy decoding 5 tokens would require about 5 verification passes: 5 * 10 ms = 50 ms minimum, which misses 15ms.
+    - Speculative decoding can verify 5 drafted tokens with one target-model pass: ~1 ms draft + ~10 ms verification + ~2 ms scheduling overhead = ~13 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound (Auto-regressive Wall)**. Using on-chip SRAM and speculative decoding breaks the sequential dependency, reducing latency from 400 ms/token to ~2.2 ms/token.
+    - **Result: Resident weights plus speculative verification can fit a short rationale under 15ms.** Treating the 400ms cold load as a per-token cost is wrong; the real win is reducing five sequential target-model passes to one bounded verification pass.
   options:
-  - The inference framework is adding unnecessary overhead; switching to a different runtime (e.g., from TensorRT to ONNX Runtime) will fix the issue.
-  - The most common L5 answer is 'use a much smaller model.' This ignores the product requirement for a certain level of reasoning quality that the 1B model provides. Another incorrect path is 'batch the sensor inputs,' which makes no sense for a single, real-time braking event.
-  - The core problem is the memory wall of auto-regressive decoding. We hit a latency floor determined by loading the model weights for every single token. The plan must break this sequential dependency.
-  - The model weights are being duplicated in memory during inference; using model sharding across CPU and GPU will halve the footprint.
+    - The inference framework is adding unnecessary overhead; switching to a different runtime (e.g., from TensorRT to ONNX Runtime) will fix the issue.
+    - The most common L5 answer is 'use a much smaller model.' This ignores the product requirement for a certain level of reasoning quality that the 1B model provides. Another incorrect path is 'batch the sensor inputs,' which makes no sense for a single, real-time braking event.
+    - The core problem is the sequential target-model pass in auto-regressive decoding. Keep the model resident, use a small draft model, and verify several proposed tokens in one bounded target-model pass.
+    - The model weights are being duplicated in memory during inference; using model sharding across CPU and GPU will halve the footprint.
   correct_index: 2
 status: published
 provenance: imported

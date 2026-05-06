@@ -12,23 +12,28 @@ scenario: 'An edge AI cell tower device has a 100 Wh battery and a solar panel p
 question: How would you design a power-adaptive inference system that maximizes overall detection accuracy under these constraints?
 details:
   realistic_solution: |
-    Design a multi-level power-aware scheduler that treats the battery as a shared resource with strict priority for the 5G radio.
+    First enforce the safety invariant: the detector may not spend battery energy needed for the radio reserve. With a 15W fixed radio, a 48-hour reserve requires 720Wh, so the stated 100Wh battery cannot by itself guarantee radio backup. The correct design must either add storage, reduce radio standby power, or relax the backup requirement before optimizing detection accuracy.
+
+    Given that invariant, run detection only from instantaneous solar surplus after the radio load is served. When surplus is >=8W, run the large model; when it is 3-8W, run the medium model; when it is 0.5-3W, run the tiny model; when surplus is below 0.5W, suspend AI rather than draining the radio reserve. If the product must maintain continuous detection, the minimum always-on choice is the tiny model plus enough additional battery capacity to preserve the 48-hour radio reserve.
   common_mistake: |
     **The Pitfall:** Creating a binary "run large model on solar, tiny on battery" scheduler.
     **The Rationale:** Engineers assume dynamically scaling compute to match available power maximizes performance.
     **The Consequence:** The system burns battery too quickly during deficit periods, forcing the AI to shut down entirely and drastically reducing time-weighted accuracy.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Efficiency: Large = 11.9% acc/W; Medium = 30.3% acc/W; Tiny = 168% acc/W.
-    - Adaptive Daily Profile: 8h surplus (95%), 4h balanced (91%), 4h deficit (84%), 8h severe deficit (0% - AI off to save radio).
-    - Tiny Model Constant: Running the 0.5W model 24/7 uses only 12Wh/day.
+    - Battery capacity: 100Wh.
+    - Radio reserve requirement: 15W for 48h.
+    - AI model powers: large 8W, medium 3W, tiny 0.5W.
+    - Solar surplus available to AI at any instant is max(0, solar_power - 15W radio load).
 
     **Calculations:**
-    - Adaptive Average: (8*95 + 4*91 + 4*84 + 8*0) / 24 = 60.8% time-weighted accuracy.
-    - Constant Average: 84% constant = 84% time-weighted accuracy.
+    - Required radio backup energy = 15W * 48h = 720Wh.
+    - Battery shortfall before running any AI = 720Wh - 100Wh = 620Wh.
+    - Running the tiny model from battery continuously would add 0.5W * 48h = 24Wh, increasing the required reserve to 744Wh.
+    - Therefore any battery-powered AI schedule violates the radio backup constraint; only solar-surplus AI operation is admissible unless the energy store is increased.
 
     **Conclusion & Interpretation:**
-    - **Result: 84% time-weighted accuracy (Power-Bound)**. A consistent, highly efficient low-power model significantly outperforms an intermittent high-power strategy.
+    - **Result: Radio reserve is the binding constraint.** With the stated 100Wh battery, 48 hours of 15W radio backup is infeasible even with AI off. A correct power-adaptive design gates AI on solar surplus and escalates model tiers only when that does not consume reserve energy; otherwise the hardware energy budget must be changed.
 status: published
 provenance: imported
 requires_explanation: true

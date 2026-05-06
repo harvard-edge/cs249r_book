@@ -11,7 +11,7 @@ title: Fleet-Wide Model Update Strategy
 scenario: You manage 100,000 predictive maintenance sensors across 200 factories. The fleet has 5 MCU variants (64KB to 8MB flash) and mixed connectivity (BLE, LoRaWAN, cellular LTE-M). You need to deploy a retrained anomaly detection model to the entire fleet.
 question: How should 100,000 sensors across 5 MCU variants and BLE, LoRaWAN, and LTE-M receive a retrained model update?
 details:
-  realistic_solution: 'Employ a multi-tiered, differential OTA strategy. Build a model family sharing a core architecture but tiered by width (40KB to 1MB) to fit varied constraints. Utilize delta patches (e.g., bsdiff) to transmit only the changed weights, minimizing payload size. Route via connectivity constraints: LTE-M gets immediate unicast OTA, LoRaWAN utilizes Class C multicast to bypass strict duty cycle limits, and BLE propagates via gateway proximity over days. Enforce a staged rollout to mitigate bricking.'
+  realistic_solution: 'Employ a multi-tiered, differential OTA strategy. Build a model family sharing a core architecture but tiered by width (40KB to 1MB) to fit varied constraints. Use delta patches to transmit only changed weights, and route by connectivity class: LTE-M can receive staged unicast OTA, LoRaWAN should use multicast groups with Class C devices where supported or scheduled receive windows otherwise, and BLE should update through gateways or phones over multiple contact windows. Enforce staged rollout, per-variant compatibility checks, signed payloads, CRC verification, and A/B rollback to mitigate bricking.'
   common_mistake: |
     **The Pitfall:** Attempting to compile and push a single monolithic model binary to all edge devices.
     **The Rationale:** Unified pipelines simplify backend management, leading engineers to ignore severe edge hardware constraints.
@@ -20,14 +20,17 @@ details:
     **Assumptions & Constraints:**
     - 25,000 Cellular, 35,000 LoRaWAN devices.
     - Average Model: 250 KB. Delta Patch: 50 KB (20%).
+    - Representative LoRaWAN payload budget: ~50 bytes per fragment before region/SF-specific limits.
 
     **Calculations:**
-    - Cellular Savings: 25,000 * 200 KB = 5 GB saved. At $0.50/MB = $2,500 saved.
-    - LoRaWAN Transmission: Max payload ~50 bytes. 50 KB patch = 1,000 packets.
-    - At 1% duty cycle (SF7), unicast takes ~2 hours per device. Class C Multicast serves all 35,000 concurrently in 2-6 hours.
+    - Full-model bytes avoided per cellular device: 250 KB - 50 KB = 200 KB.
+    - Cellular bandwidth avoided: 25,000 * 200 KB = 5,000,000 KB = about 5 GB.
+    - LoRaWAN fragments per 50 KB patch: 50 KB / 50 B = about 1,000 fragments before MAC overhead, acknowledgments, and retries.
+    - Naive LoRaWAN unicast fragments: 1,000 fragments/device * 35,000 devices = 35,000,000 downlink fragments, which is not a viable fleet rollout.
+    - LoRaWAN multicast sends each fragment once per multicast cohort, but completion time depends on region, spreading factor, duty-cycle rules, receive class, retry policy, and missed-fragment recovery.
 
     **Conclusion & Interpretation:**
-    - **Result: 2-6 hours (Bandwidth-Bound)**. Delta patches and multicast are strictly required to bypass LoRaWAN limits.
+    - **Result: Bandwidth-Bound Rollout Strategy.** Delta patches, per-variant model sizing, multicast groups for LoRaWAN cohorts, and staged rollback are required; a single fixed LoRaWAN completion time is not defensible from the stated inputs.
 status: published
 provenance: imported
 requires_explanation: true

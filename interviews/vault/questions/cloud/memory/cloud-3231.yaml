@@ -11,7 +11,7 @@ title: KV-Cache Scaling with Context Length Doubling
 scenario: GPT-4 extended its context from 8K to 128K tokens. You have a model with 96 layers, 8 GQA KV heads, and head dimension 128.
 question: How does doubling context length affect KV-cache memory, decode latency, and maximum batch size for the 96-layer GQA model?
 details:
-  realistic_solution: 'Doubling context length (e.g., 64K → 128K): (1) KV-cache memory: doubles linearly. Per token: 2 × 8 × 128 × 2B × 96 = 384 KB. At 64K: 24.6 GB. At 128K: 49.2 GB. On H100 (80 GB - 30 GB weights = 50 GB for KV): 64K barely fits (24.6 GB), 128K needs 49.2 GB — only 1 concurrent request. (2) Decode latency: each new token must attend to all previous KV entries. Attention computation per layer: loading KV-cache of 128K × 8 × 128 × 2B = 256 MB per layer. At 3.35 TB/s: 256 MB / 3.35 TB/s = 76 µs per layer × 96 layers = 7.3 ms just for KV-cache loading. At 64K: 3.65 ms. Doubles. (3) Maximum batch size: halves. If 50 GB supports 2 requests at 64K, it supports only 1 at 128K. (4) Prefill compute: quadratic — attention for 128K tokens is 4× more FLOPs than 64K (O(n²) attention). All three costs — memory, decode bandwidth, prefill compute — argue for efficient attention mechanisms at long contexts.'
+  realistic_solution: 'Doubling context length (e.g., 64K → 128K) doubles KV-cache memory and decode KV-read traffic. Per token across the model: 2 × 8 KV heads × 128 dim × 2B × 96 layers = 384 KiB. At 64K tokens this is about 24.6 GB decimal; at 128K it is about 49.2 GB. For decode, each new token reads the prior sequence KV once through attention: at 128K, the per-layer read is 128K × 8 × 128 × 2B × 2 (K+V) ≈ 524 MB, or about 49.2 GB across 96 layers. At 3.35 TB/s ideal HBM bandwidth, that is about 14.7 ms of KV-read time; 64K is about half that. For batch size, assume an 80 GB H100 with 30 GB weights and about 50 GB left before activations/workspace/fragmentation: floor(50/24.6) = 2 requests at 64K, while floor(50/49.2) = 1 request at 128K, and real overhead may make 128K require more headroom. Prefill attention work also grows quadratically, so 128K prefill is about 4x the attention work of 64K.'
   common_mistake: |
     **The Pitfall:** Only considering the memory scaling of the KV cache.
     **The Rationale:** Engineers focus on VRAM limits but forget that attention computation time scales linearly for decode and quadratically for prefill.
@@ -21,16 +21,18 @@ details:
     - Model: 96 layers, 8 GQA KV heads, 128 head dimension.
     - Context lengths: 64K and 128K.
     - HBM bandwidth: 3.35 TB/s.
+    - Batch-size example budget: 50 GB available for KV before runtime overhead.
 
     **Calculations:**
     - KV Memory per Token: 2 (K,V) * 8 heads * 128 dim * 2 bytes * 96 layers = 393,216 bytes (384 KB).
     - Memory at 64K Context: 64,000 tokens * 384 KB = 24.57 GB.
     - Memory at 128K Context: 128,000 tokens * 384 KB = 49.15 GB (2x memory).
-    - Decode Bandwidth Cost (128K): Loading 49.15 GB KV cache at 3.35 TB/s memory bandwidth.
-    - Decode Latency (KV only): 49.15 GB / 3.35 TB/s = 14.67 ms per decode step.
+    - Decode KV read at 128K: 128,000 tokens * 384 KB = 49.15 GB across all layers.
+    - Decode latency lower bound (KV only): 49.15 GB / 3.35 TB/s = 14.67 ms per decode step.
+    - Batch capacity with 50 GB KV budget: floor(50 / 24.57) = 2 at 64K; floor(50 / 49.15) = 1 at 128K before overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 14.67 ms (Memory-Bound)**. Doubling the context length doubles memory footprint and decode latency per step.
+    - **Result: 2x KV memory and about 2x KV-read latency.** Under the stated 50 GB KV budget, maximum batch falls from about 2 requests at 64K to about 1 at 128K before overhead.
 status: published
 provenance: imported
 requires_explanation: false

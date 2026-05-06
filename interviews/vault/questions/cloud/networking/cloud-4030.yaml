@@ -9,22 +9,28 @@ bloom_level: create
 phase: both
 title: Cross-Job Congestion Isolation in Multi-Tenant Clusters
 scenario: You manage a shared cluster running 4 concurrent training jobs of varying sizes. Job A's AllReduce traffic must not cause congestion that degrades Job B's performance.
-question: Specify the network isolation architecture to prevent one job's AllReduce congestion from degrading another's performance.
+question: Specify the network isolation architecture to prevent one job's AllReduce congestion from degrading another's performance?
 details:
-  realistic_solution: 'Multi-layer isolation specification: (1) Traffic classification: assign each job a unique DSCP value (0, 8, 16, 24) mapped to separate traffic classes (TC0-TC3) at the NIC via DCBX. (2) Buffer partitioning: configure strict per-TC buffer allocation on all switches — each TC gets 25% of shared buffer (16MB out of 64MB). Use dynamic thresholds within each TC but not across TCs. (3) PFC per-priority: enable PFC independently per TC so Job A''s PFC pauses only affect TC0, not TC1-TC3. (4) ECN per-TC: independent Kmin/Kmax thresholds per TC, scaled to each TC''s buffer allocation. (5) Bandwidth scheduling: use weighted fair queuing (WFQ) with weights proportional to GPU count. (6) Physical rail affinity: assign each job to preferred rails to minimize cross-job path overlap.'
+  realistic_solution: Specify isolation as a hardware-dependent policy rather than a universal guarantee. Classify each job or tenant into a small number of supported lossless/lossy traffic classes using DSCP/PCP markings that the NIC, switches, and fabric manager actually honor. Configure per-class scheduling, ECN thresholds, and, where required, PFC so congestion feedback and pause behavior are scoped to the affected class instead of all traffic. If the switches support static or dynamic buffer pools per traffic class, reserve enough headroom for latency-sensitive jobs and cap bulk AllReduce pressure, but do not assume every 64 MB shared buffer can be split into strict 16 MB slices. Add WFQ or rate limits proportional to job size, and use rail affinity when available to reduce path overlap. The acceptance test should measure per-class queue depth, ECN/PFC counters, and cross-job latency during Job A incasts.
   common_mistake: |
     **The Pitfall:** Relying solely on VLANs for network isolation.
     **The Rationale:** Candidates understand VLANs provide logical broadcast domain separation but forget they still share physical switch buffers.
     **The Consequence:** A large burst in one VLAN consumes the shared buffer and triggers PFC pauses that throttle traffic across all other VLANs.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 4 jobs with sizes 128, 256, 512, 1024 GPUs.
-       - Shared switch buffer: 64 MB.
-       - Gradient size: 2 GB.
-    2. **Calculations:**
-       - Buffer partition per Traffic Class (TC): 64 MB / 4 = 16 MB each (25%).
-       - A 1024-GPU job's AllReduce incast consumes up to 16 MB in TC3.
-    3. **Conclusion & Interpretation:** **Result: Buffer-Optimized.** Strict partitioning contains the incast to TC3's 16 MB, protecting the 48 MB buffer pool for TC0-TC2 and isolating unrelated jobs.
+    **Assumptions & Constraints:**
+    - 4 jobs with sizes 128, 256, 512, 1024 GPUs.
+    - Shared switch buffer example: 64 MB.
+    - The fabric supports traffic classes, per-class scheduling, and per-class ECN/PFC behavior.
+    - Exact buffer pool partitioning is switch-specific; do not assume strict equal slices are always available.
+
+    **Calculations:**
+    - Equal-share planning example: 64 MB / 4 classes = 16 MB nominal headroom per class.
+    - If the switch supports per-class pools, set ECN/PFC thresholds below the assigned headroom so Job A's burst is marked or paused before it consumes buffers needed by other classes.
+    - If the switch uses dynamic shared buffering, isolation is relative: scheduling weights, early ECN, and per-priority pause reduce cross-job impact, but they do not prove a hard 16 MB cap.
+    - Large gradients determine total offered load; instantaneous queue pressure still depends on fan-in, drain rate, and switch buffer policy.
+
+    **Conclusion & Interpretation:**
+    - **Result: Isolation Requires Hardware-Validated Traffic Classes.** The design can reduce cross-job congestion via classification, ECN/PFC scoping, scheduling, and optional buffer pools, but strict buffer caps are vendor- and switch-dependent.
 status: published
 provenance: imported
 requires_explanation: true

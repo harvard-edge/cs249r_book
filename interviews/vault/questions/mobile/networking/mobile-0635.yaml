@@ -1,34 +1,34 @@
 schema_version: '1.0'
 id: mobile-0635
 track: mobile
-level: L6+
+level: L4
 zone: mastery
 topic: collective-communication
 competency_area: networking
 bloom_level: evaluate
 phase: inference
-title: The Topology-Oblivious Optimization
-scenario: Your team trains a 500B parameter MoE model on multi-node servers with 8 GPUs per node connected by NVLink, and nodes connected via InfiniBand.
-question: Why does a topology-oblivious All-to-All optimization severely degrade intra-node MoE communication speed?
+title: Topology-Oblivious MoE Routing on a Mobile SoC
+scenario: Your team is prototyping a small MoE language model on a mobile SoC. Experts are split across the Hexagon HTP, Adreno GPU, and CPU, with shared LPDDR and limited on-chip SRAM for intermediate activations.
+question: Why does topology-oblivious MoE routing degrade on-device expert communication speed?
 details:
-  realistic_solution: 'The optimization was topology-oblivious and fundamentally misunderstood the datacenter hardware hierarchy. It forced all intra-node communication, which should have been on the ultra-fast 900 GB/s NVLink bus, to instead take a much slower path out through the PCIe bus to the 50 GB/s InfiniBand Host Channel Adapter (HCA) and back.'
+  realistic_solution: The optimization was topology-oblivious and ignored the mobile SoC hierarchy. A good MoE router keeps token batches on the accelerator that owns the selected experts when possible, groups experts by HTP/GPU/CPU placement, and avoids unnecessary round trips through CPU memory. A topology-oblivious All-to-All can scatter small activation shards across compute units without regard to locality, forcing extra LPDDR reads and writes, DMA synchronization, cache pollution, and CPU merge work. The slowdown is a placement and scheduling problem, not a generic accelerator failure.
   common_mistake: |
-    **The Pitfall:** Blaming InfiniBand driver misconfiguration or network congestion.
-    **The Rationale:** Assuming the network hardware is at fault rather than diagnosing a software path-selection error in the communication primitive.
-    **The Consequence:** Wasting weeks debugging network hardware while the communication logic continues to bypass the ultra-fast NVLink bus.
+    **The Pitfall:** Blaming the mobile NPU or GPU driver for poor MoE performance.
+    **The Rationale:** Assuming the accelerator is slow rather than diagnosing a software path-selection error in the routing primitive.
+    **The Consequence:** Wasting weeks tuning kernels while the communication logic continues to force avoidable LPDDR traffic and CPU synchronization.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Intra-node Transfer Size: 32 GB.
-    - NVLink Bandwidth (Optimal): 900 GB/s.
-    - PCIe/InfiniBand Bandwidth (Suboptimal): 32 GB/s.
+    - Representative MoE activation exchange per token batch: 64 MB.
+    - Local accelerator/SRAM path for grouped experts: about 400 GB/s effective on-chip movement.
+    - Unnecessary shared-LPDDR plus CPU/DMA detour: about 40 GB/s effective after synchronization overhead.
 
     **Calculations:**
-    - Time on NVLink: 32 GB / 900 GB/s = 35.5 ms.
-    - Time on PCIe: 32 GB / 32 GB/s = 1000 ms.
-    - Latency Penalty: 1000 ms / 35.5 ms = ~28x slower.
+    - Topology-aware local path: 64 MB / 400 GB/s = 0.16ms.
+    - Topology-oblivious detour: 64 MB / 40 GB/s = 1.6ms, before extra queue and CPU merge overhead.
+    - Latency penalty: 1.6ms / 0.16ms = 10x slower for traffic that should have stayed local to one accelerator group.
 
     **Conclusion & Interpretation:**
-    - **Result: ~28x slower (Network-Bound)**. Topology-oblivious routing forces intra-node traffic over PCIe, severely bottlenecking communication by 28x.
+    - **Result: ~10x slower for avoidable detours (Topology-Bound).** The degradation comes from expert placement and routing that ignore mobile compute-unit locality, not from a generic NPU performance problem.
 status: published
 provenance: imported
 requires_explanation: false

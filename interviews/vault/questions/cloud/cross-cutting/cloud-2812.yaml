@@ -7,22 +7,33 @@ topic: federated-learning
 competency_area: cross-cutting
 bloom_level: create
 phase: both
-title: Cloud New 0030
-scenario: Architect an auto-scaling cost optimizer for serving a 7B chat model. Traffic fluctuates wildly
-  10x throughout the day. You have access to reserved T4s and spot T4s. Design the scaling and request
-  routing architecture.
-question: "How would you autoscale and route traffic for a 7B chat model with 10x daily swings using reserved and spot T4s?"
+title: Auto-Scaling and Routing for 7B Chat Model on Mixed T4 Fleet
+scenario: Architect an auto-scaling cost optimizer for serving a 7B chat model. Traffic fluctuates from a protected 1,000 req/sec baseline to 10,000 req/sec peak. You have reserved T4s for the interactive SLA and spot T4s for elastic or degraded-priority work. Design the scaling and request routing architecture.
+question: How would you autoscale and route traffic for a 7B chat model with 10x daily swings using reserved and spot T4s?
 details:
-  realistic_solution: Implement a predictive load balancer with a two-tier queue. Provision reserved T4
-    instances to handle the baseline (trough) traffic to guarantee baseline SLA. For daily spikes, aggressively
-    scale preemptible spot T4 instances. Route interactive, latency-sensitive chats to reserved instances.
-    Route background batch-processing (summaries, offline extraction) to spot instances. If spot nodes
-    drop, queue the offline tasks until prices drop or baseline instances free up.
-  common_mistake: Mixing real-time user chat requests onto spot instances without a fallback routing mechanism,
-    causing dropped websockets and failed generations when preempted.
-  napkin_math: T4 has 16GB, fits 7B INT8 (7GB) easily. Throughput is ~20 tokens/sec per stream. 10x traffic
-    spike from 1,000 to 10,000 req/sec. Reserved fleet = 50 T4s. Spot fleet scales to 450 T4s. Segregating
-    batch vs interactive prevents spot drops affecting real users.
+  realistic_solution: Implement a predictive load balancer with a protected reserved lane and an elastic spot-backed lane. Provision reserved T4 instances to handle the 1,000 req/sec baseline interactive SLA. For daily spikes, aggressively scale preemptible spot T4 instances, but route only background batch work, admitted overflow, or lower-priority/degraded interactive traffic to spot-backed queues. Latency-sensitive chat stays on reserved capacity unless the request is explicitly admitted with fallback behavior. If spot nodes drop, shed or queue elastic work and preserve the reserved baseline lane.
+  common_mistake: |
+    **The Pitfall:** Mixing real-time user chat requests onto spot instances without a fallback routing mechanism.
+    **The Rationale:** Spot instances are cheaper and scale rapidly, making them attractive for absorbing traffic spikes.
+    **The Consequence:** Dropped websockets and failed generations when preempted, negatively impacting live user sessions.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - T4 has 16GB VRAM and can serve a quantized 7B model.
+    - Sustained decode throughput is ~400 generated tokens/sec per T4 with batching.
+    - Average request generates 200 tokens, so one T4 serves ~2 req/sec.
+    - 10x traffic spike from a protected 1,000 req/sec baseline to 10,000 req/sec peak.
+    - Reserved fleet sized for the baseline interactive SLA: 500 T4s. Spot fleet scales to 4,500 T4s for burst, batch, and admitted overflow work.
+
+    **Calculations:**
+    - Baseline token load: 1,000 req/sec * 200 tokens/req = 200,000 tokens/sec.
+    - Reserved capacity: 500 T4s * 400 tokens/sec = 200,000 tokens/sec = 1,000 req/sec.
+    - Peak token load: 10,000 req/sec * 200 tokens/req = 2,000,000 tokens/sec.
+    - Peak headroom required above baseline: 2,000,000 - 200,000 = 1,800,000 tokens/sec.
+    - Spot capacity needed: 1,800,000 / 400 = 4,500 T4s.
+    - Routing threshold: keep the first 1,000 req/sec of SLA-protected interactive traffic on reserved capacity; route elastic batch and explicitly admitted overflow traffic to spot-backed queues with admission control.
+
+    **Conclusion & Interpretation:**
+    - **Result:** The reserved pool covers the protected baseline interactive SLA, while ~4,500 spot T4s provide the 9,000 req/sec elastic headroom. Spot capacity is for batch or admitted overflow, not unprotected user-visible SLA traffic.
 status: published
 provenance: imported
 requires_explanation: true

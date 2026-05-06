@@ -7,32 +7,36 @@ topic: compute-cost-estimation
 competency_area: compute
 bloom_level: create
 phase: both
-title: MCU Convolution Cycle Cost
+title: Depthwise Conv Cycle Cost on Cortex-M4
 scenario: Writing a custom INT8 convolution kernel for a hearing aid on a Cortex-M4 running at 100 MHz.
-question: Implement an analytical model to calculate the exact cycle count of a 3x3 depthwise convolution considering MAC instructions and SRAM load/store overheads.
+question: Implement an analytical model to estimate the cycle count of a 3x3 depthwise convolution output pixel with 16 channels, considering MAC instructions and SRAM load/store overheads?
 details:
-  realistic_solution: 'For a 3x3 depthwise patch, there are 9 MACs per channel. The M4 supports SIMD instructions like SMLAD (dual MAC per cycle). Loading 4 bytes of activations and weights takes 2 cycles each. The core computation takes roughly 5 cycles for math + 4 cycles for loads. Across a 16-channel map, calculate `16 * 9 / 2 * (SIMD) + overhead`, summing to roughly 144 cycles per output pixel.'
+  realistic_solution: For a 3x3 depthwise patch, each channel performs 9 multiply-accumulate steps. On a conservative Cortex-M4 scalar model, count one cycle per scheduled MAC and assume activation/weight loads are partly overlapped but still add about 4 exposed SRAM cycles per channel. Add one output store and about 2 cycles of loop/control overhead per channel. That gives roughly 9 + 4 + 1 + 2 = 16 cycles per channel. For 16 channels, the estimate is 16 * 16 = 256 cycles per output pixel before boundary handling, cacheless bus stalls, and compiler effects. If the store/control terms are ignored, the older 208-cycle figure is only a lower-bound sizing estimate, not a complete analytical model.
   common_mistake: |
     **The Pitfall:** Assuming every MAC operation executes perfectly in 1 cycle without pipeline stalls.
     **The Rationale:** Engineers blindly quote hardware specification peaks without analyzing memory fetch overhead or register starvation.
     **The Consequence:** Theoretical cycle estimations are entirely detached from reality, leading to missed strict real-time deadlines upon deployment.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Target: Cortex-M4 (SIMD SMLAD, dual MAC/cycle).
-    - Depthwise patch: 9 MACs per channel.
+    - Target: Cortex-M4 with conservative scalar MAC accounting.
+    - Depthwise patch: 9 MAC steps per channel.
+    - Memory model: about 4 exposed SRAM load cycles per channel after limited scheduling overlap.
+    - Store/control model: 1 output store cycle plus about 2 loop/control cycles per channel.
 
     **Calculations:**
-    - Pure math cycles: 9 MACs / 2 MACs/cycle = 4.5 cycles.
-    - Load overhead (activations/weights): ~4 cycles.
-    - Compute + load per channel: 4.5 + 4 = 8.5 cycles.
-    - Across a 16-channel map: 16 channels × ~9 cycles = ~144 cycles per output pixel.
+    - Scalar compute per channel: 9 MAC steps, approximated as 9 cycles with single-cycle MAC availability.
+    - Activation/weight load overhead per channel: ~4 cycles.
+    - Output store and loop/control overhead per channel: 1 + 2 = ~3 cycles.
+    - Complete lower-level estimate per channel: 9 + 4 + 3 = ~16 cycles.
+    - Across a 16-channel output pixel: 16 channels * ~16 cycles/channel = ~256 cycles.
+    - If store/control overhead is omitted: 16 * (9 + 4) = ~208 cycles, a lower bound only.
 
     **Conclusion & Interpretation:**
-    - **Result: ~144 cycles (Compute-Bound)**. Even with SIMD, memory fetch overhead nearly doubles the theoretical cycle count, highlighting why cycle-accurate analytical models are mandatory for edge sizing.
+    - **Result: ~256 cycles per output pixel (Compute/Memory Estimate)**. This states the instruction and memory-overlap assumptions explicitly; ~208 cycles is only the optimistic lower bound before output-store and loop overhead.
 status: published
 provenance: llm-draft
-expected_time_minutes: 14
 requires_explanation: true
+expected_time_minutes: 14
 validated: true
 math_verified: true
 human_reviewed:
@@ -41,6 +45,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-implement-L6+
+  - gemini-generated
+  - target-implement-L6+
 created_at: '2026-04-25'

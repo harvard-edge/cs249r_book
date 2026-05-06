@@ -8,24 +8,29 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Optimizing backward pass memory for a contrastive learning model on MI300X
-scenario: 'You train a CLIP-style vision-language model on a 192GB GPU. The contrastive loss requires computing similarity between all N×N image-text pairs in a batch. With N=4096, the similarity matrix is 4096×4096 pairs. The backward pass through the loss OOMs even though the hardware has 192GB.'
-question: 'How would you compute the 4096×4096 CLIP contrastive loss without materializing O(N²) gradients and OOMing?'
+scenario: You train a CLIP-style vision-language model on a 192GB GPU. The contrastive loss requires computing similarity between all N×N image-text pairs in a batch. With N=4096, the similarity matrix is 4096×4096 pairs. The backward pass through the loss OOMs even though the hardware has 192GB.
+question: How would you compute the 4096×4096 CLIP contrastive loss without materializing O(N²) gradients and OOMing?
 details:
-  realistic_solution: 'Use GradCache or MoCo-style gradient chunking: split the batch into chunks of size K (e.g., K=256), compute similarity in chunks, and accumulate gradients without materializing the full N×N matrix. The memory cost becomes O(N×K) instead of O(N²). Using K=512 reduces similarity matrix memory dramatically while maintaining full effective batch size.'
+  realistic_solution: Use an exact GradCache-style two-pass method. First encode the full batch without retaining encoder activations, cache detached image/text embeddings, and compute the full contrastive logits or their row/column chunks to get embedding gradients. Then replay each encoder on chunks, backpropagating the cached embedding gradients into model parameters. This preserves the full-batch CLIP objective while keeping peak encoder activation memory at the chunk size. Simple MoCo-style queues change the objective, and naive chunked logits alone are only exact if the denominator still covers the full batch.
   common_mistake: |
     **The Pitfall:** Attempting to compute and materialize the full N×N similarity matrix as a dense tensor with gradients all at once.
     **The Rationale:** Candidates underestimate the O(N²) memory scaling of pairwise contrastive loss backwards passes combined with large encoder activations.
     **The Consequence:** The computation requires >100GB of memory for a single operation, immediately triggering an Out-of-Memory (OOM) crash.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - GPU: 192GB VRAM. Batch (N): 4096.
-       - Forward similarity matrix: 4096 × 4096.
-    2. **Calculations:**
-       - Base similarity matrix memory: 4096 × 4096 × 4 bytes = 64 MB.
-       - Gradients: 2 × 64 MB = 128 MB.
-       - The true OOM culprit is storing the full-batch high-dimensional encoder activations (e.g., 4096 images × ViT-L activations ≈ 40GB+).
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Capacity-Bound. Gradient chunking (K=512) prevents materializing the O(N²) backward pass and full activations simultaneously, averting the OOM.**
+    **Assumptions & Constraints:**
+    - GPU: 192GB VRAM.
+    - Batch N = 4096.
+    - Chunk K = 512.
+    - Logits are FP32.
+
+    **Calculations:**
+    - Full similarity logits: 4096 × 4096 × 4 bytes = 67.1MB.
+    - Image-to-text and text-to-image logits plus gradients can require several copies, so the loss tensors are hundreds of MB rather than the only OOM source.
+    - Full-batch encoder activations are the dominant peak term because autograd would retain activations for all 4096 image/text examples.
+    - Replaying chunks reduces retained encoder activations by about N / K = 4096 / 512 = 8× while preserving full-batch embedding gradients.
+
+    **Conclusion & Interpretation:**
+    - **Result: Peak-memory reduction.** GradCache reduces the dominant activation peak by replaying K-sized chunks, while full-batch contrastive denominators are still computed from cached embeddings.
 status: published
 provenance: imported
 requires_explanation: true

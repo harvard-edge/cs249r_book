@@ -11,22 +11,24 @@ title: Tail Latency of Decode Under Mixed Workloads
 scenario: Your decode pool shows P50 TPOT of 35 ms and P99 TPOT of 280 ms — an 8× tail ratio. The workload mix is 70% short-output requests (≤50 tokens) and 30% long-output requests (500–2000 tokens). The decode GPU is an H100.
 question: What causes the 8× P99/P50 TPOT tail on H100 with 30% long outputs, and what priority scheduling intervention would reduce it?
 details:
-  realistic_solution: 'When long-output requests accumulate in the batch, they hold KV-cache slots for hundreds of steps. At high occupancy (e.g., 90% of KV pool used by long requests), each decode step processes a large batch. The H100 is bandwidth-bound at decode: at batch size B, step time = max(model_weight_read / HBM_bw, compute). With many long requests in batch, step time is ~constant at ~42 ms (140 GB / 3.35 TB/s for 70B). Short requests entering this batch wait for each step the same as long requests — no priority. A short request that generates 50 tokens spends 50 × step_time = 50 × 42 ms = 2.1 s if unlucky enough to enter when batch is saturated. Fix: separate decode queues for short vs. long outputs. Short-output queue (predicted ≤50 tokens) gets absolute priority: the scheduler reserves 20% of batch slots for short requests. When short-output queue is non-empty, long requests cannot fill those slots. Result: P99 TPOT for short requests drops from 280 ms to ~50 ms (2 batch-lengths of wait + 1 step). P99 for long requests may increase slightly (5-10%).'
+  realistic_solution: 'The 8× tail is head-of-line blocking in continuous decode. Long-output requests hold KV-cache and batch slots for hundreds to thousands of decode steps, so short requests can sit behind long requests even though they only need ≤50 output tokens. The intervention is SLO-aware priority scheduling: classify predicted short outputs into a high-priority decode queue and give that queue reserved or preemptive decode slots whenever it is non-empty, while capping the slowdown imposed on long requests. This reduces short-request P99 TPOT by bounding queue wait per token. For example, if the hardware step service time is about the P50 TPOT of 35 ms and the current P99 includes about 245 ms of queueing, priority admission that bounds short-request wait to one extra step yields P99 TPOT near 70 ms; bounding it to two extra steps yields about 105 ms. The exact number depends on load, but the mechanism removes most of the 280 ms tail rather than changing HBM bandwidth.'
   common_mistake: |
     **The Pitfall:** Attributing tail TPOT to memory bandwidth variability or thermal throttling.
     **The Rationale:** These cause 10-20% variance, not 8×.
     **The Consequence:** Implementing hardware-level fixes instead of addressing head-of-line blocking from large batches.
   napkin_math: |
     **Assumptions & Constraints:**
-    - H100 decode step time for 70B: 140 GB / 3.35 TB/s = 41.8 ms/step.
-    - P99 TPOT without priority: 280 ms.
+    - Observed P50 TPOT is 35 ms, which approximates the service time of an uncongested decode step.
+    - Observed P99 TPOT is 280 ms, so the tail includes about 280 - 35 = 245 ms of queueing/head-of-line delay.
+    - Priority scheduling does not make a decode step faster; it reduces how many long-request steps a short request waits behind.
 
     **Calculations:**
-    - Without priority, short request (50 tokens) step time is inflated by large batch \u2248 42 ms \u00d7 (B/B_short) overhead.
-    - With priority, short requests always find a batch slot within 1-2 steps.
+    - Without priority: P99 TPOT = 35 ms service + 245 ms wait = 280 ms.
+    - With high-priority short queue and <=1 extra-step wait: P99 TPOT ~= 35 ms service + 35 ms wait = 70 ms.
+    - With a more conservative <=2 extra-step wait: P99 TPOT ~= 35 ms + 70 ms = 105 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 84 ms (Latency-Bound)**. P99 TPOT with priority: 2 \u00d7 42 = 84 ms (3.3\u00d7 improvement).
+    - **Result: about 70-105 ms P99 TPOT (Latency-Bound)**. Priority decode scheduling can cut short-request tail TPOT by roughly 2.7-4.0x by reducing queueing delay from long-output head-of-line blocking.
 status: published
 provenance: imported
 requires_explanation: false

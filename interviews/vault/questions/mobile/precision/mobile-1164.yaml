@@ -11,23 +11,26 @@ title: Diagnosing NaN Outputs in On-Device LLM
 scenario: You are deploying a 1.8B parameter LLM (like Gemini Nano) to a Google Tensor G3 device. To fit the model within the constraints of the 12 GB LPDDR5X RAM (shared with the OS) and leverage the 7.5 TOPS on-device TPU, you use INT8 for weights and FP16 for activations. However, during beta testing, the model occasionally outputs NaN or completely garbled text when processing prompts that generate large attention scores.
 question: Why does a 1.8B INT8-FP16 LLM on Tensor G3 produce NaNs on prompts with large attention scores?
 details:
-  realistic_solution: 'The root cause is FP16 overflow during the attention mechanism''s dot product or softmax calculations, as FP16 has a maximum representable value of only 65,504. The ideal solution is to switch the activation precision to BF16, which shares the same 8-bit exponent as FP32 (preventing overflow) while maintaining the 16-bit memory footprint. If BF16 is not fully supported for all ops, the fallback is to selectively upcast only the attention logit accumulation to FP32 before applying softmax.'
+  realistic_solution: |
+    The likely root cause is unstable attention numerics: FP16 attention-logit accumulation, masking, or softmax can overflow or produce infinities when scores are large, and later normalization can turn those infinities into NaNs. Do not assume INT8 weights are the only issue. Stabilize softmax by subtracting the row maximum before exponentiation, verify masks do not create invalid inf-inf operations, and use BF16 or selective FP32 accumulation for attention logits where supported. BF16 keeps a 16-bit storage footprint while using an 8-bit exponent field, giving an FP32-like dynamic range.
   common_mistake: |
     **The Pitfall:** Misdiagnosing as a weight quantization error or reverting to FP32.
     **The Rationale:** Candidates fail to realize FP16's low maximum value (~65k) easily overflows in deep LLMs' attention scores.
     **The Consequence:** Reverting to FP32 violates strict mobile memory constraints and destroys performance on the NPU.
   napkin_math: |
     **Assumptions & Constraints:**
-    - FP32 RAM for 1.8B parameters is 7.2 GB.
-    - INT8 weights reduce to 1.8 GB.
     - FP16 maximum value is ~65,504.
+    - BF16 has a 16-bit footprint and an 8-bit exponent field, giving an FP32-like dynamic range with maximum finite values around 3.4e38.
+    - Stable softmax subtracts the row maximum before exponentiation.
 
     **Calculations:**
-    - Attention scores exceed 65.5k, leading to NaN.
-    - BF16 provides the same 16-bit size but expands dynamic range to ~3.4e38.
+    - If attention logits or intermediate softmax values exceed ~65,504 in FP16, they overflow to inf.
+    - Unstable masking, subtracting infinities, exponentiating, or normalizing inf values can produce NaN and garbled output.
+    - Max-subtraction keeps exponent inputs near zero or negative for finite logits.
+    - BF16 or selective FP32 accumulation gives the attention path more exponent range without doubling all activation storage.
 
     **Conclusion & Interpretation:**
-    - **Result: ~3.4e38 dynamic range (Precision-Bound).** Switching to BF16 solves the overflow while maintaining strict mobile memory limits.
+    - **Result: unstable FP16 attention numerics (Precision-Bound).** Large scores can overflow FP16 or destabilize softmax; use max-subtracted softmax plus BF16 or selective FP32 accumulation for the attention path rather than blindly changing every activation.
 status: published
 provenance: imported
 requires_explanation: false

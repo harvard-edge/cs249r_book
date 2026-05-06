@@ -8,28 +8,27 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: The MoE Memory Trap
-scenario: 'The team switched from a dense 7B model to a 47B Mixture-of-Experts model with 8 experts, 2 active per token. They try to deploy it on a single GPU and it immediately OOMs.'
-question: 'Why does a 47B MoE with only 2 active experts per token OOM on a 40 GB card when a dense 13B model would easily fit?'
+scenario: The team switched from a dense 7B model to a 47B Mixture-of-Experts model with 8 experts, 2 active per token. They try to deploy it on a single GPU and it immediately OOMs.
+question: Why does a 47B MoE with only 2 active experts per token OOM on a 40 GB card when a dense 13B model would easily fit?
 details:
-  realistic_solution: 'MoE saves compute but not memory. During inference, only 2 experts are active per token (~13B active parameters total including shared layers), so the FLOPs per token are comparable to a ~13B dense model. But all 47B parameters must reside in VRAM because the router can select any expert for any token. This is the MoE Memory Trap: the compute profile of a 13B model with the memory profile of a 47B model.'
+  realistic_solution: 'MoE saves compute but not full-model weight footprint. During inference, only 2 experts are active per token, so the FLOPs per token can resemble a much smaller dense model. But the router can select different experts for different tokens, so a simple single-GPU deployment must have the full expert set available unless it uses sharding, offload, or quantization. This is the MoE Memory Trap: the compute profile of a smaller model with the memory profile of the full 47B model.'
   common_mistake: |
     **The Pitfall:** Confusing compute utilization with memory footprint.
     **The Rationale:** Thinking that because only 2 of 8 experts are active, the memory usage should mirror the compute profile of a ~13B dense model.
     **The Consequence:** Attempting to deploy massive MoE architectures on under-provisioned hardware, leading to instant OOM failures.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Dense 7B: 14 GB footprint.
-    - MoE 47B (2/8 active): ~13B active params per token.
+    - Dense 13B: 26 GB FP16 weight footprint.
+    - MoE 47B: 47B total parameters, with only a subset active per token.
     - Precision: FP16 (2 bytes per param).
 
     **Calculations:**
-    - Dense 7B FLOPs/token = 14 GFLOPs.
-    - MoE 47B FLOPs/token = 26 GFLOPs.
-    - The router can select any expert, so all 47B params must be in VRAM.
-    - Memory = 47B * 2 bytes = 94 GB.
+    - Dense 13B memory = 13B * 2 bytes = 26 GB, before KV-cache and runtime overhead, so it can plausibly fit on a 40 GB card.
+    - Full MoE FP16 weight footprint = 47B * 2 bytes = 94 GB, before KV-cache and runtime overhead.
+    - The active-expert count reduces per-token compute, but it does not reduce the full set of weights that must be available to the router in a naive single-GPU deployment.
 
     **Conclusion & Interpretation:**
-    - **Result: 94 GB Footprint (Memory-Capacity-Bound)**. Compute is cheap, but memory is fixed. The 94 GB footprint mathematically cannot fit on a 40 GB card.
+    - **Result: 94 GB FP16 Weight Footprint (Memory-Capacity-Bound)**. The model cannot fit on a single 40 GB card without sharding, offload, quantization, or a serving design that avoids keeping all FP16 expert weights resident on that GPU.
 status: published
 provenance: imported
 requires_explanation: false

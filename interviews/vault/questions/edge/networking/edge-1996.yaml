@@ -8,10 +8,10 @@ competency_area: networking
 bloom_level: analyze
 phase: inference
 title: 'Edge ML Inference: Optimizing Load Balancing with Hailo-8 Accelerators'
-scenario: 'A cluster of 50 Hailo-8 accelerators (26 TOPS INT8, 2.5W each) processes 500 inference requests per second (sampled from 100 cameras). Each inference consumes 2 TOPS. Temporary traffic spikes up to 1000 requests/second must be handled.'
-question: Which two routing architectures would you compare for the 50-Hailo-8 cluster, and how would you handle spikes to 1000 requests per second?
+scenario: A cluster of 50 Hailo-8 accelerators (26 TOPS INT8, 2.5W each) processes 500 inference requests per second (sampled from 100 cameras). Each inference consumes a fixed 2 TOPS-equivalent of work per second at the target model and frame rate. Temporary traffic spikes up to 1000 requests/second exceed physical capacity and must be handled gracefully.
+question: Which routing and load-balancing strategies would you compare for the 50-Hailo-8 cluster, and how would you handle spikes to 1000 RPS?
 details:
-  realistic_solution: 'A realistic solution involves a hybrid load balancing approach: consistent hashing for stream stickiness and local weighted round-robin for device distribution. For traffic spikes, implement dynamic load management strategies like selective inference, downsampling, or load shedding.'
+  realistic_solution: 'Compare round-robin as a baseline, consistent hashing for camera or tracker affinity, least-loaded routing using queue depth and thermal headroom, and weighted routing that accounts for per-device health. The recommended policy is hybrid: keep stateful streams sticky with consistent hashing, rebalance hot shards with least-loaded or weighted routing, and enforce admission control around the measured per-device service rate. Because the 1000 RPS spike exceeds hard capacity, no balancer can make all requests succeed; the system must shed or downgrade roughly the excess demand by downsampling, skipping frames, or running lower-priority models selectively.'
   common_mistake: |
     **The Pitfall:** Applying traditional cloud load balancing without considering strict edge power and compute limits.
     **The Rationale:** Candidates assume infinite elasticity and uniform traffic distribution, ignoring that each chip has a hard 26 TOPS and 2.5W limit.
@@ -21,16 +21,19 @@ details:
     - 50 devices at 26 TOPS each.
     - Baseline is 500 req/s.
     - Spike is 1,000 req/s.
-    - Inference cost is 2 TOPS.
+    - Each admitted request stream consumes 2 TOPS of sustained accelerator capacity at the target model/frame rate.
 
     **Calculations:**
     - Total Capacity = 50 * 26 = 1,300 TOPS.
     - Baseline Load = 500 * 2 = 1,000 TOPS (77% util).
     - Spike Load = 1,000 * 2 = 2,000 TOPS.
-    - Deficit = 2,000 - 1,300 = -700 TOPS.
+    - Deficit = 2,000 - 1,300 = 700 TOPS.
+    - Per-device service limit = 26 / 2 = 13 req/s. Baseline routing should average 500 / 50 = 10 req/s per device, leaving limited burst headroom.
+    - Spike demand averages 1,000 / 50 = 20 req/s per device, so admission should cap near 13 req/s/device before queueing grows without bound.
+    - Cluster admit capacity = 1,300 / 2 = 650 req/s; a 1,000 RPS spike requires shedding or downgrading about 350 req/s unless a cheaper fallback path is used.
 
     **Conclusion & Interpretation:**
-    - **Result: Spike requires 2,000 TOPS against 1,300 TOPS limit (Compute-Bound)**. Compute-Bound failure mandates dynamic load shedding.
+    - **Result: Spike requires 2,000 TOPS-equivalent against a 1,300 TOPS limit.** Use sticky routing for state, least-loaded/weighted routing for hot shards, and admission control around 13 req/s/device so overload becomes controlled shedding or quality reduction rather than unbounded queues.
 status: published
 provenance: imported
 requires_explanation: false

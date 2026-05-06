@@ -11,23 +11,24 @@ title: Designing a Pruning Strategy for ESP32-S3 SRAM Constraints
 scenario: You are deploying an INT8 keyword spotting model on an ESP32-S3. The baseline quantized model's weights take up 750 KB. To avoid the latency and power penalty of fetching weights from the 8 MB PSRAM, you must fit the entire model into the 512 KB internal SRAM, leaving at least 150 KB for the OS, network stack, and activation buffers.
 question: How would you design a pruning specification that achieves this memory target while ensuring the model fully utilizes the ESP32-S3's INT8 acceleration?
 details:
-  realistic_solution: The optimal design specifies structured pruning, specifically channel or filter pruning. By physically removing entire filters, the resulting weight tensors remain dense but smaller. This directly reduces the memory footprint without index overhead and perfectly aligns with the Xtensa vector instructions, guaranteeing both memory reduction and proportional inference speedups.
+  realistic_solution: The optimal design specifies structured pruning, specifically channel or filter pruning, targeting more than the bare 51.8% reduction, such as 55-60%, to leave room for biases, alignment padding, and model metadata inside the 362 KB weight budget. By physically removing entire filters or channels, the resulting tensors remain dense INT8 tensors with smaller dimensions and no sparse index overhead. This keeps the model compatible with the ESP32-S3's standard vectorized dense INT8 convolution and matrix-multiply kernels. Speedup should be confirmed by profiling because it depends on operator coverage and kernel shapes, but the pruning choice preserves the acceleration path.
   common_mistake: |
     **The Pitfall:** Proposing unstructured magnitude pruning to hit the memory target.
     **The Rationale:** Candidates choose unstructured pruning because it preserves accuracy best, forgetting that sparse metadata (CSR indices) consumes memory.
-    **The Consequence:** The overhead of storing sparse indices actually increases the memory footprint, and the lack of unstructured sparse vector instructions on the ESP32-S3 severely degrades latency.
+    **The Consequence:** The overhead of storing sparse indices can erase the memory savings, and standard ESP32-S3 dense INT8 kernels usually cannot exploit arbitrary sparsity, so latency may degrade instead of improve.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware: ESP32-S3 (512 KB internal SRAM).
-       - Baseline INT8 Model Weights: 750 KB.
-       - SRAM Reservation: 150 KB (OS, network, activations).
-    2. **Calculations:**
-       - Usable SRAM for Weights: 512 KB - 150 KB = 362 KB.
-       - Target Sparsity: 362 KB / 750 KB = 48.2% max remaining (need ~50% reduction).
-       - Unstructured 50% Cost: (750 KB / 2) weights + (750 KB / 2) indices = 750 KB (0 savings).
-       - Structured (Channel) 50% Cost: 750 KB × 0.5 = 375 KB (Dense format, 0 index overhead).
-    3. **Conclusion & Interpretation:**
-       - **Result: Structured pruning hits ~362 KB target without sparse metadata overhead.** **Result: Memory-Bound Optimization.**
+    **Assumptions & Constraints:**
+    - Hardware: ESP32-S3 (512 KB internal SRAM).
+    - Baseline INT8 Model Weights: 750 KB.
+    - SRAM Reservation: 150 KB (OS, network, activations).
+    **Calculations:**
+    - Usable SRAM for Weights: 512 KB - 150 KB = 362 KB.
+    - Absolute maximum weight payload: 362 KB / 750 KB = 48.2% remaining, so the mathematical minimum reduction is 51.8%.
+    - Practical structured target with headroom: 55% pruning leaves 750 KB * 0.45 = 337.5 KB for dense weights.
+    - Headroom for biases, alignment, and metadata: 362 KB - 337.5 KB = 24.5 KB.
+    - Unstructured pruning cost is format-dependent; with even 1 byte of sparse index per nonzero at 55% pruning, storage is about 337.5 KB weights + 337.5 KB indices = 675 KB, which fails and usually loses dense INT8 acceleration.
+    **Conclusion & Interpretation:**
+    - **Result: Structured pruning should target roughly 55-60% reduction, not the exact 51.8% threshold.** This fits the 362 KB weight budget with headroom while preserving dense INT8 kernels; the separate 150 KB reservation must still cover activations and runtime buffers.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: Optimizing FlashAttention vs. Standard Attention Activation Footprint at 
 scenario: You are comparing two attention implementations for a 30B model (40 layers, 64 heads, H=8192, head_dim=128) on a GPU at sequence length S=8192 and batch size 4. Standard attention stores the full S×S attention matrix. FlashAttention tiles the computation and stores only O(S) activations.
 question: How much activation memory does FlashAttention save at S=8192, and does it eliminate the need for gradient checkpointing within an 80 GB budget?
 details:
-  realistic_solution: FlashAttention significantly reduces the O(S^2) attention score storage. However, non-attention activations (residual, MLP) still scale massively with sequence length and batch size, meaning gradient checkpointing is still required to fit within 80GB.
+  realistic_solution: FlashAttention removes the need to store the full O(S^2) attention probability matrix, saving roughly 1.37 TB of activation storage across 40 layers for this batch, head count, and sequence length. It still stores O(S) softmax statistics and does not remove non-attention activations. The MLP intermediate alone is about 85.9 GB across all layers in this simplified accounting, and residual/hidden activations add roughly another 21.5 GB, so FlashAttention by itself does not fit the full training activation set within an 80 GB budget. Gradient checkpointing or another activation-reduction strategy is still needed.
   common_mistake: |
     **The Pitfall:** Assuming FlashAttention eliminates all attention-related activation memory.
     **The Rationale:** Engineers mistakenly believe FlashAttention has zero memory footprint during the backward pass, ignoring that it must still store softmax statistics (O(S)).
@@ -19,15 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 40 layers, 64 heads, 4 batch, 8192 seq, 128 head_dim, FP16 (2 bytes).
+    - Hidden size H = 64 * 128 = 8192.
+    - Standard attention stores FP16 attention probabilities with shape [layers, B, heads, S, S].
+    - FlashAttention stores O(S) softmax statistics; assume two FP32 stats per row per head for a conservative estimate.
 
     **Calculations:**
-    - Standard Attention Memory: 40 × 64 × 4 × 8192^2 × 2 bytes ≈ 1.37 TB.
-    - FlashAttention Memory: 40 × 64 × 4 × 8192 × 4 bytes ≈ 335.5 MB.
-    - MLP+Residual Activations: 40 × 4 × 8192 × 8192 × 4 expansion × 2 bytes ≈ 85.9 GB.
-    - Total Memory with FlashAttention: 85.9 GB + 0.33 GB = 86.23 GB.
+    - Standard attention matrix memory = 40 * 4 * 64 * 8192^2 * 2 bytes = 1,374,389,534,720 bytes ≈ 1.37 TB decimal.
+    - FlashAttention softmax stats = 40 * 4 * 64 * 8192 * 2 stats * 4 bytes = 671,088,640 bytes ≈ 0.67 GB decimal.
+    - Attention storage saved ≈ 1,374.39 GB - 0.67 GB = 1,373.72 GB.
+    - MLP intermediate activations = 40 * B * S * (4H) * 2 bytes = 40 * 4 * 8192 * 32768 * 2 ≈ 85.9 GB.
+    - One residual/hidden activation per layer = 40 * B * S * H * 2 bytes = 40 * 4 * 8192 * 8192 * 2 ≈ 21.5 GB.
+    - Simplified non-attention total with FlashAttention ≈ 85.9 + 21.5 + 0.67 = 108.07 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Capacity-Bound**. Gradient checkpointing IS needed for non-attention activations since 86.23 GB > 80 GB.
+    - **Result: Memory-Capacity-Bound**. FlashAttention saves about 1.37 TB of O(S^2) attention storage, but the remaining simplified activation estimate is still about 108 GB, so gradient checkpointing is still needed within an 80 GB budget.
 status: published
 provenance: imported
 requires_explanation: false

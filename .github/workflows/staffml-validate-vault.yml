@@ -43,12 +43,20 @@ on:
       - 'interviews/staffml-vault-worker/**'
 
 concurrency:
-  # `head_ref || run_id` keeps PR cancel-on-amend behavior while making
-  # push and workflow_call runs unique per-run, so a push to dev that
-  # triggers both this workflow standalone AND Preview's `uses:` call
-  # doesn't collide on a shared group. See staffml-validate-dev.yml for
-  # the long-form rationale.
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  # Group key uses a literal workflow-identifying string instead of
+  # ${{ github.workflow }} because the latter resolves to the CALLER's
+  # workflow name when this runs via `workflow_call`. Without the
+  # literal, both staffml-validate-dev and staffml-validate-vault — when
+  # called from the same staffml-preview-dev parent — produce the same
+  # group (parent-name + parent-run-id), and `cancel-in-progress: true`
+  # silently cancels whichever queued earlier. Observed on every push
+  # run since 2026-05-02 (introduced by 6ddb82a71b): vault jobs queue
+  # ~3s before Validate (Dev) jobs and get cancelled by them — turning
+  # the StaffML README badge red despite all real validation passing.
+  # `head_ref || run_id` still preserves PR cancel-on-amend (head_ref
+  # set on PRs) and per-run uniqueness for push/dispatch (head_ref empty
+  # → run_id fallback).
+  group: staffml-validate-vault-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 # Read-only token: jobs only checkout, install, lint, and test.
@@ -105,6 +113,39 @@ jobs:
       - name: vault check --strict (corpus invariants)
         run: vault check --strict --vault-dir "$VAULT_DIR"
 
+      - name: chains.json structural audit
+        # Structural gate on the live chain registry — runs the same
+        # validation apply_proposed_chains.py does before promoting a
+        # staging file (member ids exist + are published, levels
+        # non-decreasing, single-topic, multi-membership cap ≤ 2,
+        # L1/L2 anchor rule). Phase 4.1 of CHAIN_ROADMAP.md.
+        run: |
+          python3 "$VAULT_CLI_DIR/scripts/apply_proposed_chains.py" \
+            --proposed "$VAULT_DIR/chains.json" \
+            --dry-run
+
+      - name: chain coverage regression guard (per-track)
+        # Soft regression check: no track may drop to 0 chains. Hard
+        # floor at edge/mobile/tinyml ≥ 25 chains each (post-Phase 1
+        # baseline 49/46/36). If this trips on a real edit, raise the
+        # floor to the new baseline rather than weakening the guard.
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          from collections import Counter
+          chains = json.load(open(f"{os.environ['VAULT_DIR']}/chains.json"))
+          per_track = Counter(c["track"] for c in chains)
+          floors = {"cloud": 100, "edge": 25, "mobile": 25, "tinyml": 25, "global": 0}
+          fails = [(t, per_track.get(t, 0), f) for t, f in floors.items()
+                   if per_track.get(t, 0) < f]
+          print(f"per-track chain count: {dict(per_track)}")
+          if fails:
+              for t, n, f in fails:
+                  print(f"::error::track {t!r} has {n} chains; floor is {f}")
+              sys.exit(1)
+          print(f"all tracks above floor")
+          PY
+
       - name: vault build (reproducibility smoke test)
         # Historically this step also compared release_hash against a pinned
         # value in corpus-equivalence-hash.txt. That pin was load-bearing
@@ -135,6 +176,24 @@ jobs:
       # bundled corpus-summary.json, neither of which depends on a
       # tracked corpus.json. With no committed file there is nothing
       # to drift away from.
+
+      - name: gitignore guard (every question YAML is git-tracked)
+        # Phase 4.9 of CHAIN_ROADMAP.md. Catches the regression class
+        # where a .gitignore pattern accidentally excludes question
+        # YAMLs from the repo (the 924-yaml /data/ rescue in
+        # 367cda468 is the canonical bad day this prevents). A YAML
+        # under questions/ that is gitignored is invisible to the
+        # release pipeline, so it must fail CI.
+        run: |
+          set -euo pipefail
+          UNTRACKED=$(git ls-files --others --ignored --exclude-standard \
+                       -- "$VAULT_DIR/questions" || true)
+          if [ -n "$UNTRACKED" ]; then
+              echo "::error::question YAMLs are gitignored — release pipeline cannot see them:"
+              echo "$UNTRACKED"
+              exit 1
+          fi
+          echo "all question YAMLs under $VAULT_DIR/questions are git-tracked"
 
       - name: id-registry append-only invariant
         run: python3 "$VAULT_CLI_DIR/scripts/check_registry_append_only.py"

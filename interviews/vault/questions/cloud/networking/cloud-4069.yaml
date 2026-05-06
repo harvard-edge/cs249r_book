@@ -11,26 +11,27 @@ title: GPUDirect RDMA Page Table Alignment
 scenario: Your GPUDirect RDMA transfers on MI300X achieve only 35 GB/s instead of the expected 50 GB/s (400Gbps line rate). The GPU memory buffer starts at an address that is 2KB-aligned rather than 64KB-aligned. PCIe performance counters show excessive TLP (Transaction Layer Packet) splitting.
 question: Why does 2KB alignment hurt MI300X GPUDirect RDMA throughput, and how much loss comes from PCIe TLP splitting?
 details:
-  realistic_solution: 'Reallocate RDMA buffers using cuMemAlloc aligned to 2MB (huge page size) or cudaMemAllocManaged with cudaMemAdvise for preferred location. This prevents the HCA''s DMA engine from issuing split TLPs across 64KB page boundaries.'
+  realistic_solution: For MI300X, allocate and register GPU RDMA buffers through the AMD/ROCm stack with at least 64KB alignment, preferably using allocator settings or a small alignment shim that returns 64KB-aligned pinned GPU buffers before ibv_reg_mr or the provider-specific registration path. The 2KB offset makes many 4KB DMA segments cross a 64KB translation boundary, so the HCA must issue extra PCIe transactions and wait on additional address-translation work. The observed 35GB/s versus expected 50GB/s is a 30% throughput shortfall; the scenario says counters attribute that loss to excessive TLP splitting, so the fix is alignment and registration discipline, not CUDA APIs or unsupported IOMMU changes.
   common_mistake: |
     **The Pitfall:** Ignoring memory alignment for DMA transfers.
     **The Rationale:** Candidates assume DMA engines handle any buffer address equally efficiently.
     **The Consequence:** Misaligned buffers cause TLP splitting at page boundaries, generating multiple smaller PCIe transactions and severely reducing throughput.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Expected bandwidth is 50 GB/s, observed is 35 GB/s.
-    - 2KB alignment on 64KB pages causes 4KB MTU packets to split.
-    - Each split adds a ~100ns pipeline bubble in the HCA DMA engine.
-    - Network rate is ~12.2M packets/sec.
+    - Expected bandwidth is 50GB/s.
+    - Observed bandwidth is 35GB/s.
+    - PCIe counters identify TLP splitting from a 2KB-offset buffer as the dominant extra overhead.
+    - Use 4KB DMA segments and 64KB translation boundaries for an illustrative split-rate model.
 
     **Calculations:**
-    - Alignment-caused TLP splitting rate: 4KB / 64KB = 6.25% of packets.
-    - Lost time to bubbles: 12.2M packets/sec * 6.25% * 100ns = 76.3ms per second.
-    - Direct throughput loss from bubbles: 7.6%.
-    - Fixing alignment restores this 7.6% (improving bandwidth), though remaining overheads require disabling IOMMU pass-through to fully hit 50 GB/s.
+    - Throughput loss: 50GB/s - 35GB/s = 15GB/s.
+    - Percentage loss relative to expected: 15GB/s / 50GB/s = 30%.
+    - With a 2KB starting offset, every 16th 4KB segment crosses a 64KB boundary in a simple sequential stream.
+    - Split frequency in that model: 1 / 16 = 6.25% of segments.
+    - A split segment can cost more than one packet time because it adds extra PCIe requests, address translations, and HCA pipeline stalls; counters, not the 6.25% boundary rate alone, explain the observed 30% bandwidth loss.
 
     **Conclusion & Interpretation:**
-    - **Result: 7.6% direct throughput loss from 2KB alignment (PCIe-Transaction-Bound)**. Due to TLP splitting bubbles.
+    - **Result: 15GB/s, or 30%, observed loss (PCIe-Transaction-Bound).** The 2KB alignment creates recurring split transactions; use 64KB-aligned registered ROCm/AMD RDMA buffers to remove that source of loss.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,11 +11,12 @@ title: Symmetric vs Asymmetric MACs
 scenario: A semantic segmentation model originally in FP32 must be deployed on a mobile DSP using INT8.
 question: What is the impact of asymmetric vs symmetric quantization on the latency of the model's depthwise convolutional layers?
 details:
-  realistic_solution: 'Asymmetric quantization introduces a non-zero offset that must be multiplied out during accumulation, adding extra arithmetic instructions to every MAC. Symmetric quantization forces the zero-point to 0, eliminating offset terms and allowing the DSP to execute tight MAC loops, reducing latency.'
+  realistic_solution: |
+    In mobile DSP depthwise convolution kernels, symmetric INT8 weights and activations usually map cleanly to tight vector MAC loops because the zero-point terms are zero. Asymmetric quantization can add zero-point handling for each channel or tensor, but the latency impact depends on the kernel: fixed weight offsets can often be precomputed, activation offsets may be fused into optimized kernels, and poorly optimized paths may still pay extra subtract or correction work. The practical answer is to benchmark the target DSP kernel and prefer symmetric or per-channel schemes when they preserve accuracy and hit the fast path.
   common_mistake: |
     **The Pitfall:** Believing all INT8 quantization schemes map identically to underlying hardware instructions.
     **The Rationale:** Candidates assume INT8 arithmetic always takes 1 operation, forgetting that asymmetric quantization introduces zero-point offsets that must be multiplied out.
-    **The Consequence:** Deploying asymmetric models on DSPs results in unexpected and significant latency regressions.
+    **The Consequence:** Deploying asymmetric models on DSPs can trigger unexpected latency regressions when the chosen kernel cannot fold or fuse the zero-point handling.
   napkin_math: |
     **Assumptions & Constraints:**
     - DSP Hardware computes Multiply-Accumulate (MAC) efficiently.
@@ -23,29 +24,30 @@ details:
     - Symmetric quantization enforces Z = 0.
 
     **Calculations:**
-    - Asymmetric MAC: (a - Za) * (b - Zb) = a*b - a*Zb - b*Za + Za*Zb. Requires 3 additions + 1 multiplication.
-    - Symmetric MAC: a * b (since Za = 0, Zb = 0). Requires 1 multiplication.
+    - Symmetric inner loop: accumulate a * w with zero-point terms removed.
+    - Asymmetric inner loop: accumulate (a - Za) * (w - Zw), but optimized kernels may precompute fixed weight terms and fuse activation corrections.
+    - Depthwise sensitivity: each channel has fewer MACs than a dense convolution, so per-channel setup, offset correction, and memory layout overhead can be visible if not fused.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound.** Symmetric quantization eliminates 3 extra arithmetic ops per MAC, severely dropping latency.
+    - **Result: Kernel-dependent latency impact.** Symmetric quantization is more likely to use the fastest depthwise DSP path, while asymmetric quantization only causes a major slowdown when zero-point corrections remain on the critical path.
 status: published
 provenance: llm-draft
-expected_time_minutes: 10
 requires_explanation: true
+expected_time_minutes: 10
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-realization-L4
+  - gemini-generated
+  - target-realization-L4
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

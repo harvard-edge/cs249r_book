@@ -12,24 +12,26 @@ scenario: We're implementing a Ferret-UI-inspired agentic system where Siri can 
 question: How do you design the on-device grounding architecture and the handoff protocol under these strict memory and latency constraints?
 details:
   realistic_solution: |
-    Use an asymmetric cascaded architecture. An ultra-small, specialized CoreML model (e.g., a MobileNetV4-based encoder paired with a lightweight transformer decoder, ~15M parameters) continuously runs on the ANE to output bounding boxes and semantic embeddings for UI elements. It relies solely on pixels, bypassing the accessibility tree. For the handoff protocol, instead of sending the raw screenshot to the cloud (which introduces latency and privacy risks), the on-device model generates a highly compressed semantic embedding grid (e.g., 16x16 tokens) of the screen. Only this grid and the user's audio transcript are securely handed off to the Apple Intelligence cloud nodes, drastically reducing bandwidth and preserving user privacy.
+    Use a cascaded on-device perception stack with a compact CoreML grounding model that stays resident under the 50MB peak budget. The on-device path should detect UI regions, classify common element roles, encode a small set of candidate boxes, and resolve simple commands to x,y coordinates locally. Do not rely on pixels alone when better signals are available: combine the screenshot features with safe UI metadata such as element bounds and labels when the OS can provide them. For handoff, send Private Cloud Compute a minimal task packet: user transcript, screen/app context policy metadata, candidate element boxes, role scores, and compact per-element embeddings. The cloud performs complex reasoning over that representation and returns an element id or coordinate target; raw screenshots are avoided unless explicitly required by policy, and the device verifies the returned target against the current screen before action.
   common_mistake: |
     **The Pitfall:** Suggesting running a multi-billion parameter Vision-Language Model (VLM) on-device or relying on accessibility trees.
     **The Rationale:** Candidates often underestimate the 50MB RAM constraint or overestimate the reliability of OS-level UI accessibility features.
     **The Consequence:** Violating memory constraints by orders of magnitude, or building a brittle system that breaks on apps lacking complete accessibility metadata.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Memory: 15M parameters quantized to INT4 = ~7.5MB.
-    - Activations: Downsampled 512x512 input → 256x256x16 channels x 2 bytes (FP16) = ~2MB.
-    - Context/OS Buffer: ~5MB.
+    - Model: 12M parameters quantized to INT4 = 6,000,000 bytes, about 5.7 MiB.
+    - Activations: 512x512 input downsampled to 256x256x16 FP16 = 256 * 256 * 16 * 2 bytes = 2,097,152 bytes, or 2.0 MiB.
+    - Candidate embeddings: 128 UI elements * 64 INT8 values * 1 byte = 8,192 bytes, or 8 KiB.
+    - Candidate boxes, role scores, ids, and metadata: about 8-16 KiB, keeping candidate state well below 0.1 MiB.
+    - Runtime buffers, CoreML overhead, and safety margin: ~20 MiB.
 
     **Calculations:**
-    - Total RAM Footprint: ~14.5MB (safely under 50MB constraint).
-    - Transferring 7 MB weights from DRAM to NPU SRAM at 25.6 GB/s LPDDR5 bandwidth = 0.27 ms.
-    - Compute latency: 12 ms vision encoding + 0.27 ms weight transfer + 8 ms text grounding + 2 ms action mapping = 22.3 ms.
+    - Total peak RAM footprint: 5.7 MiB weights + 2.0 MiB activations + <0.1 MiB candidates + 20 MiB runtime/safety margin = about 27.8 MiB.
+    - On-device latency: 12ms UI region encoder + 6ms role/box head + 4ms command matching + 2ms target verification = 24ms.
+    - Handoff payload: 8 KiB of INT8 embeddings plus roughly 8-16 KiB of boxes, role scores, ids, and policy metadata = about 16-24 KiB.
 
     **Conclusion & Interpretation:**
-    - **Result: 22.3 ms / 14.5 MB (Compute-Bound)**. System operates well within acceptable interaction budgets, maintaining low memory footprints.
+    - **Result: about 24ms and 28 MiB peak RAM on-device.** The design stays under the local constraints by sending only compact candidate state to Private Cloud Compute for hard reasoning cases and verifying the returned action locally.
 status: published
 provenance: imported
 requires_explanation: true

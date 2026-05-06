@@ -11,23 +11,26 @@ title: ESP32-S3 Roofline Memory Architecture Specification
 scenario: You are tasked with deploying a visual wake word model on the ESP32-S3. The hardware features a 240 MHz processor with INT8 vector extensions, 512 KB of SRAM, and 8 MB of PSRAM. The model requires 30 million MACs and 800 KB of INT8 weights, needing to execute in under 50ms.
 question: How should the system stage the 800 KB of weights so the arithmetic intensity remains compute-bound and satisfies the 50 ms latency target?
 details:
-  realistic_solution: The architecture must allocate the current layer's weights and all activations strictly within the 512 KB internal SRAM. To handle the 800 KB full model, the system must utilize double-buffering via DMA to asynchronously stream upcoming weight layers from the slow 8 MB PSRAM into the fast SRAM in the background. Executing directly from SRAM ensures the INT8 vector units remain fully fed, keeping the operational point on the compute-bound plateau of the roofline model.
+  realistic_solution: The architecture should keep only the active tile or layer working set in the 512 KB internal SRAM, not the full 800 KB model at once. Store the full INT8 weights in PSRAM, DMA weight chunks into one SRAM buffer while the CPU computes from another, and keep reused activations and scratch buffers in SRAM. This tiled double-buffering hides mostly sequential PSRAM transfers behind compute and avoids random PSRAM accesses in the inner MAC loops. It can meet the 50 ms target only if profiling confirms enough tile reuse, SRAM-resident inner loops, and transfer/compute overlap.
   common_mistake: |
     **The Pitfall:** Implicitly relying on the PSRAM transparent cache.
     **The Rationale:** Candidates calculate theoretical compute peaks but ignore the massive bandwidth disparity between internal SRAM and external SPI-attached PSRAM.
     **The Consequence:** Attempting to execute MACs directly against weights residing in PSRAM drags the operational intensity into the memory-bound region, starving the pipeline and missing the 50ms deadline.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 30M MACs, 50ms deadline -> Required throughput = 600 MMACs/s.
-    - ESP32-S3 peak compute: 240 MHz * 2 cores * 16 MACs/cycle = 7.68 GMACs/s.
-    - PSRAM Bandwidth: ~40 MB/s. SRAM Bandwidth: ~960 MB/s.
+    - 30M MACs, 50ms deadline -> Required effective throughput = 600 MMACs/s.
+    - Use measured ESP32-S3 INT8 kernel throughput for the final proof; theoretical SIMD peaks are not a release-quality latency guarantee.
+    - PSRAM sequential bandwidth: ~40 MB/s. SRAM bandwidth is much higher, but the useful figure depends on reuse and kernel access patterns.
+    - INT8 weights: 1 byte/weight. Full model weights: 800 KB.
 
     **Calculations:**
-    - PSRAM Direct Execution: 40 MB/s -> 40 MMACs/s (Fails 600 MMACs/s requirement).
-    - SRAM Staged Execution: 960 MB/s -> Supports 960 MMACs/s.
+    - Weight-streaming bandwidth needed if each weight is staged once per inference: 800 KB / 50 ms = 16 MB/s.
+    - Sequential PSRAM DMA at 40 MB/s can supply 800 KB in ~20 ms, so transfer is feasible only if overlapped with compute and kept sequential.
+    - Direct PSRAM inner-loop execution is risky: at 600 MMAC/s, even 1 byte of uncached weight traffic per MAC would require 600 MB/s, far beyond PSRAM bandwidth.
+    - Tiled SRAM execution keeps the inner loop on SRAM-resident weights and activations; PSRAM only supplies the next tile at ~16 MB/s average.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Bandwidth**. Fetching directly from PSRAM caps throughput at 40 MMACs/s; utilizing DMA to stage weights into SRAM unlocks the required 600 MMACs/s to hit the deadline.
+    - **Result: Stage weights in SRAM tiles, not direct PSRAM execution.** The full 800 KB model need not fit in SRAM at once; double-buffered sequential transfers can meet the average bandwidth need, while SRAM-resident tiles avoid a memory-bound MAC loop if measured kernel throughput and overlap satisfy the 50 ms budget.
 status: published
 provenance: imported
 requires_explanation: true

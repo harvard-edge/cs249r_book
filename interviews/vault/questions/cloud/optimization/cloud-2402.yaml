@@ -7,12 +7,12 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: analyze
 phase: training
-title: High-Throughput DP-SGD Training
+title: Ghost Clipping for 24h DP-SGD on 500M Records
 scenario: 'Training a cloud-based recommendation embedding model on 500 million user interaction records. Privacy regulations dictate achieving a strict epsilon ≤ 1.5 using DP-SGD. Standard DP-SGD causes OOM errors on 80GB A100s due to per-sample gradient materialization and slows throughput by 10x. Target: Complete training in <24 hours.'
-question: How would you train the 500M-record embedding model with epsilon ≤ 1.5 in under 24 hours without OOMing A100s?
+question: How should the training plan trade off memory, privacy, and throughput to train the 500M-record embedding model at epsilon ≤ 1.5 in under 24 hours without OOMing A100s?
 details:
   realistic_solution: |
-    Adopt Ghost Clipping and large-scale gradient accumulation. Standard DP-SGD requires instantiating gradients per sample (`batch_size * model_size`), blowing up memory. Ghost clipping calculates the clipping norm using a memory-efficient Taylor expansion trick without materializing the full per-sample gradients, reducing memory complexity to match standard SGD. To achieve epsilon ≤ 1.5, we must use a massive logical batch size (e.g., 16,384) to maximize privacy amplification. The tradeoff is compute efficiency vs. memory: we accumulate gradients across multiple forward/backward passes on smaller physical batches to simulate the large logical batch without OOMing.
+    Adopt Ghost Clipping and large-scale gradient accumulation, but treat the privacy target as an accounting constraint rather than a memory trick. Standard DP-SGD is expensive because it needs per-example clipping information and often materializes or stores per-sample gradient data. Ghost Clipping computes clipping norms without materializing full per-sample gradients, allowing a large logical batch to be formed from smaller physical microbatches that fit on 80GB A100s. Epsilon ≤ 1.5 still depends on the sampling rate, number of optimizer steps, clipping norm, and noise multiplier, so the plan must run a DP accountant and tune noise and epochs around the 24h budget rather than assuming the batch size alone guarantees privacy.
   common_mistake: |
     **The Pitfall:** Reducing the logical batch size to fit gradients into VRAM.
     **The Rationale:** Engineers solve the immediate OOM by dropping batch sizes, ignoring the mathematics of Differential Privacy.
@@ -24,13 +24,15 @@ details:
     - Physical batch size per GPU = 256. Gradient accumulation steps = 8.
 
     **Calculations:**
-    - With Ghost Clipping, memory per GPU is ~40GB (fits in 80GB).
-    - Forward/backward pass for BS=256 takes ~300ms.
-    - 8 steps = 2.4s per logical batch.
-    - Throughput: 16,384 / 2.4s = 6,826 samples/sec.
+    - Physical batch across 8 GPUs = 8 * 256 = 2,048 records per microbatch.
+    - Accumulation steps per logical batch = 16,384 / 2,048 = 8.
+    - If one microbatch takes ~300ms, one logical batch takes 8 * 300ms = 2.4s.
+    - Throughput estimate = 16,384 / 2.4s = 6,827 samples/sec.
+    - Full-pass wall clock = 500M / 6,827 ≈ 73,238s ≈ 20.3h, leaving about 3.7h for input pipeline, checkpointing, and accountant overhead if training is one pass.
+    - DP feasibility is checked separately with a privacy accountant using the selected sampling rate, noise multiplier, and number of steps.
 
     **Conclusion & Interpretation:**
-    - **Result: 6,826 samples/sec throughput (Compute-Bound)**. Ghost clipping plus 8x gradient accumulation meets the 24h SLA while completely avoiding OOM.
+    - **Result: Conditional 24h Feasibility.** Ghost Clipping plus accumulation can make the memory and throughput plan viable for a one-pass run, but epsilon ≤ 1.5 is only valid after the DP accountant confirms the noise, sampling rate, and step count.
 status: published
 provenance: imported
 requires_explanation: false

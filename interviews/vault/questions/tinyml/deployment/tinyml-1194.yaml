@@ -11,24 +11,26 @@ title: Ethos-U55 Delegation and Shared SRAM Optimization
 scenario: You are deploying a custom hybrid CNN-Transformer keyword spotting model to an ARM Cortex-M7 + Ethos-U55 (Corstone-300) system. The system runs at 480 MHz with only 512 KB of shared SRAM for both the CPU and NPU. During TFLite Micro conversion, the Vela compiler successfully maps all Conv2D ops to the Ethos-U55, but the custom attention mechanism operators fall back to the Cortex-M7.
 question: How would you design a model conversion and runtime delegation strategy to maximize inference throughput while preventing SRAM exhaustion during CPU-NPU context switches?
 details:
-  realistic_solution: 'The optimal solution is to refactor the custom attention mechanism at the graph level into standard operations (e.g., standard FullyConnected and Softmax) that the Vela compiler can natively map to the Ethos-U55, avoiding fallback completely. If fallback is mathematically unavoidable, the deployment strategy must involve custom memory planning to pin fallback input/output tensors in the M7''s Tightly Coupled Memory (TCM) to prevent NPU DMA stalls and bus contention.'
+  realistic_solution: The optimal solution is to refactor the custom attention mechanism at the graph level into standard operations (e.g., standard FullyConnected and Softmax) that the Vela compiler can natively map to the Ethos-U55, avoiding fallback completely. If fallback is mathematically unavoidable, the runtime must use a shared-SRAM memory plan with one bounded fallback arena, explicit tensor lifetimes, aligned DMA buffers, and as few CPU-NPU boundaries as possible so the M7 and U55 do not duplicate large tensors during context switches.
   common_mistake: |
     **The Pitfall:** Suggesting writing custom NPU microcode or ignoring the massive memory ping-pong overhead of hardware fallbacks.
     **The Rationale:** Developers accustomed to programmable GPUs assume NPU kernels can be freely customized, rather than understanding the Vela compiler is closed-source.
     **The Consequence:** The team attempts an impossible compilation path, or successfully deploys a fallback model that crashes due to severe AHB bus contention starving the shared 512 KB SRAM.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Ethos-U55 compute: ~122.8 GMAC/s.
+    - Ethos-U55 compute: deployment peak depends on configuration; assume a midrange U55-128 at 480 MHz is ~61 GMAC/s peak, with lower sustained throughput after memory effects.
     - Cortex-M7 fallback compute: ~0.96 GMAC/s.
-    - 32-bit AHB bus, 480 MHz.
+    - 32-bit AHB bus, 480 MHz, with a best-case effective transfer model of 4 bytes/cycle when the bus and endpoint are saturated.
+    - Shared SRAM is the only stated fast memory, so fallback tensors must be planned inside the 512 KB SRAM budget.
 
     **Calculations:**
     - 128 KB tensor transfer: 131,072 bytes / 4 bytes/cycle = 32,768 cycles.
-    - Context switch latency: 32,768 cycles / 480 MHz = 68.2 µs per direction.
-    - Full round trip: 136.4 µs.
+    - Context switch transfer time: 32,768 cycles / 480,000,000 cycles/s = 68.3 µs per direction.
+    - Full round trip for one fallback boundary: 136.5 µs before software scheduling, cache maintenance, and bus-contention overheads.
+    - Because this is a theoretical bus minimum, repeated fallback boundaries should be budgeted as shared-SRAM pressure plus transfer overhead, not treated as free copies.
 
     **Conclusion & Interpretation:**
-    - **Result: 136.4 µs (Bus-Bound)**. Repeated CPU-NPU context switching rapidly accumulates hundreds of microseconds in AHB bus traffic, instantly destroying strict 1-2 ms inference budgets.
+    - **Result: ~0.14 ms minimum transfer overhead per CPU fallback boundary pair**. A single fallback may be tolerable, but repeated CPU-NPU ping-pong can consume a meaningful fraction of a 1-2 ms inference budget once runtime overheads and shared-SRAM contention are included, so the conversion should minimize fallback boundaries and allocate bounded fallback tensors in the shared SRAM plan.
 status: published
 provenance: imported
 requires_explanation: true

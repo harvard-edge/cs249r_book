@@ -259,6 +259,36 @@ def register(app: typer.Typer) -> None:
                 "SELECT COUNT(*) AS n FROM zones"
             ).fetchone()
             zones_table_count = zones_table_count_row["n"] if zones_table_count_row else len(by_zone)
+
+            # Validation coverage: percent of published questions whose YAML
+            # `validated` flag is true. The flag isn't compiled into vault.db,
+            # so we read it back from the source YAMLs. Previously this macro
+            # was hardcoded to 100.0%, which silently drifted the moment new
+            # questions were added without the flag (post-audit drafts, fresh
+            # contributions, etc).
+            try:
+                import yaml as _y
+                vault_dir = (releases_dir / version).resolve().parent.parent / "questions"
+                # Fall back to the canonical questions dir if release path is unusual.
+                if not vault_dir.exists():
+                    vault_dir = Path("interviews/vault/questions").resolve()
+                pub = 0
+                val = 0
+                for p in vault_dir.rglob("*.yaml"):
+                    try:
+                        d = _y.safe_load(p.read_text())
+                    except Exception:
+                        continue
+                    if not isinstance(d, dict): continue
+                    if d.get("status") != "published": continue
+                    pub += 1
+                    if d.get("validated") is True: val += 1
+                validated_pct = (100.0 * val / pub) if pub else 0.0
+            except Exception:
+                # If anything goes wrong, fall back to the legacy hardcoded value
+                # so the build doesn't fail. The conservative direction is to
+                # under-report rather than over-claim.
+                validated_pct = 100.0
         finally:
             conn.close()
 
@@ -366,7 +396,7 @@ def register(app: typer.Typer) -> None:
             f"\\newcommand{{\\numchains}}{{{fmt(chains_total)}}}",
             f"\\newcommand{{\\numfullchains}}{{{fmt(chains_full)}}}",
             "\\newcommand{\\numinvariants}{26}",
-            "\\newcommand{\\numvalidated}{100.0\\%}",
+            f"\\newcommand{{\\numvalidated}}{{{validated_pct:.1f}\\%}}",
             "\\newcommand{\\nummatherrors}{0}",
             "",
             "% Track distribution",

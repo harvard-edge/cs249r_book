@@ -8,8 +8,8 @@ competency_area: reliability
 bloom_level: evaluate
 phase: training
 title: The NFS Checkpoint Corruption
-scenario: 'You are training a 70B model on 256 GPUs. At step 80,000, a node fails. You restart from the step-79,000 checkpoint on NFS. The model loads without errors, but training loss immediately jumps to 11.0 and never recovers. The step-78,000 checkpoint works fine.'
-question: 'What happened to the step-79,000 checkpoint?'
+scenario: You are training a 70B model on 256 GPUs. At step 80,000, a node fails. You restart from the step-79,000 checkpoint on NFS. The model loads without errors, but training loss immediately jumps to 11.0 and never recovers. The step-78,000 checkpoint works fine.
+question: What happened to the step-79,000 checkpoint?
 details:
   realistic_solution: |
     NFS has weak consistency guarantees under concurrent writes. During checkpointing, all 256 GPUs write their shards to NFS simultaneously. If two nodes' writes target overlapping NFS blocks, NFS's close-to-open consistency model means a reader may see a partially written file — some blocks from the new checkpoint, some from the previous one. The step-79,000 checkpoint is a Frankenstein: the first 60% of the optimizer state is from step 79,000, but the rest is stale data from step 78,000. The model loads because tensor shapes are correct, but Adam's momentum and variance estimates are mismatched, causing catastrophically wrong steps. Fix: (1) write checkpoints to a temporary path, then atomically rename; (2) compute and verify SHA-256 checksums of each shard; (3) use a two-phase commit with a `.complete` sentinel file.

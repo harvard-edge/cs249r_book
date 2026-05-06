@@ -7,43 +7,45 @@ topic: data-pipeline-engineering
 competency_area: data
 bloom_level: create
 phase: both
-title: Orin NVJPEG Decoding Pipeline
+title: Orin JPEG Decode to TensorRT Pipeline
 scenario: A high-speed defect detection pipeline on a Jetson AGX Orin is bottlenecked by OpenCV CPU JPEG decoding before GPU inference.
-question: Design a pipeline utilizing the Orin's hardware NVJPEG decoder and NVMM memory to pass decoded frames directly to TensorRT without CPU intervention.
+question: Design a Jetson decode-to-inference pipeline that keeps JPEG frames in NVMM and avoids CPU copies before TensorRT?
 details:
-  realistic_solution: Utilize the dedicated NVJPEG hardware accelerator block via GStreamer or DeepStream. Decode the compressed payloads directly into GPU-accessible NVMM buffers. Configure TensorRT to bind natively to these NVMM device pointers. This entirely bypasses host (CPU) memory allocations and copies, dropping decode latency drastically and freeing CPU cycles for application logic.
+  realistic_solution: Use a Jetson multimedia pipeline such as GStreamer or DeepStream to decode JPEG payloads into NVMM buffers, then keep the frames in device-accessible memory through colorspace conversion, resize, and batching. Feed TensorRT through the supported DeepStream nvinfer path or a custom plugin that maps the NVMM-backed surface to CUDA-accessible input tensors. TensorRT should consume GPU tensors produced by that integration layer, not bind directly to the NVMM abstraction itself. This removes CPU decode and host-memory copies while preserving the explicit buffer conversion and synchronization points required by the stack.
   common_mistake: |
     **The Pitfall:** Decoding via NVJPEG but copying to host memory for resizing.
     **The Rationale:** Relying on familiar CPU-based tools like OpenCV for intermediate pre-processing steps, inadvertently breaking the zero-copy pipeline.
     **The Consequence:** Re-introducing costly PCIe/Memory round trips, negating the latency benefits of the hardware decoder.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Baseline CPU Decode: 15 ms.
-    - NVJPEG Hardware Decode: 2 ms.
+    - Baseline path: CPU JPEG decode, CPU resize/color conversion, then host-to-device upload.
+    - Zero-copy path: Jetson multimedia decode to NVMM, GPU/VIC preprocessing, TensorRT input via DeepStream or custom CUDA plugin.
 
     **Calculations:**
-    - Latency Saved: 15 ms - 2 ms = 13 ms per frame.
+    - Baseline frame movement includes at least one decoded-frame CPU allocation plus one host-to-device copy before inference.
+    - NVMM path keeps the decoded surface device-accessible and converts it once into a TensorRT-compatible GPU tensor.
+    - Copy-count reduction: remove the CPU decoded-frame copy and the explicit host-to-device upload from the steady-state path.
 
     **Conclusion & Interpretation:**
-    - **Result: 13 ms saved (CPU-Bound)**. Zero-copy hardware decoding saves 13ms, shifting the bottleneck exclusively to TensorRT inference.
+    - **Result: fewer CPU copies (Pipeline-Bound)**. The design reduces decode and transfer overhead, but the remaining bottleneck depends on decode, preprocessing, and TensorRT timing rather than being automatically or exclusively TensorRT-bound.
 status: published
 provenance: llm-draft
-expected_time_minutes: 12
 requires_explanation: true
+expected_time_minutes: 12
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-optimization-L6+
+  - gemini-generated
+  - target-optimization-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

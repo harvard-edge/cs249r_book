@@ -11,7 +11,7 @@ title: Privacy Guardrail Pipeline on Dataflow Edge
 scenario: You are deploying a smart-city pedestrian tracking system on a Hailo-8 edge node. To satisfy strict privacy governance guardrails, a PII redaction model must blur faces in real-time before the tracking model processes the feed. Both models operate sequentially on 1080p RGB video at 30 FPS.
 question: How do you design this dual-model pipeline and size the required host-accelerator memory bandwidth given the hardware constraints?
 details:
-  realistic_solution: 'The optimal approach evaluates the dataflow architecture and fuses the PII redaction guardrail and tracking models into a single compiled dataflow graph. By chaining them on-chip, the high-bandwidth intermediate activations remain within the Hailo-8''s internal SRAM fabric, enforcing the privacy guardrail seamlessly while strictly minimizing expensive host memory access.'
+  realistic_solution: The optimal approach first checks whether the PII redaction guardrail and tracker can be compiled as a supported chained Hailo dataflow. If they can, keep the full-frame intermediate off the host path and return only compact tracker metadata. If the models must run as separate compiled networks or exchange an unsupported tensor format, budget for host-side staging of the redacted RGB frame and size the PCIe/DMA path from the explicit full-frame transfer assumptions.
   common_mistake: |
     **The Pitfall:** Treating models as independent steps managed by the host CPU.
     **The Rationale:** Candidates fail to recognize that host-streaming large intermediate activations without local DRAM creates a massive PCIe bottleneck.
@@ -21,15 +21,18 @@ details:
     - 1080p RGB frame: 1920 x 1080 x 3 bytes = 6.22 MB.
     - Frame rate: 30 FPS.
     - Hailo-8 has no local DRAM, relies on host memory.
+    - Independent pipeline transfers full raw input, full redacted RGB frame back to host, full redacted RGB frame back to the accelerator, then compact tracker metadata.
+    - Fused pipeline transfers raw input once and returns compact tracker metadata only.
+    - Tracker metadata estimate: 100 objects * 64 bytes/object * 30 FPS = 0.19 MB/s.
 
     **Calculations:**
     - Raw Input Stream: 6.22 MB x 30 = 186.6 MB/s.
-    - Host-managed independent pipeline: Raw to Hailo (186.6 MB/s) + Redacted to Host (186.6 MB/s) + Redacted back to Hailo (186.6 MB/s) = 559.8 MB/s.
-    - Fused dataflow pipeline: Raw to Hailo (186.6 MB/s) + Tracker output to Host (<1 MB/s) ≈ 187 MB/s.
-    - Bandwidth Savings: 559.8 MB/s - 187 MB/s = 372.8 MB/s.
+    - Host-managed independent pipeline: raw to Hailo (186.6 MB/s) + redacted frame to host (186.6 MB/s) + redacted frame back to Hailo (186.6 MB/s) + metadata (0.19 MB/s) = ~560 MB/s.
+    - Fused dataflow pipeline: raw to Hailo (186.6 MB/s) + metadata to host (0.19 MB/s) = ~187 MB/s.
+    - Estimated Bandwidth Savings: ~560 MB/s - ~187 MB/s = ~373 MB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: Optimized Host Bandwidth (Memory-Bound).** Fusing the models on-chip saves ~373 MB/s of host streaming bandwidth, avoiding a severe PCIe bottleneck.
+    - **Result: Optimized Host Bandwidth (Memory-Bound Estimate).** If the unfused stages exchange full RGB frames, fusing the guardrail and tracker saves roughly 373 MB/s of host streaming bandwidth. If the redaction stage can pass compact tensors or boxes instead, the savings are smaller, so the exact value depends on the inter-model tensor contract.
 status: published
 provenance: imported
 requires_explanation: false

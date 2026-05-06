@@ -8,10 +8,13 @@ competency_area: optimization
 bloom_level: evaluate
 phase: training
 title: Evaluating Gradient Bucketing for Overlap
-scenario: You are optimizing the distributed training of a 30B parameter LLM across 64 GPUs using PyTorch FSDP. Profiling reveals that GPU SMs stall frequently during the backward pass waiting for gradient reductions, and network utilization is bursty.
-question: 'Which gradient bucket size and CUDA stream configuration should you use for FSDP on 64 GPUs to maximize communication-computation overlap?'
+scenario: You are optimizing the distributed training of a 30B parameter LLM across 64 GPUs using PyTorch FSDP. Profiling reveals that GPU SMs stall frequently during the backward pass waiting for gradient reductions, and network utilization is bursty. The measured effective per-GPU communication bandwidth for gradient reductions is 400 GB/s, and each backward block has about 1.0 ms of compute that can potentially hide communication.
+question: Which gradient bucket size and CUDA stream configuration should you use for FSDP on 64 GPUs to maximize communication-computation overlap?
 details:
-  realistic_solution: 'The optimal bucket size balances kernel launch/network latency overhead with the ability to overlap communication with computation. A medium bucket size (~25MB to 100MB) is usually optimal. Using separate CUDA streams for AllReduce and compute, a 100MB bucket transfers in 0.25ms — fully hidden behind the 1.0ms backward compute per block. A 1GB bucket takes 2.5ms, stalling the next block by 1.5ms.'
+  realistic_solution: |
+    Start with 100 MB gradient buckets and validate nearby sizes under the profiler. Under the stated measured effective bandwidth, a 100 MB bucket takes about 0.25 ms, small enough to hide under the next 1.0 ms backward compute window, while a 1 GB bucket takes about 2.5 ms and is likely to expose about 1.5 ms of stall if it cannot overlap earlier. Treat the 400 GB/s value as a measured effective local reduction bandwidth for this setup, not a generic 64-GPU cross-fabric guarantee.
+
+    Use the default compute stream for backward kernels plus a dedicated high-priority communication stream for FSDP reductions. Record an event when a bucket becomes ready, make the comm stream wait on that event, launch the reduce-scatter/all-reduce immediately, and make later consumers wait only when they need the reduced shard. If profiling shows launch overhead or poor bandwidth at 100 MB, sweep a narrow range such as 50-200 MB rather than jumping to 1 GB.
   common_mistake: |
     **The Pitfall:** Assuming that the largest possible bucket size (e.g., 1GB) is always optimal.
     **The Rationale:** Candidates think it maximizes network bandwidth utilization per transfer, forgetting it delays the start of communication.
@@ -19,13 +22,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Backward Compute Time: 1.0 ms per block.
+    - Effective gradient-reduction bandwidth: 400 GB/s per GPU for this measured local reduction path.
+    - Use decimal units for consistency: 1 GB = 1000 MB.
+    - Assume the bucket's transfer starts after its producing block and can overlap with the next 1.0 ms compute window.
 
     **Calculations:**
-    - Network Transfer Time (100MB): 100 MB / 400 GB/s = 0.25 ms.
-    - Network Transfer Time (1GB): 1000 MB / 400 GB/s = 2.5 ms.
+    - Network Transfer Time (100MB): 100 MB / 400,000 MB/s = 0.00025s = 0.25 ms.
+    - Network Transfer Time (1GB): 1000 MB / 400,000 MB/s = 0.0025s = 2.5 ms.
+    - Exposed stall for 100MB bucket: max(0, 0.25 ms - 1.0 ms) = 0 ms.
+    - Exposed stall for 1GB bucket: max(0, 2.5 ms - 1.0 ms) = 1.5 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.5 ms stall (Communication-Bound)**. A 100MB bucket completely hides communication, while a 1GB bucket stalls computation by 1.5 ms.
+    - **Result: start around 100 MB with a separate high-priority communication stream.** In this measured setup, 100 MB buckets fit inside the available 1.0 ms overlap window, while 1 GB buckets are too large unless FSDP can start them much earlier or overlap them across multiple blocks.
 status: published
 provenance: imported
 requires_explanation: false

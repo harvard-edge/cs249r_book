@@ -25,9 +25,12 @@ Usage:
 Modes:
     --mode strict (default): Δ ∈ {1, 2} between consecutive members. This is
         the cleanest pedagogical shape and what we want for primary chains.
-    --mode lenient: Δ ∈ {0, 1, 2, 3}. Δ=0 only allowed when both members
-        share a scenario thread. Used for second-pass coverage on buckets
+    --mode lenient: Δ ∈ {1, 2, 3}. Used for second-pass coverage on buckets
         the strict pass missed; resulting chains are tagged tier=secondary.
+        Earlier revisions of lenient mode also allowed Δ=0 for
+        "shared scenario, different angle" pairs; that constraint did not
+        bind in practice (audit found 54/55 Δ=0 chains had no shared
+        scenario), so Δ=0 was removed 2026-05-02.
 
 Bucket scoping:
     --buckets-from <chain-coverage.json>: limit the run to the
@@ -50,7 +53,10 @@ import yaml
 
 VAULT_DIR = Path(__file__).resolve().parents[2] / "vault"
 QUESTIONS_DIR = VAULT_DIR / "questions"
-DEFAULT_OUTPUT = VAULT_DIR / "chains.proposed.json"
+# AI-pipeline intermediate artifacts live under _pipeline/ (gitignored).
+# See interviews/CLAUDE.md for the convention.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
+DEFAULT_OUTPUT = PIPELINE_DIR / "chains.proposed.json"
 
 GEMINI_MODEL = "gemini-3.1-pro-preview"
 TOKENS_PER_CHAR = 0.25
@@ -225,15 +231,17 @@ chains for a bucket when its questions are genuinely unrelated even on
 the loosest reading.
 
 LEVEL PROGRESSION RULES (LENIENT MODE):
-  - Each consecutive pair of members satisfies: cand_level - prev_level ∈ {{0, 1, 2, 3}}
+  - Each consecutive pair of members satisfies: cand_level - prev_level ∈ {{1, 2, 3}}
   - STRONGLY PREFER strict +1 progression where it exists
   - +2 jumps acceptable when no Δ=1 candidate is available
   - +3 jumps allowed only when no smaller intermediate exists in the bucket
-  - Δ=0 (same-level pair) IS allowed when both questions clearly share the
-    same scenario thread but explore different angles of it (e.g.,
-    diagnosis vs design at the same Bloom level on the same setup,
-    debugging vs root-causing the same failure). Do NOT use Δ=0 for
-    same-level questions that just happen to share a topic.
+  - REJECT Δ=0 (same-level pair). Earlier versions of this prompt allowed
+    Δ=0 for "shared scenario / different angle" pairs, but in practice
+    that constraint did not bind — Gemini routinely produced Δ=0 chains
+    that were just two unrelated same-level same-topic questions.
+    If two same-level questions share a scenario thread, model them as
+    siblings (separate registry entries pointing at the anchor), not
+    as a chain.
   - REJECT any backward step (Δ < 0)
 
 OTHER CONSTRAINTS:
@@ -295,7 +303,7 @@ MODE_CONFIG = {
     },
     "lenient": {
         "prompt_template": LENIENT_PROMPT_TEMPLATE,
-        "allowed_deltas": frozenset({0, 1, 2, 3}),
+        "allowed_deltas": frozenset({1, 2, 3}),
     },
 }
 
@@ -365,10 +373,10 @@ def validate_chain(
     """Structural validation of a Gemini-proposed chain.
 
     Δ-rule depends on mode:
-      strict  → Δ ∈ {1, 2}        (clean +1 progression, +2 if no intermediate)
-      lenient → Δ ∈ {0, 1, 2, 3}  (Δ=0 only meaningful for shared-scenario pairs;
-                                   Δ=3 last-resort when no smaller rung exists)
-    Both modes reject backward steps and require the chain to be single-topic.
+      strict  → Δ ∈ {1, 2}     (clean +1 progression, +2 if no intermediate)
+      lenient → Δ ∈ {1, 2, 3}  (Δ=3 last-resort when no smaller rung exists)
+    Both modes reject backward steps, Δ=0 (same-level edges), and require
+    the chain to be single-topic.
     """
     if mode not in MODE_CONFIG:
         return False, f"unknown mode {mode!r}"
@@ -509,7 +517,7 @@ def main() -> int:
         "--mode",
         choices=sorted(MODE_CONFIG.keys()),
         default="strict",
-        help="strict (default): Δ ∈ {1,2}; lenient: Δ ∈ {0,1,2,3}, "
+        help="strict (default): Δ ∈ {1,2}; lenient: Δ ∈ {1,2,3}, "
              "tags chains tier=secondary",
     )
     ap.add_argument("--max-calls", type=int, default=200,

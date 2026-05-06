@@ -8,11 +8,11 @@ competency_area: architecture
 bloom_level: analyze
 phase: both
 title: Analyze inverted residual bottleneck memory access patterns on A100
-scenario: 'You are analyzing MobileNetV2''s inverted residual block (expand->depthwise->project, expansion ratio t=6) running on A100. The block takes 112x112x32 feature maps. A performance engineer claims the expand layer is the bottleneck.'
-question: 'Is the MobileNetV2 expand layer the bottleneck for 112x112x32 inputs on A100, or are depthwise/project layers more bandwidth-bound?'
+scenario: You are analyzing MobileNetV2's inverted residual block (expand->depthwise->project, expansion ratio t=6) running on A100. The block takes 112x112x32 feature maps. A performance engineer claims the expand layer is the bottleneck.
+question: Is the MobileNetV2 expand layer the bottleneck for 112x112x32 inputs on A100, or are depthwise/project layers more bandwidth-bound?
 details:
   realistic_solution: |
-    Expand (1x1): input 32ch -> 192ch at 112x112. FLOPs = 2*32*192*112^2 = 154M. Output tensor = 192*112*112*2B = 4.8MB. Depthwise (3x3): 192ch, 112x112. FLOPs = 2*192*9*112^2 = 43M (memory-bound). Project (1x1): 192->32. FLOPs = 2*192*32*112^2 = 154M. The expand layer produces the largest intermediate activation; at t=6 the expand ratio balloons memory, not compute. On A100 HBM2e (2TB/s), depthwise is most bandwidth-bound (43M FLOPs / 4.8MB read ≈ 9 FLOP/byte -> below roofline). Expand is compute-dominant but its large output strains L2.
+    Use the same memory model for each layer: read input activation, read weights once, and write output activation in FP16. Expand (1x1) maps 32 channels to 192 channels and does about 154M FLOPs. Its arithmetic intensity is roughly 154M FLOPs / 5.6 MB = 27 FLOP/byte, below the A100 ridge point but much higher than depthwise. Depthwise (3x3) over 192 channels does about 43M FLOPs and moves roughly 9.7 MB, or about 4.4 FLOP/byte, making it the most bandwidth-bound. Project (1x1) maps 192 channels back to 32 and does about 154M FLOPs over about 5.6 MB, also around 27 FLOP/byte. The expand layer creates the large intermediate tensor, but the depthwise layer is the clearest bandwidth bottleneck; project can also be memory-sensitive, while expand is not the main bottleneck relative to depthwise.
   common_mistake: |
     **The Pitfall:** Assuming the depthwise conv is always the bottleneck because it has the most spatial work.
     **The Rationale:** Candidates ignore that the 1x1 expand conv generates large intermediate tensors that stress memory bandwidth.
@@ -23,12 +23,14 @@ details:
     - Inputs: 112x112x32 feature maps.
 
     **Calculations:**
-    - Expand (1x1): 154M FLOPs, reads 0.8MB -> 192.5 FLOP/byte (compute-bound).
-    - Depthwise (3x3): 43M FLOPs, reads 4.8MB -> 9 FLOP/byte (memory-bound).
-    - Project (1x1): 154M FLOPs, reads 4.8MB -> 32 FLOP/byte (memory-bound).
+    - Input activation: 112 * 112 * 32 * 2 bytes = 0.80 MB.
+    - Expanded activation: 112 * 112 * 192 * 2 bytes = 4.82 MB.
+    - Expand (1x1): 2 * 112 * 112 * 32 * 192 = 154M FLOPs; bytes ≈ 0.80 MB input + 0.012 MB weights + 4.82 MB output = 5.63 MB; intensity ≈ 27 FLOP/byte.
+    - Depthwise (3x3): 2 * 112 * 112 * 192 * 9 = 43M FLOPs; bytes ≈ 4.82 MB input + 0.003 MB weights + 4.82 MB output = 9.64 MB; intensity ≈ 4.5 FLOP/byte.
+    - Project (1x1): 154M FLOPs; bytes ≈ 4.82 MB input + 0.012 MB weights + 0.80 MB output = 5.63 MB; intensity ≈ 27 FLOP/byte.
 
     **Conclusion & Interpretation:**
-    - **Result: 9 FLOP/byte (Bandwidth-Bound)**. The depthwise and project layers are severely bandwidth-limited, not the expand layer.
+    - **Result: Depthwise Is Most Bandwidth-Bound**. All three are below the ideal A100 ridge point under this simple HBM model, but depthwise has far lower arithmetic intensity than expand/project, so the expand layer should not be singled out as the bottleneck.
 status: published
 provenance: imported
 requires_explanation: false

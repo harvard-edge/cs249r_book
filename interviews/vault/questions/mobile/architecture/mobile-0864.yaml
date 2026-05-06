@@ -7,11 +7,14 @@ topic: cnn-efficient-design
 competency_area: architecture
 bloom_level: apply
 phase: inference
-title: 'Realization: build multi-model CNN ensemble on Snapdragon 8 Gen 3 with CPU+NPU split'
+title: Snapdragon 8 Gen 3 CNN Ensemble Scheduling
 scenario: You need to run an ensemble of MobileNetV3-Small (0.056 GFLOPs) + EfficientNet-Lite0 (0.35 GFLOPs) simultaneously on a Snapdragon 8 Gen 3 device for a high-accuracy classification feature. Total combined latency must be <8ms with the final softmax results merged.
 question: How should a MobileNetV3-Small and EfficientNet-Lite0 ensemble be split across Snapdragon compute units under 8ms?
 details:
-  realistic_solution: 'Employ a highly concurrent heterogeneous split. Assign both models to the Hexagon HTP using asynchronous QNN concurrent execution queues, or pipeline EfficientNet to the HTP and MobileNet to the Kryo CPU/Adreno GPU. Given the extreme speed, parallel dispatch ensures the total pipeline latency is bottlenecked exclusively by the single slowest model. Merge the final vectors instantly on the CPU.'
+  realistic_solution: |
+    Start with the larger EfficientNet-Lite0 on Hexagon HTP through the Snapdragon/QNN path and profile whether MobileNetV3-Small can run concurrently on Adreno GPU or Kryo CPU without starving the HTP path. If QNN can schedule both graphs on HTP with separate contexts and acceptable contention, that is also a candidate, but the release design should be chosen from end-to-end Snapdragon 8 Gen 3 measurements. Run the two models asynchronously only when measured contention is low, then merge logits on the CPU after both futures complete. If contention is high, keep EfficientNet on HTP and place the smaller MobileNet on GPU/CPU, or run the models sequentially if the measured sum is still below 8ms.
+
+    Parallel dispatch does not make latency exclusively equal to the slowest model; dispatch, preprocessing, memory bandwidth, synchronization, resource contention, and final merge all matter. The split should be chosen from on-device measurements, with the 8ms SLA evaluated end to end.
   common_mistake: |
     **The Pitfall:** Executing both models in strict sequential order on the Hexagon NPU.
     **The Rationale:** Assuming the NPU is the singular monolithic accelerator and failing to engage heterogeneous asynchronous dispatch.
@@ -19,18 +22,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target SLA: < 8ms.
-    - Snapdragon 8 Gen 3 HTP (NPU): 45 TOPS.
     - MobileNetV3-Small: 0.056 G-Ops. EfficientNet-Lite0: 0.35 G-Ops.
+    - Let E be measured EfficientNet-Lite0 latency on HTP.
+    - Let M be measured MobileNetV3-Small latency on GPU, CPU, or a second HTP context.
+    - Let O be measured preprocessing, dispatch, synchronization, and CPU logit-merge overhead.
+    - Peak TOPS is not used as a practical latency estimate.
 
     **Calculations:**
-    - MV3-Small (NPU execution): 0.056 G-Ops / 45 TOPS ≈ 1.2μs theoretical -> ~0.5ms practical overhead limit.
-    - Lite0 (NPU execution): 0.35 G-Ops / 45 TOPS ≈ 7.8μs theoretical -> ~2.0ms practical overhead limit.
-    - Strict Sequential execution: 2.0ms + 0.5ms = 2.5ms.
-    - Parallel Dispatch (Heterogeneous split): max(2.0ms, 0.5ms) = 2.0ms.
-    - CPU Softmax Merge: 2000 FP32 additions on Kryo CPU ≈ negligible (~0.001ms).
+    - Sequential SLA condition: E + M + O < 8ms.
+    - Concurrent SLA condition with contention C: max(E, M) + O + C < 8ms.
+    - Concurrency is useful only when C < min(E, M), because otherwise contention erases the overlap.
+    - If EfficientNet is the bottleneck, the available budget for overhead and contention is 8ms - E. If measured O + C exceeds that budget, move MobileNet to a different compute unit or fall back to sequential execution if E + M + O still fits.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.0 ms (Latency-Bound)**. Concurrent multi-processor execution completely absorbs the smaller model's runtime, bounding total pipeline latency to the slowest model (~2ms), effortlessly crushing the 8ms SLA.
+    - **Result: measured Snapdragon scheduling decision (Latency-Bound).** Use HTP for EfficientNet first, place MobileNet on the compute unit with the lowest measured interference, and accept the split only if the measured end-to-end inequality stays below 8ms.
 status: published
 provenance: imported
 requires_explanation: true

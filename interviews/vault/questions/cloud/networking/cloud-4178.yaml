@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: both
 title: Topology-Aware AllReduce Algorithm Selection
 scenario: Your 128-GPU cluster has a 2-level topology 8 GPUs per node connected by NVLink (900 GB/s), 16 nodes connected by InfiniBand NDR (50 GB/s). You must synchronize a 2 GB gradient buffer.
-question: "Compare ring AllReduce, hierarchical AllReduce, and NCCL's tree AllReduce; which algorithm minimizes total AllReduce time?"
+question: Compare ring AllReduce, hierarchical AllReduce, and NCCL's tree AllReduce; which algorithm minimizes total AllReduce time?
 details:
-  realistic_solution: Flat ring AllReduce bottlenecks on InfiniBand at 50 GB/s, wasting NVLink. Hierarchical AllReduce executes intra-node reduce-scatter on NVLink, inter-node AllReduce on IB, and intra-node all-gather on NVLink, utilizing the full 900 GB/s local bandwidth. Hierarchical is optimal for 2-level topology.
+  realistic_solution: For a 2 GB buffer on this 2-level topology, hierarchical AllReduce minimizes total time. A flat 128-GPU ring is dominated by the 50 GB/s inter-node path and takes about 79 ms. Hierarchical AllReduce first reduce-scatters within each 8-GPU node over the stated 900 GB/s aggregate node-local NVLink bandwidth, then AllReduces 250 MB shards across the 16 nodes over InfiniBand, then all-gathers locally. That is about 13 ms. NCCL tree AllReduce can beat ring for small latency-bound messages because it uses fewer steps, but for this large 2 GB payload it is still bandwidth-bound on the inter-node links and typically loses to the topology-aware hierarchical ring.
   common_mistake: |
     **The Pitfall:** Choosing a flat ring AllReduce that ignores the physical 2-level network topology.
     **The Rationale:** Engineers default to the mathematically simplest algorithm without realizing that a flat ring forces intra-node data to travel over the slow inter-node links.
@@ -19,17 +19,19 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Cluster: 128 GPUs, 16 nodes, 8 GPUs/node.
-       - NVLink bandwidth: 900 GB/s.
+       - NVLink bandwidth: 900 GB/s effective node-local collective bandwidth.
        - InfiniBand bandwidth: 50 GB/s.
        - Data payload: 2 GB.
     2. **Calculations:**
-       - Flat Ring Time: 2 * 2 GB * (127/128) / 50 GB/s = ~80 ms.
-       - Hierarchical Intra-Node Reduce-Scatter: 2 GB * (7/8) / 900 GB/s = 1.94 ms. (Yields 250 MB chunk per GPU).
-       - Hierarchical Inter-Node AllReduce: 2 * 250 MB * (15/16) / 50 GB/s = 9.38 ms.
-       - Hierarchical Intra-Node All-Gather: 2 GB * (7/8) / 900 GB/s = 1.94 ms.
-       - Total Hierarchical Time: 1.94 ms + 9.38 ms + 1.94 ms = 13.26 ms.
+       - Ring model: 2 * (N - 1) / N * message_size / bandwidth.
+       - Flat ring time: 2 * (127/128) * 2 GB / 50 GB/s = 79.4 ms.
+       - Hierarchical intra-node reduce-scatter: (7/8) * 2 GB / 900 GB/s = 1.94 ms. This yields a 2 GB / 8 = 250 MB shard per local rank.
+       - Hierarchical inter-node ring AllReduce per rail: 2 * (15/16) * 250 MB / 50 GB/s = 9.38 ms.
+       - Hierarchical intra-node all-gather: (7/8) * 2 GB / 900 GB/s = 1.94 ms.
+       - Total hierarchical time: 1.94 ms + 9.38 ms + 1.94 ms = 13.26 ms.
+       - Simple non-pipelined 16-node tree estimate for the 250 MB shard: 2 * log2(16) * 250 MB / 50 GB/s = 40 ms, plus local phases.
     3. **Conclusion & Interpretation:**
-       - **Result: Network-Bound Topology.** Hierarchical AllReduce is ~6x faster (13.26 ms vs 80 ms) because it minimizes traffic over the slower inter-node InfiniBand links.
+       - **Result: Hierarchical AllReduce wins for this large payload.** NCCL tree may be preferable for small latency-bound buffers, but here the topology-aware hierarchical ring is about 6x faster than a flat ring and materially faster than the simple tree estimate.
 status: published
 provenance: imported
 requires_explanation: false

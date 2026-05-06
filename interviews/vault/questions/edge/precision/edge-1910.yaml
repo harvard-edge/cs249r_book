@@ -7,25 +7,29 @@ topic: extreme-quantization
 competency_area: precision
 bloom_level: analyze
 phase: both
-title: 'Extreme Quantization Strategy for Large Models on Google Coral Edge TPU'
-scenario: 'You are leading the ML engineering effort for a critical real-time application that requires deploying a large, complex model (e.g., a 7B parameter LLM or a high-resolution instance segmentation model) on embedded hardware. The chosen platform is the Google Coral Edge TPU, which offers 4 TOPS for INT8 operations and has a strict power budget of 2W. Crucially, the Coral Edge TPU only natively supports INT8 inference. Your initial FP16/FP32 trained model is far too large (both in memory and compute requirements) to meet the target latency of <50ms per inference and an accuracy degradation ceiling of 5% from the FP16 baseline, even after aggressive INT8 post-training quantization.'
-question: 'How would you use extreme sub-4-bit quantization for the oversized model on the INT8-only Coral Edge TPU while meeting <50 ms latency and <5% accuracy loss?'
+title: Extreme Quantization Strategy for Large Models on Google Coral Edge TPU
+scenario: You are leading the ML engineering effort for a critical real-time application that requires deploying a large, complex model (e.g., a 7B parameter LLM or a high-resolution instance segmentation model) on embedded hardware. The chosen platform is the Google Coral Edge TPU, which offers 4 TOPS for INT8 operations and has a strict power budget of 2W. Crucially, the Coral Edge TPU only natively supports INT8 inference. Your initial FP16/FP32 trained model is far too large (both in memory and compute requirements) to meet the target latency of <50ms per inference and an accuracy degradation ceiling of 5% from the FP16 baseline, even after aggressive INT8 post-training quantization.
+question: Why is sub-4-bit deployment infeasible for the oversized model on Coral Edge TPU, and what fallback plan meets the latency and accuracy targets?
 details:
-  realistic_solution: 'The solution requires a multi-pronged approach: 1. **Baseline INT8 Quantization:** Establish PTQ/QAT baseline. 2. **Mixed-Precision & Sub-4-bit Strategy:** Bit-packing sub-4-bit into single INT8 bytes, and INT8 Emulation for sub-4-bit arithmetic using the Coral''s native INT8 instructions. 3. **Aggressive Accuracy Recovery:** Knowledge distillation and quantization-aware data augmentation.'
+  realistic_solution: A realistic solution starts by rejecting sub-4-bit emulation as the main Coral Edge TPU path. The Edge TPU accelerates supported INT8 graphs; arbitrary 2-4 bit LLM arithmetic would require packing, unpacking, and custom operations that fall back to the host or unsupported kernels. The fallback should be a Coral-compatible INT8 model that is small enough to compile completely, such as a distilled MobileNet/EfficientNet-style classifier for vision or a compact task-specific encoder/classifier for language intent, with QAT used if PTQ exceeds the 5% accuracy-loss budget. If the original 7B LLM is mandatory, use an offloaded/cloud-assisted path or different hardware with native memory and low-bit kernel support.
   common_mistake: |
-    **The Pitfall:** Exclusively focusing on direct sub-4-bit quantization techniques without a clear plan for how these execute on an INT8-only accelerator.
-    **The Rationale:** Leading to either unsupported operations or inefficient emulation.
-    **The Consequence:** Failing to realize the hardware requires bit-packing and emulated INT8 instructions.
+    **The Pitfall:** Treating sub-4-bit compression as if it gives native Coral Edge TPU acceleration.
+    **The Rationale:** The Edge TPU supports a constrained INT8 operator set; packed 2-4 bit LLM kernels are not the same as supported INT8 convolutions or matmuls.
+    **The Consequence:** The model either cannot compile, spills to slow host execution, exceeds memory, or misses the <50 ms target despite looking small on paper.
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 7B parameter LLM (14 GB at FP16).
     - Target: Average 3 bits/parameter (INT8/INT4/INT2 mix).
-    - Compute: Coral Edge TPU = 4 TOPS (INT8).
+    - Coral Edge TPU: 4 TOPS peak for supported INT8 operations, 2W budget.
+    - Target latency: <50 ms, so the request budget is 0.05 s.
 
     **Calculations:**
-    - Compressed size: 7 billion $\times$ (3/8) bytes $\approx$ 2.6 GB.
-    - Compute requirement: 200 GFLOPS equivalent = 400-800 GOPS needed.
+    - Compressed weight size: 7 billion x (3/8) bytes = 2.625 GB before scales, metadata, KV cache, and runtime buffers.
+    - Even if the whole 4 TOPS peak were usable, the <50 ms budget allows at most 4 x 10^12 ops/s x 0.05 s = 200 GOPS.
+    - A 7B LLM token step usually requires many billions of weight operations plus KV-cache traffic, and sub-4-bit unpack/dequantization is not native on Coral.
+    - A fallback INT8 graph must compile fully to Edge TPU operators and stay under 200 GOPS/request; for a 5% accuracy-loss cap, validate PTQ first and use QAT/distillation if needed.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.6 GB (Memory-Bound)**. While compute theoretically supports the load, memory bandwidth and emulation overhead for sub-4-bit are the critical bottlenecks.
+    - **Result: infeasible on Coral Edge TPU as stated.** The credible fallback is a fully compiled INT8 task model that measures under 50 ms with less than 5% accuracy loss; otherwise offload the oversized model or change hardware.
 status: published
+provenance: imported

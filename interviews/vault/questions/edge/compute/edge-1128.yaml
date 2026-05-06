@@ -7,11 +7,14 @@ topic: systolic-dataflow
 competency_area: compute
 bloom_level: create
 phase: both
-title: 'Edge Systolic Array Design: Optimal Tiling for Jetson Orin DLA'
-scenario: Design the tiling strategy for running YOLOv8-nano (INT8, 4.2M params, 8.7 GOPS) on the Jetson Orin's DLA (Deep Learning Accelerator, 2 DLA cores, each 5.5 TOPS INT8). Specify tile sizes for the first convolution layer (3, 640, 640 input -> 32 filters, 3x3 stride 2), memory layout, and expected latency.
+title: YOLOv8-Nano First Convolution Tiling and Latency on Jetson Orin DLA
+scenario: Design the tiling strategy for running YOLOv8-nano (INT8, 4.2M params, 8.7 GOPS) on the Jetson Orin's DLA (Deep Learning Accelerator, 2 DLA cores, each 5.5 TOPS INT8). Specify tile sizes for the first convolution layer (3, 640, 640 input -> 32 filters, 3x3 stride 2, padding 1, output 32x320x320), memory layout, and expected latency.
 question: How should the first YOLOv8-nano convolution be tiled for Jetson Orin DLA SRAM, and what latency should the two DLA cores achieve?
 details:
-  realistic_solution: 'DLA SRAM per core is typically ~3MB. The first conv requires 4.51MB, exceeding SRAM. Implement spatial tiling by splitting the input vertically into 5 strips with 2-pixel overlaps. Distribute the tiles symmetrically across the two DLA cores to process entirely within SRAM without spilling to LPDDR5.'
+  realistic_solution: |
+    DLA SRAM per core is typically ~3MB, while the full input plus output footprint for this layer is about 4.5MB, so the first convolution should be spatially tiled. Split the output height into five 64-row strips; each strip consumes about 129-130 input rows once the 3x3 stride-2 halo is included. Store input activations in NHWC/INT8 order for contiguous channel vectors, keep the 32x3x3x3 weights resident, and write each output strip contiguously. Assign three strips to one DLA core and two strips to the other; the 3/2 split creates a small load imbalance but keeps every tile under 1MB of SRAM.
+
+    The layer has about 177M FLOPs. The peak dual-DLA compute time is only 0.016ms, but that is not an achievable latency estimate by itself. With five small tiles, about 35% effective DLA utilization after tiling/halo/control overhead, and the slower core processing three of five strips, the critical-path compute time is roughly 0.055ms. Adding about 0.01-0.02ms for tile setup and SRAM movement gives an expected latency of about 0.07ms for the first convolution. The result is SRAM-resident, but not a pure peak-TOPS compute-bound case.
   common_mistake: |
     **The Pitfall:** Processing the full feature map sequentially without spatial tiling.
     **The Rationale:** Candidates forget the rigid SRAM constraints of fixed-function accelerators like the DLA.
@@ -26,14 +29,18 @@ details:
        - Full Input = 3 * 640 * 640 = 1.23 MB.
        - Full Output = 32 * 320 * 320 = 3.28 MB.
        - Full footprint = 4.51 MB (Exceeds 3MB SRAM).
-       - Tile: split into 5 horizontal strips (H=128 + overlap).
-       - Tile Input = 3 * 130 * 640 = 244 KB.
+       - Tile: split the output into 5 horizontal strips of 64 rows each.
+       - Tile Input ≈ 3 * 130 * 640 = 249,600 bytes = 244 KiB, including halo rows.
        - Tile Output = 32 * 64 * 320 = 640 KB.
-       - Tile footprint = 884 KB (Fits in SRAM).
+       - Weights = 32 * 3 * 3 * 3 = 864 bytes.
+       - Tile footprint ≈ 244 KiB + 640 KiB + weights = ~885 KiB (Fits in SRAM).
        - Total FLOPs = 2 * 32 * (320*320) * (3*3*3) = 177 MFLOPs.
-       - Compute latency per core (half workload) = (177 MFLOPs / 2) / 5.5 TOPS = ~0.016 ms.
+       - Peak dual-core compute time = 177 MFLOPs / 11 TOPS = 0.016 ms.
+       - Critical-path work with a 3/2 tile split = 3/5 * 177 MFLOPs = 106 MFLOPs on the busier core.
+       - Effective compute time at ~35% of 5.5 TOPS = 106 MFLOPs / 1.925 TOPS = 0.055 ms.
+       - Add ~0.01-0.02 ms for tile setup, halo handling, and SRAM movement.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound in SRAM**. Proper tiling shrinks the working set to 884 KB, keeping data locally in SRAM and driving the latency down to 0.016 ms across the dual DLA cores.
+       - **Result: SRAM-resident tiled execution, ~0.07 ms latency.** Proper tiling shrinks the working set to about 885 KiB per tile. The 0.016 ms peak-TOPS value is only a lower bound; realistic latency is dominated by tiling efficiency and the 3/2 core split.
 status: published
 provenance: imported
 requires_explanation: true

@@ -7,27 +7,31 @@ topic: speculative-decoding
 competency_area: latency
 bloom_level: create
 phase: inference
-title: 'Speculative Decoding with On-Device LoRA Draft'
-scenario: 'On a mobile device with 50 GB/s memory bandwidth, you run a 3B INT4 target model. Instead of a separate draft model, you use a LoRA adapter (rank=8) applied to a 2-layer subset of the target to create a fast draft path that shares 93% of weights.'
-question: 'How would you design a shared-weight speculation system and analyze its memory savings compared to a separate 0.5B draft?'
+title: Shared Early-Exit Speculative Decoding
+scenario: On a mobile device with 50 GB/s memory bandwidth, you run a 3B INT4 target model. Instead of loading a separate draft model, you add a two-layer early-exit draft path that reuses the target model's embedding table, first two transformer layers, and tied output projection.
+question: How would you design a shared-weight speculation system and analyze its memory savings compared to a separate 0.5B draft?
 details:
-  realistic_solution: 'Target: 3B INT4 = 1.5GB. Separate 0.5B INT4 draft = 0.25GB. Total with separate draft: 1.75GB of 8GB. LoRA draft: early-exit after 2 layers with LoRA adapters. LoRA params per layer: 2 x (8192 x 8 + 8 x 8192) x 0.5B (INT4) = 2 x 131K params x 0.5B = 131KB per layer x 2 layers = 262KB. Plus exit head: 8192 -> 128K vocab x 0.5B = 512MB. Wait — the exit head dominates! Even with weight sharing, the vocab projection head is 512MB. Total extra: 512MB + 262KB ≈ 512MB vs separate 0.5B draft at 250MB. The LoRA draft costs MORE memory because of the exit head. Optimization: share the vocab head with the target model (which already has one). Now extra = 262KB only. Draft forward: 2 layers at 3B/32 = 94M params per layer x 2 = 188M params = 94MB weight read at 50 GB/s = 1.9ms/token + LoRA compute (negligible). Acceptance rate: only 2 layers of context = alpha ~ 0.45. E[tok] at K=5 = 1.80. Not great, but zero extra memory.'
+  realistic_solution: |
+    Use a shared-weight speculative design with an early exit after the first two target layers. The draft path reuses the target embedding table, the first two transformer blocks, and the existing tied output projection, so the only persistent addition is a small exit controller or calibration layer, not another set of model weights. Compared with a separate 0.5B INT4 draft at about 250 MB, the shared early-exit path saves essentially that full draft footprint, aside from a few megabytes or less of control/calibration parameters. The tradeoff is quality: a two-layer early exit may have a lower acceptance rate than a trained separate draft, so latency gains must be measured by accepted tokens per target verification pass.
   common_mistake: |
-    **The Pitfall:** Assuming a LoRA adapter on a small subset of layers functions effectively as a quality draft model without addressing the vocab head.
-    **The Rationale:** Candidates think that weight sharing automatically equates to high-quality speculation and low memory, missing the massive vocab projection head size.
-    **The Consequence:** The draft's distribution diverges significantly from the target, and unoptimized vocab heads blow up the memory budget, negating the latency benefits.
+    **The Pitfall:** Treating "shared weights" as if it means a full independent draft model is available for free.
+    **The Rationale:** Candidates count memory savings but do not specify which tensors are actually persistent additions and which target tensors are reused.
+    **The Consequence:** The design either silently allocates a second draft model or overstates the speedup from an early-exit path whose acceptance rate may be low.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 50 GB/s memory bandwidth. 3B INT4 target (1.5GB), 0.5B INT4 draft (250MB).
-    - LoRA draft (rank=8) shares weights, requiring only 262KB extra (if vocab head is shared).
+    - Target model: 3B INT4 = 1.5 GB.
+    - Separate draft: 0.5B INT4 = 250 MB.
+    - Shared early-exit draft reuses target embeddings, first two target layers, and the tied output projection.
+    - Extra early-exit controller/calibration parameters are small; assume <=5 MB persistent storage.
 
     **Calculations:**
-    - Draft forward latency: 2 layers (94MB weights) / 50 GB/s = 1.9ms.
-    - Effective latency (alpha=0.45, E=1.80, K=5): (5 x 1.9ms + 29ms) / 1.80 = 21.4ms/tok.
-    - Baseline latency: 29ms/tok. Speedup: 29 / 21.4 = 1.36x.
+    - Separate target + draft memory: 1.5 GB + 250 MB = 1.75 GB.
+    - Shared target + early-exit memory: 1.5 GB + <=5 MB = <=1.505 GB.
+    - Memory saved versus a separate draft: 250 MB - <=5 MB = at least about 245 MB.
+    - No extra vocab-head storage is counted because the design explicitly reuses the target model's tied output projection.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.36x Speedup (Latency-Bound)**. The LoRA draft provides a 1.36x speedup with almost zero extra memory overhead (262KB vs 250MB) compared to a separate draft model.
+    - **Result: ~245-250 MB Memory Savings (Shared Early-Exit Draft)**. The persistent-memory benefit is real only if the draft path reuses target tensors; latency benefit depends on the measured acceptance rate.
 status: published
 provenance: imported
 requires_explanation: false

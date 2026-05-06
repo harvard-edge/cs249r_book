@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: inference
 title: Dynamic Batching for Strict Latency SLOs
 scenario: You deploy a BERT-base classification model using Triton Inference Server with a strict P99 latency SLO of 100ms end-to-end. Network and tokenization consume 30ms, leaving a 70ms budget. Inference takes 12ms for batch 1, 18ms for batch 8, 28ms for batch 32, and 45ms for batch 64. Traffic varies erratically from 50 to 1,500 QPS.
-question: What max_batch_size and max_queue_delay would you choose to keep serving under the 70ms server-side budget?
+question: What is the largest max_batch_size from the table that stays under the 70ms server-side budget, and what conservative max_queue_delay would you choose?
 details:
-  realistic_solution: 'Cap max_batch_size at 32 and set max_queue_delay to 10ms. This ensures that even in the absolute worst-case scenario (a request arriving just as a max batch starts processing), the total time spent in the system remains strictly under the 70ms budget.'
+  realistic_solution: Cap max_batch_size at 32 and set max_queue_delay to 10ms. Batch 64 cannot satisfy the 70ms server-side budget under head-of-line blocking because a request can wait behind a 45ms batch and then require another 45ms to execute. Batch 32 has a 28ms execution time, so a 10ms queue cap gives a worst-case server-side time of max(28ms, 10ms) + 28ms = 56ms. Larger queue caps up to 42ms would still fit mathematically, but 10ms is the conservative choice for erratic traffic.
   common_mistake: |
     **The Pitfall:** Setting max_batch_size to 64 and max_queue_delay to 25ms because $45\text{ms} + 25\text{ms} = 70\text{ms}$.
     **The Rationale:** Engineers mistakenly sum the queue delay and execution time without accounting for head-of-line blocking.
@@ -27,9 +27,10 @@ details:
     - Worst-case latency equation: max(busy_GPU_wait, max_queue_delay) + execution_time.
     - For Batch 64 (delay 25ms): max(45ms, 25ms) + 45ms = 90ms (Fails 70ms budget).
     - For Batch 32 (delay 10ms): max(28ms, 10ms) + 28ms = 56ms (Passes 70ms budget).
+    - With Batch 32, the mathematical maximum queue delay is 70ms - 28ms = 42ms, but a 10ms cap leaves 14ms of server-side margin under the 70ms budget.
 
     **Conclusion & Interpretation:**
-    - **Result: 56ms (Latency-Bound)**. Batch 32 reliably passes the 70ms budget even during extreme traffic spikes.
+    - **Result: max_batch_size=32, max_queue_delay=10ms (Latency-Bound)**. Batch 32 is the largest listed batch size that passes the head-of-line blocking bound; 10ms is a conservative queue cap rather than the largest possible value.
 status: published
 provenance: imported
 requires_explanation: false

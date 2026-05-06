@@ -11,20 +11,26 @@ title: Diagnosing Targeted Data Poisoning in LLM Fine-Tuning
 scenario: Your team is fine-tuning a 13B parameter LLM on a cluster of 8x A100 GPUs using a daily ingestion pipeline of 50,000 user interaction logs. After a recent automated deployment, the model's accuracy on the core 'refund intent' classification task drops abruptly from 94% to 82%, while overall validation loss and accuracy on other intents remain stable.
 question: How do you determine whether the refund-intent drop is targeted data poisoning or concept drift, and isolate the corrupted training records?
 details:
-  realistic_solution: Deploy influence functions or representational clustering (e.g., analyzing the penultimate layer activations). By clustering activations of the 'refund intent' class, poisoned samples will often form distinct, anomalous micro-clusters far from the legitimate data distribution.
+  realistic_solution: |
+    Compare poisoning and concept drift with targeted, time-sliced diagnostics before filtering records. First replay validation by ingestion day, source, and refund-intent subpopulation to identify whether the drop begins at the deployment boundary while other intents remain stable. Then run feature and label drift checks against clean refund-intent baselines: broad shifts in live features or label mix suggest concept drift, while a small lineage/source slice with anomalous labels or representations suggests poisoning. To isolate records, join training examples to provenance, rank refund-intent samples with influence functions or leave-one-source-out retraining, and inspect representational clusters for anomalous micro-clusters. Quarantine the high-influence, same-lineage suspect records and retrain/evaluate on time-sliced holdouts to verify the refund metric recovers without harming clean drifted traffic.
   common_mistake: |
     **The Pitfall:** Relying solely on global validation loss or simple high-loss sample filtering.
     **The Rationale:** Candidates assume that any harmful data will spike the global loss or have high individual loss, forgetting that sophisticated clean-label poisoning attacks are designed to avoid aggregate distribution shift alerts.
     **The Consequence:** The poisoning attack remains undetected, and the targeted class continues to fail.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Daily ingestion: 50,000 logs.
-    2. **Calculations:**
-       - Calculate total batch size: 4 days of data = 200,000 samples.
-       - Calculate injected samples: An attacker injecting 0.5% poisoned data adds 1,000 malicious samples.
-       - Analyze loss impact: This 0.5% contamination alters the overall validation loss by less than 0.005, making it invisible globally.
-    3. **Conclusion & Interpretation:**
-       - **Result: Security-Bound. The 1,000 poisoned samples represent a 20% local contamination of the 5,000 legitimate refund examples, completely flipping the decision boundary without triggering global alerts.**
+    **Assumptions & Constraints:**
+    - Daily ingestion: 50,000 logs.
+    - Investigation window: 4 days of data.
+    - Hypothetical poison rate: 0.5% of ingested records.
+
+    **Calculations:**
+    - Total records in window: 4 * 50,000 = 200,000 samples.
+    - Poisoned records at 0.5%: 200,000 * 0.005 = 1,000 samples.
+    - Global share: 1,000 / 200,000 = 0.5%, so aggregate validation metrics can remain stable.
+    - Local impact depends on how many of those 1,000 records target refund-intent examples; the scenario does not provide the refund-class count, so the local contamination percentage must be measured from lineage/class labels rather than assumed.
+
+    **Conclusion & Interpretation:**
+    - **Result: Targeted local-risk signal (Security-Bound).** A small global poison rate can be invisible in overall metrics while disproportionately damaging one intent class; isolate suspect records by time window, deployment boundary, lineage source, and refund-intent activation clusters.
 status: published
 provenance: imported
 requires_explanation: false

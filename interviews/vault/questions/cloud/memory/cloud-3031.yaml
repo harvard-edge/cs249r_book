@@ -11,7 +11,7 @@ title: 'Model Size Estimation: Compare MoE vs. Dense Memory Footprint'
 scenario: 'Compare the inference memory footprint of a Mixture-of-Experts (MoE) model (Mixtral-8x7B: 46.7B total params, 12.9B active per token) vs. a dense 13B model (LLaMA-2-13B). Both serve at batch size 32, sequence length 1024.'
 question: How does Mixtral-8x7B inference memory compare with dense LLaMA-2-13B at batch 32 and sequence length 1024?
 details:
-  realistic_solution: 'Mixtral-8x7B FP16: all 46.7B params must be in HBM = 93.4GB. Exceeds single 80GB GPU! Need 2 GPUs. Active compute: 12.9B params per token = 25.8GB accessed per decode step. LLaMA-2-13B FP16: 26GB. Fits in single GPU with KV cache. KV-cache LLaMA-2-13B at batch=32, seq=1024: 32x1024x2x5120x2Bx40 layers = 26.8GB. Total LLaMA-2-13B: 26+26.8=52.8GB < 80GB. Mixtral: 93.4GB + KV-cache -> 2 GPUs.'
+  realistic_solution: 'Mixtral-8x7B FP16: all 46.7B parameters must be resident in HBM even though only 12.9B are active per token, so weights are 46.7B × 2B = 93.4GB. That alone exceeds one 80GB GPU, so it needs at least 2 GPUs or quantization. Its KV cache at batch 32 and sequence 1024, assuming 32 layers, 8 KV heads, and 128 head dim, is 32 × 1024 × 32 × 2 × 8 × 128 × 2B = 4.3GB total. LLaMA-2-13B FP16 weights are 26GB. Its KV cache with 40 layers, 40 KV heads, and 128 head dim is 32 × 1024 × 40 × 2 × 40 × 128 × 2B = 26.8GB. Total LLaMA-2-13B is about 52.8GB plus small activation/workspace overhead, so it fits on one 80GB GPU. Mixtral has lower active compute than a dense 46.7B model, but its resident memory footprint is larger than dense 13B.'
   common_mistake: |
     **The Pitfall:** Assuming MoE memory equals active parameters multiplied by dtype bytes.
     **The Rationale:** The full weight tensor for all experts must reside in HBM even though only 2 of 8 experts activate per token.
@@ -24,13 +24,14 @@ details:
     - Precision: FP16 (2 bytes).
 
     **Calculations:**
-    - Mixtral weights: 46.7B * 2B = 93.4 GB (Exceeds 80GB GPU, requires TP-2).
-    - Mixtral KV-cache (TP-2): ~8.6 GB / 2 = 4.3 GB per GPU. Total per GPU = 93.4/2 + 4.3 = 51.0 GB.
+    - Mixtral weights: 46.7B * 2B = 93.4 GB resident (exceeds one 80GB GPU).
+    - Mixtral KV-cache: 32 * 1024 * 32 layers * 2(K,V) * 8 KV heads * 128 dim * 2B = 4.3 GB total.
+    - Mixtral under TP-2: weights shard to about 46.7 GB/GPU; KV cache is about 2.1-4.3 GB/GPU depending on whether the serving stack shards or replicates KV by tensor-parallel rank.
     - LLaMA weights: 13B * 2B = 26 GB.
     - LLaMA KV-cache: ~26.8 GB. Total = 26 + 26.8 = 52.8 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Capacity Bound**. MoE requires storing all inactive experts in HBM, forcing a multi-GPU deployment (93.4GB) compared to the dense model (26GB).
+    - **Result: Memory-Capacity Bound**. MoE active parameters affect compute, not resident HBM. Mixtral requires all 93.4GB of weights to be resident, forcing multi-GPU FP16 serving, while dense LLaMA-2-13B fits on one 80GB GPU at this batch and context.
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,7 +12,7 @@ scenario: A machine learning team is preparing to deploy a complex conversationa
 question: How would you use logit and feature distillation to build an INT8 student for Cloud AI 100, and when is distillation better than pruning?
 details:
   realistic_solution: |
-    Implement a multi-stage distillation strategy. First, use logit matching with a quantized (INT8) teacher model to guide a smaller student model, ensuring the student also targets INT8 deployment. Simultaneously, experiment with feature distillation, carefully selecting intermediate layers to distill, and profile memory access patterns to ensure the LPDDR4x bandwidth doesn't become a bottleneck. Prioritize distillation over aggressive pruning when fine-grained accuracy preservation is paramount.
+    Build a smaller student architecture first, train it with logit distillation from the large teacher, then add a small number of feature-alignment losses only at high-value layers that do not create excessive activation traffic. Use QAT so the student is trained for INT8 behavior before compiling and profiling on Cloud AI 100. Choose distillation when the teacher's architecture cannot fit memory, compile cleanly, or meet latency/power even after moderate pruning, or when pruning loses too much accuracy. Choose pruning only when the original shape already deploys and the target is an incremental memory or latency reduction.
   common_mistake: |
     **The Pitfall:** Ignoring the memory bandwidth implications of LPDDR4x for feature distillation.
     **The Rationale:** Treating edge devices like datacenter GPUs where massive intermediate feature maps can be stored in HBM.
@@ -21,13 +21,15 @@ details:
     **Assumptions & Constraints:**
     - Hardware Compute: 400 TOPS = 400,000 GOPS.
     - LPDDR4x Bandwidth: ~50 GB/s (128-bit bus width).
-    - Feature Distillation Cost: 10 intermediate layers * 10 MB feature map = 100 MB per forward pass.
+    - Distillation training can use teacher outputs offline; inference will run only the compact INT8 student.
 
     **Calculations:**
-    - Bandwidth Requirement: 100 MB / 50 GB/s = 2 ms just for feature map movement.
+    - Logit distillation stores one teacher output per example and adds little inference-time complexity because the teacher is absent at deployment.
+    - Feature distillation adds training-time activation reads/writes for each matched layer, so its cost scales with the number and size of selected feature maps.
+    - Pruning keeps the same broad architecture and removes weights or channels; it works best when the remaining shapes still map efficiently to the accelerator.
 
     **Conclusion & Interpretation:**
-    - **Result: 2 ms overhead (Memory-Bound Distillation)**. Feature distillation creates massive memory traffic overhead compared to logit distillation, making it inferior for memory-bound edge hardware.
+    - **Result: use distillation when a smaller INT8 student is needed to satisfy accuracy, compileability, memory, and latency together.** Use pruning only for deployable models needing incremental reduction; feature losses should be sparse because their training cost is bandwidth-sensitive.
 status: published
 provenance: imported
 requires_explanation: false

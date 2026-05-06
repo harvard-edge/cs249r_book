@@ -9,29 +9,29 @@ bloom_level: analyze
 phase: inference
 title: Optimizing ML Inference Power on Nordic nRF5340
 scenario: Your team is deploying a tinyML model for anomaly detection on a Nordic nRF5340 microcontroller. The device is battery-powered, and the model's inference needs to run periodically while adhering to a strict average power budget of 100 uW. The current implementation, running at full 128 MHz, consumes too much power during inference bursts.
-question: How should you use DVFS and energy-per-inference measurements to keep nRF5340 anomaly detection within a 100 uW power budget?
+question: How should you use clock scaling, sleep states, peripheral gating, and energy-per-inference measurements to keep nRF5340 anomaly detection within a 100 uW power budget?
 details:
-  realistic_solution: Implement dynamic voltage and frequency scaling (DVFS) by utilizing the nRF5340's power management capabilities to switch to lower P-states (e.g., reducing clock frequency to 64 MHz or even lower during inference, or only boosting to 128 MHz when absolutely necessary). Profile the model's execution time and power consumption at different frequencies and voltages. Quantify the energy savings per inference using the CMOS power equation for active states. Additionally, optimize data movement within memory, leverage low-power peripheral modes (e.g., for BLE communication), and ensure the device enters the most efficient sleep modes between inference cycles to meet the average power budget.
+  realistic_solution: |
+    Use the nRF5340 power-management features that are actually available: run the CPU at the lowest clock frequency that still meets the inference deadline, gate unused peripherals, keep BLE/radio work in low-power modes, and enter System ON idle or System OFF between inference windows. Measure current and latency at each supported clock configuration instead of assuming arbitrary voltage scaling. The acceptance criterion is energy per inference plus sleep leakage over the reporting interval: E_cycle = E_inference + E_peripherals + E_sleep, and E_cycle / period must be below 100 uW. If the lower clock increases latency more than it reduces active energy, keep the higher clock and spend the saved wall-clock time in a deeper sleep state.
   common_mistake: |
     **The Pitfall:** Focusing solely on model size reduction or quantization.
     **The Rationale:** Neglecting the impact of operating frequency and voltage scaling on the overall energy budget, and not accounting for quiescent power consumption between inference cycles.
     **The Consequence:** Failing to meet the strict average power budget despite having a highly optimized model.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Dynamic Power Equation: P ∝ C x V² x f.
-    - Baseline: f = 128 MHz, V = 1.8V, inference time = 10 ms.
-    - Target state: f = 64 MHz (0.5x), V = 1.44V (0.8x).
+    - Baseline supported mode: 128 MHz, active power P_128, inference time = 10 ms.
+    - Lower supported clock mode: 64 MHz, measured active power P_64 = 0.60 x P_128.
+    - Lower clock doubles compute time if the workload is CPU-bound.
 
     **Calculations:**
-    - Power scale factor = (0.8)² x 0.5 = 0.64 x 0.5 = 0.32.
-    - New Power (P_low) = 0.32 x P_max.
-    - New Inference Time = 10 ms / 0.5 = 20 ms.
-    - Original Energy (E_max) = P_max x 10 ms.
-    - New Energy (E_low) = (0.32 x P_max) x 20 ms = 6.4 x P_max.
-    - Energy reduction = (10 - 6.4) / 10 = 36%.
+    - Original energy: E_128 = P_128 x 10 ms.
+    - Lower-clock time: t_64 = 10 ms / 0.5 = 20 ms.
+    - Lower-clock energy: E_64 = (0.60 x P_128) x 20 ms = 12 ms x P_128 = 1.2 x E_128.
+    - In this measured example, slowing the clock increases inference energy by 20%.
+    - For a 100 uW average budget, the maximum cycle energy at period T is E_budget = 100 uW x T; the measured E_inference + E_sleep must be below that value.
 
     **Conclusion & Interpretation:**
-    - **Result: 36% reduction (Energy-Bound)**. Total energy per inference drops by 36%, bringing the system within the 100 uW average power budget.
+    - **Result: Measure energy, not just lower the clock (Duty-Cycle-Bound)**. On nRF5340, use supported clock choices and sleep/peripheral gating; do not assume arbitrary DVFS voltage points. A lower clock is only useful if the measured active-power drop more than offsets the longer inference time.
 status: published
 provenance: imported
 requires_explanation: false

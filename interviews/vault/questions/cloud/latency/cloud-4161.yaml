@@ -11,23 +11,26 @@ title: Tail Latency Impact of Garbage Collection
 scenario: Your Python-based inference service shows periodic P99 spikes every ~30 seconds, each lasting 50-200ms. The spikes correlate with Python garbage collection cycles.
 question: Why does GC disproportionately affect tail latency in ML serving, and what are your mitigation options?
 details:
-  realistic_solution: 'Python''s cyclic GC (generation 2) triggers every ~700 allocations by default and runs stop-the-world, pausing all threads including the ones feeding data to the TPU. During a GC pause, the TPU starves for input and the response is delayed by the full GC duration. Mitigations: (1) Disable automatic GC and trigger it manually between request batches: `gc.disable()` then `gc.collect()` during idle periods. (2) Use `gc.set_threshold(50000, 50, 10)` to reduce GC frequency at the cost of higher peak memory. (3) Minimize Python object churn — use numpy/jax arrays (not Python lists) for data staging, pre-allocate buffers. (4) In production, use a sidecar process for GC-heavy preprocessing, keeping the inference process lean. Result: P99 spikes eliminated, steady-state memory increases 10-15%.'
+  realistic_solution: 'CPython reference counting still runs continuously, but the cyclic garbage collector periodically scans container objects and can pause Python execution while it finds unreachable cycles. In ML serving, even a 50-200ms pause can hit the tail because requests waiting on Python preprocessing, batching, tokenization, or accelerator feed logic cannot make progress through the GIL-bound control path. Mitigations: (1) Reduce object churn by preallocating buffers and using numpy/jax/torch arrays instead of Python lists and temporary dicts. (2) Tune `gc.set_threshold(...)` only after measuring allocation patterns. (3) Optionally disable automatic cyclic GC in the hot serving path with `gc.disable()` and call `gc.collect()` during known idle or drain windows; this does not disable reference counting and must be paired with memory monitoring. (4) Move GC-heavy preprocessing to a separate worker process. Result: pauses are reduced or moved out of the request path, not guaranteed
+    to disappear.'
   common_mistake: |
     **The Pitfall:** Disabling garbage collection entirely.
     **The Rationale:** Engineers see GC causing latency spikes and assume turning it off is the simplest fix.
     **The Consequence:** This causes memory leaks that eventually Out-Of-Memory (OOM) the inference process, trading a latency issue for a total reliability failure.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Default GC runs every ~30s, pausing for 50-200ms.
-    - Inference runs at 1000 req/s.
+    - Observed cyclic-GC-correlated spikes occur about every 30 seconds.
+    - Each spike lasts 50-200ms.
+    - The request path depends on Python control code for preprocessing, batching, or feeding the accelerator.
 
     **Calculations:**
-    - Request Delay: Each GC pause delays 50-200 requests.
-    - Latency Shift: Baseline P99 is 25ms. With spikes, P99 is 150ms.
-    - Mitigation: Manual GC scheduling drops P99 to 28ms (3ms overhead).
+    - A request unlucky enough to overlap a GC pause can inherit up to roughly 50-200ms of extra latency.
+    - Because the pause is periodic, it affects a small fraction of requests but appears strongly in high percentiles.
+    - Moving `gc.collect()` to idle or drain windows shifts the pause away from active requests when such windows exist.
+    - Raising thresholds can reduce pause frequency, but may increase memory use and make each eventual collection larger.
 
     **Conclusion & Interpretation:**
-    - **Result: P99 spikes eliminated (Runtime-Bound)**. Manual GC scheduling eliminates P99 spikes at the cost of a 10-15% memory increase.
+    - **Result: GC mitigation reduces or relocates 50-200ms tail spikes; it does not guarantee elimination.** Validate with runtime metrics, allocation profiling, and memory headroom under production load.
 status: published
 provenance: imported
 requires_explanation: false

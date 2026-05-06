@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: cloud-2351
 track: cloud
-level: L6+
+level: L5
 zone: mastery
 topic: collective-communication
 competency_area: networking
@@ -20,20 +20,25 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Job size: 32 nodes (256 GPUs). Model: 35B parameters = 70GB gradients (FP16).
-    - Data Transfer: Ring AllReduce transfers ~2 * model size = 140GB per step.
+    - A cross-AZ placement puts part of the AllReduce ring in AZ-A and part in AZ-B.
+    - Approximate chargeable cross-AZ egress per step: 140 GB total across the AZ boundary, counting both ring directions/edges that leave an AZ.
+    - Step rate while training: 1 step/second.
+    - Cross-AZ affected jobs run for 20% of the week.
+    - Cross-AZ egress price: $0.01/GB.
 
     **Calculations:**
-    - Throughput Cost: At 1 step/second, cross-AZ traffic is 140 GB/s.
-    - Cost calculation: 140 GB/s * 3,600 s/hr * $0.01/GB = $5,040/hour.
-    - Weekly Bill: Over a 168-hour week running at 20% duty cycle: $5040 * 33.6 hours = ~$169,344/week.
+    - Cross-AZ traffic rate while active: 140 GB/step × 1 step/s = 140 GB/s.
+    - Active-hour cost: 140 GB/s × 3,600 s/hr × $0.01/GB = $5,040/hour.
+    - Active hours per week: 168 hr × 20% = 33.6 hr.
+    - Weekly bill: $5,040/hr × 33.6 hr = $169,344/week.
 
     **Conclusion & Interpretation:**
-    - **Result: Network-Bound (Network-Bound)**. Inter-AZ links are vastly inferior to intra-AZ IB, starving the GPUs and creating the massive egress bill.
+    - **Result: Network-Bound.** The same cross-AZ AllReduce traffic model explains both the throughput loss and the roughly $170k/week egress bill.
   options:
-  - The new AZ-B nodes have defective networking hardware that drops packets, causing the 40% throughput loss and $170k/week egress cost due to TCP retransmissions. The scheduler should isolate these nodes.
-  - A topology-agnostic scheduler allowed synchronous Ring AllReduce to span across AZ-A and AZ-B. The slow inter-AZ link bottlenecked the GPUs, and the massive gradient transfers incurred the ~$170k/week egress bill. The scheduler must enforce locality-aware, single-AZ placement.
-  - The training loop is using FP8 quantization which falls back to CPU computation when spanning multiple AZs, causing the throughput drop and high egress costs. The scheduler should disable FP8 for cross-AZ jobs.
-  - The 128 new nodes in AZ-B are reading training data from an object store in AZ-A. The cross-AZ data loading is starving the GPUs of batches and generating the $170k/week bill. The scheduler should replicate the data to AZ-B.
+    - The new AZ-B nodes have defective networking hardware that drops packets, causing the 40% throughput loss and $170k/week egress cost due to TCP retransmissions. The scheduler should isolate these nodes.
+    - A topology-agnostic scheduler allowed synchronous Ring AllReduce to span across AZ-A and AZ-B. The slow inter-AZ link bottlenecked the GPUs, and the massive gradient transfers incurred the ~$170k/week egress bill. The scheduler must enforce locality-aware, single-AZ placement.
+    - The training loop is using FP8 quantization which falls back to CPU computation when spanning multiple AZs, causing the throughput drop and high egress costs. The scheduler should disable FP8 for cross-AZ jobs.
+    - The 128 new nodes in AZ-B are reading training data from an object store in AZ-A. The cross-AZ data loading is starving the GPUs of batches and generating the $170k/week bill. The scheduler should replicate the data to AZ-B.
   correct_index: 1
 status: published
 provenance: imported

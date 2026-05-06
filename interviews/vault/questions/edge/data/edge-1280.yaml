@@ -7,25 +7,27 @@ topic: streaming-ingestion
 competency_area: data
 bloom_level: evaluate
 phase: both
-title: 'Zero-Copy Video Ingestion Pipeline for Hailo-8'
-scenario: 'You are designing a real-time multi-camera perception pipeline for an autonomous delivery robot using a Hailo-8 dataflow accelerator. The system must ingest 4 concurrent 1080p video streams at 30 fps and feed them continuously into the accelerator for object detection.'
-question: 'How would you design host-side ingestion and memory management for 4x1080p at 30 FPS on a DRAM-less Hailo-8 to avoid bandwidth bottlenecks?'
+title: Zero-Copy Video Ingestion Pipeline for Hailo-8
+scenario: You are designing a real-time multi-camera perception pipeline for an autonomous delivery robot using a Hailo-8 dataflow accelerator. The system must ingest 4 concurrent 1080p video streams at 30 fps and feed them continuously into the accelerator for object detection.
+question: How would you design host-side ingestion and memory management for 4x1080p at 30 FPS on a DRAM-less Hailo-8 to avoid bandwidth bottlenecks?
 details:
-  realistic_solution: 'A robust design utilizes a zero-copy pipeline (e.g., using V4L2 and dma-buf) to stream data directly from the camera interfaces to pinned, contiguous host memory. The host CPU is completely bypassed for data movement; hardware-decoded buffers are mapped directly to the Hailo RT driver. The ingestion pipeline maintains a ring buffer of continuous input streams, allowing the Hailo-8 to fetch data over PCIe autonomously via DMA without waiting for CPU intervention.'
+  realistic_solution: A robust design uses a host-controlled zero-copy pipeline with V4L2, dma-buf export, and pinned or contiguous capture buffers. Camera frames land in a bounded ring of host buffers, the application or driver passes buffer descriptors to the Hailo runtime, and the PCIe/DMA engine transfers those buffers under host-managed submission and synchronization. Avoid user-space frame copies, use fixed buffer counts per camera, and apply backpressure or frame dropping when the accelerator falls behind. The CPU still orchestrates capture, buffer ownership, and DMA submission; it is not copying every pixel and the Hailo-8 is not independently fetching frames directly from cameras.
   common_mistake: |
     **The Pitfall:** Designing a standard frame-by-frame loop with CPU-managed memory copies.
     **The Rationale:** Candidates habitually assume frames must be copied to user space for processing before being sent to the NPU, ignoring that Hailo-8 has no local DRAM and relies purely on host streaming.
     **The Consequence:** Redundant memory copies that saturate the host memory bus, starving the NPU and causing massive frame drops.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 4 cameras * 1920x1080 pixels * 3 bytes/pixel (RGB) * 30 FPS = ~746 MB/s raw video.
+    - 4 cameras * 1920x1080 pixels * 3 bytes/pixel (RGB8) * 30 FPS.
 
     **Calculations:**
-    - Naive pipeline (Camera -> RAM -> CPU Cache -> RAM -> PCIe) requires >2.2 GB/s bandwidth.
-    - Zero-copy dma-buf pipeline restricts bandwidth strictly to the 746 MB/s hardware write and 746 MB/s DMA read over PCIe Gen3 x4.
+    - Raw capture rate = 4 * 1920 * 1080 * 3 * 30 = 746,496,000 bytes/s = ~746 MB/s (~712 MiB/s).
+    - Naive user-space copy path can add at least one extra full-frame read and write before accelerator submission: ~746 MB/s capture write + ~1,493 MB/s copy traffic + accelerator DMA read.
+    - dma-buf zero-copy removes the extra CPU copy traffic; the remaining dominant transfers are the camera capture write into host memory and the Hailo DMA read of the submitted buffer.
+    - PCIe Gen3 x4 has several GB/s of usable bandwidth, so ~746 MB/s of input DMA is feasible if buffers are pinned and the pipeline avoids redundant copies.
 
     **Conclusion & Interpretation:**
-    - **Result: 746 MB/s (Memory-Bandwidth Bound)**. This easily sustains the 26 TOPS INT8 throughput.
+    - **Result: ~746 MB/s Input Stream Plus Capture Writes**. The design is feasible by controlling copy count and buffer lifetime, not by bypassing the host entirely or by assuming compute TOPS guarantees ingestion bandwidth.
 status: published
 provenance: imported
 requires_explanation: true

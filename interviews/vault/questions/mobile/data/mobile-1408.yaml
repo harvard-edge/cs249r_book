@@ -11,25 +11,26 @@ title: Optimizing On-Device Calibration Data Curation for NPU
 scenario: We are deploying an on-device personalization model to the Qualcomm Hexagon NPU for privacy-preserving visual search. To utilize the NPU's 45 TOPS INT8 compute, we must perform on-device post-training quantization using the user's local photo gallery. The initial implementation naively loads 5,000 full-resolution photos for the calibration dataset, immediately crashing the application via out-of-memory errors on the device's shared 16 GB LPDDR5X memory.
 question: How would you curate calibration data for NPU quantization without loading the full image corpus into memory?
 details:
-  realistic_solution: Optimize the calibration curation pipeline through a streaming, core-set selection protocol. Instead of simultaneously loading all imagery, stream the photos sequentially off the flash drive, utilize the CPU to extract lightweight embeddings, and calculate a mathematically diverse coreset of 500 images. This subset is then batched into the NPU to compute precision INT8 scaling factors without detonating the memory ceiling.
+  realistic_solution: Optimize the calibration curation pipeline with streaming representative sampling. Instead of simultaneously loading all imagery, stream photos sequentially from storage, keep only small metadata or lightweight embeddings in RAM, and choose a representative subset of about 500 images using random, stratified, or diversity-aware sampling. Run quantization calibration over small batches from that subset so activation statistics are computed from representative inputs without exceeding the shared memory budget.
   common_mistake: |
-    **The Pitfall:** Suggesting offloading the calibration to the GPU, or proposing aggressive arbitrary downsampling of the raw images before curation.
-    **The Rationale:** Candidates completely fail to realize that the CPU, GPU, and NPU physically share the exact same 16 GB memory pool, and that downsampling mathematically distorts the activation distribution bounds necessary for precise INT8 scaling.
-    **The Consequence:** The proposed "fix" either triggers identical OOM crashes, or results in catastrophic post-quantization accuracy collapse due to warped data distributions.
+    **The Pitfall:** Suggesting GPU offload or arbitrary heavy downsampling as the main fix.
+    **The Rationale:** Offload alone does not remove the RAM pressure from loading thousands of decoded images, and non-representative calibration images can miss activation ranges that matter for INT8 scales.
+    **The Consequence:** The proposed "fix" either still risks OOM or produces calibration statistics that degrade post-quantization accuracy.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Uncompressed 12MP Image: 12,000,000 pixels * 3 channels = 36 MB.
+    - Uncompressed 12MP RGB image: 12,000,000 pixels * 3 channels * 1 byte/channel = 36,000,000 bytes = 34.3 MiB.
     - Naive batch requirement: 5,000 images.
     - Streaming target batch size: 16 images (from a curated 500 image set).
     - Shared System RAM Limit: 16 GB.
 
     **Calculations:**
-    - Naive Memory Footprint: 5,000 * 36 MB = 180,000 MB (180 GB) -> Guaranteed OOM.
-    - Streamed Batch Footprint: 16 * 36 MB = 576 MB.
-    - NPU Execution Latency (500 images at 10 GOPs): 5000 GOPs / 45,000 GOPs/sec = 0.11 seconds.
+    - Naive Memory Footprint: 5,000 * 34.3 MiB = 171,500 MiB, or about 167.5 GiB -> guaranteed OOM.
+    - Streamed Batch Footprint: 16 * 34.3 MiB = 548.8 MiB, plus preprocessing buffers.
+    - Curated Subset Storage If Decoded At Once: 500 * 34.3 MiB = 17.2 GiB, so even the subset should be streamed in mini-batches.
+    - Calibration Passes: process about 500 / 16 = 32 mini-batches to collect activation ranges without keeping all decoded images resident.
 
     **Conclusion & Interpretation:**
-    - **Result: 576 MB (Memory-Bound)**. Attempting to load the full dataset required an impossible 180 GB. A targeted streaming batch drops the active footprint to 576 MB while fully exploiting the NPU acceleration.
+    - **Result: about 550 MiB active image memory (Memory-Bound)**. Streaming representative mini-batches turns an impossible 167.5 GiB decoded load into a bounded working set suitable for on-device calibration.
 status: published
 provenance: imported
 requires_explanation: false

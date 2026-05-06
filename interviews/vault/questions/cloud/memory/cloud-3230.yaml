@@ -11,7 +11,7 @@ title: KV-Cache and Speculative Decoding Interaction
 scenario: You use speculative decoding with a 1B draft model and a 70B verifier for serving. The draft model generates 8 candidate tokens, then the verifier checks them in a single forward pass.
 question: How should speculative decoding manage draft and verifier KV-caches when 5 of 8 candidate tokens are accepted?
 details:
-  realistic_solution: 'KV-cache management for speculative decoding: Draft model maintains its own lightweight KV-cache. Verifier model processes all 8 speculative tokens in one forward pass, generating KV entries for all 8. If 5 are accepted and 3 rejected: the KV-cache must be truncated — remove entries for the rejected tokens via fast pointer updates.'
+  realistic_solution: KV-cache management for speculative decoding is transactional. The draft model maintains a separate lightweight KV-cache for its 8 candidate tokens. The verifier checks the candidates in one forward pass and may create temporary verifier KV entries for all 8, but only the 5 accepted tokens are committed to the verifier sequence state. KV entries for the 3 rejected tokens are rolled back or discarded with a block-table/pointer update, and draft-cache state is not mixed into the verifier cache.
   common_mistake: |
     **The Pitfall:** Forgetting that rejected speculative tokens create orphaned KV-cache entries.
     **The Rationale:** It's easy to assume the verifier only caches what it approves.
@@ -23,12 +23,13 @@ details:
     - Verifier accepts 5 tokens, rejects 3.
 
     **Calculations:**
-    - Memory overhead: 8 tokens * 320 KB = 2.56 MB per request.
-    - Rollback cost: Freeing 3 tokens' KV (960 KB) is an O(1) pointer update in PagedAttention.
-    - Throughput gain: 5 accepted tokens per 1 weight load = 5x improvement.
+    - Temporary verifier KV for candidates: 8 tokens * 320 KB = 2.56 MB per request.
+    - Accepted KV retained: 5 tokens * 320 KB = 1.60 MB.
+    - Rejected KV discarded: 3 tokens * 320 KB = 0.96 MB, typically by rolling the sequence/block table back to the accepted prefix.
+    - Acceptance ratio: 5/8 = 62.5%; throughput gain depends on draft cost, verifier batching efficiency, and acceptance distribution.
 
     **Conclusion & Interpretation:**
-    - **Result: 5x Throughput Gain (Compute-Bound Tradeoff)**. A trivial 2.56 MB VRAM overhead and instant pointer rollbacks yield a massive 5x decode throughput gain.
+    - **Result: Transactional KV rollback.** The cache impact is small and bounded for the 8 candidates, but 5 accepted tokens alone does not imply a 5x throughput gain.
 status: published
 provenance: imported
 requires_explanation: false

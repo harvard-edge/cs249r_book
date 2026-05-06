@@ -11,23 +11,28 @@ title: Autonomous Vehicle Dynamic Power Capping
 scenario: An autonomous vehicle edge cluster has 4 identical SoC nodes with a shared physical power budget of 200W. Normally, 3 perception nodes use 50W each (40W dynamic, 10W static) running at 30 FPS (20ms latency), and 1 planning node uses 30W. A routing failure causes the planning node to spike to 65W.
 question: Can a 10% frequency and voltage reduction on the 3 perception nodes absorb the 65W planning spike while maintaining 30 FPS?
 details:
-  realistic_solution: Apply a uniform 10% DVFS step to the perception nodes. This leverages the non-linear relationship between frequency/voltage and dynamic power (P ∝ V^2 * f). By downclocking, the system safely absorbs the planning node's power spike while still comfortably meeting the 33.3ms deadline required for 30 FPS.
+  realistic_solution: Apply a uniform 10% DVFS step to the three perception nodes. This assumes voltage scales proportionally with frequency, so only the 40W dynamic portion of each perception node scales roughly with f^3; the 10W static portion remains unchanged. The planning node spike is treated as fixed at 65W. A 0.9x step reduces dynamic power from 40W to about 29.16W per perception node, so each drops from 50W to 39.16W. The new cluster total is 3 * 39.16W + 65W = 182.48W, below the 200W budget. Latency rises from 20ms to about 22.2ms, still below the 33.3ms frame deadline, so the step can handle the spike, but only with about 17.5W of remaining headroom for thermal transients and control-loop lag.
   common_mistake: |
     **The Pitfall:** Assuming a 10% frequency reduction only yields a 10% power reduction.
     **The Rationale:** Candidates fail to apply the CMOS power equation and miss the cubic reduction in dynamic power when voltage and frequency are stepped down together.
     **The Consequence:** Incorrectly concluding the system will crash, missing an elegant DVFS optimization.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Current total power = 215W (15W over 200W budget).
+    - Baseline cluster power before the routing failure = 3 * 50W + 30W = 180W.
+    - During the failure, total power without mitigation = 3 * 50W + 65W = 215W, which is 15W over the 200W budget.
     - Perception node latency deadline: 33.3ms (30 FPS).
-    - CMOS dynamic power scales cubically with frequency/voltage step-down (P ∝ f^3).
+    - Each perception node has 40W dynamic power and 10W static power.
+    - Use a simplified DVFS model where voltage scales with frequency, so perception-node dynamic power scales as roughly f^3; static power does not scale.
+    - The planning node remains fixed at the 65W spike during this mitigation.
 
     **Calculations:**
-    - Reduce perception frequency by 10% (0.9x). New latency = 20ms / 0.9 = 22.2ms (meets 33.3ms deadline).
-    - New dynamic power = 40W * (0.9)^3 = 29.16W.
-    - Total savings = 3 * (40W - 29.16W) = 32.52W.
-    - New system total = 215W - 32.52W = 182.48W.
+    - Reduce perception frequency by 10% (0.9x). Assuming latency scales inversely with frequency, 20ms becomes 20ms / 0.9 = 22.2ms (meets 33.3ms deadline).
+    - New dynamic power per perception node = 40W * (0.9)^3 = 29.16W.
+    - New total power per perception node = 29.16W + 10W static = 39.16W.
+    - New system total = 3 * 39.16W + 65W planning = 182.48W.
+    - Remaining headroom = 200W - 182.48W = 17.52W.
 
     **Conclusion & Interpretation:**
-    - **Result: 182.48W (Power-Bound Mitigation)**. A 10% DVFS step-down absorbs the spike, landing safely at 182.48W.
+    - **Result: 182.48W with 17.52W headroom (Power-Bound Mitigation).** A 10% perception-node DVFS step absorbs the fixed planning spike under the simplified model, but the remaining margin is limited enough that thermal transients and control-loop lag still need validation.
 status: published
+provenance: imported

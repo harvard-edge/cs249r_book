@@ -11,11 +11,11 @@ title: 'Dataset Curation: Realize PSRAM-Constrained Training Dataset for ESP32-S
 scenario: Realize the constraints for an on-device training dataset on ESP32-S3 (240MHz, 512KB SRAM, 8MB PSRAM). You want to train a gesture recognition model with 5 gestures using 200 samples per class collected from the integrated IMU.
 question: How would you specify what fits in PSRAM, the training batch strategy, and training loop design?
 details:
-  realistic_solution: 'Store dataset in PSRAM, load mini-batches into SRAM for computation. Use streaming training to avoid holding full dataset in fast memory.'
+  realistic_solution: Store dataset in PSRAM, load mini-batches into SRAM for computation. Use streaming training to avoid holding full dataset in fast memory.
   common_mistake: |
-    **The Pitfall:** Attempting to load all training data simultaneously into SRAM.
-    **The Rationale:** In typical deep learning pipelines on servers, fitting the entire dataset into RAM is common practice to speed up epoch iterations.
-    **The Consequence:** The device immediately crashes via an Out-of-Memory (OOM) error because SRAM is strictly limited to 512 KB, halting all development.
+    **The Pitfall:** Treating SRAM as the place for the full on-device dataset and preprocessing buffers.
+    **The Rationale:** ESP32-S3 has enough PSRAM for the 600 KB corpus, but SRAM must be reserved for the current mini-batch, model state, optimizer buffers, stack, and intermediate activations.
+    **The Consequence:** Training becomes unstable or impossible because active tensors crowd out the model workspace; even when it runs, oversized SRAM staging reduces batch size and throughput.
   napkin_math: |
     **Assumptions & Constraints:**
     - Dataset: 5 classes × 200 samples × 600 Bytes = 600 KB total.
@@ -24,11 +24,13 @@ details:
     **Calculations:**
     - Dataset (600 KB) > SRAM (512 KB), must reside in PSRAM.
     - Mini-batch SRAM load: 16 samples × 600 Bytes = 9.6 KB.
-    - Compute per step: ~10.25 ms.
-    - PSRAM load latency: 100 cycles vs 1 cycle SRAM. Load time for 9.6 KB ≈ 250 µs.
+    - If preprocessing uses one input buffer and one augmented/normalized buffer: 2 × 9.6 KB = 19.2 KB.
+    - Allow ~12 KB for labels, DMA/alignment, and staging metadata.
+    - Active data footprint ≈ 31.2 KB, plus model activations/optimizer state.
+    - If compute per step is ~10.25 ms and PSRAM streaming for 9.6 KB costs about 0.25 ms, I/O overhead is 0.25 / 10.25 ≈ 2.4%.
 
     **Conclusion & Interpretation:**
-    - **Result: 33.6 KB (I/O-Bound)**. By streaming mini-batches from PSRAM, the 33.6 KB active footprint safely fits in SRAM, while the 250 µs load time adds a negligible ~2.4% latency overhead.
+    - **Result: ~31 KB active data footprint, not a 600 KB SRAM load**. Store the corpus in PSRAM, stream 16-sample batches into SRAM, and double-buffer only if the remaining model workspace can support it; the example load overhead is small compared with compute, so the loop is compute-dominated rather than I/O-bound.
 status: published
 provenance: imported
 requires_explanation: false

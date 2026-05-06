@@ -11,7 +11,7 @@ title: The FP16 Divergence
 scenario: We're pre-training a 13B model. It trains perfectly in BF16 for 100k steps. When we switch to FP16 with dynamic loss scaling, it diverges around step 50k with loss spikes and eventual NaNs. The hyperparameters are identical.
 question: What is happening at step 50k that wasn't happening at step 1k?
 details:
-  realistic_solution: 'Early in training, gradients are large (the model is far from any minimum) and comfortably within FP16''s representable range. As training converges, gradient magnitudes shrink — by step 50k, many gradients have decayed below FP16''s minimum representable value of ~5.96 × 10^-8. Dynamic loss scaling tries to compensate by multiplying the loss by a large factor before backprop, but this is a balancing act: scale too high and activations overflow to Inf; scale too low and gradients underflow to zero. Around step 50k, the gradient distribution straddles FP16''s narrow range — some values need high scaling (small gradients) while others need low scaling (large activations). No single scale factor works for all parameters simultaneously, and training oscillates between overflow and underflow until it diverges. BF16 never has this problem because its 8 exponent bits give the same range as FP32.'
+  realistic_solution: 'Early in training, gradients are large and comfortably represented by FP16 after loss scaling. As training converges, the gradient distribution shifts smaller and becomes more sensitive to FP16''s limited exponent range and precision. FP16 does have subnormals down to about 5.96 × 10^-8, but many late-training gradients can still quantize poorly or underflow, especially on hardware paths that flush subnormals. Dynamic loss scaling can adapt, but around step 50k it may start oscillating: raising the scale rescues small gradients but increases the chance of overflow in backprop intermediates, while lowering it avoids overflow but loses small updates. BF16 is more stable here because its 8 exponent bits give roughly the same dynamic range as FP32, so it needs much less scaling gymnastics.'
   common_mistake: |
     **The Pitfall:** Assuming the loss scaler isn't tuned properly or that FP16 is just unstable.
     **The Rationale:** Engineers treat dynamic loss scaling as a black box that just needs tweaking.
@@ -20,13 +20,14 @@ details:
     1. **Assumptions & Constraints:**
        - Step 1k gradients: 10^-3 to 10^-1.
        - Step 50k gradients: 10^-6 to 10^-12.
-       - FP16 floor: 5.96 × 10^-8.
-       - BF16 floor: 9.18 × 10^-41.
+       - FP16 min normal: 6.10 × 10^-5; min subnormal: about 5.96 × 10^-8.
+       - BF16 min normal: about 1.18 × 10^-38; min subnormal: about 9.18 × 10^-41.
     2. **Calculations:**
-       - At step 50k, a significant portion of gradient magnitudes (10^-8 to 10^-12) strictly fall below the FP16 minimum representable boundary.
-       - Dynamic scaling attempts to bridge this, but high scaling induces Inf bounds in activations.
+       - At step 50k, gradients below about 6 × 10^-8 are not representable in FP16 even with subnormals; gradients between about 6 × 10^-8 and 6 × 10^-5 live in the fragile subnormal range.
+       - Loss scaling by S shifts gradients to g*S during backprop, but the same scale also increases the magnitude of backprop intermediates. A scale high enough to preserve the smallest gradients can trigger overflow elsewhere; a lower scale avoids overflow but zeros or coarsely quantizes the tail of the distribution.
+       - BF16 covers the whole 10^-6 to 10^-12 range as normal values, so it does not require such aggressive scaling.
     3. **Conclusion & Interpretation:**
-       - **Result: Precision-Bound. With 70% of gradients underflowing in FP16, the effective learning rate collapses for most parameters while a few with large gradients still update, destabilizing the model.**
+       - **Result: Precision-Bound. Late-training gradients become small enough that FP16 dynamic loss scaling can oscillate between underflow/quantization error and overflow, while BF16 remains stable because its exponent range is much wider.**
 status: published
 provenance: imported
 requires_explanation: false

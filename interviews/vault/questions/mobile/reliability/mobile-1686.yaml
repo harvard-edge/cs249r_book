@@ -11,7 +11,8 @@ title: Designing a Safety-Critical ML System on Samsung Exynos 2400 NPU
 scenario: You are tasked with designing a safety-critical machine learning system for an autonomous driving feature that will run on an NPU. This system must comply with ASIL B requirements under ISO 26262.
 question: How would you architect a safety-critical pedestrian detection system on the NPU to satisfy ISO 26262 ASIL B?
 details:
-  realistic_solution: Architect a dual-core lockstep system with deterministic execution constraints. Implement rigorous software watchdogs to verify inference completion within the ASIL B time budget, and inject hardware fault tests periodically to validate LPDDR5X ECC integrity.
+  realistic_solution: |
+    Architect the pedestrian detector as a supervised NPU pipeline with explicit ASIL decomposition. Run the primary model on the NPU under deterministic scheduling with fixed model/runtime versions, bounded DMA and memory use, and a measured worst-case latency budget. Add an independent safety monitor on a safety island or MCU that checks frame freshness, inference deadlines, confidence/plausibility, model artifact integrity, and runtime health signals. For redundancy, use either a lightweight diverse pedestrian check, temporal consistency monitor, or classical perception guardrail rather than relying only on the same NPU output. On fault, stale output, or implausible detections, transition to the defined safe behavior: degrade automation, request driver takeover, slow the vehicle, or suppress unsafe actuation. Support the safety case with fault injection, coverage evidence, traceable requirements, deterministic deployment artifacts, and online diagnostics.
   common_mistake: |
     **The Pitfall:** Focusing solely on model accuracy while ignoring ISO 26262 requirements.
     **The Rationale:** ML practitioners default to standard accuracy metrics rather than the deterministic redundancy required for automotive safety.
@@ -21,14 +22,15 @@ details:
     - Safety Time Budget: 100 ms fault detection window.
     - Self-Test Requirement: 10 ms per window.
     - Memory Safety: ECC on LPDDR5X adds ~8% bandwidth overhead.
+    - Primary inference consumes 80% of the compute budget in the worst case.
 
     **Calculations:**
-    - Compute Overhead: 10 ms / 100 ms = 10% lost to safety overhead.
-    - Effective Bandwidth: 100% - 8% ECC = 92% of peak available.
-    - NPU Headroom: 100% - 10% (safety) - 80% (primary inference) = 10% margin.
+    - Compute reservation: 10 ms / 100 ms = 10% of the compute window reserved for diagnostics or monitor work.
+    - Compute utilization: 80% primary inference + 10% safety reservation = 90%, leaving 10% timing headroom.
+    - Memory bandwidth is a separate constraint: an 8% ECC or integrity overhead leaves about 92% of peak bandwidth, so profiling must confirm the detector is not bandwidth-bound at that reduced level.
 
     **Conclusion & Interpretation:**
-    - **Result: 10% compute and 8% bandwidth overhead (Safety-Bound)**. Failure to reserve this headroom results in missed deadlines during diagnostic interrupts.
+    - **Result: Tight but Feasible if Measured.** The compute budget leaves only 10% headroom, while memory has a separate 92% effective-bandwidth check. The design should keep diagnostics bounded and prove worst-case latency rather than mixing compute and bandwidth into one margin.
 status: published
 provenance: imported
 requires_explanation: true

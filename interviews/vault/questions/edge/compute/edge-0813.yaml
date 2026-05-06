@@ -8,29 +8,28 @@ competency_area: compute
 bloom_level: evaluate
 phase: training
 title: The CUDA Stream Contention Trap
-scenario: 'On a Jetson Orin (2048 CUDA cores, 275 TOPS INT8), you launch two detection models on separate CUDA streams expecting them to overlap. Model A uses 1800 cores and Model B uses 1600 cores. You observe zero overlap — they run sequentially in 35ms total instead of the expected ~20ms.'
+scenario: 'On a Jetson Orin with 16 SMs, you launch two TensorRT detection models on separate CUDA streams expecting them to overlap. Nsight Systems shows Model A runs for about 20 ms and reaches near-maximum occupancy across all SMs because of its block count, registers, and shared-memory use. Model B runs for about 15 ms and also needs most SM resources. You observe zero overlap: they run sequentially in 35 ms total instead of overlapping.'
 question: Why do the two CUDA-stream models on the Orin serialize, and what fix would achieve at least partial overlap?
 details:
-  realistic_solution: 'The Orin has 2048 CUDA cores across 16 SMs (128 cores/SM). Model A requests 1800/128 ≈ 15 SMs. Model B requests 1600/128 ≈ 13 SMs. Combined: 28 SMs needed, but only 16 exist. The GPU cannot overlap these kernels. Fix: Use NVIDIA MPS (Multi-Process Service) or redesign with smaller models. If you reduce Model A to use ~8 SMs and Model B to ~8 SMs (via TensorRT workspace limits or smaller batch sizes), both fit simultaneously. This reduces per-model throughput but the combined pipeline throughput improves from 35ms to max(20,18) ≈ 20ms — a 43% improvement.'
+  realistic_solution: Separate CUDA streams only make kernels eligible for concurrency; they do not reserve independent slices of the GPU. If Model A launches enough resident blocks, registers, shared memory, or TensorRT workspace usage to keep all 16 SMs occupied, the scheduler has no remaining per-SM resources for Model B, so the second stream waits. NVIDIA MPS is not the usual fix for two streams inside one process. The practical fixes are to reduce per-kernel resource pressure through smaller batches, TensorRT optimization profiles, lower shared-memory/register usage, different plugin launch settings, or splitting work so resident blocks from both models can coexist. CUDA graphs can reduce launch overhead and stream priorities can order work, but overlap requires both kernels to be concurrency-eligible and to fit simultaneously.
   common_mistake: |
     **The Pitfall:** Believing that using separate CUDA streams guarantees parallel execution.
     **The Rationale:** Candidates know streams enable concurrent scheduling but forget that GPU SMs (Streaming Multiprocessors) are a finite physical resource.
     **The Consequence:** Unexpected pipeline serialization when two kernels together demand more SMs than are physically available on the hardware.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Orin cores: 2048 (16 SMs, 128 cores/SM).
-    - Model A request: 1800 cores.
-    - Model B request: 1600 cores.
+    - Orin GPU scheduling unit for overlap: SM resident resources, not requested CUDA cores.
+    - Model A duration when run alone: 20 ms; occupancy/resource use fills all 16 SMs.
+    - Model B duration when run alone: 15 ms; occupancy/resource use also needs most SM resources.
 
     **Calculations:**
-    - Model A SMs needed = ceil(1800/128) = 15 SMs.
-    - Model B SMs needed = ceil(1600/128) = 13 SMs.
-    - Total SMs needed = 15 + 13 = 28 SMs.
-    - 28 SMs > 16 SMs, so kernels serialize.
-    - Capping each at 8 SMs allows concurrent execution.
+    - If Model A occupies all resident block slots/registers/shared memory on each SM, available resources for Model B during A ≈ 0.
+    - Observed serialized latency = 20 ms + 15 ms = 35 ms.
+    - If resource tuning lets each model occupy about half the SM residency budget, both can run concurrently for part or all of their duration.
+    - The ideal fully overlapped lower bound is max(20 ms, 15 ms) = 20 ms, but real latency may be higher if throttling reduces per-model throughput.
 
     **Conclusion & Interpretation:**
-    - **Result: 1.75x Speedup (Compute Resource Serialization).** Overlapped time is ~20ms compared to serial time of 35ms.
+    - **Result: Resource-Eligibility Problem, Not Core Arithmetic.** Streams serialize because one model consumes the resident SM resources needed by the other. Reducing occupancy pressure can enable partial overlap; 35 ms to 20 ms is only an ideal upper-bound speedup, not a guaranteed result.
 status: published
 provenance: imported
 requires_explanation: true

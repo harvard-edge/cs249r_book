@@ -7,9 +7,9 @@ topic: tail-latency
 competency_area: latency
 bloom_level: analyze
 phase: inference
-title: 'NUMA Effects on Inference Tail Latency'
+title: NUMA Effects on Inference Tail Latency
 scenario: 'Your dual-socket inference server with 2 GPUs shows bimodal latency: 50% of requests complete in 30ms, 50% in 90ms. Both GPUs are identical and equally loaded.'
-question: "What hardware topology issue explains this bimodal distribution, and how do you fix it?"
+question: What hardware topology issue explains this bimodal distribution, and how do you fix it?
 details:
   realistic_solution: 'Each GPU is attached via PCIe Gen4 to one CPU socket. When the inference process allocates host memory on NUMA node 0 but the GPU is on NUMA node 1, every CPU-GPU transfer traverses the UPI link (Intel) or Infinity Fabric (AMD), adding ~50ns per cache line and causing 2-3× slowdown for data staging. The 50/50 split occurs because the OS scheduler randomly assigns threads to either NUMA node. Fix: (1) Pin each inference process to the correct NUMA node: `numactl --cpunodebind=0 --membind=0 ./server --gpu=0`. (2) Set CUDA_VISIBLE_DEVICES per process. (3) Use `nvidia-smi topo -m` to identify GPU-to-NUMA affinity. After pinning: bimodal distribution collapses to unimodal 30ms.'
   common_mistake: |
@@ -17,16 +17,18 @@ details:
     **The Rationale:** Candidates focus entirely on GPU utilization without checking the underlying CPU socket topology.
     **The Consequence:** Recommending hardware upgrades or model optimization instead of fixing the root cause: cross-UPI PCIe transfers due to incorrect NUMA node pinning.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Topology: Dual-socket CPU with NUMA.
-       - Local PCIe Gen4 Bandwidth: 32 GB/s.
-       - Remote UPI Bandwidth: ~16 GB/s effective.
-    2. **Calculations:**
-       - Local Latency = 30ms.
-       - Remote Latency = (Data Transfer at Half Bandwidth) + UPI Overhead = 30ms * 2 + Overhead ≈ 90ms.
-       - Probability = 50% local, 50% remote due to random OS thread scheduling.
-    3. **Conclusion & Interpretation:**
-       - **Result: 90ms Tail Latency (Interconnect-Bound).** Fixing NUMA pinning collapses the bimodal distribution entirely, eliminating the cross-socket interconnect overhead.
+    **Assumptions & Constraints:**
+    - Dual-socket CPU server with one GPU local to each NUMA node.
+    - Local GPU process uses CPU memory and threads from the GPU's attached socket.
+    - Remote GPU process stages host data across the inter-socket link before PCIe transfer.
+
+    **Calculations:**
+    - Local mode: correct CPU, memory, and GPU affinity keeps the request on the local NUMA path, matching the observed ~30ms mode.
+    - Remote mode: CPU threads or host buffers are placed on the opposite socket, so staging traffic crosses UPI/Infinity Fabric and then PCIe, matching the observed slower ~90ms mode.
+    - The 50%/50% split is explained by process or thread placement alternating between local and remote NUMA paths, not by different GPU models or load.
+
+    **Conclusion & Interpretation:**
+    - **Result: bimodal ~30ms local and ~90ms remote latency.** NUMA-aware CPU and memory pinning should collapse the distribution toward the local 30ms path.
 status: published
 provenance: imported
 requires_explanation: false

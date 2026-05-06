@@ -7,26 +7,27 @@ topic: gpu-compute-architecture
 competency_area: compute
 bloom_level: create
 phase: both
-title: 'Heterogeneous Pipeline Design for Jetson Orin'
-scenario: 'You are architecting the compute pipeline for an autonomous robotics platform utilizing the NVIDIA Jetson Orin. The system requires processing multiple sensor modalities under a strict 60W TDP.'
-question: 'How would you partition a massive transformer perception model across the Ampere GPU and DLA, and design kernels to avoid LPDDR5 bottlenecks?'
+title: Heterogeneous Pipeline Design for Jetson Orin
+scenario: You are architecting the compute pipeline for an autonomous robotics platform utilizing the NVIDIA Jetson Orin. The system requires processing multiple sensor modalities under a strict 60W TDP.
+question: How would you partition a massive transformer perception model across the Ampere GPU and DLA, and design kernels to avoid LPDDR5 bottlenecks?
 details:
-  realistic_solution: 'The optimal architecture statically schedules standard INT8 dense operations (like standard convolutions or MLPs) onto the DLA to maximize power efficiency within the 60W budget. The Ampere GPU Tensor Cores are reserved for irregular or dynamic operations like fused multi-head attention. To prevent memory bottlenecks, the implementation must use zero-copy memory (pinned memory) to avoid redundant copies, and warp-level primitives with asynchronous copy (cp.async) to load data from the 32 GB LPDDR5 directly into shared memory, maximizing memory coalescing and Tensor Core occupancy.'
+  realistic_solution: Partition by actual TensorRT/DLA support, not by generic matrix type. Put DLA-compatible INT8 CNN-style perception subgraphs such as standard convolutions, pooling, supported activations, and simple heads on the DLA when they compile without fallback. Keep transformer attention, MLP/GEMM-heavy blocks, reshape-heavy paths, dynamic shapes, and unsupported normalization or indexing on the Ampere GPU Tensor Cores. Use the unified LPDDR5 memory as device/global memory, then tile GPU kernels so cp.async stages coalesced global-memory loads into shared memory before Tensor Core execution. Avoid unnecessary CPU-GPU copies with zero-copy-style ownership at pipeline boundaries, but do not rely on pinned host memory as a substitute for shared-memory tiling.
   common_mistake: |
     **The Pitfall:** Scheduling all matrix operations onto the Ampere SMs and neglecting the DLA.
     **The Rationale:** Candidates treat the system as a standard discrete GPU and ignore the shared unified memory architecture.
     **The Consequence:** Severe memory contention between CPU, GPU, and DLA, wasting power and failing to meet the 60W budget.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Orin LPDDR5 bandwidth: 204.8 GB/s
-    - Peak INT8 compute: 275 TOPS
-    - Standard attention arithmetic intensity: <400 OPS/Byte
+    - Jetson AGX Orin 64GB-class LPDDR5 bandwidth: 204.8 GB/s.
+    - Peak INT8 compute: 275 TOPS.
+    - Attention-heavy transformer stages have assumed arithmetic intensity <400 OPS/Byte after normal tiling.
 
     **Calculations:**
-    - Required arithmetic intensity = 275e12 OPS / 204.8e9 Bytes/s = 1342 OPS/Byte
+    - Arithmetic intensity needed to sustain peak compute from LPDDR5 = 275e12 OPS/s / 204.8e9 Bytes/s = ~1343 OPS/Byte.
+    - If the attention stage is <400 OPS/Byte, achievable compute from memory bandwidth is <400 * 204.8e9 = <81.9 TOPS before cache and scheduling effects.
 
     **Conclusion & Interpretation:**
-    - **Result: 1342 OPS/Byte required (Memory-Bound)**. Intermediate tensors must be materialized in shared memory (zero-copy) to bypass the 204.8 GB/s bandwidth wall, as 400 OPS/Byte is far below the required 1342 OPS/Byte.
+    - **Result: Attention Is Memory-Bound Against Peak INT8 Compute**. DLA should only receive supported subgraphs; GPU kernels need shared-memory tiling and fusion to raise reuse, not a claim that zero-copy bypasses LPDDR5 bandwidth.
 status: published
 provenance: imported
 requires_explanation: true
@@ -34,13 +35,13 @@ expected_time_minutes: 22
 validated: true
 validation_status: WARN
 validation_date: '2026-04-01'
-validation_model: 'gemini-2.5-flash'
+validation_model: gemini-2.5-flash
 validation_issues:
-  - 'The arithmetic intensity calculation (Ops / Byte) is correct, but then it states If a single token KV-cache requires 256 KB... without explicitly defining what this refers to (e.g., for a specific model size or hidden dimension), making it hard to verify.'
+  - The arithmetic intensity calculation (Ops / Byte) is correct, but then it states If a single token KV-cache requires 256 KB... without explicitly defining what this refers to (e.g., for a specific model size or hidden dimension), making it hard to verify.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'
-math_model: 'gemini-3.1-pro-preview'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null

@@ -7,11 +7,11 @@ topic: fault-tolerance-checkpointing
 competency_area: reliability
 bloom_level: apply
 phase: training
-title: 'Checkpoint Storm I/O Bottleneck'
-scenario: 'A 512-GPU job trains a 70B parameter model with FSDP (each GPU holds a ~280MB shard). The shared Lustre filesystem provides 200 GB/s aggregate write bandwidth.'
-question: 'For a 512-GPU FSDP checkpoint with 280MB shards and 200 GB/s Lustre, what write time do you expect with and without staggered writes?'
+title: Checkpoint Storm I/O Bottleneck
+scenario: A 512-GPU job trains a 70B parameter model with FSDP (each GPU holds a ~280MB shard). The shared Lustre filesystem provides 200 GB/s aggregate write bandwidth.
+question: For a 512-GPU FSDP checkpoint with 280MB shards and 200 GB/s Lustre, what write time do you expect with and without staggered writes?
 details:
-  realistic_solution: 'Total checkpoint size: 512 × 280MB = 140GB. At 200 GB/s bandwidth: 140GB / 200GB/s = 0.7 seconds ideal. But with 512 simultaneous file creates, metadata operations dominate: each file create takes ~50ms under contention, and the metadata server handles ~100 ops/sec under load. So 512 creates take ~5 seconds for metadata alone. With I/O contention and TCP incast, actual bandwidth drops to ~50 GB/s, so writes take 140/50 = 2.8 seconds. Total: ~8 seconds. Staggered (8 groups of 64): each group writes 64 × 280MB = 17.5GB. At close to full bandwidth (~180GB/s with less contention): 0.1s per group. With 2s gaps: 8 × 2s = 16s total. Paradoxically slower in wall time but much less disruptive to other filesystem users. Actual benefit: avoids filesystem brownout that affects other jobs.'
+  realistic_solution: 'Total checkpoint size: 512 × 280MB ≈ 143GB, often rounded to 140GB. At 200 GB/s bandwidth: 140GB / 200GB/s = 0.7 seconds ideal. Without staggering, 512 simultaneous file creates dominate: at about 100 metadata ops/sec, creates take roughly 512/100 = 5.1 seconds. If incast contention drops effective write bandwidth to ~50 GB/s, data transfer takes 140/50 = 2.8 seconds. Expected non-staggered time is therefore about 5.1 + 2.8 = 7.9 seconds, rounded to 8 seconds, with a high risk of filesystem disruption. With staggering into 8 groups of 64, each group writes about 17.5GB. At ~180GB/s with less contention, each data write takes about 0.1s; including a 2s spacing between group starts gives approximately 7 gaps × 2s + 8 × 0.1s = 14.8s, or about 15s. If the implementation waits 2s after the final group as well, report about 16.8s. Staggering is slower for the job but much less disruptive to the shared filesystem.'
   common_mistake: |
     **The Pitfall:** Calculating write time based purely on raw bandwidth and ignoring metadata operations.
     **The Rationale:** Candidates often divide the total size by the aggregate bandwidth (140GB / 200GB/s = 0.7s) and assume that's the total time, completely missing the overhead of 512 simultaneous file create operations.
@@ -20,14 +20,15 @@ details:
     **Assumptions & Constraints:**
     - Ideal Checkpoint Write: 140GB / 200 GB/s = 0.7s.
     - 512 concurrent file creates cause metadata lock contention.
-    
+    - Staggered plan: 8 groups of 64, 2s spacing between group starts.
+
     **Calculations:**
-    - Simultaneous Writes: Contention drops bandwidth to 50 GB/s. Total time: ~8 seconds (plus filesystem brownout).
+    - Simultaneous Writes: metadata time ≈ 512 / 100 ops/s = 5.1s; contention drops bandwidth to 50 GB/s, so data time = 140GB / 50 GB/s = 2.8s. Total ≈ 7.9s (~8s), plus filesystem brownout risk.
     - Staggered Writes (8 groups of 64, 2s gap): Each group writes 17.5GB in ~0.1s.
-    - Wall Time: 8 groups * 2s gaps = ~16 seconds.
-    
+    - Wall Time: 7 inter-group gaps * 2s + 8 writes * 0.1s = 14.8s (~15s). If counting a final post-write gap, use 16.8s.
+
     **Conclusion & Interpretation:**
-    - **Result: ~16 seconds (I/O-Bound)**. Staggering writes increases absolute wall time but avoids destructive metadata bottlenecks across the Lustre cluster.
+    - **Result: ~8s non-staggered vs ~15-17s staggered (I/O-Bound)**. Staggering increases checkpoint wall time but avoids destructive metadata bottlenecks across the Lustre cluster.
 status: published
 provenance: imported
 requires_explanation: false

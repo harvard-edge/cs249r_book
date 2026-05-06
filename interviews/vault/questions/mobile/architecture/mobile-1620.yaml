@@ -11,22 +11,29 @@ title: Encoder-Decoder Tradeoffs for On-Device NPU Deployment
 scenario: Your team is tasked with deploying a new real-time multimodal AI assistant on a mobile device powered by the Samsung Exynos 2400 NPU. The assistant needs to process user speech, understand context, and generate natural language responses with minimal latency.
 question: Which encoder, decoder, or encoder-decoder architecture would you choose for an Exynos 2400 AI assistant and why?
 details:
-  realistic_solution: A strong candidate would likely lean towards an encoder-only model for understanding/classification tasks and a smaller, highly optimized decoder-only or a very compact encoder-decoder architecture for generation tasks, potentially even exploring hybrid approaches or quantization strategies. They would justify their choice by estimating memory footprint vs. 12GB LPDDR5X, inference latency vs. real-time requirements, and power consumption given the 34.7 TOPS capability. They would also consider techniques like pruning, distillation, and efficient attention mechanisms to fit within the NPU's capabilities, demonstrating a deep understanding of practical optimization for mobile hardware.
+  realistic_solution: |
+    Choose a constrained hybrid: a small speech/context encoder for understanding plus a compact quantized decoder, rather than a large general decoder-only model. The encoder can process speech features and context in parallel with predictable latency, while a 1B-2B INT4/INT8 decoder generates short responses with a bounded output length and quantized KV cache. A full 20B FP16 decoder is infeasible because weights alone are about 40 GB. The recommendation should include strict response-length caps, streaming, distillation, GQA/MQA, mobile profiling, and thermal testing because sustained latency is limited by memory traffic and supported NPU kernels, not peak TOPS alone.
   common_mistake: |
     **The Pitfall:** Focusing solely on accuracy and proposing massive parameter models.
     **The Rationale:** Candidates anchor to cloud-based LLM architectures without calculating how they map to mobile constraints.
     **The Consequence:** Proposing a 20B parameter model that requires 40GB of RAM, immediately failing due to the device's 12GB physical limit.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware: Exynos 2400 (34.7 TOPS, 12 GB LPDDR5X RAM).
-       - Bandwidth: LPDDR5X ~64 GB/s.
-    2. **Calculations:**
-       - Compute Latency: 1 TOPS workload = 1 / 34.7 = 28.8ms latency.
-       - Encoder Context: 100M param MobileBERT takes ~10-20 TOPS. Fits easily.
-       - Decoder Constraint: Full 20B decoder (40GB FP16) OOMs on 12GB physical RAM.
-       - Memory Bound: Loading a 1-2B INT8 parameter model (1-2GB) per 100ms takes 10-20 GB/s bandwidth.
-    3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bound Asymmetric Architecture. A lightweight encoder (100M) paired with a heavily pruned/quantized 1B-2B parameter decoder prevents 12GB RAM overflow.**
+    **Assumptions & Constraints:**
+    - Hardware: Exynos 2400-class mobile NPU, 12 GB unified memory.
+    - Reserve 3 GB for OS/app/runtime, leaving about 9 GB for model state.
+    - Candidate hybrid: 100M INT8 encoder plus 1.5B decoder at INT4 weights, FP16 or INT8 KV cache.
+    - Avoid 20B FP16 decoder baseline.
+
+    **Calculations:**
+    - 20B FP16 weights = 20B * 2 bytes = 40 GB, before KV cache, so it cannot fit.
+    - 100M INT8 encoder weights ≈ 0.1 GB.
+    - 1.5B INT4 decoder weights ≈ 0.75 GB; INT8 would be ≈ 1.5 GB.
+    - Example decoder KV cache with 24 layers, hidden size 2048, FP16 KV = 24 * 2 * 2048 * 2 = 196,608 bytes/token.
+    - For 512 cached tokens, KV ≈ 100 MB; INT8 KV would be about 50 MB.
+    - Total model state for the hybrid is roughly 1-2 GB plus activations, leaving multiple GB of memory margin.
+
+    **Conclusion & Interpretation:**
+    - **Result: Constrained Hybrid Architecture.** Use a lightweight encoder plus a compact quantized decoder with bounded generation. This fits memory far more plausibly than a 20B decoder and gives a clearer path to low latency under mobile bandwidth and thermal limits.
 status: published
 provenance: imported
 requires_explanation: true

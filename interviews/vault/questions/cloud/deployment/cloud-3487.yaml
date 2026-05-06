@@ -11,19 +11,25 @@ title: Real-time LLM Deployment on Google TPU v5e with MLOps
 scenario: You are designing an MLOps pipeline for real-time LLM inference on TPU v5e. The system requires frequent updates with strict latency targets (under 50ms).
 question: How would you design an end-to-end MLOps pipeline to ensure TPU v5e hardware constraints are validated automatically and training-serving consistency is maintained?
 details:
-  realistic_solution: Use a dedicated model registry and CI/CD pipelines to automate testing and deployment. Crucially, pipelines must include TPU-specific performance benchmarks (e.g., verifying BF16 compatibility and measuring HBM transfers). Containerized environments guarantee training-serving parity.
+  realistic_solution: |
+    Build the pipeline around a model registry artifact that records weights, tokenizer, preprocessing code, shape contracts, precision policy, and the TPU v5e compile target. CI should run training-serving parity tests first: golden prompts, tokenizer parity, feature-schema checks, and output/score tolerances between the training graph and serving graph. The release pipeline should then compile the model for TPU v5e, reject unsupported dynamic shapes, verify BF16/quantization settings, check HBM and KV-cache memory budgets, and run representative batch and sequence-length benchmarks on TPU slices. Promotion requires measured P99 latency under 50ms with headroom, no compile/runtime shape failures, and no accuracy or parity regression. Deployment should use shadow traffic, a small canary, automated rollback on latency/error/HBM thresholds, and post-release drift and SLO monitoring tied back to the registry version.
   common_mistake: |
     **The Pitfall:** Overlooking hardware-specific optimizations like BF16 precision and HBM limits.
     **The Rationale:** Candidates design generic MLOps pipelines without integrating TPU-specific performance benchmarks or validation.
     **The Consequence:** Suboptimal throughput, OOM crashes, and deployed models that silently regress in performance.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware: TPU v5e (16 GB HBM, 197 TFLOPS BF16 peak, 1.6 TB/s memory bandwidth).
-       - Strict latency target: < 50ms.
-    2. **Calculations:**
-       - Memory Transfer (8 GB weights) = 8e9 bytes / 1.6e12 bytes/s = 5ms transfer time.
-       - Compute Limit (assuming 10 TFLOPS inference) = 197 TFLOPS / 10 TFLOPS ≈ 19.7 inferences/sec per core (max).
-    3. **Conclusion & Interpretation:** **Integrating the 5ms transfer and 19.7 inf/sec compute bounds strictly into the CI/CD pipeline guarantees hardware-aware validation, preventing silent production regressions.**
+    **Assumptions & Constraints:**
+    - Hardware: TPU v5e with 16 GB HBM, 197 TFLOPS BF16 peak, and 1.6 TB/s peak HBM bandwidth.
+    - Strict latency target: under 50ms.
+    - Candidate model inference requires 2e12 BF16 operations and streams about 12 GB from HBM per request at the chosen batch.
+
+    **Calculations:**
+    - Compute lower bound = 2e12 FLOPs / 197e12 FLOPs/s = about 10ms.
+    - HBM lower bound = 12 GB / 1,600 GB/s = about 7.5ms.
+    - These are ideal lower bounds; end-to-end latency also includes compilation shape choices, input preprocessing, queueing, collectives, and runtime overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Benchmark-Gated Validation.** CI/CD should fail releases on measured TPU latency, memory footprint, shape compatibility, and training-serving drift; peak hardware numbers inform tests but do not guarantee production latency.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,28 +8,29 @@ competency_area: precision
 bloom_level: analyze
 phase: inference
 title: Symmetric Weights and SIMD Utilization
-scenario: 'You are deploying a keyword spotting model to an ARM Cortex-M4 (STM32F4) running at 168 MHz with 256 KB SRAM. The team used Post-Training Quantization (PTQ) to convert the model to INT8, utilizing asymmetric quantization for both activations and weights to maximize representational precision. However, profiling shows the pointwise convolutions are taking nearly 3 times longer than expected, failing to utilize the CMSIS-NN SIMD capabilities and causing the device to drop incoming audio frames.'
-question: 'Why do asymmetric INT8 weights slow Cortex-M4 pointwise convolutions, and how should quantization be changed?'
+scenario: You are deploying a keyword spotting model to an ARM Cortex-M4 (STM32F4) running at 168 MHz with 256 KB SRAM. The team used Post-Training Quantization (PTQ) to convert the model to INT8, utilizing asymmetric quantization for both activations and weights to maximize representational precision. However, profiling shows the pointwise convolutions are taking nearly 3 times longer than expected, failing to utilize the CMSIS-NN SIMD capabilities and causing the device to drop incoming audio frames.
+question: Why do asymmetric INT8 weights slow Cortex-M4 pointwise convolutions, and how should quantization be changed?
 details:
-  realistic_solution: 'Diagnose that asymmetric weights prevent the use of the SMLAD SIMD instruction. The fix is to switch the weights to symmetric quantization (zero-point = 0) while keeping activations asymmetric. This eliminates the activation-dependent zero-point arithmetic in the innermost loop. The CMSIS-NN backend can now pack two INT8 values into 32-bit registers and execute 2 MACs per cycle. To recover any accuracy lost from symmetric quantization, transition the pipeline from PTQ to Quantization-Aware Training (QAT).'
+  realistic_solution: Diagnose that asymmetric weights prevent the use of the SMLAD SIMD instruction. The fix is to switch the weights to symmetric quantization (zero-point = 0) while keeping activations asymmetric. This eliminates the activation-dependent zero-point arithmetic in the innermost loop. The CMSIS-NN backend can now pack two INT8 values into 32-bit registers and execute 2 MACs per cycle. To recover any accuracy lost from symmetric quantization, transition the pipeline from PTQ to Quantization-Aware Training (QAT).
   common_mistake: |
     **The Pitfall:** Assuming all INT8 quantization formats perform equally on all hardware.
     **The Rationale:** Candidates focus on tweaking memory layout or clock speed, ignoring the scalar arithmetic overhead introduced by weight zero-points.
     **The Consequence:** Throughput remains low because SIMD packing is fundamentally broken.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Cortex-M4 SIMD (SMLAD) executes 2 INT8 MACs/cycle ideally.
+    - Cortex-M4 CMSIS-NN kernels get their best throughput when inner-loop zero-point corrections can be hoisted or eliminated.
     - System clock is 168 MHz.
     - Model requires 2,000,000 MACs.
-    - Asymmetric weights disable SIMD, reducing throughput to ~0.5 MACs/cycle.
+    - Symmetric weights have zero-point = 0; asymmetric weights require subtracting a nonzero weight zero-point in the MAC loop.
 
     **Calculations:**
-    - Ideal SIMD cycles: 2,000,000 / 2 = 1,000,000 cycles (5.95 ms).
-    - Asymmetric cycles: 2,000,000 / 0.5 = 4,000,000 cycles (23.8 ms).
-    - Overhead factor: 4,000,000 / 1,000,000 = 4x slower.
+    - Idealized symmetric-weight lower bound: 2,000,000 MACs / 2 MACs/cycle = 1,000,000 cycles.
+    - Lower-bound time: 1,000,000 / 168,000,000 s = 5.95 ms before memory and loop overhead.
+    - With asymmetric weights, each multiply needs extra zero-point handling, so the kernel falls off the optimized packed inner loop.
+    - A measured near-3x slowdown means the effective path is dominated by scalar correction overhead, not by the ideal SIMD bound.
 
     **Conclusion & Interpretation:**
-    - **Result: 5.95 ms (Compute-Bound)**. Switching to symmetric weights (zero-point = 0) eliminates the scalar subtraction loop and fully restores the SIMD pipeline.
+    - **Result: asymmetric weights explain the slowdown path, not the ideal 5.95 ms bound**. Switching weights to symmetric INT8 while keeping activations asymmetric removes the inner-loop weight zero-point correction and lets CMSIS-NN use its optimized kernels; use QAT if PTQ accuracy drops.
 status: published
 provenance: imported
 requires_explanation: false

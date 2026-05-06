@@ -7,11 +7,11 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: create
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Design Bandwidth-Efficient On-Device LLM Pipeline'
-scenario: 'Design a bandwidth-efficient decode pipeline for a 3B INT4 LLM targeting TPOT < 30ms. The baseline INT4 model uses 1.5GB.'
-question: 'How would you design a bandwidth-efficient decode pipeline for a 3B INT4 LLM targeting TPOT < 30ms by leveraging weight tiling, prefetching, and KV-cache layouts?'
+title: 3B INT4 On-Device Decode Bandwidth Pipeline for Sub-30ms TPOT
+scenario: Design a bandwidth-efficient decode pipeline for a 3B INT4 LLM targeting TPOT < 30ms. The baseline INT4 model uses 1.5GB.
+question: How would you design a bandwidth-efficient decode pipeline for a 3B INT4 LLM targeting TPOT < 30ms by leveraging weight tiling, prefetching, and KV-cache layouts?
 details:
-  realistic_solution: 'A naive 3B INT4 decode requires loading 1.5GB of weights per token. At 68 GB/s, memory transfer alone takes 22ms per token. While compute takes <1ms, the memory wall dominates. To ensure TPOT stays strictly < 30ms under OS background contention, the pipeline must implement speculative decoding (e.g., K=3 draft tokens) to verify multiple tokens per 1.5GB read, increasing effective bandwidth utilization. Use PagedAttention KV-cache layout with INT8 quantization to minimize fragmentation and reduce read bandwidth.'
+  realistic_solution: Under the simplified decode model, assume each verified token streams about 1.5 GB of INT4 weights from LPDDR because the full working set is not resident in SRAM. The design goal is to keep that stream sequential, overlapped, and protected from avoidable KV-cache traffic. Tile weights in layer order so each tile is consumed once from LPDDR and staged through SRAM, double-buffer the next tile with prefetch/DMA while the current tile computes, and avoid layouts that force small random DRAM reads. Use a paged or block-contiguous KV-cache layout grouped by layer/head so attention reads are coalesced, with INT8 KV only when measured context length makes KV traffic material. This simplified weight-stream budget is about 22.1 ms/token and leaves roughly 8 ms for compute, illustrative KV reads, and OS contention under a 30 ms target.
   common_mistake: |
     **The Pitfall:** Assuming weight tiling alone reduces main memory reads during autoregressive decode.
     **The Rationale:** Candidates confuse compute-bound prefill optimizations (SRAM locality) with memory-bound decode realities.
@@ -21,15 +21,18 @@ details:
     - Memory Bandwidth: 68 GB/s.
     - Model Size: 3B INT4 = 1.5 GB.
     - Target TPOT: < 30 ms.
+    - Simplified decode assumption: the full INT4 weight stream is read once per verified token because it is not fully cached on chip.
+    - KV-cache examples below are illustrative short-context figures, not derived from a specific layer/head configuration.
 
     **Calculations:**
-    - Naive Decode Cost: 1.5 GB / 68 GB/s = 22 ms/token (memory limit).
-    - Draft Model Decode Cost (50MB): 50 MB / 68 GB/s = 0.7 ms/token.
-    - Speculative Step (K=3): Draft 3 tokens (2.1 ms) + Verify 1.5 GB (22 ms) = 24.1 ms.
-    - Effective TPOT (if 2 accepted): 24.1 ms / 2 tokens = 12.05 ms/token.
+    - Weight-stream lower bound: 1.5 GB / 68 GB/s = 0.0221 s = about 22.1 ms/token.
+    - Rounded design budget: about 22 ms/token for weights before compute, KV reads, and scheduler overhead.
+    - Illustrative FP16 KV read at short context: 32 MB / 68 GB/s = 0.47 ms/token.
+    - Illustrative INT8 KV at the same context: 16 MB / 68 GB/s = 0.24 ms/token, saving about 0.23 ms/token.
+    - Practical budget: 22.1 ms weights + ~0.5 ms KV + a few ms compute/scheduling overhead remains below 30 ms if the weight stream is kept sequential and prefetch overlap is effective.
 
     **Conclusion & Interpretation:**
-    - **Result: 12.05 ms/token (Memory-Bound)**. Speculative decoding drastically improves effective bandwidth utilization, safely meeting the <30ms target.
+    - **Result: ~22-27 ms/token (Memory-Bound)**. Weight tiling and prefetching do not amortize the full model read, but they prevent wasted bandwidth; coalesced/quantized KV layouts protect the remaining TPOT margin.
 status: published
 provenance: imported
 requires_explanation: true

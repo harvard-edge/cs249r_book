@@ -11,17 +11,27 @@ title: The Product Quantization Memory Tradeoff
 scenario: Your 100M-vector index (768-dim, FP32) requires 306 GB of RAM. The infrastructure team says you can have at most 64 GB. A colleague suggests Product Quantization (PQ) with 96 subquantizers and 256 centroids each.
 question: How much memory does the PQ-compressed index require, and what is the recall cost?
 details:
-  realistic_solution: 'PQ with 96 subquantizers (each covering 768/96 = 8 dimensions) and 256 centroids per subquantizer encodes each vector as 96 bytes (one uint8 centroid ID per subquantizer). Memory: 100M × 96 bytes = 9.6 GB — a 32× compression from the original 306 GB. This easily fits in 64 GB with room for HNSW graph overhead and IVF lists. The recall cost: typical recall drops from ~0.95 (HNSW on raw vectors) to ~0.80-0.85 with PQ alone. Mitigation: use IVF-PQ with HNSW on centroids, and add a reranking step that re-scores the top-100 PQ results against the original vectors (stored on SSD). This gets recall back to ~0.93 at the cost of ~5ms additional SSD reads.'
+  realistic_solution: 'PQ with 96 subquantizers (each covering 768/96 = 8 dimensions) and 256 centroids per subquantizer encodes each vector as 96 bytes: one uint8 centroid ID per subquantizer. The PQ codes require 100M × 96 bytes = 9.6 GB, plus a negligible codebook and additional IVF/HNSW/list metadata. That compressed search index can fit in 64 GB, but it does not include a separate copy of original FP32 vectors for reranking; those originals would still be about 307 GB and must live on SSD, be separately compressed, or be omitted. The recall cost is approximation error: PQ distances are computed against centroids, so nearest-neighbor ordering can change. Recall usually drops versus raw-vector search, and reranking a candidate set with higher-fidelity vectors can recover some recall, but the exact recall and latency depend on the data distribution, candidate count, and storage path.'
   common_mistake: |
     **The Pitfall:** Confusing Product Quantization with simple scalar quantization.
     **The Rationale:** Engineers assume PQ just reduces precision of each float to an integer.
     **The Consequence:** They underestimate the extreme compression PQ offers by replacing subvectors with centroid IDs, failing to realize it operates on an entirely different mechanism of approximate distance computation.
   napkin_math: |
-    - **Original Memory:** 100M × 768 × 4B = 307.2 GB.
-    - **PQ Memory:** PQ-96 encodes each vector as 96 bytes: 100M × 96B = 9.6 GB (32× compression).
-    - **Codebook Memory:** 96 subquantizers × 256 centroids × 8 dims × 4B = 768 KB (negligible).
-    - **Total Index:** IVF with 16K lists + PQ + HNSW adds some overhead, totaling ~12 GB.
-    - **Result:** **The ~12 GB index easily fits in 64 GB. Reranking SSD read overhead for top-100 × 3 KB/vector = 300 KB ≈ 1ms on NVMe.**
+    **Assumptions & Constraints:**
+    - Original vectors: 100M vectors, 768-dim, FP32.
+    - Memory Limit: 64 GB.
+    - PQ setup: 96 subquantizers, 256 centroids each.
+    - Original vectors for reranking are not included in the in-RAM PQ-code size.
+
+    **Calculations:**
+    - Original vector storage: 100M × 768 × 4B = 307.2 GB.
+    - PQ code storage: 100M × 96B = 9.6 GB, a 32x reduction for the codes.
+    - Codebook storage: 96 × 256 × 8 dims × 4B = 786,432 bytes, or about 0.8 MB.
+    - IVF/HNSW/list metadata adds implementation-dependent overhead, so the in-RAM compressed index is 9.6 GB plus metadata, not a guaranteed 12 GB total.
+    - If reranking uses original FP32 vectors, that separate store is still about 307.2 GB and is outside the 64 GB RAM budget unless compressed or placed off-RAM.
+
+    **Conclusion & Interpretation:**
+    - **Result: 9.6 GB plus metadata for PQ codes (Memory/Recall Tradeoff)**. The compressed index fits in 64 GB, but recall drops because distances are approximate; reranking can help only if higher-fidelity vectors are stored and served within the latency budget.
 status: published
 provenance: imported
 requires_explanation: false
