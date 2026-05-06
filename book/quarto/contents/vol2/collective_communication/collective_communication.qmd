@@ -636,7 +636,7 @@ If a GPU simply opens a socket and sends a massive gradient to another GPU, the 
 
 Different model architectures stress different operations, and selecting the wrong primitive for a workload creates unnecessary bottlenecks.
 
-### The six core primitives
+### The six core primitives {#sec-collective-communication-six-core-primitives-8a66}
 
 1.  **Broadcast**\index{Broadcast}: One sender transmits data to all receivers.
     *   *Use Case*: Distributing initial model weights from rank 0 to all workers at startup. Used across **all parallelism strategies** during initialization.
@@ -1529,7 +1529,7 @@ Communication libraries like NCCL perform **topology detection**\index{Topology 
 
 The topology detection process begins with hardware enumeration. NCCL queries the PCIe bus to discover GPU placement, NVLink connectivity between GPUs, and NIC-to-PCIe-switch affinity. From this information, it constructs an internal graph where nodes represent GPUs and edges represent physical links with annotated bandwidth and latency. A graph search algorithm then finds communication paths that maximize aggregate bandwidth while minimizing the number of cross-domain hops (transitions between NVLink, PCIe, and InfiniBand domains). This topology-aware path selection is what allows NCCL to achieve 85--95 percent of theoretical peak bandwidth on well-configured systems, compared to the 40--60 percent typical of topology-unaware implementations.
 
-#### Torus topology (TPU pods)
+#### Torus topology (TPU pods) {#sec-collective-communication-torus-topology-tpu-pods-68b2}
 
 ::: {#fig-torus-reduction fig-env="figure" fig-pos="htb" fig-cap="**Dimension-Ordered Reduction on Torus Topology**. In a 2D torus mesh (a simplified representation of 3D TPU pods), AllReduce is decomposed into two sequential steps along the X and Y dimensions. By reducing along one dimension at a time, the system minimizes network diameter and avoids link contention, ensuring that each direct neighbor link operates at full bandwidth." fig-alt="2D grid diagram of nodes in a torus topology. Arrows show sequential reduction along X-axis rings, then Y-axis rings."}
 ![](images/svg/torus-reduction.svg){width=100%}
@@ -1545,7 +1545,7 @@ Each dimension-ordered reduction is itself a Ring AllReduce along that dimension
 
 Dimension-ordered reduction minimizes network diameter and ensures each link carries traffic in only one direction at a time, avoiding congestion. The torus topology also provides natural fault tolerance through alternate routing paths: if one link in the X-dimension fails, traffic can detour through the Y or Z dimensions (at the cost of increased latency). Google's Accelerated Linear Algebra (XLA) compiler generates dimension-ordered collectives automatically when targeting TPU pods, abstracting the topology details from the user.
 
-#### Rail-optimized routing (NVIDIA DGX)
+#### Rail-optimized routing (NVIDIA DGX) {#sec-collective-communication-railoptimized-routing-nvidia-dgx-7081}
 
 In NVIDIA DGX systems, each GPU has its own dedicated NIC (network interface card). **Rail-optimized** routing exploits this by ensuring that GPUs at the same position within their respective nodes communicate only with each other:
 
@@ -1596,7 +1596,7 @@ The progression from mild to aggressive quantization illustrates the trade-off b
 
 3. **1-bit SGD**\index{1-bit SGD}: The extreme case: transmit only the **sign** of each gradient element (+1 or -1). The receiver reconstructs using a learned or adaptive scaling factor. This achieves **32$\times$ compression** over FP32 but introduces substantial noise that typically degrades convergence without additional mechanisms.
 
-#### Block quantization for gradient communication
+#### Block quantization for gradient communication {#sec-collective-communication-block-quantization-gradient-communication-c883}
 
 The quantization progression above uses a single scaling factor per entire tensor, which implicitly assumes the gradient distribution is uniform across the tensor. In practice, gradient distributions are highly non-uniform: attention layers produce gradients with heavy tails, embedding layers produce extremely sparse gradients, and normalization layers produce gradients concentrated near zero. A single scaling factor per tensor is suboptimal when gradient distributions vary across the tensor. Regions with small gradients lose most of their information when quantized with a scaling factor dominated by the tensor's maximum value. **Block quantization**\index{Block Quantization} addresses this by dividing the gradient tensor into blocks of $B$ elements (typically $B = 64$ or $128$) and computing an independent scaling factor per block. Each block's scaling factor adapts to the local gradient distribution, reducing quantization error at the cost of transmitting $d/B$ additional scaling factors.
 
@@ -1614,7 +1614,7 @@ Each reduction in bit-width introduces quantization noise. This noise acts as a 
 
 Quantization attacks communication volume by reducing the number of bits per gradient element while transmitting every element. An orthogonal approach, **sparsification**\index{Sparsification}, attacks the problem from the other direction: keep full precision but transmit only a subset of gradient elements, setting the rest to zero.
 
-#### Top-k sparsification
+#### Top-k sparsification {#sec-collective-communication-topk-sparsification-40fc}
 
 The most common method is **Top-K compression**: for a gradient vector $g \in \mathbb{R}^d$, transmit only the $K$ elements with the largest absolute magnitude, setting the rest to zero:
 
@@ -1622,15 +1622,15 @@ $$\text{TopK}(g) = g \odot \mathbf{1}_{|g| \geq |g|_{(K)}}$$
 
 where $|g|_{(K)}$ is the $K$-th largest element by magnitude. With $K = 0.001 \times d$ (keeping only 0.1 percent of elements), this achieves **1000$\times$ compression**.
 
-#### Encoding sparse gradients
+#### Encoding sparse gradients {#sec-collective-communication-encoding-sparse-gradients-ddee}
 
 Transmitting a sparse gradient requires sending both the nonzero values and their indices. For a gradient vector of dimension $d$ with $K$ nonzero elements, the encoded message contains $K$ values (each in FP32 or FP16) plus $K$ indices (typically INT32). The total message size is $K \times (4 + 4) = 8K$ bytes for FP32 values with INT32 indices. The effective compression ratio is therefore $4d / 8K = d / 2K$. For $K = 0.001d$, this yields a compression ratio of 500$\times$ (not 1000$\times$), because the index overhead is significant. Reducing the index size to INT16 (for $d < 65536$) or using run-length encoding for structured sparsity patterns can improve the effective ratio.
 
-#### Random-k as an alternative
+#### Random-k as an alternative {#sec-collective-communication-randomk-alternative-3668}
 
 An alternative to Top-K is **Random-K sparsification**\index{Random-K Sparsification}, which selects $K$ elements uniformly at random and scales them by $d/K$ to maintain an unbiased gradient estimate. Random-K has the advantage of being an unbiased compressor even without error feedback, because $\mathbb{E}[\text{RandomK}(g)] = g$. However, it introduces higher variance than Top-K because it discards large gradients with the same probability as small ones. In practice, Top-K with error feedback converges faster than Random-K for the same compression ratio, because Top-K preserves the most informative gradient components at each step.
 
-#### The convergence problem
+#### The convergence problem {#sec-collective-communication-convergence-problem-43f6}
 
 Naively discarding small gradients creates a systematic bias. If a parameter consistently receives small gradients (e.g., 0.01 per step), it will *never* be updated because 0.01 is always below the Top-K threshold. Over thousands of steps, these "lost" gradients accumulate to a significant error that prevents the model from converging to the true optimum.
 
@@ -1766,7 +1766,7 @@ Gradient compression is not free; it trades reduced communication for increased 
 | **Top-K (1 percent) + Error FB** |           100$\times$ |    Moderate slowdown (~10--20 percent) | Cross-datacenter training      |
 | **1-bit + Error FB**             |            32$\times$ | Significant slowdown (~20--30 percent) | Extreme bandwidth constraints  |
 
-#### When to use compression
+#### When to use compression {#sec-collective-communication-use-compression-8519}
 
 - **Use aggressive compression** when communication time dominates compute time (high $T_{\text{comm}}/T_{\text{compute}}$ ratio). This typically occurs with smaller models on large clusters.
 - **Avoid aggressive compression** when compute time dominates. The convergence slowdown is not worth the communication savings when the system is not bottlenecked on communication.
