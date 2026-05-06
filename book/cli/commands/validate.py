@@ -136,6 +136,7 @@ class ValidateCommand:
             ("cross-refs", "_run_refs"),
             ("citations", "_run_citations"),
             ("duplicate-year", "_run_duplicate_citation_year"),  # "[@foo1964] (1964)" → redundant year
+            ("duplicate-key", "_run_duplicate_citation_key"),    # "[@k; @k]" or "[@k] [@k]" — same-key citeproc dup
             ("manual-bracket", "_run_manual_bracket_citation"),  # *et al.*(…) or *A & B*(…) + [@k] — citeproc dup
             ("inline", "_run_inline_refs"),
             ("self-ref", "_run_self_referential"),
@@ -995,6 +996,109 @@ class ValidateCommand:
         return ValidationRunResult(
             name="duplicate-citation-year",
             description='Flag "[@citekey] (YEAR)" — citation already carries the year',
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+
+    def _run_duplicate_citation_key(self, root: Path) -> ValidationRunResult:
+        """Flag same-key duplicates in cite groups: `[@k; @k]` or `[@k] [@k]`.
+
+        Both patterns render through citeproc as a visible duplicate
+        "(Author Year) (Author Year)" because the renderer treats each
+        appearance of the same key as a separate citation event.
+
+        Two shapes caught:
+
+        1. **Same key inside one bracket** — `[@key; @key]` or
+           `[@a; @b; @a]`. Common cause: copy-paste while authoring a
+           multi-cite. The fix is to drop the duplicate key:
+           `[@key]` or `[@a; @b]`.
+
+        2. **Same key in stacked brackets** — `[@key][@key]` or
+           `[@key] [@key]`. Common cause: two separate cite-additions
+           in the same paragraph that landed adjacent to each other.
+           The fix is to remove one of the brackets, OR — if both
+           cites genuinely anchor different facts — separate them with
+           prose so the reader sees each cite anchor a distinct claim.
+
+        Distinct from `duplicate-year` (which flags `[@k] (YEAR)`) and
+        from `manual-bracket` (which flags hand-typed author/year + cite).
+        Skips fenced code blocks and inline backticks so anti-pattern
+        documentation does not fire.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        # "[@key; ...; @key]" — same key appears twice within one
+        # multi-cite bracket group, possibly with other keys between.
+        # Backreference (?P=k) requires the second occurrence to match
+        # the first capture exactly. Spans up to 8 keys per group to
+        # keep the regex bounded; longer multi-cites are rare.
+        same_bracket_dup = re.compile(
+            r"\[@(?P<k>[A-Za-z][\w:.-]*)"
+            r"(?:\s*;\s*@[\w:.-]+){0,8}"
+            r"\s*;\s*@(?P=k)\b"
+        )
+        # "[@key][@key]" or "[@key] [@key]" — same key in adjacent
+        # bracket groups. Allow whitespace, comma, semicolon, or period
+        # between the brackets (typical sentence punctuation that does
+        # not change the citeproc-duplicate outcome).
+        stacked_same_dup = re.compile(
+            r"\[@(?P<k>[A-Za-z][\w:.-]*)\][\s,;.]*\[@(?P=k)\b"
+        )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                # Strip inline code spans so anti-pattern documentation
+                # in backticks does not fire on the example string.
+                scrubbed = re.sub(r"`[^`]+`", "", line)
+                for m in same_bracket_dup.finditer(scrubbed):
+                    context = scrubbed[max(0, m.start() - 10) : min(len(scrubbed), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="duplicate_citation_key_in_bracket",
+                            message=(
+                                f"Same key @{m.group('k')} appears twice inside one cite group. "
+                                "Citeproc renders each occurrence as a separate (Author Year), "
+                                "duplicating the rendered citation. Drop the redundant copy."
+                            ),
+                            severity="error",
+                            context=context,
+                        )
+                    )
+                for m in stacked_same_dup.finditer(scrubbed):
+                    context = scrubbed[max(0, m.start() - 10) : min(len(scrubbed), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="duplicate_citation_key_stacked",
+                            message=(
+                                f"Same key @{m.group('k')} appears in two adjacent cite brackets. "
+                                "Citeproc renders each as '(Author Year)', producing a visible "
+                                "(Author Year) (Author Year) duplicate. Remove one bracket, or "
+                                "separate the two facts with prose so each cite anchors a distinct claim."
+                            ),
+                            severity="error",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="duplicate-citation-key",
+            description='Flag "[@k; @k]" or "[@k] [@k]" — same-key citeproc dup',
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
