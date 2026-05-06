@@ -42,68 +42,32 @@ cli/
 
 ### Check (Validation)
 
-All validation is in `validate.py`. Each check belongs to a **group** and has a **scope**.
+All validation lives in `validate.py`. Each check belongs to a **group** and has a **scope**. Each scope carries a **`default`** flag that controls whether it runs in the curated set (pre-commit / CI) or only on demand.
 
 ```bash
-./binder check <group>                    # Run all scopes in a group
-./binder check <group> --scope <name>     # Run one specific scope
-./binder check all                        # Run everything
-./binder check all --vol1                 # Volume I only
+./binder check <group>                  # default=True scopes only
+./binder check <group> --scope <name>   # one specific scope
+./binder check <group> --all-scopes     # every scope, including default=False
+./binder check all                      # every group's default=True scopes
+./binder check all --vol1               # ... scoped to Volume I
+./binder check <group> help             # per-group scope listing
 ```
 
-#### Check Groups & Scopes
+#### How scopes are discovered
 
-| Group | Scope | What it checks |
-|-------|-------|----------------|
-| **refs** | `python-syntax` | Python code block syntax errors |
-| | `inline-python` | Inline `{python}` reference validity |
-| | `cross-refs` | `@sec-`, `@fig-`, `@tbl-` reference targets exist |
-| | `citations` | `[@key]` citation keys exist in `.bib` |
-| | `inline` | Inline ref patterns, scope analysis |
-| | `self-ref` | Self-referential cross-references |
-| **labels** | `duplicates` | Duplicate `#fig-`, `#tbl-`, `#lst-` labels |
-| | `orphans` | Defined labels never referenced |
-| | `fig-labels` | Underscore in figure label IDs |
-| **headers** | `ids` | All `##` sections have `{#sec-...}` IDs |
-| **footnotes** | `placement` | Footnotes not in tables/captions |
-| | `integrity` | Every `[^fn-...]` reference has a definition |
-| | `cross-chapter` | Duplicate footnote IDs across chapters |
-| **figures** | `captions` | Figures have `fig-cap` and `fig-alt` |
-| | `div-syntax` | Figures use div syntax (not markdown-image) |
-| | `flow` | Figures placed near first reference |
-| | `files` | Referenced image files exist on disk |
-| **rendering** | `patterns` | LaTeX+Python rendering hazards |
-| | `python-echo` | Python blocks have `echo: false` |
-| | `indexes` | `\index{}` not inline with headings |
-| | `dropcaps` | Drop cap compatibility |
-| | `parts` | Part key validation |
-| | `heading-levels` | No skipped heading levels (##→####) |
-| | `duplicate-words` | Repeated consecutive words |
-| | `grid-tables` | Warn about grid tables (prefer pipe) |
-| | `tables` | Table content validation |
-| | `ascii` | Non-ASCII characters in prose |
-| | `percent-spacing` | No space between value and `%` |
-| | `unit-spacing` | Space between number and unit (`100 ms`) |
-| | `binary-units` | Use `GB`/`TB` not `GiB`/`TiB` |
-| | `contractions` | No contractions in body prose |
-| | `unblended-prose` | No split paragraphs |
-| | `times-spacing` | Space after `$\times$` before word |
-| | `times-product-spacing` | Space before `$\times$` after inline code |
-| | `purpose-unnumbered` | Purpose sections have `{.unnumbered}` |
-| | `div-fences` | Malformed `:::` / `::::` fences |
-| **images** | `formats` | Image file format validation |
-| | `external` | No external image URLs |
-| | `svg-xml` | SVG XML well-formedness |
-| **json** | `syntax` | JSON file syntax |
-| **units** | `physics` | Pint unit consistency in `mlsys/` |
-| **spelling** | `prose` | Spell check prose content |
-| | `tikz` | Spell check TikZ labels |
-| **epub** | `hygiene` | Fast SVG/BibTeX source invariants (pre-commit, <1s) |
-| | `smoke` | Reader-compat smoke checks on built EPUBs — no Java required |
-| | `epubcheck` | W3C epubcheck on built EPUBs under `_build/epub-vol*/` (CI, ~7s per volume) |
-| **sources** | `citations` | Source citation verification |
-| **references** | `hallucinator` | Bibliography entry verification (Crossref/DOI) |
-| **content** | `tree` | Content tree structure |
+`./binder check` (no args) prints the full group catalogue. Scopes marked with `*` are `default=False` — opt-in only, reachable via `--scope` or `--all-scopes`. Per-group help (`./binder check <group> help`) prints the same catalogue with one row per scope, plus the runner method name and a one-line note.
+
+The authoritative list is the `GROUPS` dict in `book/cli/commands/validate.py`. That dict is the only place a new scope needs to be wired; pre-commit, CI, and ad-hoc invocations all read from it.
+
+#### Default vs. opt-in: the contract
+
+A scope is `default=True` when it should run on every commit. Reasons to mark a scope `default=False`:
+
+1. It currently fails on dev (corpus debt; opt in to find the cleanup work, then flip the flag).
+2. It is intentionally heavy — slow (`math/render-audit`, ~10 min) or external (`references/hallucinator`, network calls; `spelling/*` requires aspell; `epub/epubcheck` requires JRE).
+3. It is a manual-stage check (`render-audit` is also wired to pre-commit's `[manual]` stage).
+
+Flipping `default=False → default=True` once dev is clean is a one-line edit in `validate.py`. No YAML change needed.
 
 ### Format (Auto-formatters)
 
@@ -132,14 +96,33 @@ All validation is in `validate.py`. Each check belongs to a **group** and has a 
 
 ## Pre-commit Integration
 
-Every pre-commit hook routes through `./book/binder`. The pattern is:
+Every `book-*` pre-commit hook routes through `./book/binder`. The hook tree mirrors the binder command tree one-to-one: there is one hook per check group (`book-check-refs`, `book-check-prose`, `book-check-footnotes`, ...). Each hook runs the curated default scopes for its group; opt-in scopes are reachable on the CLI via `--scope` or `--all-scopes`.
 
 ```yaml
-- id: book-check-<name>
-  entry: ./book/binder check <group> --scope <scope>
+- id: book-check-<group>
+  entry: ./book/binder check <group>
+  language: system
+  pass_filenames: false
+  files: ^book/quarto/contents/.*\.qmd$
 ```
 
-No inline bash scripts. One CLI, one validation framework, consistent output.
+Two structural exceptions, both documented inline in `.pre-commit-config.yaml`:
+
+- **Vol1-only hooks** (`book-check-headers --vol1`, `book-check-labels --vol1`) — Vol II has known forward references and missing IDs that would block every commit.
+- **Format-vs-content split** (`book-check-tables` runs `binder check tables` for content; `book-check-tables-format` runs `binder format tables --check` for whitespace) — these are different binder commands.
+
+No inline bash scripts. One CLI, one validation framework, one error format. Retired-hook history lives in `.pre-commit-history.md` so the live config is not a graveyard.
+
+## Adding a new check
+
+The flow that a future maintainer should mimic:
+
+1. **Implement the runner** in `book/cli/commands/validate.py` as `_run_<scope>(self, root: Path) -> ValidationRunResult`. For per-file regex checks, walk `self._qmd_files(root)`. For graph / corpus checks, build the model once and emit `ValidationIssue` entries. For external scripts you want to keep callable standalone, wrap with `self._delegate_script(script_path, args, run_name)`.
+2. **Register the scope** by adding a `Scope("<name>", "_run_<scope>", default=...)` entry to the right group in the `GROUPS` dict at the top of the file. Mark `default=False` if the scope still fails on dev or is intentionally opt-in.
+3. **Surface any new flags** in the argparse block in `ValidateCommand.run()`, and dispatch them in `_run_group` if the runner needs them as kwargs.
+4. **Stop.** Pre-commit picks up the new scope automatically because the existing `book-check-<group>` hook already runs every default-True scope in the group. You only add a new pre-commit hook for a brand-new group, or to pass a scope-specific flag (the vol1 / format-check exceptions above).
+
+When you flip a scope from `default=False` → `default=True`, that single edit in `validate.py` ships the scope to every developer's pre-commit and to CI on the next push.
 
 ## EPUB Checks — Two Layers, One CLI Surface
 
