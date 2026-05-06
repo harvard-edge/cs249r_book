@@ -279,10 +279,13 @@ def register(app: typer.Typer) -> None:
                         d = _y.safe_load(p.read_text())
                     except Exception:
                         continue
-                    if not isinstance(d, dict): continue
-                    if d.get("status") != "published": continue
+                    if not isinstance(d, dict):
+                        continue
+                    if d.get("status") != "published":
+                        continue
                     pub += 1
-                    if d.get("validated") is True: val += 1
+                    if d.get("validated") is True:
+                        val += 1
                 validated_pct = (100.0 * val / pub) if pub else 0.0
             except Exception:
                 # If anything goes wrong, fall back to the legacy hardcoded value
