@@ -1691,7 +1691,7 @@ class AcceleratorSpecs:
 ```
 
 \index{Arithmetic Intensity!attention layer}
-Consider a GPT-2 attention layer where Q, K, V projections with dimensions ($B{\times}S{\times}H$) multiplied by ($H{\times}H$) produce BSH² FLOPs. Data movement requires reading Q, K, V (3 $\times$ BSH $\times$ 2 bytes) plus writing the output (BSH $\times$ 2 bytes). The arithmetic intensity equals BSH² divided by (8BSH), which simplifies to H/8. For GPT-2 Small (H=`{python} AttentionIntensity.H_small_str`, the 117M variant, used here because its lower intensity clearly falls below the ridge point), this yields `{python} AttentionIntensity.attn_intensity_str` FLOP/byte, below the A100's ridge point, making standard attention memory bound. GPT-2 XL (H=1600) would yield 200 FLOP/byte, above the ridge point, illustrating how model scale shifts the same operation between regimes.
+Consider a GPT-2 attention layer where Q, K, V projections with dimensions $(B{\times}S{\times}H)$ multiplied by $(H{\times}H)$ produce $BSH^2$ FLOPs. Data movement requires reading Q, K, V ($3 \times BSH \times 2$ bytes) plus writing the output ($BSH \times 2$ bytes). The arithmetic intensity equals $BSH^2$ divided by $8BSH$, which simplifies to $H/8$. For GPT-2 Small ($H=$ `{python} AttentionIntensity.H_small_str`, the 117M variant, used here because its lower intensity clearly falls below the ridge point), this yields `{python} AttentionIntensity.attn_intensity_str` FLOP/byte, below the A100's ridge point, making standard attention memory bound. GPT-2 XL $(H=1600)$ would yield 200 FLOP/byte, above the ridge point, illustrating how model scale shifts the same operation between regimes.
 
 Accelerators have characteristic hardware ridge points where operations transition from memory-bound to compute bound. The A100 with `{python} AcceleratorSpecs.a100_tflops_fp16_str` TFLOPS FP16 Tensor Core and `{python} AcceleratorSpecs.a100_bw_tbs_str` TB/s bandwidth has a ridge point of `{python} AcceleratorSpecs.a100_ridge_str` FLOP/byte. The H100 SXM with `{python} AcceleratorSpecs.h100_tflops_fp16_str` TFLOPS FP16 Tensor Core and `{python} AcceleratorSpecs.h100_bw_tbs_str` TB/s bandwidth has a ridge point of approximately `{python} AcceleratorSpecs.h100_ridge_str` FLOP/byte. Operations below the ridge point are memory bound; above are compute bound.
 
@@ -2340,8 +2340,8 @@ The final zone shows multiple GPUs receiving preprocessed batches for training. 
 The data pipeline's throughput is ultimately limited by how fast training data can be retrieved from storage. The data engineering practices from @sec-data-engineering, including data format selection (Parquet, TFRecord, Arrow), partitioning strategies, and data locality optimization, directly impact these storage characteristics. Here we examine how storage constraints propagate through the training system.
 
 Storage throughput is bounded by the slower of two hardware constraints, expressed in @eq-storage-throughput:
-$$R_{\text{storage}} =\min(BW_{\text{disk}}, BW_{\text{network}})$$ {#eq-storage-throughput}
-\index{Data Shuffling!random access penalty}where $BW_{\text{disk}}$ is the physical disk bandwidth and $BW_{\text{network}}$ represents the network bandwidth for distributed storage systems. In practice, training workloads rarely achieve this theoretical maximum because they require data shuffling---randomly sampling examples to prevent the model from learning spurious ordering effects. This random access pattern dramatically reduces effective throughput, as captured in @eq-effective-throughput:
+$$R_{\text{storage}} =\min(\text{BW}_{\text{disk}}, \text{BW}_{\text{network}})$$ {#eq-storage-throughput}
+\index{Data Shuffling!random access penalty}where $\text{BW}_{\text{disk}}$ is the physical disk bandwidth and $\text{BW}_{\text{network}}$ represents the network bandwidth for distributed storage systems. In practice, training workloads rarely achieve this theoretical maximum because they require data shuffling---randomly sampling examples to prevent the model from learning spurious ordering effects. This random access pattern dramatically reduces effective throughput, as captured in @eq-effective-throughput:
 $$R_{\text{effective}} = R_{\text{storage}} \times F_{\text{access}}$$ {#eq-effective-throughput}
 where $F_{\text{access}} \approx 0.1$ for typical training workloads. Storage systems optimized for sequential reads deliver only ten percent of their peak bandwidth under random access. This order-of-magnitude penalty explains why data pipeline engineering matters: without careful prefetching and buffering, an accelerator costing thousands of dollars per hour sits idle waiting for a storage device costing hundreds.
 
@@ -2550,7 +2550,7 @@ A ResNet-50 model on modern accelerator hardware can process 1,000 images per se
 
 \index{Memory Hierarchy!ML training tiers}
 Training data traverses three memory tiers on its way from disk to accelerator, and the bandwidth gap between these tiers, spanning three orders of magnitude, is the central challenge of data pipeline design. The effective transfer rate through the hierarchy is bounded by its slowest link (@eq-memory-hierarchy-bandwidth):
-$$R_{\text{memory}} =\min(BW_{\text{storage}}, BW_{\text{system}}, BW_{\text{accelerator}})$$ {#eq-memory-hierarchy-bandwidth}
+$$R_{\text{memory}} =\min(\text{BW}_{\text{storage}}, \text{BW}_{\text{system}}, \text{BW}_{\text{accelerator}})$$ {#eq-memory-hierarchy-bandwidth}
 
 Storage devices provide 1--2 GB/s, system memory delivers 50--100 GB/s, and accelerator HBM achieves `{python} TrainingHardware.v100_bw_str` GB/s or higher. Each jump represents roughly a 50--100$\times$ bandwidth increase, which means data that flows freely within accelerator memory creates a severe bottleneck when it must be fetched from disk. This cascading bandwidth hierarchy explains why the iteration time of a well-pipelined system is governed by the *maximum* of its component latencies rather than their sum (@eq-iteration-time):
 $$t_{\text{iteration}} =\max(t_{\text{fetch}}, t_{\text{process}}, t_{\text{transfer}})$$ {#eq-iteration-time}
@@ -2561,7 +2561,7 @@ When pipeline stages overlap correctly (fetching the next batch from storage whi
 
 \index{NVMe!storage bandwidth}
 These throughput relationships become concrete when applied to real storage hardware. An NVMe storage device with `{python} StorageBandwidth.nvme_bw_str` GB/s theoretical bandwidth typically sustains approximately `{python} StorageBandwidth.nvme_bw_sustained_str` GB/s in practice (@eq-practical-throughput), and random access patterns for data shuffling reduce effective throughput by another 90 percent.
-$$R_{\text{practical}} = 0.5 \times BW_{\text{theoretical}}$$ {#eq-practical-throughput}
+$$R_{\text{practical}} = 0.5 \times \text{BW}_{\text{theoretical}}$$ {#eq-practical-throughput}
 
 To keep accelerators fed despite this bandwidth reduction, pipeline architectures maintain multiple data buffers simultaneously---prefetch buffers loading future batches, processing buffers holding data under transformation, and transfer buffers staging data for accelerator consumption. The total host memory required scales with batch size according to @eq-buffer-memory:
 $$M_{\text{required}} = (N_{\text{prefetch}} + N_{\text{processing}} + N_{\text{transfer}}) \times S_{\text{batch}}$$ {#eq-buffer-memory}
@@ -3779,7 +3779,7 @@ Mixed-precision training combines FP32, 16-bit floating-point (FP16), and brain 
 A neural network trained in FP32 requires `{python} ResNetMemoryScaling.bytes_fp32_str` bytes per parameter, while both FP16 and bfloat16 use `{python} MixedPrecisionScenarios.bytes_fp16_str` bytes. For a model with $10^9$ parameters, this reduction cuts memory usage from `{python} MixedPrecisionScenarios.model_1b_fp32_gb_str` GB to `{python} MixedPrecisionScenarios.model_1b_fp16_gb_str` GB. This memory reduction enables larger batch sizes and deeper architectures on the same hardware.
 
 \index{BF16!exponent range preservation}
-The numerical precision differences between these formats shape their use cases. @tbl-precision-comparison reveals that BF16's 8-bit exponent matches FP32's dynamic range ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$), while FP16's 5-bit exponent limits its range to $6 \times 10^{-8}$, explaining why gradients below this threshold underflow to zero without loss scaling. FP32 represents numbers from approximately $\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$ with 7 decimal digits of precision. FP16 ranges from $\pm6.10 \times 10^{-5}$ to $\pm65{,}504$ with 3-4 decimal digits of precision. Bfloat16, developed by Google Brain, maintains the same dynamic range as FP32 ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$) but with reduced precision (3-4 decimal digits). This range preservation makes bfloat16 particularly suited for deep learning training, as it handles large and small gradients more effectively than FP16.
+The numerical precision differences between these formats shape their use cases. @tbl-precision-comparison reveals that BF16's 8-bit exponent matches FP32's dynamic range $(\pm1.18 \times 10^{-38} \text{ to } \pm3.4 \times 10^{38})$, while FP16's 5-bit exponent limits its range to $6 \times 10^{-8}$, explaining why gradients below this threshold underflow to zero without loss scaling. FP32 represents numbers from approximately $\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$ with 7 decimal digits of precision. FP16 ranges from $\pm6.10 \times 10^{-5}$ to $\pm65{,}504$ with 3-4 decimal digits of precision. Bfloat16, developed by Google Brain, maintains the same dynamic range as FP32 ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$) but with reduced precision (3-4 decimal digits). This range preservation makes bfloat16 particularly suited for deep learning training, as it handles large and small gradients more effectively than FP16.
 
 | **Property**            |  **FP32**  |       **FP16**       |  **BF16**  |
 |:------------------------|:----------:|:--------------------:|:----------:|
@@ -4374,14 +4374,14 @@ class FlashAttentionCalc:
 ```
 
 \index{FlashAttention!IO complexity reduction}
-For $n = 4096$, $d = 64$: Standard attention requires $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` MB per head. Flash Attention requires only (3$\times$ $4096{\times}64$)$\times$ 4 bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` MB per head, a **`{python} FlashAttentionCalc.fa_reduction_str`$\times$ reduction**.
+For $n = 4096$, $d = 64$: Standard attention requires $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` MB per head. Flash Attention requires only $(3 \times 4096{\times}64) \times 4$ bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` MB per head, a **`{python} FlashAttentionCalc.fa_reduction_str`$\times$ reduction**.
 
 ##### IO complexity (memory reads/writes) {#sec-model-training-io-complexity-memory-readswrites-4af5}
 
 Standard attention performs:
 
 - Forward pass: Read $Q$, $K$, $V$ from HBM, write $S$, $P$, $O$ to HBM: $O(n \cdot d + n^2)$ bytes
-- Backward pass: Read $Q$, $K$, $V$, $S$, $P$, $O$, dO$ from HBM, write $dQ, dK, dV$: $O(n \cdot d + n^2)$ bytes
+- Backward pass: Read $Q$, $K$, $V$, $S$, $P$, $O$, $dO$ from HBM, write $dQ$, $dK$, $dV$: $O(n \cdot d + n^2)$ bytes
 - Total: $O(n \cdot d + n^2)$ HBM accesses
 
 Flash Attention performs different memory operations. In the forward pass, it reads $Q$, $K$, $V$ once and writes $O$ once, requiring $O(n \cdot d)$ bytes. In the backward pass, it recomputes $S$, $P$ in SRAM from $Q$, $K$, $V$ and writes $dQ$, $dK$, $dV$, again requiring $O(n \cdot d)$ bytes. Total HBM accesses are $O(n \cdot d)$.
@@ -4720,7 +4720,7 @@ For a network with $L$ layers, each storing A bytes of activations, @tbl-checkpo
 
 Sub-linear checkpointing strategies can reduce memory consumption from $O(L)$ to $O(\sqrt{L})$ with only a fractional increase in total compute time, enabling the training of much deeper models on existing hardware.
 
-Setting the derivative of total memory cost $(k \times A + (L/k)\times A)$ to zero yields k_optimal = sqrt(L). In the common sqrt(L) checkpointing scheme, this gives roughly one-third extra forward compute in exchange for the minimum memory footprint under this simplified model. For GPT-2 with forty-eight transformer layers, the contrast is stark: without checkpointing, memory equals $48\times A$ (full activation storage). Optimal checkpointing (sqrt(48) approximately equals seven checkpoints) requires memory of $7\times A + (48/7)\times A$ approximately equals $14\times A$, achieving 71 percent memory savings with approximately 33 percent compute overhead.
+Setting the derivative of total memory cost $(k \times A + (L/k)\times A)$ to zero yields $k_{\text{optimal}} = \sqrt{L}$. In the common $\sqrt{L}$ checkpointing scheme, this gives roughly one-third extra forward compute in exchange for the minimum memory footprint under this simplified model. For GPT-2 with forty-eight transformer layers, the contrast is stark: without checkpointing, memory equals $48\times A$ (full activation storage). Optimal checkpointing ($\sqrt{48}$ approximately equals seven checkpoints) requires memory of $7\times A + (48/7)\times A$ approximately equals $14\times A$, achieving 71 percent memory savings with approximately 33 percent compute overhead.
 
 | **Strategy**               | **Memory Cost**             | **Recompute Cost**  |
 |:---------------------------|:----------------------------|:--------------------|
