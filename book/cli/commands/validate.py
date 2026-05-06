@@ -2157,9 +2157,23 @@ class ValidateCommand:
             lines = self._read_text(file).splitlines()
             in_code = False
             in_div = False
+            in_html_comment = False
 
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
+                # HTML comments are tracked OUTSIDE code blocks. A code fence
+                # inside an HTML comment (e.g. a hidden TikZ example) is just
+                # text, not a real fence — toggling in_code on it would mis-
+                # classify the rest of the file. See `_maintain_section_ids`
+                # in maintenance.py for the matching writer-side fix.
+                if not in_code:
+                    if "<!--" in stripped and "-->" not in stripped:
+                        in_html_comment = True
+                        continue
+                    if in_html_comment:
+                        if "-->" in stripped:
+                            in_html_comment = False
+                        continue
                 if code_block_pat.match(stripped):
                     in_code = not in_code
                     continue
