@@ -1202,17 +1202,17 @@ The fundamental convergence result for distributed SGD provides the theoretical 
 
 ::: {.callout-theorem title="Convergence Rate for Distributed SGD"}
 
-For synchronous data parallel SGD with $N$ workers, each computing gradients on a local batch of size $b$, after $M$ total iterations the expected optimization error satisfies:
+For synchronous data parallel SGD with $N$ workers, each computing gradients on a local batch of size $b$, after $T$ total iterations the expected optimization error satisfies:
 
 $$
-\mathbb{E}[\mathcal{L}(\theta_M)] - \mathcal{L}^{\star} \leq \underbrace{\frac{L_s \|\theta_0 - \theta^{\star}\|^2}{2M}}_{\text{optimization error}} + \underbrace{\frac{\eta L_s \sigma^2}{2Nb}}_{\text{variance floor}}
+\mathbb{E}[\mathcal{L}(\theta_T)] - \mathcal{L}^{\star} \leq \underbrace{\frac{L_s \|\theta_0 - \theta^{\star}\|^2}{2T}}_{\text{optimization error}} + \underbrace{\frac{\eta L_s \sigma^2}{2Nb}}_{\text{variance floor}}
 $$
 
-where $\eta$ is the learning rate, $L_s$ is the smoothness constant, $\mathcal{L}^{\star}$ is the optimal loss value, $\theta^{\star}$ is an optimal parameter vector, and $\sigma^2$ is the gradient variance. The effective convergence rate is $O(1/\sqrt{NbM})$ when the learning rate is tuned optimally as $\eta = O(\sqrt{Nb/M})$.
+where $\eta$ is the learning rate, $L_s$ is the smoothness constant, $\mathcal{L}^{\star}$ is the optimal loss value, $\theta^{\star}$ is an optimal parameter vector, and $\sigma^2$ is the gradient variance. The effective convergence rate is $O(1/\sqrt{NbT})$ when the learning rate is tuned optimally as $\eta = O(\sqrt{Nb/T})$.
 
 :::
 
-The theorem reveals several important insights. First, the variance floor decreases linearly with the number of workers $N$, explaining why distributed training can achieve the same final loss with fewer iterations. The effective batch size is $B = Nb$, so $N$ workers with batch size $B$ each behave equivalently to a single worker with batch size $Nb$. Second, the convergence rate $O(1/\sqrt{NbM})$ shows that workers, local batch size, and iteration count jointly determine statistical progress, assuming infinite bandwidth. This is the **statistical efficiency**\index{Statistical Efficiency!distributed training} of distributed training, distinct from hardware efficiency.
+The theorem reveals several important insights. First, the variance floor decreases linearly with the number of workers $N$, explaining why distributed training can achieve the same final loss with fewer iterations. The effective batch size is $B = Nb$, so $N$ workers with batch size $B$ each behave equivalently to a single worker with batch size $Nb$. Second, the convergence rate $O(1/\sqrt{NbT})$ shows that workers, local batch size, and iteration count jointly determine statistical progress, assuming infinite bandwidth. This is the **statistical efficiency**\index{Statistical Efficiency!distributed training} of distributed training, distinct from hardware efficiency.
 
 However, the theorem assumes perfect synchronization (BSP). When workers proceed at different rates or use stale gradients, convergence guarantees degrade, as we examine next.
 
@@ -1232,12 +1232,12 @@ Synchronization models fundamentally affect convergence behavior. The staleness 
 
 The convergence behavior differs across these models in ways that directly affect training cost and solution quality.
 
-In Bulk Synchronous Parallel (BSP, $\tau = 0$), all workers compute gradients on the same parameter version, then synchronize via barrier before updating. This guarantees mathematical equivalence to single-device training with larger batch size, an optimal convergence rate of $O(1/\sqrt{NbM})$, and no hyperparameter adjustment beyond batch size scaling.
+In Bulk Synchronous Parallel (BSP, $\tau = 0$), all workers compute gradients on the same parameter version, then synchronize via barrier before updating. This guarantees mathematical equivalence to single-device training with larger batch size, an optimal convergence rate of $O(1/\sqrt{NbT})$, and no hyperparameter adjustment beyond batch size scaling.
 
 Stale Synchronous Parallel (SSP, $\tau \leq s$) relaxes the barrier by allowing workers to proceed up to $s$ iterations ahead of the slowest worker. The convergence rate degrades to:
 
 $$
-\mathbb{E}[\mathcal{L}(\theta_M)] - \mathcal{L}^{\star} \leq O\left(\frac{1}{\sqrt{NbM}}\right) + O\left(\frac{s^2 \eta^2 L_s^2}{Nb}\right)
+\mathbb{E}[\mathcal{L}(\theta_T)] - \mathcal{L}^{\star} \leq O\left(\frac{1}{\sqrt{NbT}}\right) + O\left(\frac{s^2 \eta^2 L_s^2}{Nb}\right)
 $$
 
 The second term represents the **staleness penalty**. For bounded staleness $s$, this penalty can be controlled by reducing the learning rate: $\eta' = \eta / \sqrt{1 + s}$. Typical production systems use $s \in \{2, 4, 8\}$, accepting 5--15 percent convergence degradation for 20--40 percent throughput improvement on heterogeneous clusters.
@@ -1245,7 +1245,7 @@ The second term represents the **staleness penalty**. For bounded staleness $s$,
 Asynchronous SGD (ASP, $\tau = \infty$) eliminates waiting entirely: workers update parameters immediately. While this maximizes throughput, convergence degrades:
 
 $$
-\mathbb{E}[\mathcal{L}(\theta_M)] - \mathcal{L}^{\star} \leq O\left(\frac{1}{\sqrt{M}}\right) + O\left(\bar{\tau}^2 \eta^2 L_s^2\right)
+\mathbb{E}[\mathcal{L}(\theta_T)] - \mathcal{L}^{\star} \leq O\left(\frac{1}{\sqrt{T}}\right) + O\left(\bar{\tau}^2 \eta^2 L_s^2\right)
 $$
 
 where $\bar{\tau}$ is the average staleness. The staleness penalty now scales with the square of average delay, and critically, the variance reduction from $N$ workers disappears in the dominant term. Compensation techniques include:
@@ -1258,7 +1258,7 @@ where $\bar{\tau}$ is the average staleness. The staleness penalty now scales wi
 
 | **Model** | **Staleness**   |                    **Convergence Rate** | **Variance Reduction** | **Best For**                          |
 |:----------|:----------------|----------------------------------------:|:-----------------------|:--------------------------------------|
-| **BSP**   | $\tau = 0$      |                       $O(1/\sqrt{NbM})$ | Full ($1/N$)           | Final training, reproducibility       |
+| **BSP**   | $\tau = 0$      |                       $O(1/\sqrt{NbT})$ | Full ($1/N$)           | Final training, reproducibility       |
 | **SSP**   | $\tau \leq s$   |        $O(1/\sqrt{NbM}) + O(s^2\eta^2 L_s^2 / Nb)$ | Partial                | Heterogeneous clusters                |
 | **ASP**   | $\tau = \infty$ | $O(1/\sqrt{M}) + O(\bar{\tau}^2\eta^2 L_s^2)$ | None                   | Maximum throughput, early exploration |
 
