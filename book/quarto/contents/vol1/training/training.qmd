@@ -203,14 +203,14 @@ The simplification is valid when the pipeline is correctly staged: at training s
 
 \index{Tensor Core!mixed precision throughput}
 
-| **Technique**                   | **Term Affected**                 | **Mechanism**                                                                      |
-|:--------------------------------|:----------------------------------|:-----------------------------------------------------------------------------------|
-| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑                 | Tensor Cores operate at up to 16$\times$ higher FLOP/s                             |
-| **Data Prefetching**            | Utilization ↑                     | Reduces accelerator idle time waiting for data                                     |
-| **Gradient Checkpointing**      | Total Operations ↑                | Adds recomputation, but enables larger models                                      |
-| **Gradient Accumulation**       | Utilization ↑                     | Maintains high batch parallelism efficiency                                        |
-| **Operator Fusion**             | Utilization ↑                     | Reduces memory bandwidth bottlenecks                                               |
-| **FlashAttention**              | Memory Traffic ↓, Utilization ↑   | Same asymptotic FLOPs, much lower HBM IO; backward recomputation may add FLOPs     |
+| **Technique**                   | **Term Affected**               | **Mechanism**                                                                  |
+|:--------------------------------|:--------------------------------|:-------------------------------------------------------------------------------|
+| **Mixed Precision (FP16/BF16)** | Peak Throughput ↑               | Tensor Cores operate at up to 16$\times$ higher FLOP/s                         |
+| **Data Prefetching**            | Utilization ↑                   | Reduces accelerator idle time waiting for data                                 |
+| **Gradient Checkpointing**      | Total Operations ↑              | Adds recomputation, but enables larger models                                  |
+| **Gradient Accumulation**       | Utilization ↑                   | Maintains high batch parallelism efficiency                                    |
+| **Operator Fusion**             | Utilization ↑                   | Reduces memory bandwidth bottlenecks                                           |
+| **FlashAttention**              | Memory Traffic ↓, Utilization ↑ | Same asymptotic FLOPs, much lower HBM IO; backward recomputation may add FLOPs |
 
 : **iron law Optimization Mapping.** Optimization techniques mapped to iron law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping tbl-colwidths="[25,27,48]"}
 
@@ -234,7 +234,7 @@ Training speed is governed by the utilization of hardware peaks.
 :::
 
 \index{Transformer!training evolution}
-The iron law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the *binding constraint* has shifted over time as hardware and algorithms co-evolved. In 1986, backpropagation was formalized [@rumelhart1986learning], and training a three-layer network on toy datasets required days on CPU workstations---the bottleneck was raw compute throughput ($R_{\text{peak}}$). In 2012, AlexNet demonstrated GPU training [@alexnet2012], reducing ImageNet training from weeks to days and launching the deep learning era. By 2017, transformers and NVIDIA Volta Tensor Cores enabled mixed-precision training with a further 5$\times$ speedup [@vaswani2017attention]. GPT-3 in 2020 used over `{python} TrainingScenarios.gpt3_gpu_count_str` V100 GPUs at an estimated \$`{python} TrainingScenarios.gpt3_compute_cost_str`M cost [@brown2020language], making utilization ($\eta_{\text{hw}}$) critical. By 2023, training efficiency improved 10$\times$ through the techniques examined in this chapter: FlashAttention reduces memory traffic while improving $\eta$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $R_{\text{peak}}$. Each innovation was motivated by a specific iron law bottleneck.
+The iron law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the *binding constraint* has shifted over time as hardware and algorithms co-evolved. In 1986, backpropagation was formalized [@rumelhart1986], and training a three-layer network on toy datasets required days on CPU workstations---the bottleneck was raw compute throughput ($R_{\text{peak}}$). In 2012, AlexNet demonstrated GPU training [@krizhevsky2012imagenet], reducing ImageNet training from weeks to days and launching the deep learning era. By 2017, transformers and NVIDIA Volta Tensor Cores enabled mixed-precision training with a further 5$\times$ speedup [@vaswani2017]. GPT-3 in 2020 used over `{python} TrainingScenarios.gpt3_gpu_count_str` V100 GPUs at an estimated \$`{python} TrainingScenarios.gpt3_compute_cost_str`M cost [@brown2020language], making utilization ($\eta_{\text{hw}}$) critical. By 2023, training efficiency improved 10$\times$ through the techniques examined in this chapter: FlashAttention reduces memory traffic while improving $\eta$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $R_{\text{peak}}$. Each innovation was motivated by a specific iron law bottleneck.
 
 ```{python}
 #| label: gpt2-lighthouse-hardware-calc
@@ -972,14 +972,14 @@ The choice of optimization algorithm creates specific patterns of computation an
 
 [^fn-convergence-training]: **Convergence**: Training converges when the loss stops decreasing meaningfully, typically after `{python} OptimizerScenarios.sgd_iterations_min_str`--`{python} OptimizerScenarios.sgd_iterations_max_str` iterations for large models. The systems consequence: faster convergence (fewer iterations) directly reduces wall-clock time and cost, but the optimizer that converges fastest (Adam) requires two FP32 auxiliary tensors beyond the parameters and gradients---a trade-off between time and memory that shapes every training budget. \index{Convergence!time-memory trade-off}
 
-| **Property**             |  **SGD**   |  **Momentum**  |    **RMSprop**    |               **Adam**              |
-|:-------------------------|:----------:|:--------------:|:-----------------:|:-----------------------------------:|
-| **Memory Overhead**      |    None    | Velocity terms | Squared gradients | Both velocity and squared gradients |
+| **Property**                    |  **SGD**   |  **Momentum**  |    **RMSprop**    |               **Adam**              |
+|:--------------------------------|:----------:|:--------------:|:-----------------:|:-----------------------------------:|
+| **Memory Overhead**             |    None    | Velocity terms | Squared gradients | Both velocity and squared gradients |
 | **Parameter + optimizer state** | 1$\times$  |   2$\times$    |     2$\times$     |              3$\times$              |
-| **Access Pattern**       | Sequential |   Sequential   |       Random      |                Random               |
-| **Operations/Parameter** |     2      |       3        |         4         |                  5                  |
-| **Hardware Efficiency**  |    Low     |     Medium     |        High       |               Highest               |
-| **Convergence Speed**    |  Slowest   |     Medium     |        Fast       |               Fastest               |
+| **Access Pattern**              | Sequential |   Sequential   |       Random      |                Random               |
+| **Operations/Parameter**        |     2      |       3        |         4         |                  5                  |
+| **Hardware Efficiency**         |    Low     |     Medium     |        High       |               Highest               |
+| **Convergence Speed**           |  Slowest   |     Medium     |        Fast       |               Fastest               |
 
 : **Optimizer Memory Footprint.** Different optimization algorithms impose varying auxiliary-state costs due to the storage of intermediate values like velocities and squared gradients. The multiplier row counts parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. Understanding these trade-offs is important for resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[22,12,15,17,34]"}
 
@@ -1706,7 +1706,7 @@ Batch size directly influences arithmetic intensity. With batch = 1, many operat
 
 This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores, parallelism, or quantization matters more. See @sec-hardware-acceleration for detailed roofline model analysis and hardware-specific optimization strategies.
 
-Look back at @fig-training-roofline and notice where standard attention sits (memory-bound region) vs. where FlashAttention[^fn-flashattention-training] lands (compute-bound region)—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N{\times}N$ attention matrix and instead processing in tiles that fit in fast SRAM (on-chip static RAM), FlashAttention reduces memory traffic from $O(N^2)$ to $O(N)$, achieving 2$\times$--4$\times$ speedups [@dao2022flashattention]. We examine the algorithm, its implementation, and when to use it in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
+Look back at @fig-training-roofline and notice where standard attention sits (memory-bound region) vs. where FlashAttention[^fn-flashattention-training] lands (compute-bound region)—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N{\times}N$ attention matrix and instead processing in tiles that fit in fast SRAM (on-chip static RAM), FlashAttention reduces memory traffic from $O(N^2)$ to $O(N)$, achieving 2$\times$--4$\times$ speedups [@dao2022]. We examine the algorithm, its implementation, and when to use it in detail in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
 
 [^fn-flashattention-training]: **FlashAttention**: The core mechanism is processing the attention calculation in small tiles that fit entirely within the accelerator's fast, on-chip SRAM, which avoids writing the full intermediate $N{\times}N$ matrix to slower HBM. This design directly causes the shift from the memory-bound to the compute-bound region of a roofline model by trading a slight increase in FLOPs for a massive reduction in memory I/O. The result is the 2$\times$--4$\times$ end-to-end speedup mentioned in the text. \index{FlashAttention!IO-aware design}
 
@@ -2691,11 +2691,11 @@ A common mistake in ML systems is treating batch size as a continuous variable. 
 
 ::: {tbl-colwidths="[25,25,25,25]"}
 
-|                  **Batch Size**                 | **Warps Needed** |                 **Utilization**                 |                    **Relative Time**                    |
-|:-----------------------------------------------:|:----------------:|:-----------------------------------------------:|:-------------------------------------------------------:|
-| `{python} TrainingDimensions.wave_batch_32_str` |        1         |                    100 percent                  |                       1.0$\times$                       |
+|                  **Batch Size**                 | **Warps Needed** |                    **Utilization**                     |                    **Relative Time**                    |
+|:-----------------------------------------------:|:----------------:|:------------------------------------------------------:|:-------------------------------------------------------:|
+| `{python} TrainingDimensions.wave_batch_32_str` |        1         |                      100 percent                       |                       1.0$\times$                       |
 | `{python} TrainingDimensions.wave_batch_33_str` |        2         | `{python} TrainingDimensions.wave_util_33_str` percent | ~`{python} TrainingDimensions.wave_time_33_str`$\times$ |
-| `{python} TrainingDimensions.wave_batch_64_str` |        2         |                    100 percent                  |                       1.0$\times$                       |
+| `{python} TrainingDimensions.wave_batch_64_str` |        2         |                      100 percent                       |                       1.0$\times$                       |
 | `{python} TrainingDimensions.wave_batch_65_str` |        3         | `{python} TrainingDimensions.wave_util_65_str` percent | ~`{python} TrainingDimensions.wave_time_65_str`$\times$ |
 
 :::
@@ -4179,7 +4179,7 @@ Optimal mixed-precision training requires matching the precision format to hardw
 | **Architecture**  | **Recommended Precision**            | **Key Considerations**                                                                                      |
 |:------------------|:-------------------------------------|:------------------------------------------------------------------------------------------------------------|
 | **V100 (Volta)**  | FP16 with loss scaling               | No BF16 support; gradient clipping essential                                                                |
-| **A100 (Ampere)** | BF16 for transformers; FP16 for CNNs | TF32 mode provides automatic 2$\times$--3$\times$ speedup for legacy FP32 code                                      |
+| **A100 (Ampere)** | BF16 for transformers; FP16 for CNNs | TF32 mode provides automatic 2$\times$--3$\times$ speedup for legacy FP32 code                              |
 | **H100 (Hopper)** | FP8 via TransformerEngine            | Requires FP8-aware training recipes; `{python} AcceleratorSpecs.h100_tflops_fp8_str` TFLOPS peak throughput |
 
 : **Precision Strategy by GPU Architecture.** Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy tbl-colwidths="[14,34,52]"}
@@ -4230,9 +4230,9 @@ The performance impact across generations appears in the throughput numbers: tra
 
 \index{FlashAttention!IO-aware algorithm}\index{FlashAttention!memory bandwidth optimization}Mixed-precision training addresses two bottlenecks: compute throughput (Tensor Cores operate faster on FP16) and memory capacity (half the bytes per value). For transformer models during training, however, a third bottleneck often dominates: *memory bandwidth*. The attention mechanism's quadratic intermediate matrices must be repeatedly loaded and stored during the forward pass and accessed again during backpropagation. Even with reduced precision, the sheer volume of memory traffic can leave compute units idle—GPUs waiting for data rather than computing.
 
-Flash Attention[^fn-flashattention-origin] [@dao2022flashattention] addresses this bandwidth bottleneck through a radically different approach: rather than optimizing *what precision* to use, it optimizes *how data flows* between memory hierarchies. By processing attention in small tiles that fit in fast on-chip SRAM, Flash Attention avoids materializing the full $n{\times}n$ attention matrix in slow HBM. This algorithmic restructuring achieves 2$\times$--4$\times$ training speedups while enabling training on sequences that would otherwise cause out-of-memory errors\index{Out-of-Memory Error!training constraint}.
+Flash Attention[^fn-flashattention-origin] [@dao2022] addresses this bandwidth bottleneck through a radically different approach: rather than optimizing *what precision* to use, it optimizes *how data flows* between memory hierarchies. By processing attention in small tiles that fit in fast on-chip SRAM, Flash Attention avoids materializing the full $n{\times}n$ attention matrix in slow HBM. This algorithmic restructuring achieves 2$\times$--4$\times$ training speedups while enabling training on sequences that would otherwise cause out-of-memory errors\index{Out-of-Memory Error!training constraint}.
 
-[^fn-flashattention-origin]: **FlashAttention**: Introduced by @dao2022flashattention, achieving 2$\times$--4$\times$ wall-clock speedups without changing the mathematical output of attention. The key insight was treating attention as an IO problem rather than a compute problem: by never materializing the $N{\times}N$ score matrix in HBM and instead computing in SRAM-sized tiles, the algorithm shifted the operation from memory-bound to compute-bound on the roofline model. FlashAttention-2 [@dao2023flashattention2] further improved throughput to 50--73 percent of theoretical peak on A100. \index{FlashAttention!origin and engineering insight}
+[^fn-flashattention-origin]: **FlashAttention**: Introduced by @dao2022, achieving 2$\times$--4$\times$ wall-clock speedups without changing the mathematical output of attention. The key insight was treating attention as an IO problem rather than a compute problem: by never materializing the $N{\times}N$ score matrix in HBM and instead computing in SRAM-sized tiles, the algorithm shifted the operation from memory-bound to compute-bound on the roofline model. FlashAttention-2 [@dao2023flashattention2] further improved throughput to 50--73 percent of theoretical peak on A100. \index{FlashAttention!origin and engineering insight}
 
 #### The standard attention memory bottleneck {#sec-model-training-standard-attention-memory-bottleneck-6f39}
 
