@@ -105,6 +105,8 @@ class Scenario(BaseModel):
                 "latency": actual_latency,
                 "throughput": throughput,
                 "scaling_eff": perf.scaling_efficiency,
+                "mfu": perf.node_profile.mfu * perf.scaling_efficiency,
+                "node_mfu": perf.node_profile.mfu,
                 "sla_latency": self.sla_latency
             }
         else:

@@ -39,13 +39,13 @@ Optimizations that shave milliseconds from inference latency or percentage point
 
 ::: {.callout-learning-objectives}
 
-- Quantify why serving cost dominates training cost over a model's lifetime using the **total cost of serving equation**
-- Design batching strategies matched to model architectures, distinguishing **static batching**\index{Static Batching} for vision models from **continuous batching** for LLMs and **feature-parallel batching** for recommendation systems
-- Apply the **serving hierarchy framework** (request, replica, service, platform) to systematically identify and resolve inference bottlenecks at each level
-- Compare model sharding strategies (**tensor parallelism**\index{Tensor Parallelism}, **pipeline parallelism**\index{Pipeline Parallelism}, **expert parallelism**\index{Expert Parallelism}, **embedding sharding**\index{Embedding Sharding}) by their communication patterns and latency-memory tradeoffs
-- Analyze load balancing algorithms using **queuing theory**\index{Queuing Theory} to explain why **power-of-two-choices** achieves exponentially better performance than random assignment
-- Recognize **KV cache** memory challenges in LLM serving and understand how techniques like continuous batching and memory management enable high GPU utilization
-- Design **autoscaling**\index{Autoscaling} policies that account for **GPU cold start** latency and balance cost optimization with SLO guarantees
+- Quantify why serving cost dominates training cost over a model's lifetime using the total cost of serving equation
+- Design batching strategies for each model class: static batching for vision, continuous batching for LLMs, feature-parallel batching for recommenders
+- Apply the serving hierarchy framework (request, replica, service, platform) to systematically identify and resolve inference bottlenecks at each level
+- Compare model sharding strategies (tensor parallelism, pipeline parallelism, expert parallelism, embedding sharding) by their communication patterns and latency-memory tradeoffs
+- Analyze load balancing algorithms using queuing theory to explain why power-of-two-choices achieves exponentially better performance than random assignment
+- Identify KV-cache memory challenges in LLM serving and explain how continuous batching and memory management sustain high GPU utilization
+- Design autoscaling policies that account for GPU cold start latency and balance cost optimization with SLO guarantees
 
 :::
 
@@ -3356,7 +3356,7 @@ $$\text{Output} = \sum_{i \in \text{top-}k} g_i \cdot \text{Expert}_i(\text{inpu
 
 Expert parallelism distributes experts across devices, with each device hosting $E/N$ experts, where $N$ is the number of expert-parallel devices. @fig-moe-routing traces the routing, dispatch, and gather operations:
 
-::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-Experts (MoE) Routing**. Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-k experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts (1). Experts process the tokens in parallel (2). A second AllToAll step gathers the results back to the original device (3). This pattern enables massive model capacity but introduces all-to-all communication overhead." fig-alt="Diagram of MoE token routing. Gating selects top-2 experts. Dashed arrows show All-to-All dispatch to Expert A and B devices. Third device idle. Results gather via All-to-All to weighted sum output."}
+::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-Experts (MoE) Routing**. Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-$k$ experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts (1). Experts process the tokens in parallel (2). A second AllToAll step gathers the results back to the original device (3). This pattern enables massive model capacity but introduces all-to-all communication overhead." fig-alt="Diagram of MoE token routing. Gating selects top-2 experts. Dashed arrows show All-to-All dispatch to Expert A and B devices. Third device idle. Results gather via All-to-All to weighted sum output."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
@@ -3417,7 +3417,7 @@ Mixtral-8x7B uses 8 experts per MoE layer with top-2 routing:
 
 - Total parameters: 47B (but only ~13B active per token)
 - Experts per layer: 8
-- Active experts per token: 2 (top-k = 2)
+- Active experts per token: 2 (top-$k$ = 2)
 - MoE layers: Every other feed-forward layer
 
 **Sharding strategy** (4-way expert parallelism):
@@ -4030,7 +4030,7 @@ The critical insight from @fig-pipeline-parallel-routing is that pipeline parall
 
 Under expert parallelism, each request is dispatched to the devices hosting its selected experts based on the gating decision. Two AllToAll communication steps bookend the expert compute, as shown in @fig-expert-parallel-routing. Load imbalance is the critical challenge: when the gating function routes disproportionately to some experts, communication overhead becomes a bottleneck.
 
-::: {#fig-expert-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Expert Parallelism (MoE) Request Flow**. Gating selects the top-k experts; an AllToAll dispatch sends tokens to the GPUs hosting those experts; experts compute in parallel; a second AllToAll gathers results. The lower panel contrasts unbalanced routing (one expert bottlenecks) against balanced routing (uniform utilization via auxiliary loss)." fig-alt="Five-stage horizontal pipeline: Request, Gating, AllToAll dispatch (dashed orange), Expert Compute (three GPU boxes), AllToAll gather (dashed orange), Response. Lower panel shows two sets of three capacity bars: unbalanced with one overloaded, balanced with equal tokens."}
+::: {#fig-expert-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Expert Parallelism (MoE) Request Flow**. Gating selects the top-$k$ experts; an AllToAll dispatch sends tokens to the GPUs hosting those experts; experts compute in parallel; a second AllToAll gathers results. The lower panel contrasts unbalanced routing (one expert bottlenecks) against balanced routing (uniform utilization via auxiliary loss)." fig-alt="Five-stage horizontal pipeline: Request, Gating, AllToAll dispatch (dashed orange), Expert Compute (three GPU boxes), AllToAll gather (dashed orange), Response. Lower panel shows two sets of three capacity bars: unbalanced with one overloaded, balanced with equal tokens."}
 
 ![](images/svg/expert-parallel-routing.svg)
 

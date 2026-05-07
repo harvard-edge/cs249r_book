@@ -147,6 +147,7 @@ class SystemEvaluator:
             )
         elif "DistributedModel" in results:
             dist_res = results["DistributedModel"]
+            effective_mfu = dist_res.node_profile.mfu * dist_res.scaling_efficiency
             feasibility = EvaluationLevel(
                 level_name="Feasibility",
                 status="PASS",
@@ -160,7 +161,10 @@ class SystemEvaluator:
                 metrics={
                     "step_latency": dist_res.step_latency_total.m_as("ms"),
                     "comm_overhead": dist_res.communication_latency.m_as("ms"),
-                    "fleet_throughput": dist_res.effective_throughput.m_as("1/s")
+                    "fleet_throughput": dist_res.effective_throughput.m_as("1/s"),
+                    "mfu": effective_mfu,
+                    "node_mfu": dist_res.node_profile.mfu,
+                    "scaling_efficiency": dist_res.scaling_efficiency,
                 }
             )
         else:
