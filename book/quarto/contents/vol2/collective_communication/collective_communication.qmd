@@ -311,7 +311,7 @@ Every step our gradient takes is governed by the linear cost model $T(n) = \alph
 
 ***α-β Model (Hockney Model)***\index{Alpha-Beta Model!definition} is the linear communication cost model $T(n) = \alpha + n/\beta$ that decomposes message transfer time into a fixed startup latency ($\alpha$, the per-message overhead) and a message-size-dependent bandwidth term ($n/\beta$, proportional to bytes transferred), enabling algorithm designers to predict when message fusion or gradient compression will improve throughput [@hockney1994].
 
-1.  **Significance (Quantitative):** For InfiniBand NDR at $\alpha \approx 2\,\mu\text{s}$ and $\beta \approx 50\,\text{GB/s}$, the crossover size $n^* = \alpha \cdot \beta \approx 100\,\text{KB}$. MoE routing tokens (~4 KB each) are 25$\times$ below $n^*$: fusing 100 tokens into one 400 KB message reduces communication cost from $100\alpha = 200\,\mu\text{s}$ to one $\alpha + n/\beta \approx 10\,\mu\text{s}$, a 20$\times$ improvement. By contrast, Top-K gradient compression that reduces a 140 GB gradient to 1.4 GB (1 percent sparsity) saves bandwidth but does not change the startup cost, so it is most valuable when $n \gg n^*$.
+1.  **Significance (Quantitative):** For InfiniBand NDR at $\alpha \approx 2\,\mu\text{s}$ and $\beta \approx 50\,\text{GB/s}$, the crossover size $n^* = \alpha \cdot \beta \approx 100\,\text{KB}$. MoE routing tokens (~4 KB each) are 25$\times$ below $n^*$: fusing 100 tokens into one 400 KB message reduces communication cost from $100\alpha = 200\,\mu\text{s}$ to one $\alpha + n/\beta \approx 10\,\mu\text{s}$, a 20$\times$ improvement. By contrast, Top-k gradient compression that reduces a 140 GB gradient to 1.4 GB (1 percent sparsity) saves bandwidth but does not change the startup cost, so it is most valuable when $n \gg n^*$.
 2.  **Distinction (Durable):** Unlike idealized throughput models that treat bandwidth as the sole communication cost, the α-β model reveals that $N$ small messages of size $n/N$ cost up to $N\times$ more than one large message of size $n$ when $n/N \ll n^*$—explaining why NCCL fuses small AllReduce calls and why MoE routing algorithms buffer tokens before launching collectives.
 3.  **Common Pitfall:** A frequent misconception is that gradient compression always helps. If the compressed gradient size remains well above $n^*$, compression reduces the bandwidth term but leaves the latency term unchanged—gradient sparsification at 99 percent compression on a 70B model still transfers 1.4 GB per AllReduce, remaining firmly bandwidth-bound and not recovering latency-regime performance.
 
@@ -373,7 +373,7 @@ $n^* = \alpha \cdot \beta = 2 \times 10^{-6}$ s $\times 50 \times 10^9$ B/s $=$ 
 The critical message size separates two distinct operating regimes:
 
 1.  **Latency-Bound** $(n < n^*)$: For small messages (for example, MoE routing tokens, scalar reductions), time is dominated by $\alpha$. Optimization focuses on **fusion** (batching small messages), **topology** (reducing hop count), and **software stack tuning** (kernel bypass via RDMA).
-2.  **Bandwidth-Bound** $(n \gg n^*)$: For large messages (for example, LLM gradients, optimizer states), time is dominated by $n/\beta$. Optimization focuses on **compression** \index{Compression} (FP8, Top-K sparsity), **algorithm choice** (Ring vs. Tree), and **link aggregation** (multi-rail NICs).
+2.  **Bandwidth-Bound** $(n \gg n^*)$: For large messages (for example, LLM gradients, optimizer states), time is dominated by $n/\beta$. Optimization focuses on **compression** \index{Compression} (FP8, Top-k sparsity), **algorithm choice** (Ring vs. Tree), and **link aggregation** (multi-rail NICs).
 
 A direct comparison of two message sizes illustrates how the bottleneck shifts between these regimes:
 
@@ -1616,7 +1616,7 @@ Quantization attacks communication volume by reducing the number of bits per gra
 
 #### Top-k sparsification {#sec-collective-communication-topk-sparsification-40fc}
 
-The most common method is **Top-K compression**: for a gradient vector $g \in \mathbb{R}^d$, transmit only the $K_{\text{top}}$ elements with the largest absolute magnitude, setting the rest to zero:
+The most common method is **Top-k compression**: for a gradient vector $g \in \mathbb{R}^d$, transmit only the $K_{\text{top}}$ elements with the largest absolute magnitude, setting the rest to zero:
 
 $$\text{TopK}(g) = g \odot \mathbf{1}_{|g| \geq |g|_{(K_{\text{top}})}}$$
 
@@ -1628,11 +1628,11 @@ Transmitting a sparse gradient requires sending both the nonzero values and thei
 
 #### Random-k as an alternative {#sec-collective-communication-randomk-alternative-3668}
 
-An alternative to Top-K is **Random-K sparsification**\index{Random-K Sparsification}, which selects $K_{\text{rand}}$ elements uniformly at random and scales them by $d/K_{\text{rand}}$ to maintain an unbiased gradient estimate. Random-K has the advantage of being an unbiased compressor even without error feedback, because $\mathbb{E}[\text{RandomK}(g)] = g$. However, it introduces higher variance than Top-K because it discards large gradients with the same probability as small ones. In practice, Top-K with error feedback converges faster than Random-K for the same compression ratio, because Top-K preserves the most informative gradient components at each step.
+An alternative to Top-k is **Random-k sparsification**\index{Random-k Sparsification}, which selects $K_{\text{rand}}$ elements uniformly at random and scales them by $d/K_{\text{rand}}$ to maintain an unbiased gradient estimate. Random-k has the advantage of being an unbiased compressor even without error feedback, because $\mathbb{E}[\text{RandomK}(g)] = g$. However, it introduces higher variance than Top-k because it discards large gradients with the same probability as small ones. In practice, Top-k with error feedback converges faster than Random-k for the same compression ratio, because Top-k preserves the most informative gradient components at each step.
 
 #### The convergence problem {#sec-collective-communication-convergence-problem-43f6}
 
-Naively discarding small gradients creates a systematic bias. If a parameter consistently receives small gradients (e.g., 0.01 per step), it will *never* be updated because 0.01 is always below the Top-K threshold. Over thousands of steps, these "lost" gradients accumulate to a significant error that prevents the model from converging to the true optimum.
+Naively discarding small gradients creates a systematic bias. If a parameter consistently receives small gradients (e.g., 0.01 per step), it will *never* be updated because 0.01 is always below the Top-k threshold. Over thousands of steps, these "lost" gradients accumulate to a significant error that prevents the model from converging to the true optimum.
 
 The problem is not merely practical; it is a fundamental mathematical obstacle. Without correction, sparsified SGD is a **biased estimator** of the true gradient, and biased gradient descent can converge to arbitrarily wrong solutions. The same problem afflicts aggressive quantization: rounding gradients to INT8 or 1-bit introduces a systematic rounding error that accumulates across training steps. Both quantization and sparsification need a correction mechanism that prevents this accumulation [@seide2014].
 
@@ -1644,9 +1644,9 @@ We solve the conflict between compression and convergence with **Error Feedback*
 
 ***Error Feedback***\index{Error Feedback!definition} is a convergence-preserving technique for gradient compression that maintains a per-worker residual accumulator $e_t$, re-injecting the compression error back into the next gradient update so that information deferred by the compressor is never permanently discarded.
 
-1.  **Significance (Quantitative):** Top-K sparsification at 1 percent keeps only the largest 1 percent of gradient values by magnitude, reducing AllReduce data volume from 140 GB to 1.4 GB for a 70B model—an 100$\times$ bandwidth reduction. Without error feedback, the discarded 99 percent of gradient values are lost, causing training loss to plateau 2–5 percent above the dense baseline. With error feedback, the residual accumulates until small components cross the Top-K threshold in subsequent steps, recovering convergence at the same asymptotic rate as uncompressed SGD.
+1.  **Significance (Quantitative):** Top-k sparsification at 1 percent keeps only the largest 1 percent of gradient values by magnitude, reducing AllReduce data volume from 140 GB to 1.4 GB for a 70B model—an 100$\times$ bandwidth reduction. Without error feedback, the discarded 99 percent of gradient values are lost, causing training loss to plateau 2–5 percent above the dense baseline. With error feedback, the residual accumulates until small components cross the Top-k threshold in subsequent steps, recovering convergence at the same asymptotic rate as uncompressed SGD.
 2.  **Distinction (Durable):** Unlike lossy compression (which permanently discards sub-threshold gradient components), error feedback is a delayed transmission strategy: the residual $e_t$ telescopes across steps so that $\frac{1}{T}\sum_{t=1}^{T} v_t \to \frac{1}{T}\sum_{t=1}^{T} g_t$ as $T \to \infty$, making the long-run average of transmitted gradients equal to the true gradient average.
-3.  **Common Pitfall:** A frequent misconception is that error feedback is built into standard gradient compressors. PyTorch's built-in DDP gradient compression does not implement error feedback by default; without it, Top-K and 1-bit quantization introduce systematic bias that accumulates across steps, typically degrading final model accuracy by 1–3 percent on benchmark tasks compared to the feedback-corrected version.
+3.  **Common Pitfall:** A frequent misconception is that error feedback is built into standard gradient compressors. PyTorch's built-in DDP gradient compression does not implement error feedback by default; without it, Top-k and 1-bit quantization introduce systematic bias that accumulates across steps, typically degrading final model accuracy by 1–3 percent on benchmark tasks compared to the feedback-corrected version.
 
 :::
 
@@ -1751,7 +1751,7 @@ Verify your understanding of when and how to apply gradient compression:
 - [ ] Can you explain why 1-bit SGD without error feedback causes divergence, while 1-bit Adam with warmup converges? What is fundamentally different about how each method handles information loss?
 - [ ] Given a training run where the backward pass takes 800 ms and AllReduce takes 200 ms, would applying 4$\times$ gradient compression improve total step time? What if AllReduce takes 2000 ms?
 - [ ] Can you derive the steady-state behavior of the error accumulator $e_t$ when the true gradient is constant at $g = 0.3$ and the compression threshold is 0.5?
-- [ ] When would you choose Top-K sparsification\index{Top-K Sparsification} over quantization? Consider the trade-off between compression ratio and the overhead of encoding sparse indices.
+- [ ] When would you choose Top-k sparsification\index{Top-k Sparsification} over quantization? Consider the trade-off between compression ratio and the overhead of encoding sparse indices.
 
 :::
 
@@ -1763,7 +1763,7 @@ Gradient compression is not free; it trades reduced communication for increased 
 |:--------------------------|----------------------:|--------------------------------:|:-------------------------------|
 | **FP16**                  |             2$\times$ |                      Negligible | Default for all training       |
 | **INT8 + Error FB**              |             4$\times$ |        Minor slowdown (~5--10 percent) | Bandwidth-constrained clusters |
-| **Top-K (1 percent) + Error FB** |           100$\times$ |    Moderate slowdown (~10--20 percent) | Cross-datacenter training      |
+| **Top-k (1 percent) + Error FB** |           100$\times$ |    Moderate slowdown (~10--20 percent) | Cross-datacenter training      |
 | **1-bit + Error FB**             |            32$\times$ | Significant slowdown (~20--30 percent) | Extreme bandwidth constraints  |
 
 #### When to use compression {#sec-collective-communication-use-compression-8519}
@@ -2042,7 +2042,7 @@ Ring achieves bandwidth-optimal $2\frac{N-1}{N}\frac{M}{\beta}$ but pays $O(N)$ 
 
 **Pitfall:** *Compressing gradients without error feedback.*
 
-Top-K sparsification can achieve 99 percent compression, but naively discarding small gradients causes divergence. Without error feedback ($e_{t+1} = (g_t + e_t) - v_t$), gradients below the threshold are lost forever, accumulating systematic bias that eventually destabilizes training.
+Top-k sparsification can achieve 99 percent compression, but naively discarding small gradients causes divergence. Without error feedback ($e_{t+1} = (g_t + e_t) - v_t$), gradients below the threshold are lost forever, accumulating systematic bias that eventually destabilizes training.
 
 **Fallacy:** *Async collectives always hide latency.*
 
