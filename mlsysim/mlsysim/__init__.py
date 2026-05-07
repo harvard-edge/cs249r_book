@@ -13,7 +13,6 @@ from . import systems
 from . import sim
 from . import fmt
 from . import show
-from . import viz
 
 from .core.scenarios import Scenarios, Applications, Archetypes
 
@@ -66,14 +65,30 @@ from .infra.registry import Infra
 from .systems.registry import Systems
 
 # Export unit registry for custom workload definitions
-from .core.constants import ureg
+from .core.constants import ureg, Q_
 
-# Visualization
-from .viz.plots import plot_evaluation_scorecard, plot_roofline
+
+def plot_evaluation_scorecard(*args, **kwargs):
+    """Render a system evaluation scorecard.
+
+    Matplotlib is imported lazily so importing ``mlsysim`` remains safe in
+    headless environments such as CI, notebooks running in browser sandboxes,
+    and macOS shells without a GUI session.
+    """
+    from .viz.plots import plot_evaluation_scorecard as _plot_evaluation_scorecard
+
+    return _plot_evaluation_scorecard(*args, **kwargs)
+
+
+def plot_roofline(*args, **kwargs):
+    """Render a Roofline plot, importing matplotlib only when needed."""
+    from .viz.plots import plot_roofline as _plot_roofline
+
+    return _plot_roofline(*args, **kwargs)
 
 __all__ = [
     # Core API (the 5-line happy path)
-    "Engine", "Hardware", "Models", "Scenarios", "ureg",
+    "Engine", "Hardware", "Models", "Scenarios", "ureg", "Q_",
     # Types (for type annotations and custom workloads)
     "HardwareNode", "Workload", "TransformerWorkload", "CNNWorkload",
     "Fleet", "Node", "NetworkFabric", "PerformanceProfile",
@@ -91,7 +106,7 @@ __all__ = [
     "ResponsibleEngineeringModel", "ParallelismOptimizer", "BatchingOptimizer",
     "PlacementOptimizer",
     # Submodules (for advanced use)
-    "core", "hardware", "models", "infra", "systems", "sim", "fmt", "show", "viz",
+    "core", "hardware", "models", "infra", "systems", "sim", "fmt", "show",
     # Visualization
     "plot_evaluation_scorecard", "plot_roofline",
 ]
