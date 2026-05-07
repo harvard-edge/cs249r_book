@@ -11,24 +11,26 @@ title: Diagnose Transformer Inference Latency Regression on ESP32-S3
 scenario: 'A production keyword-spotting transformer on ESP32-S3 at 240 MHz suddenly shows 340ms inference latency, up from 85ms baseline after a firmware update that increased context window from 32 to 128 tokens. The model is unchanged: 2 layers, 4 heads, 64-dim heads, INT8. The team suspects attention is O(n²) but profiling shows only 60% CPU utilization during inference.'
 question: Why did the ESP32-S3 transformer jump from 85 ms to 340 ms when context increased from 32 to 128 tokens?
 details:
-  realistic_solution: 'Attention FLOPs scale 16×: 0.30 × 85ms × 16 = 408ms for attention alone if it were 100%... but it''s 30%. Non-attention ops scale 4×: 0.70 × 85ms × 4 = 238ms. Total predicted: 0.30×85×16 + 0.70×85×4 = 408+238 = 646ms. But actual is 340ms. Low CPU utilization (60%) suggests memory bandwidth saturation: KV cache at 128 tokens = 4×64×128×1B = 32KB, exceeding L1 cache (32KB on S3), causing cache thrashing. Fix: use tiled attention with 32-token tiles to stay in L1.'
+  realistic_solution: 'The 4x latency jump is best explained as a memory-working-set regression from the larger context window, not as pure attention FLOPs. The full INT8 KV cache at 128 tokens is 2 layers * 2 K/V tensors * 4 heads * 64 dims * 128 tokens * 1 byte = 131,072 bytes (128 KiB), versus 32 KiB at 32 tokens. Even if the implementation stores only the active layer, the working set grows from 16 KiB to 64 KiB. That can push attention data out of ESP32-S3 cache/internal SRAM locality and into slower SRAM/PSRAM or less efficient access patterns. The 60% CPU utilization reinforces this diagnosis: at 340ms, only about 204ms is active CPU work and the rest is stalls or waiting, so pruning arithmetic alone is unlikely to recover the regression. The fix is to profile memory stalls and use tiled/streamed attention, active-layer KV buffering, KV quantization/compression, or a smaller/sliding context.'
   common_mistake: |
     **The Pitfall:** Assuming O(n²) attention FLOPs fully explain the 4× latency increase.
     **The Rationale:** Candidates know attention scales quadratically and hastily assume a 4x context increase directly causes the observed latency jump without doing the math.
     **The Consequence:** The team attempts to optimize compute (e.g., pruning) when the actual bottleneck is memory bandwidth and cache thrashing.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware: ESP32-S3 (32 KB L1 Cache).
-       - Model: Transformer (2 layers, 4 heads, 64-dim).
-       - Context increase: 32 tokens to 128 tokens (4x increase).
-       - Profiling: 85 ms baseline -> 340 ms actual. CPU utilization at 60%.
-       - Baseline compute split: 30% attention (O(n²)), 70% non-attention (O(n)).
-    2. **Calculations:**
-       - KV Cache Size at 128 tokens: 2 layers × 4 heads × 64 dim × 128 tokens × 1 Byte = 65,536 Bytes = 64 KB.
-       - Expected Compute Latency: (0.30 × 85 ms × 16) + (0.70 × 85 ms × 4) = 408 ms + 238 ms = 646 ms.
-       - Cache vs Payload: 64 KB KV Cache > 32 KB L1 Cache (Thrashing occurs).
-    3. **Conclusion & Interpretation:**
-       - **Result: 64 KB KV Cache exceeds 32 KB L1, causing cache evictions.** **Result: Memory-Bandwidth Bound (Cache Thrashing).**
+    **Assumptions & Constraints:**
+    - Hardware: ESP32-S3 at 240 MHz.
+    - Model: Transformer (2 layers, 4 heads, 64-dim, INT8 KV cache).
+    - Context increase: 32 tokens to 128 tokens (4x increase).
+    - Profiling: 85 ms baseline -> 340 ms actual. CPU utilization at 60%.
+
+    **Calculations:**
+    - Full KV cache at 32 tokens: 2 layers × 2 K/V × 4 heads × 64 dim × 32 tokens × 1 byte = 32,768 bytes = 32 KiB.
+    - Full KV cache at 128 tokens: 2 layers × 2 K/V × 4 heads × 64 dim × 128 tokens × 1 byte = 131,072 bytes = 128 KiB.
+    - Active-layer working set grows from 16 KiB to 64 KiB, a 4x increase that can exceed the fast-memory/cache-friendly region.
+    - CPU-active time at 340 ms and 60% utilization is about 204 ms, leaving roughly 136 ms attributable to stalls, waits, or memory traffic rather than arithmetic.
+
+    **Conclusion & Interpretation:**
+    - **Result: Larger KV working set and memory traffic after the 128-token update (Memory-Bandwidth Bound).** The observed 340 ms should be diagnosed with memory-stall profiling and fixed with tiled or streamed attention, active-layer buffering, or a smaller/sliding context.
 status: published
 provenance: imported
 requires_explanation: false

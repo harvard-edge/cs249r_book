@@ -11,22 +11,25 @@ title: Secure TinyML Anomaly Detection on ESP32-S3 Against Adversarial Attacks
 scenario: Imagine you are designing a critical TinyML application for anomaly detection on an ESP32-S3 microcontroller. This device is deployed in a remote industrial setting where physical access is difficult but not impossible. The anomaly detection model, a small neural network, runs locally on the device.
 question: How should an ESP32-S3 anomaly detector defend against model tampering, side-channel leakage, and poisoned OTA model updates?
 details:
-  realistic_solution: 'A realistic solution would involve a multi-layered approach tailored to the ESP32-S3''s capabilities: 1. Secure Boot & Firmware Updates: Implement secure boot with cryptographic verification (e.g., using RSA or ECC) for all firmware and model OTA updates, leveraging the ESP32''s hardware trust features to prevent model tampering. 2. Efficient Adversarial Training: Train the anomaly detection model with carefully chosen adversarial examples, optimized for the ESP32-S3''s constrained resources, using lightweight techniques. 3. Runtime Integrity Checks: Implement periodic, lightweight integrity checks for critical model parameters stored in PSRAM to detect potential runtime corruption. 4. Side-Channel Resistance: Design the inference code to minimize data-dependent operations and memory access patterns that could leak sensitive information, aiming for constant-time operations where feasible for critical sections. 5. Environmental Monitoring: Integrate sensor data redundancy and cross-validation to detect anomalous input patterns that might indicate data poisoning attempts or adversarial inputs.'
+  realistic_solution: |
+    Use a layered design matched to the actual ESP32-S3 board configuration. Enable secure boot and flash encryption, require signed OTA firmware and model artifacts, store a signed manifest with model version/hash, and enforce anti-rollback so a captured old or poisoned image cannot be installed. Validate candidate model updates before activation with signature checks, version policy, size limits, hash checks, and a small on-device smoke test or staged rollout gate; fall back to the last known-good model if validation fails. Keep active weights and integrity metadata in internal SRAM/flash when they must be trusted at runtime, and treat PSRAM as optional board-level capacity that still needs integrity checks if present. Reduce side-channel leakage by avoiding secret-dependent branches and memory access where practical, limiting debug/JTAG access, and monitoring sensor consistency to flag adversarial or poisoned inputs.
   common_mistake: |
     **The Pitfall:** Ignoring the strict resource limits of the ESP32-S3 when designing defenses.
     **The Rationale:** Candidates propose cloud-scale security measures without verifying SRAM availability.
     **The Consequence:** The defense mechanisms exceed the 512 KB SRAM budget, rendering the system un-deployable.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Base SRAM: 512 KB.
-    - Bootloader: 64 KB.
-    - Integrity checks: 50 KB.
+    - ESP32-S3 internal SRAM available to the application is board and ESP-IDF configuration dependent; do not assume 512 KB is freely available for tensors.
+    - Budget for a conservative internal-memory real-time path: 320 KB usable internal SRAM after RTOS, stacks, DMA buffers, and system reservations.
+    - Security overhead in internal SRAM: 16 KB hash/signature manifest buffers + 24 KB integrity-check workspace + 32 KB staging/smoke-test tensors.
+    - PSRAM, if present, can hold larger inactive OTA/model staging data but is not required for the trusted internal SRAM budget.
 
     **Calculations:**
-    - Remaining SRAM = 512 - 64 - 50 = 398 KB.
+    - Internal SRAM reserved for security/update validation = 16 KB + 24 KB + 32 KB = 72 KB.
+    - Remaining internal SRAM for active inference/RTOS margin = 320 KB - 72 KB = 248 KB.
 
     **Conclusion & Interpretation:**
-    - **Result: 398 KB remaining (Memory-Capacity-Bound)**. The system can accommodate defenses, leaving 398 KB for model inference and RTOS.
+    - **Result: about 248 KB internal SRAM margin under conservative assumptions**. Signed OTA, rollback protection, and integrity checks are feasible only if the active model and tensors fit the board's measured internal-memory budget; optional PSRAM should be used for staging or non-critical storage, not assumed as trusted core SRAM.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,24 +11,26 @@ title: Tail Latency from Thermal Throttling on Jetson Orin
 scenario: A computer vision pipeline on Jetson AGX Orin processes 30 FPS camera feeds. In a 25°C lab, P99 frame latency is 28ms. In a 40°C deployment environment, P99 spikes to 95ms intermittently. The pipeline includes YOLOv8n inference at INT8.
 question: What is causing the Jetson Orin P99 latency to jump from 28ms to 95ms at 40°C, and how would you mitigate it?
 details:
-  realistic_solution: Monitor tegrastats to correlate throttle events with latency spikes. At 40°C ambient, the 60W power draw pushes the junction temperature to its ~95°C limit, triggering thermal throttling. While compute (TOPS) is throttled, the true cause of the latency spike is memory bandwidth throttling (EMC frequency drop), which starves the pipeline. Mitigate by reducing the sustained power budget from 60W to 30W (e.g., switching from MAXN to 30W mode) to stay below thermal limits at 40°C ambient, ensuring consistent latency. Alternatively, implement active cooling or frame-dropping.
+  realistic_solution: Monitor tegrastats to correlate throttle events with latency spikes. At 40°C ambient, a 60W sustained load can push junction temperature near the throttling threshold. Thermal throttling can reduce both compute clocks and EMC memory frequency; for a lightweight detector, the EMC drop often drives the tail-latency spike by starving preprocessing and tensor movement. Mitigate by reducing sustained power from 60W to 30W, improving active cooling, or shedding frames to stay below the thermal limit.
   common_mistake: |
     **The Pitfall:** Assuming the latency spike is a software bug and spending time profiling CUDA kernels, or assuming the compute (TOPS) throttling is the bottleneck.
     **The Rationale:** Developers often focus purely on compute limitations rather than memory bandwidth, especially when dealing with lightweight models like YOLOv8n.
     **The Consequence:** Wasted profiling effort and failure to address the memory bandwidth throttling that actually causes the latency spike.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Jetson Orin thermal limits trigger at ~95°C junction temp.
-    - Environment: 40°C ambient, 60W TDP, 0.9°C/W passive thermal resistance.
-    - Throttling reduces TOPS by ~50% (275 to ~137 TOPS) and memory bandwidth is halved.
-    - YOLOv8n INT8 needs ~8.7 GOPS.
+    - Jetson AGX Orin at a sustained 60W power mode in a 40°C enclosure has much less thermal headroom than in a 25°C lab.
+    - The exact junction temperature depends on the carrier, heatsink, fan curve, enclosure airflow, and dust/loading; tegrastats is the source of truth.
+    - A throttle event can reduce GPU/CPU clocks and EMC memory frequency at the same time.
+    - YOLOv8n INT8 is light on raw TOPS, so memory movement, preprocessing, and queued frames can dominate P99 latency.
 
     **Calculations:**
-    - Junction Temp = 40°C + (60W * 0.9°C/W) = 94°C (triggering threshold).
-    - 137 TOPS > 8.7 GOPS (Compute is not the bottleneck).
+    - Observed P99 increase = 95ms / 28ms = 3.4x.
+    - If throttling cuts EMC bandwidth by about 2x, memory-bound preprocessing, tensor copies, and postprocessing can roughly double their service time even when INT8 compute capacity remains adequate.
+    - At 30 FPS, frames arrive every 33.3ms. A throttled service interval near or above one frame period can build a queue; queued frames then turn a partial service-time slowdown into much larger P99 spikes.
+    - Because the detector's raw compute demand is small relative to Orin INT8 capability, comparing TOPS alone does not explain the 95ms tail. Correlating P99 samples with EMC/GPU/CPU clock drops does.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory bandwidth throttling stretches P99 latency to 95ms (Memory-Bound).** Reducing sustained power budget to 30W prevents thermal throttling.
+       - **Result: thermal throttling with likely EMC impact (Thermal/Memory-Bound).** The 3.4x P99 jump is plausible when throttled EMC and lower clocks push service time toward the 33ms frame interval and create queueing tails. Verify with tegrastats, then reduce sustained power, improve active cooling, or shed frames.
 status: published
 provenance: imported
 requires_explanation: false

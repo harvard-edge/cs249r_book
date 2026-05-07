@@ -8,27 +8,30 @@ competency_area: parallelism
 bloom_level: analyze
 phase: training
 title: Tensor Parallelism Embedding Layer Split and Vocabulary Parallelism
-scenario: A 7B model with 128K vocabulary size is being trained with TP=4. The embedding layer (128K * 4096 * 2 bytes = 1GB) and the output LM head (same 1GB) together consume 2GB. A team member suggests these can also be tensor-parallelized.
+scenario: A 7B model with 128K vocabulary size is being trained with TP=4. The embedding layer (128K * 4096 * 2 bytes = 1.0 GiB) and the output LM head (same 1.0 GiB) together consume about 2.0 GiB. A team member suggests these can also be tensor-parallelized.
 question: How would you tensor-parallelize the 128K-token embedding and LM head with TP=4, and what communication does it add?
 details:
-  realistic_solution: 'Split vocabulary dimension: each GPU holds [32K, 4096] of the embedding matrix (128K/4 = 32K per GPU). During forward: each GPU gathers embeddings only for tokens in its vocabulary shard, then all-reduce across TP ranks to get the full embedding vector. This requires one all-reduce per embedding lookup. For the LM head: each GPU computes logits for its vocabulary shard, then all-gather for top-k sampling.'
+  realistic_solution: 'Split the vocabulary dimension: each GPU holds [32K, 4096] of the embedding matrix (128K/4 = 32K rows). During embedding forward, each rank masks tokens outside its shard, looks up local rows for in-shard tokens, and an all-reduce sums the partial embedding outputs into the full hidden vectors. For the LM head, each rank computes logits for its vocabulary shard. Training can compute vocab-parallel cross-entropy without gathering all logits; inference needs either distributed top-k across shards or a gather of candidate logits only when the sampler requires it.'
   common_mistake: |
     **The Pitfall:** Splitting the vocabulary embedding along the embedding dimension (4096/4 = 1024 per GPU).
     **The Rationale:** Slicing the hidden dimension requires gathering partial embeddings before any downstream computation can proceed, creating a severe bottleneck.
     **The Consequence:** Memory is not saved along the massive vocabulary dimension, and the resulting communication overhead stalls the forward pass.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 128K vocab, TP=4: 32K tokens/GPU * 4096 * 2 bytes = 256 MB/GPU.
-    - Full embedding is 1024 MB.
+    - 128K vocab, hidden size 4096, BF16 weights.
+    - TP=4 splits vocabulary rows evenly: 32K rows per GPU.
+    - Example microbatch: batch=8, sequence=2048.
 
     **Calculations:**
-    - Memory savings: 1024 - 256 = 768 MB/GPU.
-    - All-reduce for embedding: batch * seq * hidden_dim * 2 bytes = 8 * 2048 * 4096 * 2 = 134 MB.
-    - At 600 GB/s NVLink bandwidth: 134 MB / 600 GB/s = 0.22 ms per step.
-    - 50K training steps: 0.22 ms * 2 (fwd+bwd) * 50K = 22 seconds of communication.
+    - Full embedding size: 128K * 4096 * 2 bytes = 1,073,741,824 bytes = 1.0 GiB.
+    - Per-GPU sharded embedding: 1.0 GiB / 4 = 256 MiB.
+    - The LM head has the same size, so sharding saves about 768 MiB per GPU for embeddings and another 768 MiB per GPU for the LM head.
+    - Embedding output collective size: 8 * 2048 * 4096 * 2 bytes = 134,217,728 bytes = 128 MiB.
+    - Embedding output collective payload: 128 MiB of hidden activations must be summed across TP ranks.
+    - If implemented as a 4-rank ring all-reduce, per-rank link traffic is about 2 * (4-1) / 4 * 128 MiB = 192 MiB; other collective implementations can have different traffic and latency constants.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Optimization (Memory-Bound)**. Embedding parallelization yields significant memory savings with entirely negligible communication overhead.
+    - **Result: Memory-Bound Optimization**. Vocabulary parallelism saves about 1.5 GiB per GPU across embedding plus LM head, while adding an embedding-output collective for training and distributed logits handling for inference.
 status: published
 provenance: imported
 requires_explanation: false

@@ -153,6 +153,83 @@ def test_zone_bloom_recall_evaluate_rejected():
     raise AssertionError("recall+evaluate should have been rejected")
 
 
+# ─── Phase 6: Details extra="forbid" + format-marker structural check ────────
+
+
+def test_details_extra_forbidden():
+    """Phase 6: Details rejects unknown keys."""
+    q = _question("recall", "remember")
+    q["details"] = {"realistic_solution": "x", "made_up_field": "boom"}
+    try:
+        Question(**q)
+    except Exception as e:
+        assert "made_up_field" in str(e) or "extra" in str(e).lower()
+        return
+    raise AssertionError("Details should reject unknown keys")
+
+
+def test_format_markers_invariant_passes_on_compliant_cm_nm():
+    """The structural check accepts marker-compliant cm/nm on published."""
+    from vault_cli.loader import LoadedQuestion
+    from vault_cli.validator import _check_format_markers
+    base = {**_question("analyze", "analyze"), "status": "published"}
+    q = Question(**{
+        **base,
+        "details": {
+            "realistic_solution": "x",
+            "common_mistake": (
+                "**The Pitfall:** wrong intuition.\n"
+                "**The Rationale:** because reasons.\n"
+                "**The Consequence:** bad outcome."
+            ),
+            "napkin_math": (
+                "**Assumptions:** ok.\n\n"
+                "**Calculations:**\n- step 1\n\n"
+                "**Conclusion:** done."
+            ),
+        },
+    })
+    lq = LoadedQuestion(question=q, path=Path("/tmp/x.yaml"))
+    assert _check_format_markers([lq]) == []
+
+
+def test_format_markers_invariant_flags_malformed_cm_on_published():
+    """A published YAML with malformed common_mistake fails the structural check."""
+    from vault_cli.loader import LoadedQuestion
+    from vault_cli.validator import _check_format_markers
+    base = {**_question("analyze", "analyze"), "status": "published"}
+    q = Question(**{
+        **base,
+        "details": {
+            "realistic_solution": "x",
+            "common_mistake": "Just a sentence with no markers at all.",
+        },
+    })
+    lq = LoadedQuestion(question=q, path=Path("/tmp/x.yaml"))
+    failures = _check_format_markers([lq])
+    assert len(failures) == 1
+    assert failures[0].check == "format-markers"
+    assert "common_mistake" in failures[0].message
+
+
+def test_format_markers_invariant_skips_drafts():
+    """Drafts are exempt — author-in-progress malformed markers are fine."""
+    from vault_cli.loader import LoadedQuestion
+    from vault_cli.validator import _check_format_markers
+    base = _question("analyze", "analyze")
+    base["status"] = "draft"
+    q = Question(**{
+        **base,
+        "details": {
+            "realistic_solution": "x",
+            "common_mistake": "no markers here",
+            "napkin_math": "no markers here either",
+        },
+    })
+    lq = LoadedQuestion(question=q, path=Path("/tmp/x.yaml"))
+    assert _check_format_markers([lq]) == []
+
+
 def test_zone_bloom_mastery_remember_rejected():
     try:
         Question(**_question("mastery", "remember"))

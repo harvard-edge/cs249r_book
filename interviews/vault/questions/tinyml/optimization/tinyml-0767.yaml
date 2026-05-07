@@ -8,12 +8,12 @@ competency_area: optimization
 bloom_level: understand
 phase: inference
 title: The Pruning Sparsity Threshold
-scenario: >
+scenario: |
   A 200 KB dense model runs inference in 50ms on a Cortex-M4 at 100 MHz. After unstructured pruning at 80% sparsity, the model weights drop to 40 KB. However, the sparse inference still takes 48ms because the Cortex-M4 has no hardware sparse-matrix support.
 question: Why doesn't the 5x weight reduction translate to a 5x speedup, and what sparsity pattern would help?
 details:
-  realistic_solution: >
-    Unstructured pruning saves static Flash memory but not dynamic compute because the dense matrix multiply loop still iterates over all positions (including zeros), lacking hardware sparse-tensor support. Structured pruning (removing entire filters or channels) reduces both memory and compute proportionally because it eliminates entire dimensions from the GEMM operation, achieving true latency speedup.
+  realistic_solution: |
+    Unstructured pruning saves static Flash memory but not dynamic compute because the dense matrix multiply loop still iterates over all positions (including zeros), lacking hardware sparse-tensor support. Structured pruning (removing entire filters or channels) reduces both memory and compute because it eliminates entire dimensions from the dense MAC loops used by the inference kernel, so it can produce real latency speedup.
   common_mistake: |
     **The Pitfall:** Equating a smaller model file size directly with faster execution speed.
     **The Rationale:** Candidates assume CPUs automatically skip zeros, ignoring the index overhead and lack of specialized sparse execution units.
@@ -23,15 +23,16 @@ details:
        - Dense: 200 KB, 50 ms.
        - Unstructured 80% Sparse: 40 KB, 48 ms.
     2. **Calculations:**
-       - Structured 80% Sparse: MACs ∝ C_in * 0.2 * C_out = 0.2x original MACs.
-       - New Latency: 50 ms * 0.2 = 10 ms.
+       - Unstructured 80% Sparse: stored weights fall to 0.2x, but the dense inference kernel still visits most tensor positions, so latency remains near 50 ms.
+       - Structured 80% Sparse: removing channels or filters can reduce the executed dense MAC count to about 0.2x the original for the affected layer.
+       - Latency expectation: the layer's compute work can fall by about 5x, but end-to-end latency may be less than 5x faster unless that dense MAC work dominates the whole inference.
     3. **Conclusion & Interpretation:**
-       - **Result: 10 ms latency with Structured Pruning.** Unstructured only saves Flash; Structured provides true 5x acceleration. **Bottleneck: Dense GEMM Compute.**
+       - **Result: unstructured pruning mainly saves Flash, while structured pruning can reduce executed dense MAC work and therefore produce real speedup.** **Bottleneck: Dense MAC compute in the inference kernel.**
   options:
-  - A) Unstructured gives 5x speedup; structured gives 2x
-  - B) Both give 5x speedup — the bottleneck is elsewhere
-  - C) Unstructured barely helps compute; structured gives the real speedup
-  - D) Neither helps on MCUs; only quantization reduces latency
+    - A) Unstructured gives 5x speedup; structured gives 2x
+    - B) Both give 5x speedup — the bottleneck is elsewhere
+    - C) Unstructured barely helps compute; structured gives the real speedup
+    - D) Neither helps on MCUs; only quantization reduces latency
   correct_index: 2
 status: published
 provenance: imported

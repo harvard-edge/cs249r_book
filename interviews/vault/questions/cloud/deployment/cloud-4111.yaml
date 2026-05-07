@@ -9,9 +9,9 @@ bloom_level: apply
 phase: inference
 title: MIG Partitioning for Inference Multiplexing
 scenario: You have 4 A100-80GB GPUs and need to serve 12 different small models (each <7B parameters, ~14 GB in FP16).
-question: "How would you use MIG to partition 4 A100-80GB GPUs to run 12 concurrent <7B model instances with isolation?"
+question: How would you use MIG to partition 4 A100-80GB GPUs to run 12 concurrent <7B model instances with isolation?
 details:
-  realistic_solution: 'A100-80GB MIG profiles: 1g.10gb (1 SM partition, 10 GB), 2g.20gb (2 SMs, 20 GB), 3g.40gb (3 SMs, 40 GB), 7g.80gb (full GPU). For 7B models at 14 GB FP16: need at least 2g.20gb instances (20 GB provides 14 GB for weights + 6 GB for activations/KV cache). Each A100 can be split into: 3× 2g.20gb + 1× 1g.10gb (using 7 of 7 SM partitions, 70 of 80 GB). That gives 3 model slots per GPU × 4 GPUs = 12 slots — exactly matching the 12 models. The 1g.10gb partitions can serve smaller models (<3B) or run monitoring. Key benefits: (1) Hardware-level memory isolation — one model''s OOM cannot crash others, (2) SM partitioning guarantees compute throughput — no time-slicing jitter, (3) Each MIG instance gets its own CUDA context and L2 cache partition. Tradeoff: each 2g.20gb partition has only 2/7 ≈ 28.6% of the GPU''s compute, so throughput per model is ~3.5× lower than having the full GPU.'
+  realistic_solution: 'Use a supported A100-80GB MIG layout that creates three 2g.20gb instances per GPU. Across 4 GPUs, that yields 12 isolated 20 GB model slots. This is appropriate only if each <7B model is quantized or otherwise profiled to fit comfortably within 20 GB including weights, runtime overhead, and KV cache; a full 7B FP16 model may be too tight in practice. The scheduler should place one model server per 2g.20gb MIG device and reject placements whose measured memory headroom is unsafe. Key benefits: hardware memory isolation, separate CUDA device contexts, and reduced cross-model interference. Tradeoff: throughput per model is lower than on a full GPU, and the actual performance share must be validated for the model rather than treated as a fixed 2/7 rule.'
   common_mistake: |
     **The Pitfall:** Assuming MIG can create arbitrary partition sizes.
     **The Rationale:** Treating GPU partitioning like standard container memory requests.
@@ -22,10 +22,11 @@ details:
 
     **Calculations:**
     - 4 GPUs × 3 MIG instances = 12 instances.
-    - Each gets 20 GB memory, ~28.6% compute.
+    - Each instance exposes a 20 GB MIG device; 12 model servers require 12 such devices.
+    - Memory fit must be verified against total runtime footprint, not just FP16 weight size.
 
     **Conclusion & Interpretation:**
-    - **Result: 12 isolated instances (Hardware Partitioning)**. Exactly matches the 12 model requirements while guaranteeing hardware-level memory isolation.
+    - **Result: 12 isolated model slots using supported 2g.20gb MIG devices**. This satisfies the concurrency goal if profiling confirms each model fits within 20 GB with safe headroom.
 status: published
 provenance: imported
 requires_explanation: false

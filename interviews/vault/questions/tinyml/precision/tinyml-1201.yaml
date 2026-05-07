@@ -9,26 +9,28 @@ bloom_level: create
 phase: inference
 title: Mixed-Precision Audio Keyword Spotting on ESP32-S3
 scenario: You are deploying a continuous keyword spotting (KWS) model on an ESP32-S3. The model initially uses standard INT8 per-tensor PTQ but exhibits unacceptable accuracy drops. To fit within 512 KB SRAM and meet real-time latency requirements, you must design a mixed-precision (INT4/INT8/INT16) quantization strategy from scratch.
-question: How do you architect the calibration pipeline, partition the network layers for different precisions, and ensure the vector extensions are maximally utilized despite the mixed bit-widths?
+question: How would you choose calibration data, assign layer precisions, and map mixed-width kernels to ESP32-S3 SIMD?
 details:
-  realistic_solution: Architect a hybrid Quantization-Aware Training (QAT) loop. Retain INT16 or highly-granular INT8 for feature extraction and final logits to guard dynamic range. Compress heavy intermediate layers to INT4 weights with INT8 activations. Crucially, unpack the INT4 weights to INT8 on-the-fly (or via LUT) before feeding them to the ESP32-S3's native INT8 vector extensions. This strategy isolates the working set strictly to SRAM, avoiding PSRAM cache penalties while leaning on hardware acceleration.
+  realistic_solution: Use a representative calibration set that spans quiet, noisy, near-field, far-field, and hard negative utterances, then collect per-layer activation ranges, clipping sensitivity, and confusion changes against a floating-point or high-precision baseline. Keep the frontend, first convolution, residual joins, and final classifier in INT16 or carefully calibrated INT8 where dynamic range is fragile. Put low-sensitivity middle convolution blocks in INT4 weights with INT8 activations only when per-layer error analysis shows acceptable loss. On ESP32-S3, pack INT4 weights in flash/SRAM for storage but unpack each tile to INT8 in scratch before calling native INT8 SIMD kernels; schedule one active tile at a time so unpack buffers, activations, and stack fit in SRAM.
   common_mistake: |
     **The Pitfall:** Suggesting placing the entire INT8 model in external PSRAM to solve memory limits.
     **The Rationale:** Candidates fail to realize the massive latency penalty of PSRAM cache misses, or they propose INT4 MACs without checking hardware support.
     **The Consequence:** Software emulation overhead for unsupported INT4 and slow PSRAM latency severely violate real-time deadlines.
   napkin_math: |
     **Assumptions & Constraints:**
-    - ESP32-S3 @ 240 MHz. Target SRAM: < 512 KB.
-    - Model: 1M parameters. Native INT8 throughput: ~2 GMACs/sec.
+    - ESP32-S3 @ 240 MHz. Target SRAM: 512 KiB = 524,288 bytes.
+    - Model after structured pruning/factorization: 0.9M parameters.
     - 90% INT4 weights, 10% INT8 weights.
+    - Runtime keeps compressed weights resident and unpacks only the active layer tile into scratch memory.
 
     **Calculations:**
-    - Memory: (0.9M * 0.5 bytes) + (0.1M * 1.0 bytes) = 0.45MB + 0.1MB = 0.55 MB total weights.
-    - Unpack Efficiency Penalty: throughput drops to ~200 MMACs/sec.
-    - Inference Time (10 MMAC workload): 10M / 200M = 50 ms.
+    - INT4 weights: 0.81M * 0.5 bytes = 405,000 bytes.
+    - INT8 weights: 0.09M * 1 byte = 90,000 bytes.
+    - Total compressed weights: 495,000 bytes = about 483.4 KiB.
+    - SRAM headroom for tensor arena, stack, and unpack tiles: 524,288 - 495,000 = 29,288 bytes = about 28.6 KiB, so activations and unpacked INT8 tiles must be scheduled one layer at a time.
 
     **Conclusion & Interpretation:**
-    - **Result: 50 ms (Fast On-the-Fly Unpacking)**. Despite the unpacking tax, 50 ms safely meets a 100ms real-time audio budget entirely within fast SRAM.
+    - **Result: about 483 KiB compressed weights with about 29 KiB SRAM headroom**. The mixed-precision plan is viable only after pruning/factorization and careful arena scheduling; latency must then be measured from the actual tiled INT4-unpack-to-INT8 kernels rather than inferred from peak INT8 throughput alone.
 status: published
 provenance: imported
 requires_explanation: true

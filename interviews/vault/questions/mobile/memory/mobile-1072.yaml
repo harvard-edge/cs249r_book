@@ -11,25 +11,24 @@ title: On-Device KV-Cache Budget for Mobile LLM
 scenario: You are deploying a 3B-parameter LLM (32 layers, 4 GQA KV heads, head_dim=64) on an A17 Pro. The OS and other apps consume 4 GB, leaving 4 GB for the model. After loading INT4 weights (1.5 GB) and runtime overhead (0.5 GB), only 2 GB remains for KV-cache.
 question: What KV-cache context length fits a 3B INT4 LLM on A17 Pro when only 2GB remains for KV storage?
 details:
-  realistic_solution: 'KV per token per layer: 2 (K+V) x 4 (KV heads) x 64 (head_dim) x 2B (FP16) = 1,024 bytes = 1 KB. Per token across 32 layers: 1 KB x 32 = 32 KB. Maximum context: 2 GB / 32 KB = 65,536 tokens. This is generous — the model supports ~64K context from a memory perspective. However, practical constraints: (1) Memory pressure from OS can reclaim memory at any time — reserve 25% buffer -> effective budget 1.5 GB -> 48K tokens. (2) Memory bandwidth for attention scales O(n) per token. (3) Practical sweet spot: 4K-8K context (128-256 MB KV-cache).'
+  realistic_solution: 'Assume the KV-cache remains FP16 even though the model weights are INT4. KV per token per layer: 2 (K+V) x 4 (KV heads) x 64 (head_dim) x 2B (FP16) = 1,024 bytes = 1 KB. Per token across 32 layers: 1 KB x 32 = 32 KB. Using the stated 2 GB KV budget directly, the maximum context is approximately 2 GB / 32 KB = 65,536 tokens, or about 64K tokens. In practice, a product may choose a smaller context for OS memory pressure and attention bandwidth, but that is an operational safety margin rather than the answer to the stated capacity question.'
   common_mistake: |
     **The Pitfall:** Computing KV-cache size using server-scale dimensions.
     **The Rationale:** Engineers mistakenly use standard cloud configurations (e.g., many more KV heads and larger head dimensions) instead of mobile-optimized GQA configurations.
     **The Consequence:** This leads to heavily underestimating the possible context length on mobile hardware.
   napkin_math: |
     **Assumptions & Constraints:**
-    - KV-Cache Budget: 2 GB.
+    - KV-Cache Budget: 2 GB, treated as approximately 2 GiB for a round capacity estimate.
     - Model: 32 layers, 4 GQA KV heads, head_dim=64.
-    - Precision: FP16 (2 bytes).
+    - KV Precision: FP16 (2 bytes), even though model weights are INT4.
 
     **Calculations:**
     - KV per token per layer: 2 (K+V) x 4 (KV heads) x 64 (head_dim) x 2 bytes = 1,024 bytes = 1 KB.
     - Total KV per token: 1 KB x 32 layers = 32 KB.
-    - Max theoretical context: 2 GB / 32 KB = 65,536 tokens (64K).
-    - Practical context: Reserving a 25% OS memory buffer leaves 1.5 GB -> 48K tokens.
+    - Max context from the stated KV budget: 2 GiB / 32 KiB = 65,536 tokens (about 64K).
 
     **Conclusion & Interpretation:**
-    - **Result: 48K Practical Context (Memory-Capacity-Bound)**. Leveraging Grouped-Query Attention preserves significant mobile context length while limiting absolute memory drain.
+    - **Result: ~64K Context (Memory-Capacity-Bound)**. Leveraging Grouped-Query Attention preserves significant mobile context length; any additional safety buffer should be applied separately from the stated 2 GB KV budget.
 status: published
 provenance: imported
 requires_explanation: false

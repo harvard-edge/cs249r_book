@@ -7,11 +7,11 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: evaluate
 phase: training
-title: 'Structured vs Unstructured Pruning on nRF5340'
-scenario: 'You are deploying a wake-word model on a Nordic nRF5340 (128 MHz app core, 256 KB SRAM, 1 MB flash, ~5mA active). The baseline dense model requires 350 KB of SRAM, failing to fit, and takes 25ms per inference. Option A uses 80% unstructured pruning. Option B uses 50% structured (filter) pruning.'
-question: 'Which pruning strategy is better suited to fit the model onto the nRF5340 while minimizing execution time?'
+title: Structured vs Unstructured Pruning on nRF5340
+scenario: You are deploying a wake-word model on a Nordic nRF5340 (128 MHz app core, 256 KB SRAM, 1 MB flash, ~5mA active). The baseline dense model requires 350 KB of SRAM, failing to fit, and takes 25ms per inference. Option A uses 80% unstructured pruning. Option B uses 50% structured (filter) pruning.
+question: Which pruning strategy is better suited to fit the model onto the nRF5340 while minimizing execution time?
 details:
-  realistic_solution: 'Option B (50% structured pruning) is the superior choice. Structured pruning physically shrinks the tensor dimensions, allowing the model to remain dense and leverage highly optimized, vectorized CMSIS-NN kernels on the 128 MHz app core without any branching overhead. It guarantees a reduction in both the 1 MB flash footprint for weights and the 256 KB SRAM requirement for activations, ensuring deterministic execution time and lower energy consumption.'
+  realistic_solution: Option B (50% structured pruning) is usually the better fit for this nRF5340 deployment. Removing whole filters or channels reduces tensor dimensions while preserving dense execution, so the model can still use optimized CMSIS-NN kernels on the Cortex-M33. That generally lowers weight storage, activation sizes, and MAC count in a way the runtime can exploit. Option A has higher nominal sparsity, but unstructured sparsity usually needs index metadata and sparse kernels; without hardware or library support, branchy zero-skipping can erase much of the latency benefit.
   common_mistake: |
     **The Pitfall:** Choosing Option A due to the higher theoretical sparsity rate (80%).
     **The Rationale:** Candidates assume 80% sparsity automatically translates to the smallest footprint and fastest execution.
@@ -24,12 +24,12 @@ details:
     - Option B: 50% Structured Pruning.
 
     **Calculations:**
-    - Option A latency: Zero-skipping branches keep latency near 25 ms. Energy: 25 ms * 5 mA = 125 μC.
-    - Option B reduction: Halving filters reduces weights quadratically by 75% and activation buffers by 50%. Model drops to ~150 KB.
-    - Option B compute: MACs drop by 75%, cutting latency to 6.25 ms. Energy: 6.25 ms * 5 mA = 31.25 μC.
+    - Option A: 80% sparse weights reduce stored nonzero values, but metadata plus irregular access can limit flash savings and often keeps dense activation buffers. Without efficient sparse kernels, latency may remain close to the 25 ms dense baseline.
+    - Option B: Removing 50% of filters reduces the following activation channels by roughly 50% for affected layers and keeps the remaining tensors dense. If adjacent layer dimensions are also shrunk, MACs can fall substantially; a simple conv-to-conv estimate is about 50% fewer output channels times 50% fewer next-layer input channels, or up to a 75% MAC reduction for those layers.
+    - Latency estimate: If the pruned layers dominate runtime and dense-kernel efficiency is preserved, the affected compute could approach 25 ms * 25% = 6.25 ms. End-to-end latency may be higher once unpruned layers and overheads are included, but the reduction is directly usable by the Cortex-M runtime.
 
     **Conclusion & Interpretation:**
-    - **Result: Option B (Compute-Bound)**. Structured pruning natively fits the 256 KB SRAM limit and guarantees a 4x reduction in compute time without sparse-matrix hardware.
+    - **Result: Option B**. Structured pruning is the safer deployment strategy because it reduces dense tensor dimensions and preserves fast dense kernels. It is more likely than unstructured pruning to help meet the 256 KB SRAM limit and reduce execution time, although the exact flash, SRAM, and latency savings depend on which layers are pruned and how the model is compiled.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,29 +7,31 @@ topic: operator-scheduling
 competency_area: optimization
 bloom_level: analyze
 phase: inference
-title: LLM Operator Scheduling on Hexagon NPU
-scenario: You are tasked with optimizing the inference latency and memory footprint of a critical, computationally intensive block within a large language model (LLM) for deployment on a mobile NPU. The LLM block consists of a sequence of operators, some of which are memory-bound (e.g., element-wise operations with large tensors), while others are compute-bound (e.g., matrix multiplications).
+title: Transformer Decode Block Scheduling on Hexagon NPU
+scenario: You are optimizing a transformer decode block on a Snapdragon-class Hexagon NPU. The block runs RMSNorm, QKV projections, attention with KV-cache reads, output projection, MLP matmuls, GELU/SwiGLU, residual adds, and requantization; the matmuls are compute-heavy while norms, residuals, and cache reads are memory-heavy.
 question: How would you schedule an LLM block on the NPU to reduce latency, reuse memory, exploit parallelism, and apply layer fusion to meet a 100ms latency target?
 details:
   realistic_solution: |
-    A realistic solution involves a multi-pronged approach: 1. **Computational Graph Analysis**: Represent the LLM block as a DAG to identify data dependencies. 2. **Memory-Aware Scheduling**: Employ algorithms to determine an execution order that maximizes in-place operations and minimizes peak memory footprint. 3. **Layer Fusion**: Identify sequences of operations that can be fused into a single kernel (e.g., FlashAttention) to reduce memory reads/writes. 4. **Parallelism Exploitation**: Schedule independent subgraphs to run concurrently. 5. **Profiling and Iteration**: Start with an initial schedule, use nsys profiling on the target NPU, analyze bottlenecks, and iteratively refine.
+    Represent the decode block as a DAG and schedule it around the longest live tensors: hidden state, QKV projections, attention output, MLP intermediate, and KV-cache slices. Fuse RMSNorm with the following linear input preparation where supported, fuse residual/add/requantization epilogues into matmul kernels, and use a FlashAttention-style or tiled attention kernel so QK, softmax, and AV do not materialize large intermediate tensors. Reuse a preallocated activation arena across the attention and MLP phases, keep KV-cache blocks contiguous or paged for predictable gathers, and avoid CPU/GPU fallback operators in the hot path. Use Qualcomm AI Engine Direct or Snapdragon Profiler to compare per-operator latency, bytes moved, and NPU occupancy, then revise tile sizes, fusion choices, and parallel head/MLP scheduling until the block fits the 100 ms budget.
   common_mistake: |
     **The Pitfall:** Prioritizing compute utilization without adequately considering memory access patterns and bandwidth limitations.
     **The Rationale:** Candidates often focus purely on parallelizing matrix multiplications and maximizing TOPS utilization.
     **The Consequence:** Naive scheduling leads to excessive data movement between DRAM and NPU caches, significantly bottlenecking performance even if the NPU's raw compute is underutilized.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Budget for 100ms latency on 45 TOPS NPU.
-    - 100 GOPS block requirement.
+    - Latency budget: 100 ms on a 45 TOPS NPU.
+    - Example compiled block requirement: 100 GOP of INT8-equivalent work per token/block.
     - LPDDR5X bandwidth: ~50 GB/s.
+    - Example unfused block traffic: 1 GB of total reads/writes across weights, activations, and KV-cache slices.
 
     **Calculations:**
-    - Compute limit: 45 TOPS * 0.1 sec = 4.5 Trillion INT8 operations.
-    - Theoretical compute time: 100 * 10^9 / (45 * 10^12) = 2.2ms.
-    - Transferring 1 GB of data takes ~20ms.
+    - Compute capacity in 100 ms: 45e12 ops/s * 0.1 s = 4.5e12 ops = 4.5 TOP.
+    - Theoretical compute time for the example block: 100e9 ops / 45e12 ops/s = 0.0022 s = 2.2 ms.
+    - Ideal transfer time for 1 GB traffic: 1 GB / 50 GB/s = 0.020 s = 20 ms.
+    - Combined lower bound before scheduling overhead is about 22.2 ms, leaving roughly 77.8 ms for launch, synchronization, and non-ideal bandwidth effects.
 
     **Conclusion & Interpretation:**
-    - **Result: 20ms transfer vs 2.2ms compute (Memory-Bandwidth-Bound)**. Even small data transfers consume a massive portion of the latency budget compared to raw compute.
+    - **Result: The example block is more sensitive to bytes moved than raw TOPS.** Fusion and memory reuse should target the 1 GB traffic term because 20 ms of ideal transfer is much larger than the 2.2 ms compute floor.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,22 +11,31 @@ title: 'Fault Tolerance: Realize Checkpoint Storage Architecture for 200-Device 
 scenario: 'You must realize the checkpoint storage architecture for a fleet of 200 Jetson Orin devices, each running online learning with LoRA adaptation. Requirements: 30-day checkpoint history, cloud backup within 1 hour of creation, and recovery within 5 minutes. You must specify storage at every tier.'
 question: What storage tiers would you specify for 30-day LoRA checkpoint history, 1-hour cloud backup, and 5-minute recovery across 200 Orin devices?
 details:
-  realistic_solution: 'Edge checkpoint storage is dominated by NVMe endurance and cloud sync costs. LoRA state at 2MB per checkpoint is small relative to NVMe endurance limits.'
+  realistic_solution: |
+    Specify three tiers. On each Orin, reserve NVMe space for the full 30-day local history: 4 checkpoints/hour * 24 hours/day * 30 days at 2 MB each, plus manifest/checksum metadata. In the site gateway or regional cache, keep the latest verified checkpoint per device and the previous known-good checkpoint so a replacement device can restore within 5 minutes even if the WAN is degraded. In cloud object storage, upload every checkpoint within the 1-hour SLA, retain the same 30-day history, and index by device ID, base-model version, checkpoint time, and checksum for reconciliation during restore.
   common_mistake: |
     **The Pitfall:** Not sizing local NVMe correctly for retention or not accounting for cloud egress costs.
     **The Rationale:** Treating edge storage and cloud sync as "infinite" resources without running the capacity and cost calculations.
     **The Consequence:** Unplanned storage exhaustion or a massive, unexpected monthly cloud egress bill.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Fleet: 200 devices. 4 checkpoints/hour at 2MB per checkpoint.
+    - Fleet: 200 devices.
+    - Checkpoint cadence: 4 checkpoints/hour at 2MB per checkpoint.
+    - Retention: 30 days.
+    - Cloud backup SLA: every checkpoint uploaded within 1 hour.
+    - Recovery SLA: replacement can fetch latest checkpoint within 5 minutes.
 
     **Calculations:**
-    - Edge storage: 200 * 2MB * 4/hr = 1.6GB/hr fleet-wide NVMe writes.
-    - Cloud sync: 200 * 2MB * 96/day = 38.4 GB/day.
-    - Cloud egress at $0.09/GB = $3.45/day ($1261/year).
+    - Checkpoints per device per day: 4/hour * 24 hours = 96 checkpoints/day.
+    - 30-day edge NVMe per device: 96/day * 30 days * 2MB = 5.76 GB/device.
+    - Fleet-wide 30-day edge history: 200 * 5.76 GB = 1.152 TB.
+    - Cloud ingest/sync volume: 200 * 96/day * 2MB = 38.4 GB/day.
+    - Cloud 30-day retained history: 38.4 GB/day * 30 = 1.152 TB.
+    - Cloud transfer/storage budget at $0.09/GB for the synced volume: 38.4 GB/day * $0.09 = $3.46/day, or ~$1,261/year.
+    - Recovery payload: latest 2MB checkpoint plus manifest; even a 10 Mbps link transfers 2MB in about 1.6 seconds, leaving the rest of the 5-minute SLA for provisioning and validation.
 
     **Conclusion & Interpretation:**
-    - **Result: Cost is dominated by cloud egress at $1261/year.** Edge NVMe storage is easily absorbed, but cloud networking is the primary constraint.
+    - **Result: 5.76 GB NVMe per device, 1.152 TB cloud retention, 38.4 GB/day sync, and 2MB restore payloads.** This tiering satisfies 30-day local history, 1-hour cloud backup, and 5-minute recovery with explicit capacity at each tier.
 status: published
 provenance: imported
 requires_explanation: false

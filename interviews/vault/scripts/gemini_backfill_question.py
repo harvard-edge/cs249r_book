@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# STATUS (2026-05-03): preserved as a reference pattern — see vault/scripts/DEPRECATED.md
+# §"Preserved for adaptation". The corpus walk targets the post-v1.0 YAML layout,
+# but the prompt / batching / threadpool pattern is reused by the upcoming
+# audit_corpus_batched.py (CORPUS_HARDENING_PLAN.md Phase 5). Verify the
+# batching limits + Gemini-CLI invocation against the current SDK before reuse.
 """Backfill the `question` YAML field across the StaffML corpus.
 
 As of 2026-04-24, 6,864 of 9,657 questions (71%) have no explicit

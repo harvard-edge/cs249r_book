@@ -1,0 +1,51 @@
+schema_version: '1.0'
+id: mobile-2154
+track: mobile
+level: L4
+zone: diagnosis
+topic: model-serving-infrastructure
+competency_area: deployment
+bloom_level: analyze
+phase: inference
+title: The Infotainment Traffic Jam
+scenario: You successfully quantized the car's 7-billion parameter AI Co-Pilot to INT4, allowing it to fit within the 8 GB of shared RAM on the infotainment SoC. However, during road tests, the assistant fails its 10 tokens/sec generation SLA unpredictably—specifically, generation crawls to a halt whenever the driver aggressively pans the 3D navigation map.
+question: What is the architectural root cause of these unpredictable latency spikes, and what system-level mitigations would you deploy to guarantee the SLA?
+details:
+  realistic_solution: The root cause is memory bandwidth contention on the Unified Memory Architecture (UMA) SoC. The GPU rendering the 3D map and the NPU generating tokens are fighting for the same limited memory bus. Even with INT4 weights, each generated token requires streaming a large fraction of model weights plus KV-cache traffic, so graphics bursts can starve the decoder. Mitigations include enforcing Quality of Service (QoS) priorities at the memory controller, dynamically reducing the map's framerate during voice interactions, reserving bandwidth for the NPU, or using speculative decoding to reduce time spent on the memory-bound target model.
+  common_mistake: |
+    **The Pitfall:** Assuming the latency is caused by thermal throttling of the NPU or compute-bound operator inefficiencies.
+    **The Rationale:** Candidates often jump to compute optimizations or model architectural changes because they view the LLM in isolation from the rest of the OS.
+    **The Consequence:** Time is wasted on compute-centric profiling while the real issue—starvation at the memory bus—persists whenever background graphic workloads spike.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - 7B model at INT4 requires ~3.5 GB for weights.
+    - Target generation speed: 10 tokens/sec (batch size 1).
+    - SoC unified memory bus bandwidth is 50 GB/s.
+    - 3D Map rendering consumes up to 30 GB/s of bandwidth when panned.
+    - Each decoded token streams most weights plus KV/cache activations, estimated at ~4 GB/token of memory traffic.
+
+    **Calculations:**
+    - LLM bandwidth requirement: ~4 GB/token * 10 tokens/sec = ~40 GB/s.
+    - When the map is idle, the 50 GB/s bus can cover the LLM's ~40 GB/s demand with limited headroom.
+    - When the map pans, total demand is ~40 GB/s + 30 GB/s = ~70 GB/s, exceeding the 50 GB/s bus.
+    - If graphics consumes 30 GB/s without QoS limits, only ~20 GB/s remains for decoding, supporting about 20 GB/s / 4 GB/token = ~5 tokens/sec.
+
+    **Conclusion:**
+    The combined memory bandwidth demand of the LLM and graphics rendering can exceed the SoC's physical bus limits, so the decoder sees memory stalls and misses its 10 tokens/sec SLA unless bandwidth is reserved or graphics load is throttled.
+status: published
+provenance: llm-draft
+requires_explanation: false
+expected_time_minutes: 10
+human_reviewed:
+  status: verified
+  by: vj
+  date: '2026-05-02T14:47:29+00:00'
+tags:
+  - memory-bandwidth
+  - edge-inference
+  - uma
+  - bottleneck
+  - gap-bridge:mobile-0305-mobile-0659
+created_at: '2026-05-02T14:17:24+00:00'
+authors:
+  - gemini-3.1-pro-preview

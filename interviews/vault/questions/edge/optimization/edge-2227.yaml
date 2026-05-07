@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: edge-2227
 track: edge
-level: L4
+level: L3
 zone: optimization
 topic: autograd-computational-graphs
 competency_area: optimization
@@ -11,20 +11,24 @@ title: Implementing efficient knowledge distillation with autograd on Jetson Ori
 scenario: You are performing on-device knowledge distillation on Jetson Orin to adapt a compressed 2M parameter student model using soft labels from a 20M parameter teacher. The teacher is frozen. Current implementation runs both models in the same forward pass, consuming 22GB of activation memory — nearly 70% of Orin's 32GB.
 question: How would you reduce activation memory for on-device distillation when the 20M-parameter teacher is frozen?
 details:
-  realistic_solution: 'Run teacher inference with torch.no_grad() to get soft labels. Only the student''s computational graph needs to be built. This reduces activation memory from 22GB to ~2GB (student only). In code: `with torch.no_grad(): teacher_logits = teacher(x)` followed by loss computation.'
-  common_mistake: Running teacher and student in the same forward-backward pass, allowing the computational graph to track both models. The teacher's activations are stored for a backward pass that never happens.
+  realistic_solution: Run teacher inference with torch.no_grad() to get soft labels, then build the loss against the student output. Only the student needs an autograd graph; the frozen teacher can release intermediate activations immediately after its forward pass. The exact memory savings depend on batch size, input or sequence length, precision, and layer shapes, but disabling autograd for the teacher removes the teacher activation graph rather than just freezing its parameters.
+  common_mistake: |
+    **The Pitfall:** Running teacher and student in the same forward-backward pass.
+    **The Rationale:** This allows the computational graph to actively track both models simultaneously.
+    **The Consequence:** The teacher's activations are stored for a backward pass that never happens, wasting massive amounts of memory.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Teacher: 20M parameters (~20GB activations if tracked)
-    - Student: 2M parameters (~2GB activations)
+    - Teacher is frozen and does not need gradients.
+    - Activation memory scales with batch size, input or sequence length, precision, and layer shapes.
+    - Let tracked teacher activations be A_teacher and tracked student activations be A_student.
 
     **Calculations:**
-    - Total without no_grad = 20GB + 2GB = 22GB
-    - Total with torch.no_grad() on teacher = 2GB (teacher activations immediately freed)
-    - Savings = 22GB - 2GB = 20GB
+    - Without no_grad: retained activation memory is approximately A_teacher + A_student.
+    - With torch.no_grad() on the teacher: retained activation memory is approximately A_student.
+    - Savings = A_teacher, minus any temporary teacher logits or buffers needed for the loss.
 
     **Conclusion & Interpretation:**
-    - **Result: 20GB Saved (Memory-Capacity-Bound)**. Explicitly disabling autograd for frozen models prevents massive activation retention during the forward pass.
+    - **Result: teacher activation graph removed (Memory-Capacity-Bound).** Explicitly disabling autograd for frozen models prevents retaining activations for a backward pass that will never update the teacher.
 status: published
 provenance: imported
 requires_explanation: false

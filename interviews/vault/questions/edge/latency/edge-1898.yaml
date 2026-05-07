@@ -11,28 +11,29 @@ title: Diagnosing Latency on Qualcomm Cloud AI 100 with Profiling
 scenario: You are deploying a large language model (LLM) for real-time inference on an edge device powered by the Qualcomm Cloud AI 100. The device has 32 GB LPDDR4x memory, offers 400 TOPS INT8 performance, and operates within a 75W power envelope. Despite optimizing the model for INT8 quantization, you observe that the end-to-end inference latency is consistently higher than your target of 50 ms per request. You suspect there's a bottleneck preventing full utilization of the AI 100's capabilities.
 question: How would you use profiling and trace tools on the Qualcomm Cloud AI 100 to determine whether the 50 ms LLM latency miss is compute, memory, or I/O bound?
 details:
-  realistic_solution: '1.  **High-Level Tracing:** Start with system-level tracing (e.g., `strace`, `perf` or platform-specific Qualcomm SDK tools) to get a macroscopic view of where time is spent across the entire inference pipeline, including data ingestion, pre-processing, model execution, and post-processing. This helps identify major phases contributing to latency.
-
-    2.  **Qualcomm Profiler Integration:** Leverage Qualcomm''s proprietary profiling tools and SDKs (e.g., Qualcomm Neural Processing SDK''s profiling features, if available) which provide fine-grained metrics specific to the AI 100''s NPUs, memory controllers, and interconnects. This can reveal NPU utilization, memory bandwidth consumption (LPDDR4x), and queue stalls.
-
-    3.  **Compute Bottleneck Analysis:** If model execution is identified as the bottleneck, use NPU-specific profilers to analyze instruction mix, memory access patterns within kernels, and pipeline stalls. Check if the INT8 operations are indeed saturating the 400 TOPS, or if data movement is limiting compute.
-
-    4.  **Memory/I/O Bottleneck Analysis:** If memory or I/O is suspect, analyze LPDDR4x bandwidth utilization, cache hit rates, and main memory access patterns. Trace data transfers between CPU, NPU, and external storage.
-
-    5.  **Correlate Metrics:** Combine data from different profiling tools to build a comprehensive picture. For example, high NPU idle time coupled with high memory bandwidth usage might indicate a memory-bound workload or inefficient data transfer.'
-  common_mistake: A common mistake is to immediately assume the bottleneck is computational (e.g., INT8 ops per second) without first systematically investigating other factors. Teams often jump to model architecture changes or further quantization without understanding memory access patterns, data loading overheads, pre/post-processing latencies, or even system-level scheduling conflicts. Another mistake is using generic profiling tools not optimized for the specific Qualcomm hardware, leading to incomplete or misleading insights.
+  realistic_solution: |
+    1.  **Capture an end-to-end timeline:** Use the Cloud AI 100 runtime/compiler profiling and trace outputs available in the deployment stack, plus host tracing such as `perf`, `ftrace`, or application spans, to separate tokenization, enqueue, host-to-device copies, accelerator execution, device-to-host copies, and post-processing.
+    2.  **Check accelerator execution:** For the model-run segment, inspect per-layer/kernel duration, accelerator occupancy, queue depth, and stall reasons if exposed by the runtime. A compute-bound trace has long accelerator-active regions with high utilization and little host or transfer idle time.
+    3.  **Check memory behavior:** Inspect counters or trace events for external-memory traffic, cache spill/reuse, tensor reshapes, and repeated weight or KV-cache movement. A memory-bound trace shows accelerator bubbles or low occupancy while memory bandwidth or DMA traffic is high.
+    4.  **Check I/O and scheduling:** Correlate latency misses with host enqueue gaps, batch formation, PCIe/DMA transfer spans, storage/network input stalls, and post-processing on the CPU. I/O-bound behavior appears as long gaps before or after accelerator execution, not as saturated accelerator kernels.
+    5.  **Use A/B measurements:** Run with synthetic in-memory inputs, pinned buffers, fixed batch size, and a warmed model. If latency drops, the bottleneck is outside core compute; if only specific layers dominate, focus on operator placement, layout conversions, and compiler-generated kernels.
+  common_mistake: |
+    **The Pitfall:** Immediately assuming the bottleneck is computational without systematically investigating other factors.
+    **The Rationale:** Teams often jump to model architecture changes or further quantization without understanding memory access patterns, data loading overheads, or scheduling conflicts.
+    **The Consequence:** Using generic profiling tools or applying ML-centric fixes leads to incomplete insights and wasted effort without resolving the true latency issues.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hardware: 400 TOPS INT8 (200 Tera MACs/s).
-    - LPDDR4x bandwidth: ~50 GB/s.
-    - Model requirements: 20 Giga MACs per inference, 10 GB of weights/activations.
+    - Hardware peak: 400 TOPS INT8 = 400 x 10^12 operations/s.
+    - Effective external-memory path for this deployment: 50 GB/s.
+    - Per-request work estimate: 20 x 10^9 INT8 operations and up to 10 GB of tensor/KV/cache traffic if reuse is poor.
 
     **Calculations:**
-    - Theoretical compute time = 20 * 10^9 / (200 * 10^12) = 0.1 ms.
-    - Memory transfer time = 10 GB / 50 GB/s = 200 ms.
+    - Compute lower bound = 20 x 10^9 ops / 400 x 10^12 ops/s = 0.00005 s = 0.05 ms.
+    - Memory-traffic lower bound = 10 GB / 50 GB/s = 0.2 s = 200 ms.
+    - If profiling shows only 1 GB of off-chip traffic, that lower bound falls to 20 ms, so the traffic volume measured in traces is the deciding signal.
 
     **Conclusion & Interpretation:**
-    - **Result: 200 ms (Memory-Bandwidth-Bound)**. If the actual latency is 150-200ms, the NPU compute takes a tiny fraction, indicating a severe memory bandwidth bottleneck rather than a compute bottleneck.
+    - **Result: compute is a tiny lower bound, while measured memory/I/O traffic can dominate**. A 150-200 ms latency miss is consistent with repeated multi-GB movement, but the diagnosis must come from traces: high accelerator-active time implies compute-bound, high memory/DMA traffic with stalls implies memory-bound, and host or transfer gaps imply I/O/scheduling-bound.
 status: published
 provenance: imported
 requires_explanation: false
@@ -42,15 +43,15 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The 'Napkin Math' section implies 1 INT8 operation = 2 ops, leading to 200 Tera MACs. It should clarify that 1 MAC is often considered 2 operations (multiply and add) when converting from TOPS to MACs, but TOPS is already a measure of operations, so 400 TOPS INT8 is 400x10^12 INT8 operations/second.
-- The 'Napkin Math' section is incomplete, with the last sentence cut off.
-- Reasoning Competency, Knowledge Area, and Mode are missing for an L4 question.
+  - The 'Napkin Math' section implies 1 INT8 operation = 2 ops, leading to 200 Tera MACs. It should clarify that 1 MAC is often considered 2 operations (multiply and add) when converting from TOPS to MACs, but TOPS is already a measure of operations, so 400 TOPS INT8 is 400x10^12 INT8 operations/second.
+  - The 'Napkin Math' section is incomplete, with the last sentence cut off.
+  - Reasoning Competency, Knowledge Area, and Mode are missing for an L4 question.
 math_verified: true
 math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- 200 Tera MACs is 200 E12 MACs/s, not 200 E9 MACs/s (E9 is Giga).
+  - 200 Tera MACs is 200 E12 MACs/s, not 200 E9 MACs/s (E9 is Giga).
 human_reviewed:
   status: not-reviewed
   by: null

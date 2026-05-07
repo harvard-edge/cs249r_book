@@ -7,24 +7,28 @@ topic: encoder-decoder-tradeoffs
 competency_area: architecture
 bloom_level: analyze
 phase: both
-title: 'TPU v5e Optimization: Encoder-Decoder Tradeoffs for Mixed Workloads'
+title: TPU v5e Split Architecture for Generation and Classification
 scenario: Your company is developing a new AI-powered content generation and analysis platform. You currently use a monolithic encoder-decoder transformer model for both text generation (summarization, translation) and text classification (sentiment, topic extraction). The current inference costs are prohibitive, and you've been tasked with optimizing for deployment on Google TPU v5e.
-question: "Which architecture would you recommend for optimizing performance and cost on the TPU v5e, and why?"
+question: Which architecture would you recommend for optimizing performance and cost on the TPU v5e, and why?
 details:
-  realistic_solution: 'A strong solution would propose a hybrid or split approach: utilizing an encoder-only model (e.g., BERT-like) for classification and analysis tasks to leverage higher batch sizes and lower latency, and a smaller, highly optimized decoder-only model (e.g., Llama-variant) for generation. The solution should emphasize optimizing model quantization (e.g., BF16, int8) to fit within the strict 16 GB HBM, exploiting TPU''s matrix multiplication units, and maximizing throughput with careful batching strategies. It would also detail how to partition the workload if a single model is still desired, potentially using a ''mixture of experts'' or conditional execution to reduce active parameter count per task.'
+  realistic_solution: 'Recommend splitting the monolithic encoder-decoder deployment into separate services: an encoder-only classifier for sentiment, topic extraction, and analysis, plus a compact decoder-only or task-tuned generative model for summarization and translation. The classifier can batch many independent requests with no KV-cache growth, so it should be cheaper and lower-latency than routing those tasks through the full generative stack. The generator should be sized and batched around context length, KV-cache memory, and decode latency, using BF16 or a validated TPU-supported quantization path only after accuracy and kernel support are measured. If a single model must remain, partition workloads and admission control by task type, but do not assume MoE or conditional execution without a trained architecture and serving measurements.'
   common_mistake: |
     **The Pitfall:** Failing to differentiate the distinct inference patterns of generation vs. classification.
     **The Rationale:** Candidates treat the encoder-decoder as a single monolithic block without splitting workloads based on batch size and auto-regressive constraints.
     **The Consequence:** Proposing solutions that exceed memory capacity or underutilize compute, leading to unoptimized latency and wasted costs.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Hardware: TPU v5e (16 GB HBM, 1.6 TB/s bandwidth).
-       - Model: 7B parameters (BF16 = 14 GB).
-    2. **Calculations:**
-       - Remaining HBM = 16 GB - 14 GB = 2 GB (Extremely tight for KV cache/activations).
-       - Weight Load Time = 14 GB / 1.6 TB/s = 8.75 ms per token.
-    3. **Conclusion & Interpretation:**
-       - **Result: 8.75ms Baseline Latency (Memory-Capacity-Bound).** A monolithic 7B model leaves almost no room for context window batching on a 16GB chip, necessitating a split into targeted encoder/decoder models.
+    **Assumptions & Constraints:**
+    - Hardware: TPU v5e with 16 GB HBM.
+    - Monolithic decoder-capable model: 7B parameters in BF16 = 14 GB resident weights.
+    - Example KV cache shape: 32 layers, 32 KV heads, d_head=128, BF16.
+
+    **Calculations:**
+    - Weight residency leaves about 16 GB - 14 GB = 2 GB for KV cache, activations, compiler buffers, and runtime overhead.
+    - KV cache per generated token = 2 (K,V) * 32 layers * 32 heads * 128 values * 2 bytes ≈ 0.5 MB.
+    - A 2 GB residual budget holds at most about 2 GB / 0.5 MB ≈ 4096 aggregate cached tokens before accounting for activations and runtime buffers.
+
+    **Conclusion & Interpretation:**
+    - **Result: Memory-capacity pressure.** The 7B monolith can keep weights resident, but it leaves little practical headroom for context length and batching. A split workload with smaller encoder-only classification models and a compact decoder for generation is more cost-efficient on TPU v5e.
 status: published
 provenance: imported
 requires_explanation: true

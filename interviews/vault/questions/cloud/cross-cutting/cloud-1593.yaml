@@ -9,23 +9,29 @@ bloom_level: evaluate
 phase: both
 title: Trade-offs in Disaggregated Performance vs Latency
 scenario: You are evaluating two LLMs for a medical triage application. The 13B quantized model achieves an average 150ms TTFT and costs $1.50/hr. Its Model Card shows an F1 score of 0.94 for the majority demographic (80% of users) but 0.78 for a minority demographic (20% of users). The 70B model costs $12.00/hr, achieves 350ms TTFT, and has a uniform F1 of 0.92. The strict system SLA requires <200ms average TTFT.
-question: "How would you serve the medical triage LLMs to meet the <200ms TTFT SLA while satisfying cost and subgroup fairness constraints?"
+question: Can these two medical triage LLMs meet under 200ms average TTFT and F1 at least 0.92 for each demographic without protected-attribute routing?
 details:
-  realistic_solution: 'Implement a hybrid routing architecture. Use a lightweight classifier to route queries affecting the minority demographic to the 70B model, while the 13B model serves the remaining 80%. This satisfies fairness criteria while maintaining the overall SLA.'
+  realistic_solution: Do not deploy a policy that routes individual requests by demographic group. With the stated aggregate metrics, the two available models do not provide a clean serving policy that both avoids protected-attribute routing and proves F1 >= 0.92 for each demographic under the 200ms average TTFT SLA. Use a request-difficulty or confidence-based gate only if it is validated per subgroup, add fairness monitoring using protected attributes only for offline audit, and otherwise improve the 13B model for the minority subgroup or reduce the 70B model's latency before launch.
   common_mistake: |
-    **The Pitfall:** Unconditionally deploying the 70B model or only looking at the aggregate 13B F1 score.
-    **The Rationale:** Candidates fail to consider hybrid routing architectures that balance cost, latency, and fairness simultaneously.
-    **The Consequence:** The deployment either violates the 200ms SLA and explodes costs, or deploys an unfairly biased model.
+    **The Pitfall:** Routing requests directly by demographic identity to make the spreadsheet constraints pass.
+    **The Rationale:** Candidates treat protected attributes as ordinary routing features instead of distinguishing offline fairness audit from online serving policy.
+    **The Consequence:** The deployment may create privacy, fairness, and regulatory risk while still failing for users whose demographic attributes are unavailable or misclassified.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Target SLA: <200 ms TTFT.
-       - 13B model: 150 ms TTFT, $1.50/hr. 80% routing.
-       - 70B model: 350 ms TTFT, $12.00/hr. 20% routing.
-    2. **Calculations:**
-       - Hybrid Average TTFT: (0.8 × 150 ms) + (0.2 × 350 ms) = 120 + 70 = 190 ms.
-       - Hybrid Effective Cost: (0.8 × $1.50) + (0.2 × $12.00) = $1.20 + $2.40 = $3.60/hr.
-       - Exclusive 70B cost: $12.00/hr.
-    3. **Conclusion & Interpretation:** **Hybrid routing meets the 190 ms SLA and guarantees 0.92+ F1 for all groups, while saving 70% compared to a pure 70B deployment. Result: Latency-Cost-Bound.**
+    **Assumptions & Constraints:**
+    - SLA is average TTFT <200 ms.
+    - Fairness target is F1 >= 0.92 for each demographic.
+    - 13B model: 150 ms TTFT, $1.50/hr, majority F1 = 0.94, minority F1 = 0.78.
+    - 70B model: 350 ms TTFT, $12.00/hr, F1 = 0.92 for both groups.
+    - Traffic mix: 80% majority, 20% minority.
+
+    **Calculations:**
+    - Serving all traffic on 13B gives 150 ms TTFT but minority F1 = 0.78, so it fails the fairness target.
+    - Serving all traffic on 70B gives uniform F1 = 0.92 but TTFT = 350 ms, so it fails the 200 ms latency target.
+    - A spreadsheet route of majority to 13B and minority to 70B gives average TTFT = (0.8 * 150 ms) + (0.2 * 350 ms) = 190 ms, but it depends on protected-attribute routing.
+    - A difficulty-based gate may be acceptable only after offline subgroup evaluation shows each demographic reaches F1 >= 0.92 under the gate; the provided aggregate numbers alone do not prove that.
+
+    **Conclusion & Interpretation:**
+    - **Result: no release-ready serving policy is proven by these metrics.** Avoid demographic routing; use protected attributes for audit, not online routing, and launch only after validated difficulty-based routing or model/latency improvements meet both constraints.
 status: published
 provenance: imported
 requires_explanation: true

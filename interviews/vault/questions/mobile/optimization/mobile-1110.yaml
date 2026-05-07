@@ -7,27 +7,28 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: apply
 phase: training
-title: 'Unstructured Sparsity Inefficiency on Apple A17 Pro'
-scenario: 'Your team applies 50% unstructured pruning to a 100MB vision model requiring 10 TOPS per inference, expecting a 2x speedup on the Apple A17 Pro Neural Engine (35 TOPS, 16-core ANE, 8GB shared unified memory). However, profiling reveals zero latency improvement and identical memory bandwidth consumption compared to the unpruned model.'
-question: 'Why does unstructured sparsity fail to yield hardware performance gains, and what is the expected compute-bound execution time?'
+title: Unstructured Sparsity Inefficiency on Apple A17 Pro
+scenario: Your team applies 50% unstructured pruning to a 100MB vision model requiring 10 trillion operations per inference, expecting a 2x speedup on a mobile neural engine with 35 TOPS peak throughput and shared unified memory. However, profiling reveals zero latency improvement and identical memory bandwidth consumption compared to the unpruned model.
+question: Why does unstructured sparsity fail to yield hardware performance gains, and what is the expected compute-bound execution time?
 details:
-  realistic_solution: 'The Apple A17 Pro Neural Engine relies on dense systolic arrays designed to maximize throughput for contiguous matrix operations. Unstructured pruning leaves the zero-weights randomly scattered, forcing the 16-core ANE to still load the full 100MB tensor from the 8GB unified memory and execute the zero-multiplies to maintain regular control flow. Because there is no specialized hardware block in the A17 Pro ANE to skip sparse, unstructured MAC operations, the actual executed operations remain unchanged. To achieve real speedups, the team must employ structured pruning, such as filter or channel pruning, which physically reduces the tensor dimensions.'
+  realistic_solution: Dense mobile neural engines are designed to maximize throughput for regular contiguous matrix operations. Unstructured pruning leaves zero weights randomly scattered, so the dense kernels still read the same tensor layout and execute the same scheduled multiply-accumulate slots unless the compiler and hardware have explicit sparse support. With a 10 trillion operation inference on a 35 TOPS engine, the compute-bound lower bound is 10e12 ops / 35e12 ops/s = about 0.286 seconds. Because the dense execution schedule is unchanged, 50% unstructured sparsity does not reduce that time; structured pruning, such as filter or channel pruning, is needed to physically reduce tensor dimensions.
   common_mistake: |
     **The Pitfall:** Assuming a reduction in theoretical non-zero weights guarantees proportional execution speedup.
     **The Rationale:** Candidates confuse theoretical FLOPs with hardware execution, forgetting that dense systolic arrays cannot easily skip unstructured zeros.
     **The Consequence:** Wasting effort on unstructured pruning that provides zero latency or bandwidth benefits on standard NPUs.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Original Compute: 10 TOPS.
+    - Original work per inference: 10 trillion operations.
     - Peak ANE Throughput: 35 TOPS.
 
     **Calculations:**
-    - Dense Execution Time: 10 TOPS / 35 TOPS = ~285 ms.
-    - Pruned Compute Execution: 5 TOPS (math) + 5 TOPS (zero-multiplies) = 10 TOPS.
-    - Execution Time: 10 TOPS / 35 TOPS = ~285 ms (0% speedup).
+    - Dense execution time lower bound: 10e12 ops / 35e12 ops/s = 0.286s = ~286 ms.
+    - Theoretical non-zero math after pruning: 5e12 useful ops.
+    - Dense hardware schedule without sparse skipping: still 10e12 scheduled ops.
+    - Execution time remains: 10e12 ops / 35e12 ops/s = ~286 ms (0% speedup).
 
     **Conclusion & Interpretation:**
-    - **Result: ~285 ms (Compute-Bound)**. Because unstructured zeros still traverse dense systolic arrays, latency remains identical to dense execution.
+    - **Result: ~286 ms (Compute-Bound)**. Because unstructured zeros still occupy dense execution slots and the same memory layout is read, latency and bandwidth remain identical to dense execution.
 status: published
 provenance: imported
 requires_explanation: false

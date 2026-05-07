@@ -11,11 +11,11 @@ title: Optimizing Transformer Inference on Google TPU v5e via Kernel Fusion
 scenario: Your team is deploying a large transformer model for real-time inference on Google TPU v5e. Initial profiling reveals that despite the TPU's significant compute capabilities (197 TFLOPS BF16), the inference pipeline is bottlenecked by a sequence of memory-bound element-wise operations (e.g., GELU, LayerNorm, Add) and frequent, small kernel launches.
 question: How would you use operator fusion on TPU v5e to cut memory-bound element-wise latency, and how would you identify, implement, and validate it?
 details:
-  realistic_solution: 'Utilize XLA Custom Calls to explicitly fuse the sequence of memory-bound element-wise operations (LayerNorm -> GELU -> Add). This forces intermediates to reside in on-chip SRAM rather than bouncing through HBM.'
+  realistic_solution: Identify the bottleneck with TPU profiler traces showing low matrix-unit utilization, high HBM traffic, and time in small element-wise HLOs. Inspect HLO dumps to see whether LayerNorm, GELU, and Add are already fused or blocked by layout conversions, dynamic shapes, or graph boundaries. Implement fusion by rewriting the model into XLA-friendly expressions, removing unnecessary materialization, using static shapes, and relying on XLA HLO fusion or TPU-appropriate lowerings. Validate with before/after p50 and p99 latency, HBM traffic, HLO fusion groups, and numerical checks against the unfused graph.
   common_mistake: |
-    **The Pitfall:** Focusing solely on optimizing individual operations or relying purely on automatic compiler fusions.
-    **The Rationale:** Candidates neglect to analyze the specific data movement patterns and XLA compilation limits for memory-bound workloads.
-    **The Consequence:** They fail to implement custom XLA fusions, leaving intermediate results passing through HBM and missing the latency target.
+    **The Pitfall:** Focusing solely on individual operation speed without inspecting the compiled graph.
+    **The Rationale:** Candidates assume the framework graph and the TPU HLO graph have the same memory behavior.
+    **The Consequence:** Missed fusion blockers leave intermediate results passing through HBM and the latency target is missed.
   napkin_math: |
     **Assumptions & Constraints:**
     - TPU v5e HBM bandwidth: 1.6 TB/s. Tensor size: N = 10^7 elements (BF16, 2 bytes = 20 MB).
@@ -24,7 +24,7 @@ details:
     **Calculations:**
     - Without fusion: Each op reads N, writes N. Total HBM traffic = 3 ops * 2 * 20 MB = 120 MB.
     - Data movement time (unfused): 120 MB / 1.6 TB/s = ~75us.
-    - With custom XLA fusion: Intermediates stay on-chip. 1 read, 1 write. Total HBM traffic = 40 MB.
+    - With XLA/HLO fusion: Intermediates stay on-chip. 1 read, 1 write. Total HBM traffic = 40 MB.
     - Data movement time (fused): 40 MB / 1.6 TB/s = ~25us.
 
     **Conclusion & Interpretation:**

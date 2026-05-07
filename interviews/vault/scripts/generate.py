@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# STATUS (2026-05-03): preserved as a reference pattern — see vault/scripts/DEPRECATED.md
+# §"Preserved for adaptation". Coverage-survey-driven generation (find empty
+# cells, fill emptiest first, stop when saturated). `vault generate` does
+# per-cell generation but NOT the auto-balance loop. Adapt the survey to walk
+# vault/questions/**/*.yaml instead of the legacy corpus.json before running.
 """
 StaffML Question Generation Engine — One Command
 

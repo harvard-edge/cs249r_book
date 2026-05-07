@@ -7,27 +7,31 @@ topic: adversarial-robustness
 competency_area: reliability
 bloom_level: analyze
 phase: both
-title: 'Optimizing Adversarial Purification on Jetson Orin'
-scenario: 'An autonomous security pipeline runs on an edge GPU. To defend against physical adversarial patches, an FP16 denoising autoencoder purifies frames before passing them to the main object detector. Currently, both models execute sequentially on the GPU, causing memory bandwidth contention and reducing throughput to 15 FPS instead of the required 30 FPS, while maxing out the thermal limit.'
-question: 'How would you diagnose the hardware bottleneck and quantify the performance gain of a deployment optimization?'
+title: Optimizing Adversarial Purification on Jetson Orin
+scenario: An autonomous security pipeline runs on an edge GPU. To defend against physical adversarial patches, an FP16 denoising autoencoder purifies frames before passing them to the main object detector. Currently, both models execute sequentially on the GPU, causing memory bandwidth contention and reducing throughput to 15 FPS instead of the required 30 FPS, while maxing out the thermal limit.
+question: How would you diagnose the hardware bottleneck and quantify the performance gain of a deployment optimization?
 details:
-  realistic_solution: 'The bottleneck is GPU contention and memory bandwidth saturation from sequential FP16 execution. The solution is to quantize the main object detector to INT8 and offload it to the DLA, which is heavily optimized for dense INT8 operations. This allows the GPU to exclusively run the FP16 adversarial purification model, enabling a pipelined architecture where both compute blocks run concurrently, drastically reducing latency and power draw. Confirm DLA offloading using nsys profiling.'
+  realistic_solution: |
+    Diagnose before choosing the fix: use nsys and tegrastats to measure GPU kernels, DLA utilization, memory bandwidth, copy engines, clocks, and thermal throttling while the purifier and detector run sequentially. If the detector is DLA-compatible after INT8 calibration, offload it to DLA and keep the FP16 purifier on GPU so the two stages run as a bounded pipeline. If unsupported layers remain, either keep those layers on GPU with explicit synchronization costs in the budget or choose a detector variant that compiles fully to DLA. Quantify gain from measured stage times and pipeline throughput, not from an assumed universal speedup.
   common_mistake: |
     **The Pitfall:** Suggesting pruning or knowledge distillation to shrink the models.
     **The Rationale:** Candidates default to model compression without analyzing the heterogeneous hardware architecture.
     **The Consequence:** They fail to utilize the available Deep Learning Accelerator (DLA) to resolve contention.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Current latency: Purification (25ms) + Detector (41ms) = 66ms (15 FPS).
+    - Current measured end-to-end throughput: 15 FPS, so sequential service time is about 1000ms / 15 = 66.7ms per frame.
+    - Profiling after instrumentation reports purifier GPU stage = 26ms and detector GPU stage = 40.7ms.
     - Target latency for 30 FPS: < 33.3ms.
 
     **Calculations:**
-    - Optimization: Quantize detector to INT8 and offload to DLA (3x speedup -> ~14ms).
-    - Pipeline throughput dictated by slowest stage: max(25ms, 14ms) = 25ms.
-    - New throughput: 1000ms / 25ms = 40 FPS.
+    - Sequential baseline check: 26ms + 40.7ms = 66.7ms, matching 15 FPS.
+    - Measured optimized detector on DLA after INT8 calibration: 18ms, with 2ms synchronization overhead.
+    - Pipelined steady-state throughput is governed by the slowest stage: max(26ms, 18ms + 2ms) = 26ms.
+    - New steady-state throughput: 1000ms / 26ms = 38.5 FPS.
+    - End-to-end latency for one frame remains about 26ms + 20ms = 46ms, so the optimization improves throughput but not single-frame latency to 33.3ms unless the stages overlap across frames and the control loop cares about throughput deadline.
 
     **Conclusion & Interpretation:**
-    - **Result: 40 FPS (Compute-Bound)**. Pipelining drastically reduces latency and exceeds the target.
+    - **Result: about 38 FPS steady-state throughput (Contention-Bound)**. DLA offload meets the 30 FPS throughput target under the stated pipeline assumptions, while latency must be reported separately from throughput.
 status: published
 provenance: imported
 requires_explanation: false

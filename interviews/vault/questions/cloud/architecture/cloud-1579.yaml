@@ -8,10 +8,10 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Evaluating MoE Serving Topologies on H100 Nodes
-scenario: 'Your team is deploying an 8x22B Mixture of Experts (MoE) LLM (141B total parameters, 39B active per token) on a node with 8x GPUs connected via NVSwitch. Serving with standard Tensor Parallelism (TP=8) yields poor throughput due to massive communication bottlenecks during expert routing.'
+scenario: Your team is deploying an 8x22B Mixture of Experts (MoE) LLM (141B total parameters, 39B active per token) on a node with 8x GPUs connected via NVSwitch. Serving with standard Tensor Parallelism (TP=8) yields poor throughput due to massive communication bottlenecks during expert routing.
 question: Which parallelization topology should you use for the 8x22B MoE on 8x GPUs, and why is it better than pure TP or pipeline parallelism?
 details:
-  realistic_solution: 'Implement a hybrid strategy using Tensor Parallelism for the dense attention layers and Expert Parallelism (EP=8) for the MoE layers. By placing one expert on each GPU, you isolate the massive parameters while utilizing the NVSwitch efficiently for All-to-All token routing.'
+  realistic_solution: Implement a hybrid strategy using Tensor Parallelism for the dense attention layers and Expert Parallelism (EP=8) for the MoE layers. Tensor Parallelism can still be useful inside dense layers or inside an expert, but pure TP across MoE layers adds collectives around active expert MLP computation even though each token uses only a few experts. Pure pipeline parallelism is also a poor fit because MoE routing creates dynamic, imbalanced token flows and pipeline bubbles. EP keeps expert weights resident on their owning GPUs and uses NVSwitch for routed activation All-to-All traffic, which scales with tokens and selected experts rather than with all expert parameters.
   common_mistake: |
     **The Pitfall:** Treating the MoE model exactly like a dense model by defaulting to TP=8 across all layers.
     **The Rationale:** TP=8 is the standard, easy-to-deploy strategy for large dense models.
@@ -20,14 +20,21 @@ details:
     **Assumptions & Constraints:**
     - 141B params FP16 = 282GB.
     - Node VRAM = 8 * 80GB = 640GB.
-    - NVSwitch = 900 GB/s.
-    
+    - EP=8 places experts across GPUs; dense attention can still use TP.
+    - MoE communication moves routed activations, not the 141B parameters.
+    - Hidden size = 4096, FP16 activations = 2 bytes/value, so one routed token activation is about 8 KB.
+    - Top-2 routing sends each token to two experts and later returns the expert outputs.
+    - Example serving microbatch = 4096 tokens.
+
     **Calculations:**
-    - Transfer size (batch 256, seq 2048, hidden 4096): 256 * 2048 * 4096 * 2 bytes ≈ 4.3GB.
-    - Transfer time over NVSwitch < 5ms per layer.
-    
+    - Per routed activation payload ≈ 4096 * 2 bytes = 8 KB, plus a similar return payload after expert compute.
+    - EP routing traffic for the example microbatch ≈ 4096 tokens * 2 experts * 8 KB * 2 send/return = 128 MiB per MoE layer before routing metadata and imbalance.
+    - Pure TP-style MoE execution shards active expert MLP computation and adds collectives around those matrix multiplies; EP instead keeps expert weights local and exchanges routed activations.
+    - Pure pipeline parallelism places layers on different stages, but dynamic expert routing sends uneven token counts across stages and leaves bubbles when one expert or stage is hot.
+    - Communication is therefore dominated by All-to-All activation exchange and load balance, while expert weights stay resident on their owning GPUs.
+
     **Conclusion & Interpretation:**
-    - **Result: <5ms (Network-Bound)**. The transfer time is trivial compared to the compute gains of isolating experts via EP.
+    - **Result: use hybrid TP plus EP.** Communication remains material, but it is bounded by routed activation volume rather than by moving or tensor-parallelizing all expert weights; the design still needs batching, load balancing, and NVSwitch-aware placement.
 status: published
 provenance: imported
 requires_explanation: false

@@ -4,7 +4,7 @@
 Subcommands:
     list     — Show all .bib files with entry counts
     clean    — Remove unused entries from .bib files
-    update   — Run betterbib update -i on .bib files (fetch proper metadata)
+    update   — Run betterbib sync-preserve on .bib files (fetch metadata, keep citekeys stable)
     sync     — Clean then update (full pipeline)
     normalize — Full-tree: same 3 steps as pre-commit (mechanical → tidy → bib_lint check)
 """
@@ -84,7 +84,7 @@ class BibCommand:
         elif ns.subcommand == "clean":
             return self._run_clean(root, ns.dry_run)
         elif ns.subcommand == "update":
-            return self._run_update(root)
+            return self._run_update(root, ns.dry_run)
         elif ns.subcommand == "sync":
             return self._run_sync(root, ns.dry_run)
         return False
@@ -99,7 +99,10 @@ class BibCommand:
         table.add_column("Description", style="white", width=50)
         table.add_row("list", "Show all .bib files with entry counts")
         table.add_row("clean", "Remove unused entries from .bib files")
-        table.add_row("update", "Run betterbib update -i (fetch proper metadata)")
+        table.add_row(
+            "update",
+            "Run betterbib sync-preserve (fetch metadata, keep citekeys stable)",
+        )
         table.add_row("sync", "Clean then update (full pipeline)")
         table.add_row(
             "normalize",
@@ -425,8 +428,14 @@ class BibCommand:
     # Update
     # ------------------------------------------------------------------
 
-    def _run_update(self, root: Path) -> bool:
-        """Run betterbib update -i on .bib files."""
+    def _run_update(self, root: Path, dry_run: bool = False) -> bool:
+        """Run betterbib sync-preserve on .bib files."""
+        repo = self.config_manager.root_dir
+        script = repo / "book" / "tools" / "bib_sync_preserve.py"
+        if not script.is_file():
+            console.print(f"[red]Missing {script}[/red]")
+            return False
+
         # Check if betterbib is available
         try:
             subprocess.run(
@@ -446,32 +455,28 @@ class BibCommand:
             console.print("[yellow]No .bib files found.[/yellow]")
             return True
 
-        console.print(f"[bold]Updating {len(bib_files)} .bib files with betterbib...[/bold]\n")
+        console.print(
+            f"[bold]Updating {len(bib_files)} .bib file(s) with betterbib sync-preserve...[/bold]\n"
+        )
 
-        success = 0
-        failed = 0
-        for bib in bib_files:
-            rel = self._relative(bib)
-            console.print(f"  Updating {rel}...", end=" ")
-            try:
-                result = subprocess.run(
-                    ["betterbib", "update", "-i", str(bib)],
-                    capture_output=True,
-                    text=True,
-                    timeout=120,
-                )
-                if result.returncode == 0:
-                    console.print("[green]✓[/green]")
-                    success += 1
-                else:
-                    console.print(f"[red]✗[/red] [dim]{result.stderr.strip()[:80]}[/dim]")
-                    failed += 1
-            except subprocess.TimeoutExpired:
-                console.print("[red]✗ timed out[/red]")
-                failed += 1
+        cmd = [sys.executable, str(script)]
+        if dry_run:
+            cmd.append("--dry-run")
+        if root.is_file() and root.suffix == ".bib":
+            cmd.append(str(root))
+        else:
+            cmd.extend(str(b) for b in bib_files)
 
-        console.print(f"\n[bold]Done:[/bold] {success} updated, {failed} failed")
-        return failed == 0
+        result = subprocess.run(
+            cmd,
+            cwd=str(repo),
+            text=True,
+        )
+        if result.returncode == 0:
+            console.print("\n[green]Done.[/green]")
+            return True
+        console.print("\n[red]sync-preserve reported failures.[/red]")
+        return False
 
     # ------------------------------------------------------------------
     # Sync (clean + update)

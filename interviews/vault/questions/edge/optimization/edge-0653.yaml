@@ -9,24 +9,27 @@ bloom_level: create
 phase: inference
 title: The Autonomous Stack Consolidation
 scenario: You are the new technical lead for the perception team at a leading autonomous vehicle company. The current system is a complex web of 15+ specialized CNNs running on a Jetson AGX Orin. This system is stable and meets its 33ms end-to-end latency budget, with the perception stack consuming 25ms of that budget. The research team has developed a new unified Transformer-based model that significantly improves accuracy but takes 200ms per inference.
-question: What systematic optimization plan would you use to bring the 200ms Transformer under the <25ms perception budget on the same Orin?
+question: For a 200ms unified Transformer on Jetson AGX Orin, what bounded optimization plan reaches the <25ms perception budget, and what must change if optimization is not enough?
 details:
-  realistic_solution: 'A successful plan requires a systematic approach, starting with the biggest sources of waste and moving to more sophisticated techniques. The correct order is crucial because the effectiveness of later stages depends on the success of earlier ones.'
+  realistic_solution: |
+    Start with profiling, not tool-chasing: break the 200ms into attention, MLP, memory traffic, pre/post-processing, and kernel launch overhead. Then apply changes in dependency order: export to TensorRT with fused kernels and static shapes, move to INT8 or FP8 with representative calibration, reduce token count with patch merging or ROI tokens, prune/distill the Transformer, and keep only the latency-critical heads on the edge path. If the measured speedup after compiler, precision, and token reduction is still short of the required 8x, the architecture must change: use a shared CNN or hybrid encoder on Orin and reserve the full Transformer for cloud/offline analysis or lower-rate non-safety features.
   common_mistake: |
     **The Pitfall:** Unsystematic application of fragmented optimization techniques.
     **The Rationale:** Engineers often focus heavily on one area (like aggressive quantization) without addressing fundamental architectural inefficiencies, or they misorder steps (e.g., speculative decoding before fixing attention memory bottlenecks).
     **The Consequence:** The optimization yields minimal overall gains because the true bottlenecks (e.g., memory bandwidth and kernel launch overhead) are never resolved.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - 15 CNNs running independently on Jetson AGX Orin (204.8 GB/s, 275 TOPS).
-       - Each CNN: 2 GOPs compute, 10MB weights, 50 layers.
-       - Target budget < 25ms.
+       - Current Transformer latency: 200ms per inference.
+       - Target perception budget: <25ms.
+       - Same Jetson AGX Orin hardware; no batching across safety-critical frames.
     2. **Calculations:**
-       - Sequential memory read = 15 * 10MB = 150MB. Read time = 150MB / 204.8 GB/s = 0.73ms.
-       - Compute time = 30 GOPs / 275 TOPS = ~0.11ms.
-       - Kernel launch overhead = 15 models * 50 layers * 0.05ms/launch = 37.5ms.
+       - Required speedup = 200ms / 25ms = 8x.
+       - Compiler/kernel fusion might remove 20-30% if launch and layout overhead are visible: 200ms -> about 140-160ms.
+       - INT8/FP8 can provide up to about 2x on well-supported layers: 150ms -> about 75ms.
+       - Token reduction is the largest Transformer-specific lever. Halving tokens cuts MLP-like linear work about 2x and global attention score work about 4x; a practical 2-3x end-to-end gain could move 75ms -> 25-38ms.
+       - Distillation or structured pruning must close any remaining gap while preserving accuracy.
     3. **Conclusion & Interpretation:**
-       - **Result: Overhead-Bound**. The system is bottlenecked not by compute or memory bandwidth, but by massive kernel launch penalties. A shared backbone eliminates this overhead, shifting the bottleneck and hitting the <25ms target.
+       - **Result: The plan needs at least an 8x measured speedup.** TensorRT and quantization alone are unlikely to be enough; reaching <25ms requires token/architecture reduction, and failure to hit that budget means the unified Transformer cannot replace the edge safety stack as-is.
 status: published
 provenance: imported
 requires_explanation: true

@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: cloud-3409
 track: cloud
-level: L3
+level: L2
 zone: analyze
 topic: flash-attention
 competency_area: optimization
@@ -18,20 +18,21 @@ details:
     **The Consequence:** Exhausting HBM capacity and becoming severely memory-bandwidth bound even for moderate sequence lengths.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Sequence length (N): 80,000.
+    - Sequence length (N): 80,000 as a stress-case extension of a service that already struggles beyond 8k.
     - Head dimension (D): 128.
     - Heads: 16.
     - Precision: FP16 (2 bytes).
     - A100 Memory Bandwidth: 2.0 TB/s.
 
     **Calculations:**
-    - Standard Attention Matrix (N^2): 80,000^2 * 2 bytes = 12.8 GB per head.
-    - FlashAttention memory footprint: O(N * D) instead of O(N^2).
-    - Read volume for Q, K, V: 3 * N * D * 2 bytes = 3 * 80,000 * 128 * 2 = 61.44 MB.
-    - HBM fetch time: 61.44 MB / 2.0 TB/s = 30.7 μs.
+    - One standard attention score matrix is N^2 FP16 elements: 80,000^2 * 2 bytes = 12.8 GB per head, before softmax buffers.
+    - If a per-layer implementation holds the full score/probability tensors for all 16 heads at once, the score tensor alone is 12.8 GB * 16 = 204.8 GB, which exceeds an 80 GB A100. Some kernels stream heads or recompute, but any full N^2 materialization is the memory risk.
+    - FlashAttention keeps the running softmax statistics and Q/O tiles in SRAM and streams K/V tiles; it does not need an N x N HBM tensor.
+    - The persistent sequence tensors for Q, K, V, and output are 4 * Heads * N * D * 2 bytes = 4 * 16 * 80,000 * 128 * 2 = 1.31 GB, but this is model data around the kernel, not the peak temporary score matrix.
+    - A lower-bound HBM time for one pass over those tensors is 1.31 GB / 2.0 TB/s = 0.655 ms; real time is much higher because K/V tiles are streamed repeatedly and the QK/O matmuls dominate.
 
     **Conclusion & Interpretation:**
-    - **Result: 30.7 μs Fetch (Compute-Bound)**. FlashAttention keeps intermediate N^2 tiles in SRAM, reducing the operation from memory-bound (N^2 HBM accesses) to compute-bound, easily fitting within the 80GB HBM.
+    - **Result: Avoids N^2 HBM Materialization**. For the 80k stress case, FlashAttention makes long-sequence attention feasible by eliminating the full multi-head score/probability tensor, while the final bottleneck still depends on tile reuse, bandwidth, and Tensor Core utilization.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,27 +7,28 @@ topic: collective-communication
 competency_area: networking
 bloom_level: evaluate
 phase: both
-title: The InfiniBand Subnet Saturation
+title: Fat-Tree Inter-Pod Bisection Bottleneck
 scenario: You are building a 4,000 GPU cluster. You use a standard Fat-Tree InfiniBand topology. The cluster is divided into 4 pods of 1,000 GPUs each. Jobs running entirely within Pod A achieve 98% network scaling efficiency. However, when you launch a 2,000 GPU job spanning Pod A and Pod B, the network efficiency plummets to 40%. The cables are all 400 Gbps.
 question: What architectural constraint in the Fat-Tree topology is causing the network efficiency to plummet for cross-pod jobs?
 details:
-  realistic_solution: 'The Fat-Tree topology has oversubscribed uplinks between pods. Within Pod A, the leaf-to-spine bandwidth is 1:1 (non-blocking), so intra-pod traffic achieves 98% efficiency. But the spine-to-core uplinks connecting pods are typically oversubscribed 3:1 to save cost. When a 2000-GPU job spans Pods A and B, half the AllReduce traffic must cross the core, but only 1/3 of the needed bandwidth exists. The 267 Tbps deficit causes massive queuing and drops. The fix: build a full-bisection-bandwidth core (1:1 oversubscription at ~3x the cost) or use topology-aware job placement to keep training jobs within a single pod.'
+  realistic_solution: The constraint is oversubscribed inter-pod bisection bandwidth. Within one 1,000-GPU pod the leaf/spine fabric can be close to non-blocking, so an intra-pod job sees high efficiency. A 2,000-GPU job split across Pods A and B creates collective traffic across the pod boundary; the cross-pod portion must traverse the spine/core uplinks. If those uplinks are built at 3:1 oversubscription, only one third of the cross-pod bandwidth needed for line-rate communication is available, so queues and tail latency dominate. The fix is a full-bisection core for cross-pod training or topology-aware placement that keeps large training jobs inside a pod unless the core has enough capacity.
   common_mistake: |
     **The Pitfall:** Assuming distance between the pods adds latency that drops efficiency.
     **The Rationale:** People think physical distance over fiber optic causes the 60% drop.
     **The Consequence:** They ignore the oversubscription ratio of the uplinks, failing to address the actual bandwidth bottleneck.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Intra-pod (1000 GPUs): 400 Gbps each.
-    - Oversubscription ratio: 3:1 for uplinks.
+    - Job spans two pods with 1,000 GPUs in each pod.
+    - Each GPU has a 400 Gbps network link.
+    - Inter-pod uplinks are provisioned at 3:1 oversubscription.
 
     **Calculations:**
-    - Intra-pod Traffic: 1000 * 400 Gbps = 400 Tbps.
-    - Uplink Capacity: 400 Tbps / 3 ≈ 133 Tbps.
-    - Bottleneck Deficit: 400 Tbps - 133 Tbps = 267 Tbps.
+    - Cross-pod bisection demand at line rate: 1,000 GPUs * 400 Gbps = 400 Tbps from one half of the job to the other.
+    - Provisioned inter-pod capacity at 3:1 oversubscription: 400 Tbps / 3 ≈ 133 Tbps.
+    - Missing cross-pod capacity: 400 Tbps - 133 Tbps ≈ 267 Tbps.
 
     **Conclusion & Interpretation:**
-    - **Result: 267 Tbps (Network-Bound)**. 267 Tbps of data is physically blocked at the Spine switch every second.
+    - **Result: Inter-Pod Bisection Bottleneck.** The 2,000-GPU job exposes a 267 Tbps cross-pod capacity gap under these assumptions, so efficiency falls even though each individual cable is 400 Gbps.
 status: published
 provenance: imported
 requires_explanation: true

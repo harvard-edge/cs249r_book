@@ -9,35 +9,45 @@ bloom_level: create
 phase: both
 title: Multi-Modal Distributed Ingestion Architecture Specification
 scenario: A training cluster of 10,000 H100 SXM GPUs processes interleaved text and 4K images for a 1T parameter multimodal model.
-question: Architect the data loader and prefetch specification to ensure the 989 TFLOP/s FP16 tensor cores remain at least 60% utilized without bottlenecking on host-device PCIe bandwidth.
+question: Specify a loader that keeps 10,000 H100s at 60% use, assuming each GPU needs 64 preprocessed 8MB samples every 1s over PCIe Gen5?
 details:
-  realistic_solution: Formulate a distributed hierarchical dataloader that dynamically resizes images on CPU, caches raw text in host RAM, and pipelines batches to device memory asynchronously. Compute the required host-to-device bandwidth to feed the accelerator at the target utilization. Pin memory and use CUDA streams to hide memory transfer latency.
+  realistic_solution: Formulate a distributed hierarchical dataloader that dynamically resizes images on CPU, caches tokenized text in host RAM, and prefetches multiple ready batches per GPU. With 64 preprocessed 8MB samples per GPU every 1s, each GPU needs 512 MB/s of host-to-device payload bandwidth, or 5.12 TB/s aggregate across 10,000 GPUs. PCIe Gen5 x16 has far more than 512 MB/s per GPU, so the specification should reserve headroom for bursts and focus on CPU preprocessing, local cache hit rate, storage/network fan-out, pinned host memory, and asynchronous CUDA stream copies.
   common_mistake: |
     **The Pitfall:** Ignoring the host-to-device transfer overhead.
     **The Rationale:** Engineers assume data pipelines end at CPU memory, neglecting the PCIe transfer phase.
     **The Consequence:** The GPU tensor cores sit idle waiting for slow data transfers, missing the 60% utilization target entirely.
   napkin_math: |
-    - Target utilization = 60%.
-    - Max compute = 989 TFLOPS.
-    - **0.60 * 989 TFLOPS = 593 TFLOPS minimum target utilization, dictating minimum batch delivery rates over PCIe Gen5.**
+    **Assumptions & Constraints:**
+    - Target cadence: each GPU receives one ready batch every 1 second.
+    - Batch payload per GPU: 64 samples x 8 MB/sample after CPU preprocessing.
+    - PCIe Gen5 x16 usable one-way bandwidth is tens of GB/s, well above a sub-GB/s payload.
+
+    **Calculations:**
+    - Per-GPU host-to-device payload: 64 x 8 MB = 512 MB per step.
+    - Per-GPU bandwidth at a 1 second step time: 512 MB / 1 s = 512 MB/s.
+    - Cluster aggregate payload: 512 MB/s x 10,000 GPUs = 5,120,000 MB/s = 5.12 TB/s.
+    - PCIe comparison: 512 MB/s is less than 1% of a typical PCIe Gen5 x16 one-way link budget, leaving large per-GPU copy headroom if transfers are pinned and overlapped.
+
+    **Conclusion & Interpretation:**
+    - **Result: ~512 MB/s per GPU over PCIe and ~5.12 TB/s aggregate.** PCIe is not the primary limiter under these assumptions; preprocessing, caching, network/storage fan-out, and prefetch depth determine whether 60% utilization is maintained.
 status: published
 provenance: llm-draft
-expected_time_minutes: 15
 requires_explanation: true
+expected_time_minutes: 15
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-specification-L6+
+  - gemini-generated
+  - target-specification-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

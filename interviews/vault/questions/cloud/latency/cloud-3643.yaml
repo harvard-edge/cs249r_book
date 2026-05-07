@@ -12,24 +12,24 @@ scenario: An ML serving system on MI300X (192GB HBM3, 5.3TB/s) uses dynamic batc
 question: How would you change the dynamic batching policy to meet P999 < 200ms without collapsing GPU utilization?
 details:
   realistic_solution: |
-    Implement adaptive batching: use a short timeout (5ms) for small batches (<=8 requests) but allow larger batches to form when queue depth exceeds 32. Add a per-request max-wait SLA of 15ms. Monitor queue depth as a leading indicator. MI300X's 5.3TB/s bandwidth means small batches are not significantly penalized.
+    Implement adaptive batching: use a short timeout (5ms) for small queues, allow larger batches only when queue depth is already high, and enforce a per-request max-wait budget of 15ms. Track queue wait separately from GPU execution so the scheduler can stop admitting requests to a large batch before it threatens the P999 budget.
   common_mistake: |
     **The Pitfall:** Reducing the global batch timeout to 5ms for all requests.
     **The Rationale:** Engineers assume minimizing wait time fixes tail latency without realizing it completely destroys large-batch formation.
     **The Consequence:** The strict timeout reduces GPU utilization from 80% to 45%, increasing operational costs by ~78% with only a marginal P50 improvement.
   napkin_math: |
     **Assumptions & Constraints:**
-    - MI300X with 5.3TB/s bandwidth.
-    - 7B model (14GB BF16).
+    - Current P999 is 450ms because some requests wait the full 20ms and then sit in large-batch service time.
     - Target P999 < 200ms.
 
     **Calculations:**
-    - Model load time: 14GB / 5.3TB/s = 2.6ms.
-    - Batch 8 @ 5ms timeout: latency = 5ms wait + 2.6ms load + compute.
-    - Batch 64 @ 20ms timeout: latency = 20ms wait + 2.6ms load + 8x compute.
+    - A resident 14GB model is not loaded from HBM for each request; 14GB / 5.3TB/s = 0.0026s only describes an ideal full-model memory sweep, not per-request load latency.
+    - With a 15ms max queue wait, the GPU execution plus downstream budget at P999 must fit within 200ms - 15ms = 185ms.
+    - Small-queue path: 5ms batching wait leaves 195ms for execution, reducing tail wait without disabling large batches when demand is high.
+    - High-queue path: form larger batches only while the oldest request remains under the 15ms wait budget.
 
     **Conclusion & Interpretation:**
-    - **Result: Small batches loaded in 2.6ms (Latency-Bound)**. Adaptive batching with a 5ms timeout for small queues easily meets the 200ms SLA without penalizing throughput due to 5.3TB/s HBM bandwidth.
+    - **Result: Queue-wait-bound tail.** The scheduler should cap per-request wait and adapt batch size to queue depth; HBM bandwidth does not justify a per-request model-load latency claim.
 status: published
 provenance: imported
 requires_explanation: false

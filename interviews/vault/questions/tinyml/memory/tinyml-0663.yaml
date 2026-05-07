@@ -8,25 +8,28 @@ competency_area: memory
 bloom_level: create
 phase: inference
 title: The Conversational Doorbell's Memory Deficit
-scenario: >
+scenario: |
   You are designing a context-aware doorbell on a Cortex-M7 MCU. The product features a tiny transformer model requiring a KV-cache for at least 256 tokens of conversational context. The model's tensor arena requires 200KB of SRAM. The FP16 KV-cache requires 256KB. With the RTOS (~80KB), the 536KB total requirement exceeds the 512KB SRAM.
-question: How can a Cortex-M7 doorbell support a 256-token transformer KV cache when SRAM needs exceed 512 KB?
+question: What SRAM-first strategy makes the KV cache feasible without paging it through Flash?
 details:
-  realistic_solution: >
-    Treat the device's Flash memory as a secondary storage tier for the KV-cache using 'Flash Paging', analogous to virtual memory on a PC. Store older conversational tokens in Flash (which supports XIP reads at high bandwidth) and only keep the active token window in the SRAM tensor arena. This seamlessly resolves the 24 KB memory deficit while maintaining conversational latency requirements.
+  realistic_solution: |
+    Do not treat Flash as transparent virtual memory for the KV-cache. On a Cortex-M7, naive paging adds latency jitter and write/endurance problems that are a poor fit for a transformer decode loop. The feasible design is to reduce and explicitly manage the KV footprint so the hot state stays in SRAM: quantize the KV-cache to INT8 or another validated compact format, use a sliding or summarized context window if accuracy allows, and reserve fixed SRAM buffers for the active decode state. Flash can hold immutable model weights or precomputed tables, but frequently updated KV state should not be swapped through Flash on the real-time path.
   common_mistake: |
-    **The Pitfall:** Declaring the feature impossible or arbitrarily shrinking the model/context length.
-    **The Rationale:** Software engineers often view SRAM as a hard boundary and Flash purely as read-only code storage, ignoring the potential for Flash-based virtual memory architectures on bare-metal systems.
-    **The Consequence:** Failing to meet the product requirements when a creative, hardware-aware systems design could have delivered the feature.
+    **The Pitfall:** Treating Flash like PC-style swap or virtual memory for the KV-cache.
+    **The Rationale:** Engineers focus on Flash read bandwidth and ignore erase/write granularity, endurance limits, lack of an MMU, and latency jitter.
+    **The Consequence:** The design appears to solve a 24 KB SRAM deficit on paper but fails in the real decode loop when KV updates and cache misses become unpredictable.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - Total SRAM: 512 KB. Flash Read Speed: QSPI at ~40 MB/s.
-       - Requirements: 200 KB (Arena) + 256 KB (KV Cache) + 80 KB (RTOS) = 536 KB.
+       - Total SRAM: 512 KB.
+       - Baseline requirements: 200 KB tensor arena + 256 KB FP16 KV-cache + 80 KB RTOS = 536 KB.
     2. **Calculations:**
        - SRAM Deficit: 536 KB - 512 KB = 24 KB.
-       - Token Vector Size: 1 KB. Fetch Latency: 1 KB / 40,000 KB/s = 25 µs.
+       - FP16 KV-cache uses 2 bytes/value, so INT8 or another 1-byte compact KV format halves the cache storage.
+       - INT8 KV-cache size: 256 KB FP16 * (1 byte / 2 bytes) = 128 KB.
+       - Revised SRAM requirement: 200 KB arena + 128 KB KV-cache + 80 KB RTOS = 408 KB.
+       - Headroom after compression: 512 KB - 408 KB = 104 KB.
     3. **Conclusion & Interpretation:**
-       - **Result: 24 KB deficit resolved via Flash Paging.** The 25 µs Flash read latency per token is perfectly acceptable, allowing the system to use Flash as virtual memory. **Bottleneck: SRAM Capacity.**
+       - **Result: 104 KB SRAM headroom if INT8 KV accuracy is validated.** If compression is not accurate enough, the feasible path is a shorter context window or redesigned model, not Flash paging. The release design should keep frequently updated KV state in SRAM and use Flash only for immutable or infrequently accessed data.
 status: published
 provenance: imported
 requires_explanation: true
@@ -36,9 +39,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- Classification sanity - `reasoning_competency` and `reasoning_mode` are incorrectly
-  set to `None` for a question that clearly tests Memory Management, System Design,
-  and Low-Level Optimization.
+  - Classification sanity - `reasoning_competency` and `reasoning_mode` are incorrectly set to `None` for a question that clearly tests Memory Management, System Design, and Low-Level Optimization.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

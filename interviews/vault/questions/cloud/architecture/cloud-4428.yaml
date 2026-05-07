@@ -11,21 +11,24 @@ title: 'Adapter Composition: Sequential vs Parallel LoRA Merging'
 scenario: 'A multi-tenant serving system needs to apply two LoRA adapters simultaneously: one for domain-specific knowledge and one for style.'
 question: For medical and formal-tone LoRA adapters applied together, should you use sequential composition, parallel merge, or task-vector arithmetic?
 details:
-  realistic_solution: 'Three approaches: (1) Sequential: apply adapter 1 then adapter 2 at inference. Adds 2x LoRA compute overhead but preserves each adapter''s behavior. (2) Parallel merge: delta_W_merged = alpha1 * B1*A1 + alpha2 * B2*A2. Check interference via cosine similarity of B1*A1 and B2*A2. If cosine < 0.1 (near orthogonal), addition is safe. Scale factors alpha control contribution. (3) Task arithmetic: merge weights into base before serving, zero inference overhead but static. For medical+formal: these are likely near-orthogonal (different attention heads specialize for domain vs style). Use parallel merge with alpha1=alpha2=0.7 (scale down to avoid magnitude explosion). Validate on held-out set covering both properties.'
+  realistic_solution: 'Compare the methods explicitly. Sequential composition applies both adapters at inference and is the safest default when each adapter was trained independently, but it adds two LoRA paths and order can matter. Parallel composition computes a combined delta_W = alpha1 * B1*A1 + alpha2 * B2*A2 for the same base activation; use it when validation shows low interference and tune alpha values on held-out medical/formal examples rather than hard-coding them. Task-vector arithmetic is an offline weight-space operation: it can merge a validated delta into a served checkpoint for zero adapter dispatch overhead, but it is static and riskier for multi-tenant serving because changing one adapter requires a new merged artifact. For this scenario, prefer parallel composition with validation if both attributes must be selectable at request time; fall back to sequential when interference tests fail.'
   common_mistake: |
     **The Pitfall:** Simply adding the two adapter weight matrices together dynamically.
     **The Rationale:** It appears to be the standard mathematical way to merge linear projections.
-    **The Consequence:** While this works for orthogonal adapters, it causes catastrophic interference when both adapters attempt to modify the same weight directions simultaneously.
+    **The Consequence:** Addition is only reliable when the adapter deltas affect mostly independent directions; if both adapters push the same projection in incompatible directions, the merged behavior can lose either medical accuracy or the requested style.
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Base model: Llama-3 8B. seq_len=512, d=4096.
        - LoRA rank r=16.
+       - Comparison is for one targeted d x d projection.
     2. **Calculations:**
        - Base projection FLOPs: 2 × 512 × 4096² = 17.2B FLOPs.
-       - LoRA FLOPs: 4 × 512 × 4096 × 16 = 134M FLOPs.
-       - LoRA overhead: 134M / 17.2B = 0.78% per projection.
+       - One LoRA adapter FLOPs: 4 × 512 × 4096 × 16 = 134M FLOPs.
+       - One-adapter overhead: 134M / 17.2B = 0.78% for that projection.
+       - Two dynamic adapters, sequential or parallel before materializing the merged delta: 2 × 134M = 268M FLOPs = 1.56% for that projection.
+       - Offline task-vector or static merged checkpoint: adapter dispatch overhead is 0%, but only after validation and artifact creation.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound. Two sequential adapters add ~1.5% compute overhead, making sequential composition safe and computationally negligible.**
+       - **Result: Validation-Bound.** The compute overhead of two dynamic adapters is small per targeted projection, so the choice should be driven by interference tests, request-time flexibility, and whether a static merged artifact is acceptable.
 status: published
 provenance: imported
 requires_explanation: true

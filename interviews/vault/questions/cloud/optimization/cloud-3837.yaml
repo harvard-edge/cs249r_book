@@ -7,27 +7,30 @@ topic: flash-attention
 competency_area: optimization
 bloom_level: analyze
 phase: inference
-title: 'FlashAttention Arithmetic Intensity Shift'
-scenario: 'Your team profiles standard attention on an A100 GPU. For sequence length N=4096 and head dimension d=128, standard attention executes 8.59 GFLOPs but transfers ~137 MB of data to and from HBM due to intermediate NxN attention matrices. FlashAttention, using SRAM tiling and online softmax, drops the total HBM data transfer to ~4.2 MB while executing the exact same 8.59 GFLOPs.'
-question: 'Why does standard attention underutilize the A100''s compute capacity, and how does FlashAttention''s SRAM tiling shift the bottleneck?'
+title: FlashAttention Arithmetic Intensity Shift
+scenario: Your team profiles standard attention on an A100 GPU. For sequence length N=4096 and head dimension d=128, standard attention executes 8.59 GFLOPs but transfers ~137 MB of data to and from HBM due to intermediate NxN attention matrices. FlashAttention, using SRAM tiling and online softmax, drops the total HBM data transfer to ~4.2 MB while executing the exact same 8.59 GFLOPs.
+question: Why does standard attention underutilize the A100's compute capacity, and how does FlashAttention's SRAM tiling shift the bottleneck?
 details:
-  realistic_solution: 'Standard attention generates high memory traffic from writing and reading the O(N^2) intermediate attention score matrix to HBM, resulting in an arithmetic intensity lower than the A100''s ridge point. This makes it memory bandwidth bound. FlashAttention fuses the operation and keeps intermediates in SRAM, vastly reducing HBM reads/writes. This skyrockets the arithmetic intensity well past the hardware''s ridge point, shifting the bottleneck from memory bandwidth to the GPU''s FP16 tensor cores.'
+  realistic_solution: Standard attention generates high memory traffic from writing and reading the O(N^2) intermediate attention matrix in HBM, giving it arithmetic intensity below the A100 ridge point and making it memory-bandwidth bound. FlashAttention tiles the computation through SRAM and uses online softmax, so it performs the same FLOPs with far less HBM traffic. That raises arithmetic intensity above the ridge point in this simplified roofline model, shifting the limiting factor toward compute, although real throughput still depends on kernel efficiency and will not automatically equal peak TFLOPS.
   common_mistake: |
     **The Pitfall:** Assuming FlashAttention speeds up the model by reducing the total number of FLOPs or simply stating that it 'uses less memory'.
     **The Rationale:** Candidates focus on the output without connecting the reduction in memory traffic to the hardware's arithmetic intensity ridge point.
     **The Consequence:** Failing to understand the fundamental mechanics of the hardware bottleneck, leading to incorrect assumptions about kernel optimization.
   napkin_math: |
     **Assumptions & Constraints:**
+    - Decimal units: 1 MB = 10^6 bytes, 1 GFLOP = 10^9 FLOPs.
     - Standard Attention data transfer = 137 MB, FlashAttention data transfer = 4.2 MB.
     - 8.59 GFLOPs for both.
     - A100 Ridge Point = 156 FLOPs/Byte.
 
     **Calculations:**
-    - Standard Attention Intensity: 8.59 GFLOPs / 137 MB = ~62.7 FLOPs/Byte. (62.7 < 156, memory bound).
-    - FlashAttention Intensity: 8.59 GFLOPs / 4.2 MB = ~2045 FLOPs/Byte.
+    - Standard Attention intensity = 8.59e9 FLOPs / 137e6 bytes = about 62.7 FLOPs/Byte.
+    - 62.7 < 156, so standard attention is below the ridge point and is memory-bound in the roofline model.
+    - FlashAttention intensity = 8.59e9 FLOPs / 4.2e6 bytes = about 2045 FLOPs/Byte.
+    - 2045 > 156, so the simplified roofline bottleneck shifts toward compute.
 
     **Conclusion & Interpretation:**
-    - **Result: ~2045 FLOPs/Byte (Compute-Bound)**. Since 2045 > 156, FlashAttention is completely compute-bound and can theoretically reach the full 312 TFLOPS capability.
+    - **Result: arithmetic intensity rises from about 63 to about 2045 FLOPs/Byte**. FlashAttention moves this workload past the ridge point, but peak TFLOPS remains an upper bound, not a guaranteed outcome.
 status: published
 provenance: imported
 requires_explanation: false

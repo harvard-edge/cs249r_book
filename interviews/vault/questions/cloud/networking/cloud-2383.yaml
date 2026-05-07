@@ -12,7 +12,7 @@ scenario: 5,000 4G LTE intersection cameras. Cloud tracks vehicles globally acro
 question: How would you split perception and tracking between 5,000 LTE cameras with edge NPUs and the cloud to reduce data cost?
 details:
   realistic_solution: |
-    Move the perception stack entirely to the edge. The NPU runs YOLO for object detection and a lightweight Re-ID model to generate embeddings. The edge device only transmits a JSON payload to the cloud containing vehicle embeddings, bounding boxes, and timestamps. The cloud acts purely as a tracking and routing aggregator.
+    Split the pipeline so the edge camera performs the cheap, bandwidth-reducing work and the cloud keeps the global state. Run a tiny detector or motion-triggered vehicle proposal model on the 2MB-SRAM NPU, do short-term local association across nearby frames, and transmit compact events: timestamp, camera ID, bounding box, class, confidence, and a small appearance embedding only when a vehicle is observed or its track changes. The cloud performs cross-camera re-identification, global track stitching, routing, and any heavier model pass for ambiguous cases. This avoids streaming all video while not assuming the camera can run the full perception and citywide tracking stack locally.
   common_mistake: |
     **The Pitfall:** Downscaling video to 480p and streaming to the cloud.
     **The Rationale:** Attempting to solve the problem with traditional video compression rather than edge ML.
@@ -20,14 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Raw streaming: 1080p @ 15fps takes 2 Mbps = 0.25 MB/s = 21.6 GB/day per camera.
-    - Edge NPU metadata: 10 vehicles/frame * 15fps * (128B embedding + 32B bbox) = 24 KB/s = 2.07 GB/day per camera.
+    - Edge metadata event: 128B embedding + 32B bbox/score/class + 40B timestamp/camera/track fields = 200B.
+    - Average metadata rate after local association: 10 vehicle events/second per camera, not every vehicle in every frame.
 
     **Calculations:**
     - Total Raw Cost: For 5,000 cameras, 108,000 GB/day at $0.05/GB costs $5,400/day.
-    - Total NPU Cost: Total data is 10,350 GB/day = $517.5/day.
+    - Edge metadata per camera: 10 events/s * 200B = 2,000 B/s = 0.002 MB/s.
+    - Edge metadata per camera per day: 0.002 MB/s * 86,400s = 172.8 MB/day ≈ 0.173 GB/day.
+    - Total metadata: 0.173 GB/day * 5,000 = 864 GB/day.
+    - Total metadata cost: 864 GB/day * $0.05/GB = $43.20/day.
 
     **Conclusion & Interpretation:**
-    - **Result: ~$4,882/day savings (Bandwidth-Bound)**. Edge ML saves ~$4,882/day (~90% cost reduction).
+    - **Result: ~$5,357/day savings (Bandwidth-Bound)**. Edge detection plus local association reduces LTE traffic by sending compact track events instead of raw video, while the cloud still handles global re-identification and tracking.
 status: published
 provenance: imported
 requires_explanation: true
@@ -46,6 +50,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- computer-vision
-- bandwidth-optimization
-- edge-npu
+  - computer-vision
+  - bandwidth-optimization
+  - edge-npu

@@ -11,7 +11,7 @@ title: Diagnosing Write-Bound Systolic Arrays
 scenario: 'Your team is deploying a large recommendation model on a custom cloud accelerator featuring a 256x256 systolic array. During profiling of the deep fully-connected layers (INT8 inputs/weights, INT32 accumulators), you observe that off-chip memory bandwidth is saturated. The performance trace reveals a severe asymmetry: DRAM write bandwidth is maxed out at 400 GB/s, while DRAM read bandwidth hovers at only 100 GB/s, and compute utilization is stalled at 15%.'
 question: What is the architectural root cause of this inverted memory profile, and how should you reconfigure the dataflow to fix it?
 details:
-  realistic_solution: 'Analyze the trace using nsys profiling to recognize that the compiler selected a Weight Stationary (WS) dataflow with a tile size that forces high-precision INT32 partial sums to constantly spill to DRAM before accumulation is complete. Reconfigure the compiler to force an Output Stationary (OS) dataflow, pinning the 32-bit partial sums in the local PE accumulators and streaming the much smaller 8-bit inputs and weights.'
+  realistic_solution: Analyze the trace using nsys profiling to recognize that the compiler selected a Weight Stationary (WS) dataflow with a tile size that forces high-precision INT32 partial sums to constantly spill to DRAM before accumulation is complete. Reconfigure the compiler to force an Output Stationary (OS) dataflow, pinning the 32-bit partial sums in the local PE accumulators and streaming the much smaller 8-bit inputs and weights.
   common_mistake: |
     **The Pitfall:** Assuming the workload is fundamentally memory-bandwidth bound and attempting to increase batch size or prune weights.
     **The Rationale:** Completely missing that the higher-precision INT32 partial sums are causing a write-thrashing bottleneck.
@@ -20,13 +20,14 @@ details:
     **Assumptions & Constraints:**
     - Accelerator: 256x256 systolic array, INT8 inputs/weights, INT32 accumulators.
     - DRAM bandwidth: 400 GB/s write maxed out, 100 GB/s read.
-    
+
     **Calculations:**
-    - Weight Stationary (WS): Each intermediate MAC triggers an INT32 read (4B) and write (4B).
-    - Output Stationary (OS): Partial sums stay locked in local SRAM. Write traffic drops to 1 byte (INT8 post-activation) per finished output.
-    
+    - Weight Stationary (WS): weights are reused on-chip, but if accumulator buffering or tiling is insufficient, INT32 partial sums may spill and reload before the reduction is complete.
+    - Spill/fill traffic is expensive because partial sums are 4B each and can be written multiple times per output tile.
+    - Output Stationary (OS): partial sums stay in PE accumulators or local SRAM until the output is complete, so off-chip writes are mostly final outputs rather than intermediate INT32 reductions.
+
     **Conclusion & Interpretation:**
-    - **Result: 1 Byte Write Traffic (Write-Bandwidth Bound)**. Forcing Output Stationary dataflow instantly eliminates the 400 GB/s write bottleneck by keeping accumulators on-chip.
+    - **Result: write-bandwidth pressure from partial-sum spilling.** Forcing Output Stationary dataflow should greatly reduce off-chip partial-sum traffic, but the exact write volume depends on layer shape, tiling, accumulator capacity, and output format.
 status: published
 provenance: imported
 requires_explanation: false

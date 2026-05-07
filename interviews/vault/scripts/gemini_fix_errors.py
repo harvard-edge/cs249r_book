@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# STATUS (2026-05-03): preserved as a reference pattern — see vault/scripts/DEPRECATED.md
+# §"Preserved for adaptation". The HARDWARE_REFERENCE constant (V100/A100/H100/B200/T4
+# specs as ground-truth context for the judge) is exactly what
+# audit_corpus_batched.py needs in Phase 5 (CORPUS_HARDENING_PLAN.md). The
+# error-input format targets a legacy validation-results JSON shape; adapt to
+# whatever audit_corpus_batched.py emits.
 """
 Gemini 3.1 Pro error fixer for StaffML corpus.
 

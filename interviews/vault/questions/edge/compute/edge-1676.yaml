@@ -7,11 +7,11 @@ topic: systolic-dataflow
 competency_area: compute
 bloom_level: create
 phase: both
-title: 'Edge TPU Systolic Dataflow for Depthwise Convolutions'
-scenario: 'You are designing a real-time tracking system for a drone using an Edge TPU accelerator. The model uses novel lightweight convolution blocks that map poorly to standard dense systolic arrays, causing low MAC utilization.'
-question: 'How would you redesign dataflow, tiling, and operators so the drone tracker fully uses the TPU without CPU fallbacks?'
+title: Edge TPU Systolic Dataflow for Depthwise Convolutions
+scenario: You are designing a real-time tracking system for a drone using an Edge TPU accelerator. The model uses custom lightweight convolution blocks that may not compile to supported Edge TPU operators and can map poorly to dense systolic arrays.
+question: How would you redesign dataflow, tiling, and operators so the drone tracker fully uses the TPU without CPU fallbacks?
 details:
-  realistic_solution: 'Reformulate the network to prioritize pointwise (1x1) convolutions that perfectly utilize the systolic array, and restructure the dataflow to minimize SRAM reads. Enforce strict INT8 quantization to guarantee 100% on-chip execution, designing a tiling schema that hides the transfer latency.'
+  realistic_solution: Keep the tracker fully compilable for the Edge TPU by replacing unsupported custom blocks with supported INT8 ops, fusing activation/normalization patterns, and avoiding dynamic shapes or host-side postprocessing inside the critical path. For depthwise-heavy stages, pack channels and tiles so the TPU sees larger contiguous work units, fuse depthwise plus pointwise blocks where the compiler supports it, and increase pointwise expansion only where it improves array utilization without blowing the SRAM tile budget. The dataflow should double-buffer input tiles, keep intermediate tensors on chip between fused operators, and verify with the compiler report that no op falls back to CPU.
   common_mistake: |
     **The Pitfall:** Assuming standard weight-stationary dataflows will be efficient for depthwise convolutions.
     **The Rationale:** Candidates treat all convolutions equally and ignore how depthwise ops severely underutilize dense systolic arrays.
@@ -19,13 +19,16 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Edge TPU: 4 TOPS INT8 at 2W.
-    - Model requirement: 100 GOPS/frame.
+    - Model requirement: 100 GOP/frame if every operator remains on the TPU.
+    - CPU fallback for one unsupported block adds 12ms of host transfer and scalar execution.
 
     **Calculations:**
-    - Theoretical max throughput: 4,000 GOPS / 100 GOPS = 40 FPS.
-    - Poor utilization scenario: 20% systolic array utilization drops effective TOPS to 0.8 (yielding only 8 FPS).
-    - Optimized scenario: Restructuring to 1x1 convolutions pushes utilization to 80% (effective 3.2 TOPS = 32 FPS).
+    - Theoretical max throughput at peak: 4,000 GOP/s / 100 GOP/frame = 40 FPS, or 25 ms/frame.
+    - Poor depthwise mapping: 20% systolic utilization gives 0.8 TOPS = 800 GOP/s effective, so frame time is 100 GOP / 800 GOP/s = 125 ms, or 8 FPS before fallback overhead.
+    - CPU fallback path: 125 ms TPU portion + 12 ms fallback overhead = 137 ms/frame, or about 7.3 FPS.
+    - Optimized supported graph: 80% utilization gives 3.2 TOPS = 3,200 GOP/s effective, so frame time is 100 GOP / 3,200 GOP/s = 31.25 ms, or 32 FPS.
 
     **Conclusion & Interpretation:**
-    - **Result: 32 FPS (Utilization-Bound)**. Optimized tiling achieves 32 FPS while remaining strictly within the 2W power envelope.
+    - **Result: 32 FPS (Utilization- and Fallback-Bound)**. The redesign meets real-time tracking only if the compiler report shows a single supported TPU graph and the tiling keeps fused intermediates in SRAM.
 status: published
+provenance: imported

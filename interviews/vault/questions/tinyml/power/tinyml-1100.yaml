@@ -13,18 +13,25 @@ question: What sleep and wake schedule lets a solar-powered STM32F4 acoustic det
 details:
   realistic_solution: The optimal design uses an external ultra-low-power microphone with an analog envelope detector to serve as a primary hardware wake-up interrupt. When triggered, the STM32F4 wakes from deep sleep, buffers the audio into SRAM, and rapidly executes the quantized INT8 model. By utilizing CMSIS-NN SIMD instructions, the MCU completes the inference in half the clock cycles, heavily minimizing its active time at 168 MHz before returning to a micro-amp deep sleep state.
   common_mistake: |
-    **The Pitfall:** Proposing a continuous polling architecture that keeps the MCU constantly active.
-    **The Rationale:** Candidates fail to leverage the platform's CMSIS-NN SIMD capabilities to compress the active window, and they assume software-driven microphone polling is the only way to listen.
-    **The Consequence:** The MCU bleeds energy faster than the solar panel can replenish it, resulting in rapid brownouts.
+    **The Pitfall:** Sampling audio by waking the STM32F4 on a fixed short timer and doing software threshold checks.
+    **The Rationale:** This keeps the high-current MCU in the monitoring loop even when an external micropower microphone or analog envelope detector could hold the wake-up responsibility.
+    **The Consequence:** Most of the energy is spent proving that nothing happened, leaving too little harvested power for actual event captures and inference.
   napkin_math: |
     **Assumptions & Constraints:**
-    - STM32F4 at 168 MHz. CMSIS-NN SIMD (2x INT8 MACs/cycle). Solar harvester provides 5 mW (5 mJ/s). 5M cycle model. Active draw 30 mA at 3.3V = 99 mW.
+    - Solar harvester average power: 5 mW = 5 mJ/s.
+    - Deep sleep with external acoustic wake circuit: 20 uA at 3.3 V = 0.066 mW.
+    - Active current: 30 mA at 3.3 V = 99 mW.
+    - Wake window per acoustic event: 5 ms startup/buffer + 15 ms CMSIS-NN inference + 5 ms logging/radio handoff = 25 ms.
 
     **Calculations:**
-    - Cycles with SIMD = 5M / 2 = 2.5M. Inference time = 2.5M / 168 MHz = 14.88 ms. Energy per inference = 99 mW * 14.88 ms = 1.47 mJ. Max sustainable wake-ups per second = 5 mJ / 1.47 mJ = 3.4 inferences.
+    - Active energy per wake: 99 mW * 25 ms = 2.475 mJ.
+    - Sleep energy per second: 0.066 mJ/s.
+    - Harvest left for wakes: 5 - 0.066 = 4.934 mJ/s.
+    - Sustainable event rate: 4.934 / 2.475 = 1.99 wakes/s.
+    - Equivalent minimum average spacing: 1 / 1.99 = 0.50 s between full MCU wake events.
 
     **Conclusion & Interpretation:**
-    - **Result: ~3 inferences per second (Energy-Bound Duty Cycle)**.
+    - **Result: event-driven duty cycle.** The MCU can monitor continuously only by sleeping between hardware wake interrupts; a schedule that wakes the STM32F4 for about 25 ms per event and averages no more than roughly two full inference wakes per second stays within the 5 mW harvest budget.
 status: published
 provenance: imported
 requires_explanation: true

@@ -7,26 +7,28 @@ topic: roofline-analysis
 competency_area: compute
 bloom_level: apply
 phase: both
-title: 'The Dying ReLU Diagnosis'
+title: The Dying ReLU Diagnosis
 scenario: During training of a 12-layer MLP, loss plateaus after 1,000 steps and gradient norms for layers 8-12 drop to near zero. A histogram of layer 10 activations shows 87% of values are exactly zero.
 question: What is the root cause of the 87% zero activations, and what are two systems-aware mitigations?
 details:
-  realistic_solution: 'Root cause: Dying ReLU. With a large learning rate or poor initialization, weight updates push pre-activation values permanently negative. Once a ReLU neuron dies (output always 0), it receives zero gradient and never recovers. Systems impact: 87% dead neurons means 87% of those layers'' MACs are wasted (computing zeros). Mitigations: (1) Switch to LeakyReLU or GELU, which have nonzero gradients for negative inputs (compute cost is identical on modern GPUs). (2) Use batch normalization or layer normalization before the activation, which re-centers pre-activations and prevents the drift into the dead zone. (3) From a systems perspective, activation sparsity can actually be exploited with sparse kernels, but unstructured 87% sparsity from dead neurons is usually not the right kind of sparsity.'
+  realistic_solution: 'Root cause: Dying ReLU. With a large learning rate or poor initialization, weight updates push pre-activation values permanently negative. Once a ReLU neuron dies (output always 0), it receives zero gradient and may not recover. Systems impact: if the 87% zero rate is representative of later layers, much of those layers'' dense MAC work is producing zeros that do not help learning. Mitigations: (1) Switch to LeakyReLU or GELU, which preserve gradient signal for negative inputs; GELU may add some compute compared with ReLU but is often acceptable in dense GPU kernels. (2) Use batch normalization or layer normalization before the activation, which re-centers pre-activations and prevents drift into the dead zone. (3) From a systems perspective, activation sparsity can sometimes be exploited with sparse kernels, but unstructured sparsity from dead neurons is usually not the right kind of sparsity.'
   common_mistake: |
     **The Pitfall:** Blaming the optimizer or learning rate without inspecting activation distributions.
     **The Rationale:** The 87% zero activations clearly indicate the dying ReLU problem, which permanently zeroes out gradients.
     **The Consequence:** Wasting time debugging hyperparameter schedules while 87% of layer compute performs useless multiplications.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 12-layer MLP. 87% dead neurons in later layers.
-    - Compute per layer: 34.3 GFLOPs.
-    
+    - 12-layer MLP.
+    - Layer 10 activation histogram shows 87% exact zeros.
+    - The prompt does not provide hidden sizes or per-layer FLOPs.
+
     **Calculations:**
-    - Wasted Compute: 0.87 * 34.3 GFLOPs = 29.8 GFLOPs per layer.
-    - Total Waste (5 affected layers): 5 * 29.8 = ~149 GFLOPs per step.
-    
+    - Diagnostic signal: layers 8-12 have near-zero gradient norms, and layer 10 has 87% zero activations.
+    - With ReLU, negative pre-activations output exactly zero and pass zero gradient. A persistent high zero fraction plus near-zero downstream gradients is consistent with dying ReLU.
+    - Systems impact is qualitative from the given data: dense kernels still execute the layer MACs even when many activations are zero, but the prompt does not specify enough dimensions to compute GFLOPs wasted.
+
     **Conclusion & Interpretation:**
-    - **Result: 149 GFLOPs wasted (Compute-Bound)**. Switching to GELU runs at the same FLOP cost but restores gradients.
+    - **Result: Dying ReLU with wasted dense work.** Use LeakyReLU/GELU to preserve gradients or normalization to keep pre-activations centered; GELU may cost more than ReLU, so treat it as a training-stability tradeoff rather than a free FLOP-equivalent swap.
 status: published
 provenance: imported
 requires_explanation: false

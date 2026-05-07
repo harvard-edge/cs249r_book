@@ -11,16 +11,22 @@ title: Paged KV Cache Capacity Calculation
 scenario: You are serving a 7B parameter LLM on an 80GB GPU. Model weights leave 60GB for the KV cache. The KV cache requires 128 KB per token. The system statically allocates the maximum sequence length of 8,192 tokens for every request to prevent OOMs. Telemetry shows the average request length is only 1,024 tokens.
 question: What is the expected increase in concurrent request capacity with 16-token paged KV cache allocation?
 details:
-  realistic_solution: Calculate the capacity based on average sequence length rather than max sequence length. Paged memory allocates blocks dynamically, allowing the system to serve requests up to the physical memory limit based on actual usage.
+  realistic_solution: Static allocation reserves 8,192 tokens * 128KB = 1GB of KV cache for every request, so 60GB supports about 60 concurrent requests. With 16-token pages and an average request length of 1,024 tokens, each request uses 64 pages, or 128MB. The same 60GB therefore supports about 480 average-length requests, an 8x capacity increase, before allocator metadata and fragmentation overhead.
   common_mistake: |
     **The Pitfall:** Calculating memory savings based purely on eliminating external fragmentation.
     **The Rationale:** Candidates overlook that static allocation reserves the absolute maximum sequence length upfront for every request, regardless of actual output size.
     **The Consequence:** The true capacity benefits of PagedAttention (often 8x or more) are vastly underestimated.
   napkin_math: |
+    **Assumptions & Constraints:**
+    - System statically allocates max sequence length.
+    - Paged allocation uses 16-token blocks and average request length is 1,024 tokens.
+    **Calculations:**
     - Static allocation per request: 8,192 tokens * 128 KB = 1,048,576 KB (1 GB).
     - Max static concurrency: 60 GB / 1 GB = 60 requests.
-    - Paged allocation per average request: 1,024 tokens * 128 KB = 131,072 KB (128 MB).
+    - Paged blocks per average request: ceil(1,024 / 16) = 64 blocks.
+    - Paged allocation per average request: 64 blocks * 16 tokens/block * 128 KB = 131,072 KB (128 MB).
     - Max paged concurrency: 60 GB / 128 MB = 480 requests.
+    **Conclusion & Interpretation:**
     - **Result: Switching to 16-token paged KV cache allocation increases capacity by 8x (480 vs 60 requests).**
 status: published
 provenance: imported

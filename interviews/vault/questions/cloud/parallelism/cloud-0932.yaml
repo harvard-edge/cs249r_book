@@ -9,13 +9,13 @@ bloom_level: evaluate
 phase: training
 title: Evaluating BSP Mitigation Strategies for Stragglers
 scenario: You are training a 175B parameter language model on a cluster of 2048 GPUs. Under the current Bulk Synchronous Parallel (BSP) model, cluster MFU is ~35%. Profiling shows that 10% of nodes consistently exhibit a 20% compute slowdown due to thermal throttling.
-question: Should you use pipeline async, Asynchronous Parallel (ASP), or mitigated BSP for this 2048-GPU training cluster, and why?
+question: Should you use Asynchronous Parallel (ASP) or mitigated BSP for this 2048-GPU training cluster, and why?
 details:
-  realistic_solution: Maintain BSP to preserve strict mathematical equivalence and convergence guarantees, but mitigate the straggler penalty by over-provisioning nodes (e.g., maintaining a warm pool of spares) to dynamically swap out thermally degraded nodes, minimizing the bottleneck at the synchronization barrier.
+  realistic_solution: Use mitigated BSP rather than ASP for this 2048-GPU 175B training run. ASP may improve raw hardware utilization by avoiding barriers, but at this scale stale gradients can reduce statistical efficiency and convergence stability. A warm pool of spare nodes or active replacement of thermally throttled nodes keeps BSP's convergence behavior while removing the recurring 20% straggler from the barrier. Under the stated 30% ASP step-count penalty, mitigated BSP is faster end to end.
   common_mistake: |
     **The Pitfall:** Immediately switching to Asynchronous Parallel (ASP) to eliminate the synchronization barrier.
     **The Rationale:** Systems engineers prioritize removing the immediate system bottleneck (idle waiting time) without understanding the impact on ML math.
-    **The Consequence:** The model experiences a severe degradation in statistical efficiency and convergence stability at the 100B+ scale, ultimately taking much longer to train or failing to converge entirely.
+    **The Consequence:** At 100B+ scale, stale-gradient effects can erase the utilization gain by requiring more steps or more tuning, while the original BSP straggler problem can often be mitigated operationally.
   napkin_math: |
     **Assumptions & Constraints:**
     - Base Compute = 500ms, Comm = 100ms.
@@ -24,11 +24,12 @@ details:
 
     **Calculations:**
     - Straggler BSP: Max(500, 600) + 100 = 700ms per step. Total = 700N.
-    - ASP Time: Avg(510) + 100 = 610ms. Total = 610ms * 1.3N = 793N.
+    - ASP compute time if barriers are removed: average compute = 0.9 * 500ms + 0.1 * 600ms = 510ms.
+    - ASP Time: 510ms compute + 100ms comm = 610ms per nominal step. With a 30% convergence penalty, total = 610ms * 1.3N = 793N.
     - Mitigated BSP (Swapping): 500 + 100 = 600ms. Total = 600N.
 
     **Conclusion & Interpretation:**
-    - **Result: 24% faster (Synchronization-Bound)**. Mitigated BSP is ~24% faster than ASP (600N vs 793N).
+    - **Result: mitigated BSP is faster and preserves convergence (Synchronization-Bound)**. ASP is about 793/600 - 1 ≈ 32% slower than mitigated BSP; equivalently, mitigated BSP saves (793 - 600) / 793 ≈ 24% of ASP's wall-clock time.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,22 +11,28 @@ title: Adversarial Defense for Wake-Word on ARM Cortex-M4
 scenario: You are deploying a TinyML wake-word detection model for a smart safe lock on an ARM Cortex-M4 (STM32F4). Recent reports show the system is vulnerable to over-the-air adversarial audio perturbations that force false accepts. The platform has a 168 MHz clock, 256 KB SRAM, 1 MB flash, no FPU, and utilizes CMSIS-NN SIMD (2x INT8 MACs/cycle).
 question: How should the STM32F4 wake-word system defend against adversarial audio within a strict 50 ms latency budget?
 details:
-  realistic_solution: Design an architecture integrating integer-only randomized smoothing directly into the INT8 MFCC feature pipeline, coupled with an adversarially trained, highly quantized DS-CNN. By injecting bounded integer uniform noise via a fast PRNG (like Xorshift) prior to the first convolutional layer, the system disrupts the structured gradients of the adversarial attack. Leveraging CMSIS-NN SIMD ensures the INT8 operations execute efficiently without FPU overhead, easily accommodating the memory and latency boundaries.
+  realistic_solution: |
+    Use an MCU-friendly robustness pipeline rather than a heavyweight detector. Train the INT8 DS-CNN with adversarial and noisy audio augmentation, then run a small randomized-consistency check in the integer MFCC domain at inference: evaluate the base MFCC frame once and one bounded-noise variant, accept only if both predictions agree with sufficient confidence. This does not make the system secure against all adversarial audio, but it raises the false-accept bar while staying within the 50 ms latency budget and avoiding floating-point or large secondary models.
   common_mistake: |
-    **The Pitfall:** Proposing secondary autoencoders or floating-point spectral defenses.
-    **The Rationale:** Candidates apply standard deep learning adversarial defenses without accounting for the 256 KB SRAM limit or the lack of an FPU.
+    **The Pitfall:** Proposing repeated-inference smoothing with many samples, secondary autoencoders, or floating-point spectral defenses.
+    **The Rationale:** Candidates apply standard deep learning adversarial defenses without accounting for the 256 KB SRAM limit, the lack of an FPU, or the 50 ms end-to-end latency cap.
     **The Consequence:** The defense mechanism immediately triggers Out-of-Memory errors or massive latency violations on the STM32F4.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Cortex-M4 at 168 MHz. Latency Budget: 50 ms.
-    - Defense Mechanism: Xorshift PRNG noise.
+    - Cortex-M4 at 168 MHz. Latency Budget: 50 ms = 8.4M cycles.
+    - CMSIS-NN throughput: 2 INT8 MACs/cycle.
+    - DS-CNN cost: 3.0M MACs per pass.
+    - MFCC + control overhead: about 1.0M cycles.
+    - Defense: one extra bounded-noise consistency pass, not large-sample smoothing.
 
     **Calculations:**
-    - Cycle Budget: 0.05 s * 168 MHz = 8.4M cycles.
-    - Defense Overhead: 490 features * ~5 cycles = 2,450 cycles.
+    - One DS-CNN pass = 3.0M MACs / 2 MACs/cycle = 1.5M cycles = 8.9 ms.
+    - Two-pass consistency check = 3.0M cycles = 17.9 ms.
+    - PRNG feature noise = 490 features * ~5 cycles = 2,450 cycles = 0.015 ms.
+    - End-to-end estimate = 17.9 ms + (1.0M / 168M) = 17.9 ms + 6.0 ms = 23.9 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: < 0.03% latency overhead (Compute-Bound).** Randomized smoothing integrates securely into the strict latency window.
+    - **Result: About 24 ms end-to-end.** A calibrated two-pass integer consistency check fits the 50 ms budget with margin, but it should be described as a robustness improvement, not a complete security guarantee.
 status: published
 provenance: imported
 requires_explanation: true

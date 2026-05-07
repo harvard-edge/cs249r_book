@@ -8,10 +8,13 @@ competency_area: optimization
 bloom_level: create
 phase: inference
 title: The In-Car Assistant Latency Crisis
-scenario: 'You are the lead ML Systems Engineer for a new luxury EV. The product team wants a conversational AI assistant that feels ''instantaneous'' and can handle complex user queries by running a 7B parameter LLM on-device. Your target hardware is the Jetson AGX Orin (275 INT8 TOPS, 204.8 GB/s memory BW). Your initial prototype, using the 7B model quantized to INT8, has a time-to-first-token (TTFT) over 500ms, which feels sluggish. The hard constraint from the UX team is a P99 TTFT of < 150ms.'
+scenario: You are the lead ML Systems Engineer for a new luxury EV. The product team wants a conversational AI assistant that feels 'instantaneous' and can handle complex user queries by running a 7B parameter LLM on-device. Your target hardware is the Jetson AGX Orin (275 INT8 TOPS, 204.8 GB/s memory BW). Your initial prototype, using the 7B model quantized to INT8, has a time-to-first-token (TTFT) over 500ms, which feels sluggish. The hard constraint from the UX team is a P99 TTFT of < 150ms.
 question: What are your first three architectural decisions to meet the latency budget, and how do they combine to solve the problem?
 details:
-  realistic_solution: 'The correct approach is to design a multi-model system using speculative decoding. This avoids compromising the quality of the large model while massively accelerating inference.'
+  realistic_solution: |
+    Make three architectural decisions in order. First, split the product path into a small on-device draft/intent model and the 7B verifier so common short commands can start generation immediately while harder prompts still use the full model. Second, optimize the 7B serving path for TTFT: keep weights resident, preallocate KV cache, use a fused paged-attention runtime, pin prompt length budgets, and capture the decode graph so the first forward pass has no allocation or compilation stalls. Third, choose a batching and partitioning policy that protects P99 latency, such as single-request priority lanes for driver interactions and background batching only for non-urgent requests.
+
+    Speculative decoding helps steady-state decode and can reduce perceived latency when the draft model is confident, but it is not the only decision and it does not by itself solve TTFT. The system must remove prompt-prefill stalls and queueing jitter first.
   common_mistake: |
     **The Pitfall:** Focusing only on optimizing the 7B model in isolation via aggressive pruning or further quantization.
     **The Rationale:** Failing to recognize that auto-regressive generation is severely memory-bandwidth bound, not compute-bound.
@@ -20,14 +23,17 @@ details:
     **Assumptions & Constraints:**
     - Memory Requirement: A 7B parameter LLM in INT8 requires 7GB for weights.
     - Hardware: Jetson AGX Orin (275 INT8 TOPS, 204.8 GB/s memory BW).
+    - TTFT is dominated by request queueing, prompt prefill, KV-cache setup, and the first decode step, not by reading weights once per output token from storage.
+    - Example prompt budget: 128 tokens after intent compression.
 
     **Calculations:**
-    - Memory-Bound Latency: To generate 1 token, 7GB must be read. 7GB / 204.8 GB/s = 34.1ms per token.
-    - Total Time: For a 50-token response, time is 50 * 34.1ms = 1.7 seconds.
-    - Compute Time: 7B params * 2 ops = 14 GOPs. 14G / 275T = 0.05ms (trivial).
+    - Lower-bound weight-stream time for one forward pass = 7GB / 204.8 GB/s = 34.2ms if the pass is purely bandwidth-bound.
+    - Prompt prefill for 128 tokens reuses the resident weights across a batched prompt pass; it is not 128 independent 7GB reads from storage.
+    - Practical TTFT budget example: queueing <=20ms, tokenizer/input prep <=10ms, prompt prefill + first token <=90ms, dispatch <=10ms gives P99 target <=130ms with margin under 150ms.
+    - If prompt length doubles or requests queue behind background work, TTFT can exceed 150ms even when per-token decode throughput is acceptable.
 
     **Conclusion & Interpretation:**
-    - **Result: 34.1ms/token (Memory-Bandwidth Bound)**. The bottleneck is strictly memory, requiring speculative decoding.
+    - **Result: TTFT is a serving-path latency budget, not a 50-token throughput calculation.** Speculative decoding is useful, but the first three decisions must combine draft-model routing, optimized resident-weight prefill/KV management, and strict latency-aware scheduling.
 status: published
 provenance: imported
 requires_explanation: true

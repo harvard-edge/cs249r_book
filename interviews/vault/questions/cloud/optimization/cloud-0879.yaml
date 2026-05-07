@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: training
 title: Evaluating Async Prefetching for H100 Starvation
 scenario: You are training a large vision model on an 8x H100 node. Profiling shows that a forward/backward pass takes 45ms per batch. However, fetching and augmenting a batch of 1024 high-resolution images from network storage takes 110ms on the CPU. The current sequential pipeline yields ~29% GPU utilization.
-question: Evaluate the trade-offs between CPU workers, offline preprocessing, and async GPU decoding (DALI) to stop H100 starvation.
+question: Evaluate the trade-offs between CPU workers, offline preprocessing, and async GPU decoding (DALI) to stop H100 starvation?
 details:
-  realistic_solution: Simple async prefetching overlaps I/O but is bounded by `max(T_data, T_compute)`. Since 110ms > 45ms, standard CPU prefetching only improves utilization to 41%. Offline augmentation requires massive storage overhead and limits training flexibility. The optimal solution is to combine async prefetching with DALI to shift the decode/augmentation compute to the GPU, dropping CPU pipeline time below 45ms and achieving near 100% compute saturation.
+  realistic_solution: Simple async prefetching overlaps I/O but is bounded by `max(T_data, T_compute)`. Since 110ms > 45ms, standard CPU prefetching only improves utilization to about 41%. Offline augmentation can reduce CPU pressure but creates large storage overhead and limits training flexibility. DALI or GPU-side decoding is the right direction only if it reduces the input pipeline below the GPU compute window; for example, a 30ms input stage hidden under a 50ms GPU-side step would make the GPU the bottleneck. If the input path remains above about 45-50ms, H100 starvation remains.
   common_mistake: |
     **The Pitfall:** Assuming infinite scaling with more CPU workers and `prefetch_factor`.
     **The Rationale:** Believing adding CPU threads will linearly eliminate I/O limits.
@@ -23,9 +23,10 @@ details:
     2. **Calculations:**
        - Sequential Baseline: 110ms + 45ms = 155ms. GPU Util = 45 / 155 = 29%.
        - Async CPU Prefetch: Step Time = max(110, 45) = 110ms. GPU Util = 45 / 110 = 41%.
-       - GPU Offload (DALI): CPU drops to 30ms, GPU compute slightly increases to 50ms. Step Time = max(30, 50) = 50ms.
+       - DALI/GPU Offload Condition: input pipeline time must drop below the compute window to stop starvation.
+       - Example DALI Case: CPU-visible input work drops to 30ms, GPU-side step becomes 50ms. Step Time = max(30, 50) = 50ms, so the GPU is compute-bound under that new measured profile.
     3. **Conclusion & Interpretation:**
-       - **Result: DALI Achieves ~90% Utilization.** By shifting decoding and augmentation strictly to the GPU, the pipeline bottleneck flips from CPU to GPU, maximizing throughput.
+       - **Result: DALI is conditional, not automatic.** Prefetching alone raises utilization only to about 41%; DALI reaches near-full saturation only if it reduces end-to-end input time below the GPU compute time.
 status: published
 provenance: imported
 requires_explanation: false

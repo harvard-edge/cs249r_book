@@ -11,7 +11,7 @@ title: Optimizing Dual-Socket Memory Bandwidth
 scenario: You are deploying a compute-heavy PyTorch model on a dual-socket Intel Xeon server (2 NUMA nodes). Your current deployment launches 2 worker processes that share a single model instance in memory (defaulting to Node 0) and schedules threads randomly across all cores on both sockets.
 question: What effective memory bandwidth does the shared Node-0 model get, and how should you reconfigure the workers for NUMA locality?
 details:
-  realistic_solution: 'Duplicate the model weights so a copy exists in each NUMA node''s memory. Launch independent worker processes using `numactl --cpunodebind=N --membind=N` to ensure each worker only uses local cores and local memory.'
+  realistic_solution: In the current shared-model setup, the Node-0 worker can read local memory at up to 300 GB/s, while the Node-1 worker is capped by the 64 GB/s remote UPI path. With one worker on each socket and similar demand, the shared model sees roughly (300 + 64) / 2 = 182 GB/s average per-worker effective bandwidth. Fix it by duplicating model weights so each NUMA node has a local copy, then launch independent worker processes using `numactl --cpunodebind=N --membind=N`.
   common_mistake: |
     **The Pitfall:** Only pinning CPU threads while leaving model weights in a single NUMA node.
     **The Rationale:** Candidates forget that accessing remote memory across the UPI link is a massive bottleneck.
@@ -22,11 +22,13 @@ details:
     - Model shared on Node 0
 
     **Calculations:**
-    - Naive Setup: Node 0 gets 300 GB/s, Node 1 gets 64 GB/s (UPI bottleneck). Total Naive BW < 364 GB/s
-    - NUMA Isolated (duplicated weights): Node 0 gets 300 GB/s AND Node 1 gets 300 GB/s. Total Isolated BW = 600 GB/s
+    - Current shared model on Node 0: a worker running on Node 0 can read local weights at up to 300 GB/s.
+    - A worker running on Node 1 must read the Node-0 weights remotely and is capped at about 64 GB/s by UPI.
+    - With one worker on each socket and similar demand, average per-worker effective bandwidth is roughly (300 + 64) / 2 = 182 GB/s; the remote worker is the bottleneck.
+    - Fixed NUMA-local setup: duplicate weights, bind the Node-0 worker to Node 0 memory, and bind the Node-1 worker to Node 1 memory. Each worker can then read local weights at up to 300 GB/s, for up to 600 GB/s aggregate across both sockets.
 
     **Conclusion & Interpretation:**
-    - **Result: 600 GB/s (Memory-Bandwidth-Bound)**. Interconnect. Duplicating weights and pinning memory yields a ~1.6x+ improvement in effective bandwidth.
+    - **Result: current shared setup is about 182 GB/s average per worker, with the Node-1 worker capped at 64 GB/s.** The fixed duplicated-and-pinned setup restores local memory access on both sockets, up to 300 GB/s per worker and 600 GB/s aggregate.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,28 +7,32 @@ topic: federated-learning
 competency_area: cross-cutting
 bloom_level: create
 phase: inference
-title: Decentralized Anomaly Detection via Federated Averaging on nRF5340
-scenario: A predictive maintenance system uses nRF5340 sensors. Each device locally updates an anomaly detection model and participates in Federated Averaging over BLE 5.3 without exceeding the 256 KB SRAM limit or depleting the battery (~5mA active current). Data is highly non-IID, and bandwidth is severely constrained.
-question: Architect a cross-device federated learning system that handles non-IID data while strictly adhering to nRF5340 memory and power budgets.
+title: Personalized Federated Anomaly Detection on nRF5340
+scenario: A predictive maintenance system uses nRF5340 sensors. Each device locally updates an anomaly detection model and participates in bandwidth-constrained federated learning over BLE 5.3 without exceeding the 256 KB SRAM limit or depleting the battery (~5mA active current). Data is highly non-IID, and the server may use FedAvg-compatible personalization or proximal objectives.
+question: How would you architect federated learning for non-IID nRF5340 sensors within strict memory, BLE, and power budgets?
 details:
-  realistic_solution: Utilize FedProx to handle non-IID divergence by adding a proximal term. Use INT8 quantization and LoRA (Low-Rank Adaptation) to update only a fraction of parameters, keeping SRAM footprint small and minimizing energy-intensive BLE transmissions.
+  realistic_solution: |
+    Architect the device as an inference-first node with a frozen INT8 base anomaly model and a small trainable LoRA adapter kept in SRAM. Each client trains only the adapter on local windows, clips the update, stores it in a small flash/SRAM staging buffer, and transmits compressed deltas over BLE during scheduled connection windows. The server aggregates adapter updates with FedProx-style client objectives or proximal weighting to reduce non-IID drift, then sends back a new adapter or periodic base-model refresh. Failed BLE syncs keep the last known-good adapter, and local inference continues from the frozen base plus resident adapter without exceeding SRAM.
   common_mistake: |
     **The Pitfall:** Using standard FedAvg with full model gradient transmissions.
     **The Rationale:** Ignoring the steep energy cost of BLE transmissions and SRAM limits, assuming standard FL algorithms scale down perfectly to edge nodes.
     **The Consequence:** Full model updates blow past the 256 KB SRAM limit and the massive data transfers rapidly drain the sensor battery, rendering the system undeployable.
   napkin_math: |
     **Assumptions & Constraints:**
-    - SRAM: 256 KB. Model: 100K params (INT8). Active current: 5mA.
+    - SRAM: 256 KB. Model: 100K params (INT8). Active current budget: about 5 mA while awake.
     - BLE 5.3 throughput: ~1 Mbps (125 KB/s).
+    - BLE radio current during sync: assume 8 mA at 3 V for the short transmit window.
 
     **Calculations:**
-    - LoRA update (rank-4): ~2K parameters (2 KB).
+    - Resident memory: 100 KB base weights + 2 KB adapter + about 80 KB tensor arena/update buffers = about 182 KB, leaving about 74 KB SRAM headroom.
+    - LoRA update (rank-4): about 2K INT8 parameters = 2 KB.
     - BLE Tx time for 2 KB: 2 KB / 125 KB/s = 16 ms.
-    - Energy per Tx: 5 mA * 16 ms = 0.08 mAs.
-    - Energy per local epoch (500 ms): 5 mA * 500 ms = 2.5 mAs.
+    - Charge per sync: 8 mA * 16 ms = 128 mA-ms = 0.128 mC.
+    - Energy per sync: 0.128 mC * 3 V = 0.384 mJ.
+    - If syncing once per minute, average radio current is 8 mA * 16 ms / 60,000 ms = 0.0021 mA, far below the 5 mA awake-current budget.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.08 mAs per sync using LoRA (Energy-Bound)**. The system is entirely energy-bound by communication. PEFT/LoRA is required to minimize transmission energy while FedProx mitigates non-IID drift.
+    - **Result: adapter-only FL fits both SRAM and BLE budgets**. Keep the INT8 base model frozen, train only the small adapter locally, and aggregate compressed adapter deltas with a non-IID-aware server objective so the design answers the memory, bandwidth, and drift constraints together.
 status: published
 provenance: imported
 requires_explanation: true

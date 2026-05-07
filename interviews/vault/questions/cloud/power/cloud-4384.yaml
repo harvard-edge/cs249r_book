@@ -7,11 +7,12 @@ topic: datacenter-efficiency
 competency_area: power
 bloom_level: evaluate
 phase: both
-title: 'Power Capping Strategy for MI300X Training Under Budget Constraints'
-scenario: 'You manage a 512-accelerator MI300X training cluster. Each MI300X has a maximum TDP of 750W. The datacenter power contract caps your cluster at 300 kW total IT load. During peak matrix-multiply-heavy phases of training a 70B parameter model, power meters show the cluster drawing 380 kW, causing PDU overcurrent alarms. You must evaluate each option''s effect on training throughput and energy efficiency.'
-question: 'How do static 590W caps, 25% batch-size reduction, and dynamic power capping affect throughput and energy efficiency under the 300 kW cap?'
+title: Power Capping Strategy for MI300X Training Under Budget Constraints
+scenario: You manage a 512-accelerator MI300X training cluster. Each MI300X has a maximum TDP of 750W. The datacenter power contract caps your cluster at 300 kW total IT load. During peak matrix-multiply-heavy phases of training a 70B parameter model, power meters show the cluster drawing 380 kW, causing PDU overcurrent alarms. You must evaluate each option's effect on training throughput and energy efficiency.
+question: How do static 590W caps, 25% batch-size reduction, and dynamic power capping affect throughput and energy efficiency under the 300 kW cap?
 details:
-  realistic_solution: 'Option A (static 590W cap): 512 × 590W = 302 kW, just under budget. Throughput loss is ~10-15%, not the expected 21.3%, because memory bandwidth is the bottleneck and HBM power consumption is less affected by compute power caps than CUDA core frequency. Option B (batch size -25%): Similar throughput reduction but also reduces gradient noise, potentially requiring more steps—net effect may be worse WCT. Option C (dynamic capping): Best option if the cluster has fine-grained power telemetry; cap during GEMM phases, release during all-reduce. In practice, Option A is simplest to implement reliably and within 5% of Option C''s performance.'
+  realistic_solution: |
+    Option A as stated is slightly over the cap: 512 * 590W = 302.08 kW, so it must be lowered to about 585W per accelerator to meet a 300 kW IT limit. A static cap near 585W is simple and predictable; for a memory-heavy training phase it may retain roughly 85-88% of baseline throughput, improving tokens per joule because power falls from about 380 kW observed to 300 kW. Option B, reducing batch size by 25%, directly reduces delivered tokens per step and may require more steps or worse utilization; it can reduce power, but its throughput and energy efficiency are usually worse than a targeted cap. Option C, dynamic capping, is best if telemetry and controls are reliable: cap during power-heavy GEMM phases and relax during lower-power communication phases, preserving more throughput at the same 300 kW envelope. The direct answer is that 590W static capping misses the cap unless adjusted, batch reduction is a blunt throughput cut, and dynamic capping gives the best throughput/energy tradeoff when operationally feasible.
   common_mistake: |
     **The Pitfall:** Assuming power capping linearly reduces throughput (e.g., 78.7% power -> 78.7% throughput).
     **The Rationale:** Ignoring the fact that LLM training is predominantly memory-bandwidth-bound rather than pure compute-bound.
@@ -20,16 +21,17 @@ details:
     **Assumptions & Constraints:**
     - 512 MI300X accelerators, 750W max TDP.
     - 300 kW total IT load cap.
-    - Baseline power: 512 * 750W = 384 kW (28% over budget).
+    - Peak observed training draw: 380 kW. Nameplate maximum: 512 * 750W = 384 kW.
 
     **Calculations:**
-    - Option A cap at 590W: 512 * 590W = 302 kW (78.7% of TDP).
-    - Throughput loss is ~12-15% because memory bandwidth saturation retains ~85-90% compute throughput.
-    - Option B: 25% smaller batches = ~22% throughput reduction (compute underutilization).
-    - Option C (Dynamic): ~5% better throughput than Option A.
+    - Option A at 590W: 512 * 590W = 302,080W = 302.08 kW, which exceeds the 300 kW cap.
+    - Static cap required for 300 kW: 300,000W / 512 = 585.9W, so use about 585W per accelerator.
+    - If static capping retains 85-88% throughput at 300 kW, energy efficiency versus the 380 kW baseline is (0.85 to 0.88) / (300 / 380) = 1.08 to 1.11x baseline.
+    - Option B: 25% smaller batches gives about 75% tokens/step before any extra-step penalty; if it merely brings power to 300 kW, energy efficiency is about 0.75 / (300 / 380) = 0.95x baseline.
+    - Option C: dynamic capping can retain roughly 90-93% throughput at the same 300 kW cap, giving about 1.14 to 1.18x baseline energy efficiency.
 
     **Conclusion & Interpretation:**
-    - **Result: 5-8% improved EPI (Power-Bound)**. Static capping reduces throughput by only ~12-15%, making it simpler and highly effective for memory-bound LLM training.
+    - **Result: dynamic capping is best if available; otherwise use a static cap near 585W, not 590W.** Static capping is simple and improves energy efficiency, batch-size reduction is the weakest throughput tradeoff, and dynamic capping preserves the most throughput under the 300 kW limit.
 status: published
 provenance: imported
 requires_explanation: false

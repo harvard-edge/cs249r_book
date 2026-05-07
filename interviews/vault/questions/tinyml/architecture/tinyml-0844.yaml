@@ -8,25 +8,34 @@ competency_area: architecture
 bloom_level: apply
 phase: inference
 title: 'Realization: deploy EfficientNet-inspired tiny CNN on Cortex-M4 within 256KB SRAM'
-scenario: 'You need to deploy a 4-class gesture recognizer on a Cortex-M4 (168MHz, 256KB SRAM, 1MB Flash) using a custom EfficientNet-inspired tiny CNN with depthwise separable convolutions. Input is 48x48 grayscale.'
-question: 'How would you design the architecture to fit within 256KB SRAM and 256KB Flash for model weights, then realize the TFLite Micro deployment?'
+scenario: You need to deploy a 4-class gesture recognizer on a Cortex-M4 (168MHz, 256KB SRAM, 1MB Flash) using a custom EfficientNet-inspired tiny CNN with depthwise separable convolutions. Input is 48x48 grayscale.
+question: How would you design the architecture to fit within 256KB SRAM and 256KB Flash for model weights, then realize the TFLite Micro deployment?
 details:
-  realistic_solution: 'Architecture: Conv 3x3 (1->8, stride 2, 24x24x8) -> DW+PW block (8->16, 12x12x16) -> DW+PW block (16->32, 6x6x32) -> GlobalAvgPool (1x1x32) -> FC 32->4. Weights: 1x8x9 + 8x9 + 8x16 + 16x9 + 16x32 + 32x4 = 72+72+128+144+512+128 = 1056 params x 1B INT8 = ~1KB. Flash: 1KB weights + ~20KB TFLite Micro runtime = 21KB << 1MB. Peak activation SRAM: 24x24x8=4.6KB after stem; 12x12x16=2.3KB; 6x6x32=1.2KB. Peak = 4.6KB inputs + 2.3KB output simultaneously = 6.9KB << 256KB. TFLite Micro arena: 50KB should suffice.'
+  realistic_solution: 'Architecture: 48x48x1 input -> Conv 3x3 (1->8, stride 2, 24x24x8) -> DW 3x3 stride 2 + PW 1x1 (8->16, 12x12x16) -> DW 3x3 stride 2 + PW 1x1 (16->32, 6x6x32) -> GlobalAvgPool (1x1x32) -> FC 32->4. Weights: stem 3x3x1x8 = 72, block1 depthwise 8x9 = 72, block1 pointwise 8x16 = 128, block2 depthwise 16x9 = 144, block2 pointwise 16x32 = 512, FC 32x4 = 128, for 1056 INT8 weights plus small bias/scale metadata. Model weights are about 1KB, far below the 256KB weight allowance; TFLite Micro code, kernels, and the flatbuffer metadata consume additional Flash within the device''s separate 1MB Flash budget. Peak activation SRAM with ping-pong buffers is about 48x48x1 + 24x24x8 = 6.9KB during the stem, then smaller for later blocks, so a 50KB arena is a reasonable starting point after accounting for scratch and tensor metadata.'
   common_mistake: |
     **The Pitfall:** Designing with too many channels in early layers.
     **The Rationale:** Candidates compensate for grayscale input by inflating channel counts early in the network.
     **The Consequence:** Drastically inflating peak activation memory, violating the strict 256KB SRAM constraint.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Stem MACs: 24x24x1x8x9 = 41.4K. Total MACs: ~94K MACs.
-    - Compute Cycles: 47K cycles (at 4 MACs/2 cycles SIMD).
+    - Input: 48x48 grayscale.
+    - Architecture: stem stride 2, then two depthwise separable blocks that each downsample by 2.
+    - SIMD estimate: 4 MACs per 2 cycles for optimized int8 kernels.
 
     **Calculations:**
-    - Latency: 47K / 168MHz = 0.28ms.
-    - Power: 0.28ms / 33ms frame = 0.85% duty cycle. 50mW * 0.0085 = 0.43mW.
+    - Stem MACs: 24x24x8x3x3x1 = 41,472.
+    - Block 1 MACs: depthwise 12x12x8x9 = 10,368; pointwise 12x12x8x16 = 18,432.
+    - Block 2 MACs: depthwise 6x6x16x9 = 5,184; pointwise 6x6x16x32 = 18,432.
+    - FC MACs: 32x4 = 128.
+    - Total MACs: 41,472 + 10,368 + 18,432 + 5,184 + 18,432 + 128 = 94,016 MACs.
+    - Compute cycles estimate: 94,016 * 0.5 = 47,008 cycles.
+    - Latency estimate: 47,008 / 168,000,000 = 0.28 ms before memory, framework, and kernel overhead.
+    - Weight Flash: 1056 INT8 weights is about 1.0 KB, plus bias/scale metadata, well below the 256KB model-weight allowance.
+    - Activation SRAM peak with ping-pong buffers: input 48x48x1 = 2304B plus stem output 24x24x8 = 4608B, for 6912B before scratch and tensor metadata.
+    - Runtime/code Flash: TFLite Micro kernels and support code are separate from the weight count and must fit within the device's 1MB Flash budget.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.43mW (Compute-Bound)**. The efficient architecture achieves very low duty cycle and power consumption.
+    - **Result: about 94K MACs, 0.28 ms ideal compute time, ~1KB of INT8 weights in Flash, and ~6.9KB peak activation SRAM before scratch.** The model fits the 256KB SRAM and 256KB weight budgets, while TFLite Micro runtime/code Flash must be budgeted separately within the 1MB device Flash.
 status: published
 provenance: imported
 requires_explanation: true

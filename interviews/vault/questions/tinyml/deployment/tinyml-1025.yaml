@@ -8,26 +8,29 @@ competency_area: deployment
 bloom_level: evaluate
 phase: inference
 title: TFLite Micro vs AOT Compilation on nRF5340
-scenario: >
+scenario: |
   Your team is deploying an anomaly detection model on a Nordic nRF5340 with an active current budget of ~5mA. You must evaluate converting the ONNX model to TFLite and using the TFLite Micro (TFLM) interpreter versus using an Ahead-Of-Time (AOT) compiler to generate static C code directly from the ONNX graph.
 question: How do TFLite Micro and AOT compilation compare regarding SRAM footprint, operator support, and runtime overhead on the nRF5340?
 details:
-  realistic_solution: >
-    Advocate for AOT compilation (e.g., using TVM or microTVM). TFLM introduces fixed SRAM overhead for the micro-interpreter and dynamic tensor arena allocation. AOT compilation strips the interpreter, statically allocates memory, avoiding ONNX-to-TFLite conversion bugs, saving SRAM and CPU cycles, lowering active time, and preserving the 5mA budget.
+  realistic_solution: |
+    Compare two explicit pipelines rather than treating one as universally superior. TFLite Micro requires ONNX-to-TFLite conversion, then a TFLM build with registered kernels and a statically sized tensor arena; it is portable and well-tested when the model uses supported TFLite Micro operators, but it carries interpreter, op registration, and arena-planning overhead. AOT compilation from ONNX with a tool such as TVM/microTVM can generate static C for a fixed graph, remove the interpreter dispatch path, and expose a fixed memory plan, but only if the ONNX operators lower cleanly to kernels that fit the nRF5340's Cortex-M33-class CPU and SRAM. The release decision should be based on measured arena size, generated code size, supported operators, and latency on the target board; AOT is attractive for a stable supported graph, while TFLM is safer when portability and existing operator coverage matter more.
   common_mistake: |
     **The Pitfall:** Blindly recommending TFLite Micro because it is the industry standard.
-    **The Rationale:** Candidates often default to TFLM without realizing that its micro-interpreter and dynamic tensor arena introduce fixed SRAM overheads that are highly detrimental on a 256 KB device.
-    **The Consequence:** The TFLM interpreter consumes ~30 KB of critical SRAM, leaving dangerously tight margins for the RTOS and potentially causing out-of-memory crashes.
+    **The Rationale:** Candidates often default to TFLM without checking whether the converted graph is fully supported or whether the interpreter, registered kernels, and tensor arena fit the actual SRAM budget.
+    **The Consequence:** The deployment can pass desktop conversion but fail on-device because the runtime memory margin is too tight or because an unsupported operator forces a slow fallback.
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Total SRAM: 256 KB. System Overhead (Zephyr RTOS + BLE 5.3): 64 KB.
        - Remaining App SRAM: 192 KB.
-       - Model Activations: 140 KB. TFLM Overhead: 30 KB.
+       - Example measured tensor arena for model activations/scratch: 140 KB.
+       - Example TFLM interpreter/op-registration overhead beyond tensor arena: 20-30 KB, depending on linked kernels.
+       - Example AOT runtime overhead beyond static buffers: small fixed glue code, assumed ~5 KB SRAM for this comparison.
     2. **Calculations:**
-       - TFLM Overhead (Alternative A): 140 KB + 30 KB = 170 KB. Remaining = 192 KB - 170 KB = 22 KB.
-       - AOT Compilation (Alternative B): 140 KB + 0 KB = 140 KB. Remaining = 192 KB - 140 KB = 52 KB.
+       - TFLM example: 140 KB + 30 KB = 170 KB. Remaining = 192 KB - 170 KB = 22 KB.
+       - AOT example: 140 KB + 5 KB = 145 KB. Remaining = 192 KB - 145 KB = 47 KB.
+       - SRAM margin improvement in this example: 47 KB - 22 KB = 25 KB.
     3. **Conclusion & Interpretation:**
-       - **Result: AOT compilation saves ~30 KB of SRAM.** Stripping out the dynamic interpreter provides a safer memory margin and lowers active time. **Bottleneck: SRAM Capacity.**
+       - **Result: AOT can save roughly 25 KB of SRAM in this example, but only if the ONNX graph lowers to supported generated kernels.** TFLM may be the better engineering choice when its operator coverage and conversion path are already validated. **Bottleneck: SRAM Capacity and Operator Support.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,11 +7,11 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: 'Debugging Block-wise Softmax for Long-Context Attention'
-scenario: 'You are implementing a custom attention kernel for a 32,768 context window LLM on an NVIDIA A100 (80GB HBM). To avoid materializing the 32k x 32k attention matrix in HBM, you partition the query and key sequences into tiles of 128x128. However, after computing the localized softmax per block and aggregating the results, your model''s perplexity spikes and generates NaNs. Profiling shows incorrect attention weights compared to standard PyTorch nn.functional.softmax.'
-question: 'How do you diagnose and fix the tile-based softmax computation to match exact attention?'
+title: Debugging Block-wise Softmax for Long-Context Attention
+scenario: You are implementing a custom attention kernel for a 32,768 context window LLM on an NVIDIA A100 (80GB HBM). To avoid materializing the 32k x 32k attention matrix in HBM, you partition the query and key sequences into tiles of 128x128. However, after computing the localized softmax per block and aggregating the results, your model's perplexity spikes and generates NaNs. Profiling shows incorrect attention weights compared to standard PyTorch nn.functional.softmax.
+question: How do you diagnose and fix the tile-based softmax computation to match exact attention?
 details:
-  realistic_solution: 'Implement Online Softmax. Maintain a running max (m_i) and sum (l_i) for each row i in SRAM. For a new block j, update the global max: m_new = max(m_i, m_local). Rescale the running sum: l_new = l_i * exp(m_i - m_new) + l_local * exp(m_local - m_new). Finally, rescale the accumulated output matrix by the global l_new to ensure exact softmax equivalence without materializing the full N x N matrix.'
+  realistic_solution: Implement Online Softmax. For each active query tile, maintain per-row running max m, normalization sum l, and partial output O in SRAM. For each key/value block, compute local scores, local max m_block, local sum l_block, and local weighted output O_block. Update m_new = max(m, m_block), l_new = l * exp(m - m_new) + l_block * exp(m_block - m_new), and O_new = (O * l * exp(m - m_new) + O_block * l_block * exp(m_block - m_new)) / l_new. This preserves exact softmax normalization across all key blocks without materializing the full N x N matrix.
   common_mistake: |
     **The Pitfall:** Computing standard softmax independently per block.
     **The Rationale:** Candidates try to apply block-level mathematical operations without accounting for the required global normalization denominator across all tiles in a row.
@@ -25,11 +25,16 @@ details:
 
     **Calculations:**
     - Standard HBM matrix per head: N^2 * 2 bytes = 32768^2 * 2 = 2.14 GB (68.7 GB for 32 heads).
-    - Online Softmax SRAM footprint per head: Requires tracking m_i (max) and l_i (sum) vectors of length N.
-    - SRAM size: 32768 * 4 bytes * 2 vectors =~ 262 KB.
+    - For one 128-query tile, online softmax tracks m_i and l_i for 128 active rows.
+    - Per-tile row-state SRAM: 128 rows * 2 stats * 4 bytes = 1,024 bytes.
+    - For each key block, compute local row max m_block, local denominator l_block = sum(exp(scores - m_block)), and local weighted value output O_block.
+    - Combine with running state: m_new = max(m, m_block).
+    - Combine denominators: l_new = l * exp(m - m_new) + l_block * exp(m_block - m_new).
+    - Combine outputs: O_new = (O * l * exp(m - m_new) + O_block * l_block * exp(m_block - m_new)) / l_new.
+    - The kernel streams over key blocks and updates this state for the active query tile; it does not keep all N rows' stats resident in SRAM at once.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Optimization**. By updating a global running max and sum in SRAM (~262 KB), Online Softmax perfectly matches exact attention while completely avoiding the 68 GB HBM materialization that causes OOMs.
+    - **Result: Memory-Bound Optimization**. Online softmax matches exact attention only when the running max, running sum, and partial output are all rescaled across key blocks; this avoids the full 68 GB logits materialization while keeping live SRAM state tied to the active query tile.
 status: published
 provenance: imported
 requires_explanation: false

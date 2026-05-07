@@ -11,7 +11,7 @@ title: Realizing a Hybrid On-Device and Cloud Compound AI Pipeline on Tensor G3
 scenario: 'A Tensor G3 app implements a hybrid compound AI pipeline: on-device embedding and retrieval with LLM generation handled either on-device or via a cloud API. The switching decision happens per-query.'
 question: How should a hybrid compound AI pipeline decide between cloud and on-device generation while preserving context privacy?
 details:
-  realistic_solution: 'Context sanitization before cloud offload: (1) PII scrubbing: run a fast regex + small classifier (5M model, 2ms) to detect and redact PII from retrieved chunks before cloud transmission. (2) Truncation to API budget: max 2000 tokens to keep API cost low. (3) Decision logic: route to cloud if: battery > 30% AND network_rtt < 200ms AND query_sensitivity_score < 0.5 (non-sensitive per classifier). On-device otherwise. State handoff: for cloud path, send sanitized_context + query + system_prompt (total < 2000 tokens). For on-device, send full retrieved context (no sanitization needed). Results are identical format — UI renders same way.'
+  realistic_solution: Use privacy-first routing. Run sensitivity detection and PII scrubbing on the retrieved chunks before any cloud decision. Route to on-device generation when the query or retrieved context is sensitive, when classifier confidence is low, when redaction would remove task-critical context, or when network/battery constraints are poor. Route to cloud only when battery > 30%, network_rtt < 200ms, query_sensitivity_score < 0.5 with high classifier confidence, and the scrubbed context passes a no-raw-PII check. For the cloud path, send only sanitized_context + query + system_prompt within the API budget; for the local path, keep full retrieved context on device. The UI receives the same response schema from either path.
   common_mistake: |
     **The Pitfall:** Sending raw retrieved document chunks to the cloud API without sanitization or truncation.
     **The Rationale:** Engineers optimize for latency and model output quality but ignore the architectural constraints of hybrid data privacy.
@@ -20,15 +20,18 @@ details:
     **Assumptions & Constraints:**
     - On-Device Generation: 6.25s at 5W.
     - Cloud Network RTT: 80ms. Cloud Gen: 200ms.
-    - PII scrub: 2ms.
+    - PII scrub: 2ms. Embed: 133ms.
 
     **Calculations:**
     - On-Device Power: 5W * 6.25s = 31.25J.
     - Cloud Latency: Embed(133ms) + PII scrub(2ms) + Net(80ms) + Gen(200ms) = 415ms.
-    - Cloud Power: (5W * 0.138s for embed) + (0.1W * 0.282s idle) = 0.718J.
+    - Cloud active device time: Embed(133ms) + PII scrub(2ms) = 135ms = 0.135s.
+    - Cloud waiting time: Net(80ms) + cloud Gen(200ms) = 280ms = 0.280s.
+    - Cloud device energy model: the phone spends 0.135s in active local embedding/scrubbing at 5W, then waits 0.280s for network/cloud work at an assumed 0.1W idle-radio average.
+    - Cloud device energy: (5W * 0.135s active) + (0.1W * 0.280s waiting) = 0.675J + 0.028J = 0.703J.
 
     **Conclusion & Interpretation:**
-    - **Result: 415ms Latency, 0.718J Power (Power-Bound)**. The cloud path is 15x faster and saves 97.7% energy, optimizing the constraint while preserving privacy.
+    - **Result: 415ms Latency, 0.703J Device Energy for Eligible Cloud Requests.** The cloud path is about 6.25 / 0.415 = 15.1x faster and saves (31.25 - 0.703) / 31.25 ~= 97.8% device energy only when privacy checks pass with high confidence. Sensitive or uncertain cases remain local even if that costs more latency and energy.
 status: published
 provenance: imported
 requires_explanation: false

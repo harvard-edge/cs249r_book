@@ -11,28 +11,30 @@ title: On-Device Data Pruning for Continual Learning
 scenario: You are architecting an on-device continual learning pipeline for a personalized keyboard model running on the Apple A17 Pro Neural Engine. You must avoid impacting foreground tasks and adhere to the ~5W power budget.
 question: How would you build an on-device data pruning pipeline for continual learning without exceeding mobile resource budgets?
 details:
-  realistic_solution: Design a streaming data pipeline where a lightweight, heavily quantized INT8 proxy model calculates the ICR (e.g., via approximate gradient norms) for each interaction as it occurs. High-ICR samples are saved to a fixed-size ring buffer via Top-K Sparsification, while redundant data is immediately discarded. The 16-core Neural Engine then performs scheduled, batched fine-tuning exclusively on this highly informative subset, drastically reducing total compute and memory footprint.
+  realistic_solution: Design a streaming data pipeline where a lightweight INT8 proxy model scores each keyboard interaction for training value using loss, uncertainty, novelty, or disagreement with the current personalized model. Store only compact metadata and the highest-scoring examples in bounded per-class ring buffers, evicting redundant low-value samples as new data arrives. During charging or other approved background windows, run a batched selection pass to build a balanced coreset, then fine-tune only that subset with strict time, thermal, and memory limits on the A17 Pro Neural Engine.
   common_mistake: |
     **The Pitfall:** Proposing complex coreset selection algorithms that cache the entire history.
     **The Rationale:** Candidates ignore the compute overhead of the selection mechanism and the 8 GB unified memory limit.
     **The Consequence:** This leads to memory pressure, OS-level app evictions, and proxy models that consume more power than fine-tuning saves.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Proxy Scoring Cost: 10 GOPS per sample.
-       - Target: 5,000 interactions.
-       - A17 Pro NPU: ~35 TOPS (35,000 GOPS/sec).
-       - Power Budget: ~5W.
-       - Pruning Rate: 90% (leaves 500 samples).
-       - Fine-Tuning Cost: 1,000 GOPS per sample.
-    2. **Calculations:**
-       - Scoring Total: 5,000 samples * 10 GOPS = 50,000 GOPS.
-       - Scoring Time: 50,000 GOPS / 35,000 GOPS/sec = ~1.43 seconds.
-       - Fine-Tuning Total: 500 samples * 1,000 GOPS = 500,000 GOPS.
-       - Fine-Tuning Time: 500,000 GOPS / 35,000 GOPS/sec = ~14.29 seconds.
-       - Total Compute Time: 1.43s + 14.29s = 15.72s.
-       - Energy Consumed: 15.72s * 5W = 78.6 Joules.
-    3. **Conclusion & Interpretation:**
-       - **Result: Energy-Bound.** The 78.6 Joules per day requires background scheduling to adhere to the 5W thermal envelope and avoid foreground interference.
+    **Assumptions & Constraints:**
+    - Workload basis: 5,000 keyboard interactions per day.
+    - Proxy scoring cost: 10 GOP per interaction.
+    - A17 Pro NPU effective throughput for this workload: 35 TOPS = 35,000 GOP/s.
+    - Active training power cap: 5 W.
+    - Pruning rate: 90%, leaving 500 samples for fine-tuning.
+    - Fine-tuning cost: 1,000 GOP per retained sample.
+
+    **Calculations:**
+    - Daily scoring work = 5,000 * 10 GOP = 50,000 GOP.
+    - Scoring time = 50,000 GOP / 35,000 GOP/s = 1.43 s.
+    - Daily fine-tuning work = 500 * 1,000 GOP = 500,000 GOP.
+    - Fine-tuning time = 500,000 GOP / 35,000 GOP/s = 14.29 s.
+    - Total active accelerator time = 1.43 s + 14.29 s = 15.72 s/day.
+    - Energy at the 5 W cap = 15.72 s * 5 J/s = 78.6 J/day.
+
+    **Conclusion & Interpretation:**
+    - **Result: 78.6 J/day for the stated 5,000-interaction workload.** The compute is feasible only if scheduled in short background windows so the 5 W active phase does not interfere with foreground use.
 status: published
 provenance: imported
 requires_explanation: true

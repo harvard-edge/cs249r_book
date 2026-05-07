@@ -11,7 +11,8 @@ title: The GPU Preprocessing Offload
 scenario: Your training pipeline for a large recommendation model spends 60% of step time on CPU-based feature preprocessing (hashing, bucketing, normalization of 500 features) and only 40% on GPU forward/backward passes. The GPUs are idle 60% of the time. Adding more CPU workers doesn't help because the preprocessing is already distributed across 32 CPU cores.
 question: How would you move the 500-feature preprocessing pipeline to the GPU, and what speedup should you expect?
 details:
-  realistic_solution: 'Classify preprocessing operations by GPU-friendliness: **GPU-native (80% of ops):** Numeric normalization (z-score, min-max), bucketing (searchsorted), embedding lookups (already on GPU), log transforms, polynomial features. These are embarrassingly parallel. **CPU-better (20% of ops):** String hashing (MurmurHash — can be GPU-ported but complex), regex feature extraction, JSON parsing, variable-length list features. **Architecture:** Use NVIDIA DALI or NVTabular to build a GPU-native preprocessing pipeline. Preprocessing and model forward pass share the same GPU memory, eliminating CPU→GPU data transfer for preprocessed features. Estimated speedup: if 80% of preprocessing moves to GPU and runs 50× faster (1000 features × batch of 65K = 65M operations, trivially parallel), effective preprocessing time drops from 60% to ~5% of step time. New bottleneck shifts to GPU compute at ~95% utilization.'
+  realistic_solution: |
+    Classify preprocessing operations by GPU-friendliness: GPU-native work includes numeric normalization, bucketing/searchsorted, log transforms, and dense arithmetic transforms; CPU-better work includes regex extraction, JSON parsing, and irregular string/list logic. Use a GPU preprocessing stack such as NVTabular or DALI for the GPU-native portion, keep the irregular 20% on CPU, and pass GPU-resident features directly into the model to avoid extra host-device copies. With a 100ms baseline step split into 60ms preprocessing and 40ms model compute, moving 80% of preprocessing to GPU at 50x speed leaves 12ms of CPU preprocessing plus about 1ms of GPU preprocessing. The expected step is about 53ms, or roughly 1.9x faster, not a full 2.5x because the remaining CPU path and model compute still remain.
   common_mistake: |
     **The Pitfall:** Assuming all CPU preprocessing can trivially move to GPU.
     **The Rationale:** Candidates often forget that operations like string hashing, regex, and dictionary lookups are inherently serial or have complex branching.
@@ -24,11 +25,13 @@ details:
     **Calculations:**
     - New GPU prep time = (60ms * 0.8) / 50 = 0.96ms.
     - Remaining CPU time = 60ms * 0.2 = 12ms.
-    - New step time = max(12ms, 40ms + 1ms) = 41ms.
-    - Speedup = 100ms / 41ms = 2.4x.
+    - Baseline step time = 60ms preprocessing + 40ms model = 100ms.
+    - New step time = 12ms remaining CPU prep + 0.96ms GPU prep + 40ms model = 52.96ms.
+    - Speedup = 100ms / 52.96ms ≈ 1.9x.
+    - GPU active portion after offload = 40.96ms / 52.96ms ≈ 77%.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.4x speedup (Compute-Bound)**. The bottleneck successfully shifts to GPU compute (97% utilization).
+    - **Result: About 1.9x Speedup**. GPU offload substantially reduces preprocessing time, but the remaining CPU preprocessing and unchanged model compute bound the achievable speedup.
 status: published
 provenance: imported
 requires_explanation: false

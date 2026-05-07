@@ -8,27 +8,28 @@ competency_area: architecture
 bloom_level: evaluate
 phase: both
 title: Optimize depthwise separable convolution throughput via kernel fusion on H100
-scenario: 'A profiling session with Nsight Compute shows that a MobileNetV2 block (expand 1×1 → depthwise 3×3 → project 1×1) on H100 has 47 kernel launches and 62% of time in memory transactions rather than SM compute.'
+scenario: A profiling session with Nsight Compute shows that a MobileNetV2 block (expand 1×1 → depthwise 3×3 → project 1×1) on H100 has 47 kernel launches and 62% of time in memory transactions rather than SM compute.
 question: How would you fuse kernels in the MobileNetV2 expand-depthwise-project block to reduce 47 launches and memory transactions on H100?
 details:
-  realistic_solution: 'Optimal fusion strategy: (1) Fuse expand 1×1 + BN + ReLU6 into one kernel (tensor core matmul + elementwise epilogue using cuBLAS/cuDNN epilogue fusion); (2) Fuse depthwise 3×3 + BN + ReLU6 into one kernel (custom CUDA or Triton with shared memory tiling); (3) Fuse project 1×1 + BN (no activation for linear bottleneck) into one kernel; (4) Fuse residual addition with project output. Result: 47 kernels → 3–4 kernels per MBConv block. torch.compile with Inductor backend performs this automatically.'
-  common_mistake: 'Attempting to fuse all three operations into a single kernel, which is impractical because the expand and project 1×1 operations are suited for tensor-core matmul while depthwise requires custom spatial indexing — different compute patterns cannot share tensor core instructions.'
+  realistic_solution: Use fusion at the natural compute boundaries of the block. Fuse expand 1×1 with its BN/ReLU6 epilogue, fuse depthwise 3×3 with BN/ReLU6 in a custom CUDA or Triton kernel that tiles the input halo, and fuse project 1×1 with BN plus the residual add when the skip connection is valid. Do not force expand-depthwise-project into one monolithic kernel because the 1×1 tensor-core GEMM pattern and the spatial depthwise pattern have different data layouts and reuse. A practical target is reducing the block from dozens of framework-level launches to about 3-4 launches while eliminating intermediate activation writes between convolution, normalization, activation, and residual epilogues. Compiler fusion may help, but the release answer should verify the actual fused graph or generated kernels rather than assuming it happens automatically.
+  common_mistake: |
+    **The Pitfall:** Attempting to fuse all three operations into a single kernel.
+    **The Rationale:** Different compute patterns (tensor-core vs spatial indexing) cannot share tensor core instructions.
+    **The Consequence:** Proposing an impractical fusion strategy that cannot be implemented on the hardware.
   napkin_math: |
     **Assumptions & Constraints:**
     - Original block: 47 kernel launches.
     - Fused block: 4 kernel launches.
     - Kernel launch overhead: 5µs per launch.
-    - Architecture: MobileNetV2 with 17 MBConv blocks.
-    
+
     **Calculations:**
     - Overhead per original block: 47 * 5µs = 235µs.
     - Overhead per fused block: 4 * 5µs = 20µs.
-    - Time saved per block: 235µs - 20µs = 215µs.
-    - Total time saved per inference: 17 blocks * 215µs = 3.655ms.
-    - MobileNetV2 BS=1 baseline: ~8ms. Speedup = 3.655ms / 8ms ≈ 46%.
-    
+    - Launch overhead avoided for this profiled block: 235µs - 20µs = 215µs.
+    - Additional savings should come from avoiding intermediate HBM writes between BN, activation, and residual elementwise operations.
+
     **Conclusion & Interpretation:**
-    - **Result: 46% Speedup (Launch-Overhead Bound)**. Fusing epilogues and elementwise operations massively reduces kernel launch limits and HBM round trips, slashing latency by nearly half.
+    - **Result: Block-Level Launch and Memory Reduction.** The calculation justifies a per-block launch-overhead reduction from 47 to about 4 launches; any whole-model speedup must be measured after applying the same verified fusion plan to each eligible block.
 status: published
 provenance: imported
 requires_explanation: true

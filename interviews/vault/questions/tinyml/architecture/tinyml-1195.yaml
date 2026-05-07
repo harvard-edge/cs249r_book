@@ -11,7 +11,8 @@ title: ESP32-S3 Memory Hierarchy Design for Always-On Audio
 scenario: You are architecting an always-on acoustic anomaly detection system for industrial predictive maintenance on the ESP32-S3 (240 MHz dual-core, 512 KB SRAM, 8 MB PSRAM, INT8 vector extensions). The model requires extracting Mel-spectrograms and passing them through a CNN. You must design a memory hierarchy and execution strategy that guarantees the inference critical path never stalls due to external PSRAM latency, while fitting within the 512 KB internal SRAM limit alongside system tasks.
 question: How should ESP32-S3 keep the always-on audio inference critical path in SRAM while prefetching PSRAM weights?
 details:
-  realistic_solution: 'A robust L6 architecture pins the RTOS, networking stacks, DMA audio buffers, and layer activations strictly to the fast 512 KB internal SRAM. Because the ESP32-S3 has INT8 vector extensions that demand high memory bandwidth, the INT8 model weights are stored in the larger 8 MB PSRAM (or Flash), but the candidate must design a pipelined execution engine. This engine uses a ping-pong buffer in SRAM to prefetch the next layer''s weights via DMA while the current layer computes, entirely masking the PSRAM latency.'
+  realistic_solution: |
+    A robust L6 architecture reserves internal SRAM first for deterministic work: RTOS/network state, audio DMA rings, Mel feature buffers, the current layer's activations, and two bounded PSRAM weight staging buffers. The bulk INT8 weights live in PSRAM, but execution is scheduled layer-by-layer so Core 1/DMA prefetches the next layer's weight tile into one SRAM staging buffer while Core 0 computes from the other. The design must cap activation and weight-tile sizes so the deterministic SRAM working set fits with real headroom; it can hide most PSRAM latency only when each prefetch completes before the current layer finishes and bus contention is controlled.
   common_mistake: |
     **The Pitfall:** Placing both model weights and activations entirely in the 8 MB PSRAM simply because it has enough space.
     **The Rationale:** Engineers treat all memory spaces uniformly and prioritize avoiding out-of-memory errors over optimizing access times.
@@ -25,12 +26,14 @@ details:
 
     **Calculations:**
     - Remaining ML SRAM: 512 KB - 200 KB = 312 KB.
-    - Activation ping-pong buffers: 131 KB × 2 = 262 KB.
+    - Current and next activation buffers: 96 KB × 2 = 192 KB after depth-first scheduling/fusion.
     - Weight DMA prefetch buffers: 18 KB × 2 = 36 KB.
-    - Total ML SRAM used: 262 + 36 = 298 KB.
+    - Mel/features and scratch buffers: 48 KB.
+    - Total deterministic ML SRAM used: 192 + 36 + 48 = 276 KB.
+    - Headroom inside remaining SRAM: 312 - 276 = 36 KB.
 
     **Conclusion & Interpretation:**
-    - **Result: 298 KB (SRAM-Bound)**. The architecture successfully fits within 512 KB with a 14 KB margin, entirely masking PSRAM latency via concurrent DMA ping-pong buffers.
+    - **Result: 276 KB ML working set (SRAM-Bound)**. The design fits within the post-overhead 312 KB SRAM budget with 36 KB of guard space. PSRAM latency is masked only for layers whose next weight tile can be fetched during the current layer's compute window; otherwise the scheduler must use smaller tiles or accept a bounded stall.
 status: published
 provenance: imported
 requires_explanation: true

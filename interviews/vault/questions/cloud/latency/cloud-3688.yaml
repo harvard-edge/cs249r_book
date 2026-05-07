@@ -11,20 +11,24 @@ title: SLO-Aware Autoscaling for Inference Under Bursty Load
 scenario: You serve a 70B LLaMA model with a p99 TTFT SLO of < 200ms. You experience daily 3x traffic spikes lasting 2-5 minutes. Cold start for a new instance takes 4 minutes.
 question: How would you autoscale 70B LLaMA serving to survive 3x spikes lasting 2-5 minutes when H100 cold starts take 4 minutes?
 details:
-  realistic_solution: Implement predictive scaling to pre-warm instances before predicted spikes. Use spot pools with pre-loaded weights on NVMe to drastically cut cold start times, and maintain a small warm spare pool buffer.
+  realistic_solution: Pure reactive scaling cannot protect a 2-5 minute spike when new H100 instances need 4 minutes to serve traffic. Keep a warm pool sized for the first 4 minutes of spike demand and use predictive pre-warming at least 4 minutes before expected daily spikes. If normal load needs N replicas, a 3x spike needs 3N warm replicas, so either keep about 2N spare warm capacity or pre-warm that capacity before the spike; reactive scale-out only handles the tail and recovery.
   common_mistake: |
     **The Pitfall:** Relying solely on reactive autoscaling triggered by a p95 latency breach.
     **The Rationale:** Candidates fail to model the impact of the 4-minute cold start delay against the short 5-minute spike duration.
     **The Consequence:** Scaling completes only after the traffic spike has ended, guaranteeing 4+ minutes of SLO violations and wasting cloud spend on idle instances post-spike.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 70B LLaMA model. Cold start takes 4 minutes.
-       - NVMe read speed is ~6.5 GB/s.
-    2. **Calculations:**
-       - Model size: 70B * 2 bytes = 140 GB.
-       - Standard Cold Start: 14s (S3 download) + ~4 min (init) = 4.2 mins.
-       - NVMe Pre-staging Cold Start: 140 GB / 6.5 GB/s NVMe = 21.5s + 42ms GPU load = ~22s.
-    3. **Conclusion & Interpretation:**
-       - **Pre-staging cuts cold start times by 11x, making reactive scaling viable if combined with predictive pre-warming.**
-       - **Result: IO-Bound**
+    **Assumptions & Constraints:**
+    - Baseline load requires N warm replicas.
+    - Spike load is 3N for 2-5 minutes.
+    - Cold start takes 4 minutes.
+    - p99 TTFT SLO is < 200 ms.
+
+    **Calculations:**
+    - Extra capacity needed at spike start: 3N - N = 2N replicas.
+    - Reactive scale-out arrives after 4 minutes, so it misses all of a 2-minute spike and most of a 5-minute spike.
+    - Warm capacity needed to avoid SLO breach during the cold-start window: 2N spare replicas, or an equivalent predictive pre-warm completed before the spike starts.
+
+    **Conclusion & Interpretation:**
+    - **Result: Warm-Capacity Bound.** Surviving short 3x spikes requires predictive pre-warming or a minimum warm pool; cold-start optimization helps cost and recovery but does not make purely reactive scaling sufficient.
 status: published
+provenance: imported

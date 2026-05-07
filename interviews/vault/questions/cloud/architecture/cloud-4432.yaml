@@ -8,29 +8,30 @@ competency_area: architecture
 bloom_level: analyze
 phase: inference
 title: 'Continual Adaptation: Catastrophic Forgetting in LoRA Updates'
-scenario: 'A production LLM is updated monthly with new LoRA adapters trained on fresh data. After 4 months, benchmark performance on original tasks has degraded 15% even though the base model weights are frozen.'
+scenario: A production LLM is updated monthly by replacing the served LoRA adapter with a new adapter trained on fresh data; some teams also merge monthly adapters into a serving artifact. After 4 months, benchmark performance on original tasks has degraded 15% even though the base model weights are frozen.
 question: Why did original-task performance degrade 15% after four monthly LoRA adapter updates even though the base weights were frozen, and how would you prevent it?
 details:
-  realistic_solution: 'Frozen base prevents catastrophic forgetting of base knowledge. But if the deployment pattern merges adapters into the base (for efficiency) and then trains new adapters on top of the merged base, the frozen base is different each month and gradually drifts. Fix A (no merge): maintain versioned separate adapters, serve them in ensemble. Fix B (merge with regularization): when merging adapter n, add EWC (Elastic Weight Consolidation) penalty for parameters important to previous tasks. Fix C (adapter capacity): train each monthly adapter to be orthogonal to previous adapters using Gram-Schmidt on the LoRA B matrices. Fix D (replay): include 5% of old task data in each monthly training run. Most practical: Fix D with 5% replay buffer sampled from each of the 4 previous months.'
+  realistic_solution: Frozen base weights do not by themselves preserve the deployed behavior, because the active LoRA adapter is part of the model. Monthly adapters trained only on fresh data can interfere with earlier tasks, and destructive merge practices can make the effective serving checkpoint drift even when the original base artifact is unchanged. Prevent this with adapter versioning and rollback, held-out regression suites for old tasks, rehearsal examples from prior months, and regularization against prior-adapter behavior. For multi-domain serving, prefer isolated or routed adapters over repeatedly merging every monthly delta into one serving artifact; if a merge is needed, validate the merged model against old and new tasks before promotion.
   common_mistake: |
     **The Pitfall:** Assuming frozen base weights prevent catastrophic forgetting.
-    **The Rationale:** The LoRA adapters themselves can accumulate task interference across monthly updates if each new adapter is merged additively into the base.
-    **The Consequence:** Gradual drift of the effective base model, leading to degraded performance on older tasks.
+    **The Rationale:** Replacing the active adapter, composing multiple adapters, or merging monthly deltas can all change the effective served model even when the base checkpoint is unchanged.
+    **The Consequence:** Gradual drift of deployed behavior, leading to degraded performance on older tasks.
   napkin_math: |
     **Assumptions & Constraints:**
     - 4 months of adapter updates.
     - Observed degradation: 15%.
-    - EWC regularization uses a 15M param Fisher matrix (FP32).
-    - Replay buffer uses 5% of monthly dataset (10K examples).
+    - Each monthly dataset has 10K examples.
+    - Replay buffer uses 5% from each prior monthly dataset.
+    - A regression gate keeps fixed evaluation sets for original tasks.
 
     **Calculations:**
-    - Degradation rate: 15% / 4 updates = ~3.75% drift per update.
-    - EWC storage cost: 15,000,000 params * 4 bytes = 60MB per checkpoint.
-    - Replay examples needed (3 previous months): 0.05 * 30,000 = 1500 examples.
-    - Adding 1500 examples to a 10K dataset increases training time by ~15%.
+    - Training month 4 with replay from months 1-3 uses 3 * 0.05 * 10,000 = 1,500 old examples.
+    - Total examples for that run = 10,000 fresh + 1,500 replay = 11,500.
+    - Replay data increases example count by 1,500 / 10,000 = 15% under equal-length examples.
+    - The 15% benchmark drop is an observed aggregate regression, not proof of a linear 3.75% forgetting rate per update.
 
     **Conclusion & Interpretation:**
-    - **Result: <0.5% drift/month (Capacity-Bound)**. Additive merging of LoRA weights pollutes the effective base model. A small 5% replay buffer is computationally cheap and empirically prevents catastrophic forgetting.
+    - **Result: Adapter Interference and Release Process Risk.** A small replay buffer plus regression gating is cheap relative to the monthly run and directly constrains older-task behavior; adapter isolation and validated merges prevent monthly LoRA updates from silently changing the effective served model.
 status: published
 provenance: imported
 requires_explanation: false

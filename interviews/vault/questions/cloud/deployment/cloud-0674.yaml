@@ -11,7 +11,7 @@ title: The Prefill-Decode Disaggregation
 scenario: You serve a 70B model on a fleet of 64 GPUs. During peak traffic, P99 latency spikes to 5x the P50 because long-prompt requests block short-prompt requests in the same batch. An architect proposes splitting the fleet into separate 'prefill GPUs' and 'decode GPUs'.
 question: Why would dedicating GPUs to different phases actually improve both throughput and latency?
 details:
-  realistic_solution: 'Prefill and decode have opposite computational profiles, and mixing them on the same GPU creates destructive interference. Prefill is deeply compute-bound, processing all prompt tokens in parallel through matrix multiplications. Decode is deeply memory-bandwidth-bound, reading entire model weights to produce one token per request. Disaggregation lets each pool run at its optimal operating point.'
+  realistic_solution: Prefill and decode have opposite computational profiles, and mixing them on the same GPU creates destructive interference. Prefill is deeply compute-bound, processing all prompt tokens in parallel through matrix multiplications. Decode is deeply memory-bandwidth-bound, reading entire model weights to produce one token per request. Disaggregation lets each pool run at its optimal operating point.
   common_mistake: |
     **The Pitfall:** Assuming that splitting the fleet inherently reduces throughput due to fragmentation.
     **The Rationale:** Engineers apply static capacity thinking, assuming fewer GPUs per pool means both pools will be slower.
@@ -19,12 +19,15 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - 70B model, H100 (989 TFLOPS, 3.35 TB/s).
-       - Prefill: 2048 tokens. Decode: 1 token.
+       - FP16 weights: 70B × 2 bytes = 140 GB.
+       - Prefill prompt length: 2048 tokens. Decode step: 1 new token per sequence.
     2. **Calculations:**
-       - Prefill FLOPs = 2 * 70e9 * 2048 = 287 TFLOPS. Time at 60% MFU = 287 / (989 * 0.6) = 0.48s.
-       - Prefill Arithmetic Intensity = 287e12 / 140e9 = 2050 Ops/Byte.
-       - Decode Time (Memory Bound) = 140 GB / 3350 GB/s = 41.8 ms.
-       - Decode Arithmetic Intensity = 140e9 / 140e9 = 1 Ops/Byte.
+       - Prefill FLOPs ≈ 2 × 70e9 × 2048 = 287e12 FLOPs.
+       - Prefill lower-bound compute time at 60% MFU: 287e12 / (989e12 × 0.6) ≈ 0.48 seconds.
+       - Prefill streams 140 GB of weights while doing work for 2048 tokens, so rough arithmetic intensity is 287e12 FLOPs / 140e9 bytes ≈ 2050 FLOPs/byte.
+       - Decode FLOPs for one token ≈ 2 × 70e9 = 140e9 FLOPs.
+       - Decode must still read about 140 GB of weights for that token; memory lower bound is 140 GB / 3350 GB/s ≈ 41.8 ms.
+       - Decode arithmetic intensity is 140e9 FLOPs / 140e9 bytes ≈ 1 FLOP/byte.
     3. **Conclusion & Interpretation:**
        - **Result: Hardware Disaggregation.** Prefill is deeply compute-bound, while decode is deeply memory-bound. Disaggregating them allows optimal batch sizing for each phase, preventing prefill from stalling decode.
 status: published

@@ -11,7 +11,7 @@ title: GPU Preemption for Priority Inference
 scenario: Your GPU cluster serves both latency-sensitive inference and batch training workloads. A high-priority inference model needs 8 MI300X GPUs immediately, but all GPUs are currently running training jobs.
 question: How would you preempt training jobs to free 8 MI300X GPUs for urgent inference while minimizing wasted compute and meeting the SLA?
 details:
-  realistic_solution: 'Tiered preemption strategy: (1) Check for checkpointable training jobs: use DMTCP or application-level checkpointing. Signal the 8 lowest-priority training processes to checkpoint. Give 2-minute deadline. Jobs write checkpoint to fast NVMe storage. After checkpoint, terminate and free GPUs. (2) If inference SLA requires <1 minute: use NVIDIA MPS (Multi-Process Service) to temporarily share GPUs. Once dedicated GPUs free up, migrate inference. (3) Prevention: reserve a small pool (8-16 GPUs) as burst capacity for high-priority inference.'
+  realistic_solution: Use scheduler-level priority preemption, not NVIDIA-specific sharing. Select the lowest-priority checkpointable training jobs occupying 8 MI300X GPUs, send a preemption notice, give them the configured 2-minute checkpoint/drain window, write checkpoints to fast local or shared storage, then evict the jobs and start the inference deployment on the freed GPUs. If the SLA cannot tolerate the drain window, keep an 8-GPU reserved inference pool or preempt already-checkpointed/restartable jobs first. Resume evicted training from checkpoints after the urgent inference window ends.
   common_mistake: |
     **The Pitfall:** Killing training jobs immediately via SIGKILL to rush the inference start.
     **The Rationale:** Schedulers assume batch jobs are entirely disposable and optimizing for time-to-start is the only metric.
@@ -25,9 +25,10 @@ details:
     **Calculations:**
     - Wasted training compute (checkpointed): 8 GPUs * 3 min = 24 GPU-minutes.
     - Wasted training compute (immediate kill): 8 GPUs * 2 hr = 16 GPU-hours.
+    - 24 GPU-minutes = 0.4 GPU-hours.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute Utilization Bound**. Graceful checkpointing turns 16 hours of wasted compute into just 24 minutes.
+    - **Result: Prefer checkpoint-and-evict preemption**. Graceful checkpointing reduces lost work from 16 GPU-hours to about 24 GPU-minutes while still freeing 8 MI300X GPUs for the urgent inference job.
 status: published
 provenance: imported
 requires_explanation: false

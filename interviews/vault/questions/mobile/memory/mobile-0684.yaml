@@ -8,32 +8,30 @@ competency_area: memory
 bloom_level: evaluate
 phase: inference
 title: The Mobile Memory Controller Puzzle
-scenario: You're optimizing an on-device LLM on an SoC with LPDDR5X (68.3 GB/s theoretical peak bandwidth). Your 4-bit quantized 7B model (3.5 GB) should generate tokens at 19.5 tokens/sec if fully memory-bandwidth-bound. You measure 11 tokens/sec.
+scenario: You're optimizing an on-device LLM on an SoC with LPDDR5X (68.3 GB/s theoretical peak bandwidth). A naive roofline using a 3.5 GB 4-bit weight footprint predicts about 19.5 tokens/sec, but profiling measures 11 tokens/sec.
 question: Where is the missing 44% of theoretical LPDDR5X memory bandwidth during generation?
 details:
   realistic_solution: |
-    Theoretical peak bandwidth relies on perfect, sequential burst reads. In a real edge system, effective bandwidth is severely cannibalized by four factors:
-    1. Constant DRAM hardware refresh cycles steal ~7% of up-time.
-    2. Competing traffic from asynchronous ISP, Display, and CPU components claims another ~14%.
-    3. The LLM's non-sequential weight access across different layers heavily fragments access, causing LPDDR row-buffer misses. Opening and closing memory pages strips away an additional ~30% of efficiency.
-    Optimizations must focus on contiguous weight layouts (e.g., interleaving weights to match the NPU access pattern) and blocking background hardware traffic (like camera streams) during generation.
+    The missing bandwidth is the gap between a naive roofline and end-to-end effective bandwidth. The roofline treats the 3.5 GB weight footprint as a perfectly streamed payload, but transformer decode has layer-by-layer working sets, dequantization, KV-cache reads and writes, activation traffic, synchronization, kernel launch overhead, cache effects, and competing display/ISP/CPU traffic. These factors overlap, so they should not be subtracted as independent GB/s penalties. The fix is to profile effective bandwidth per kernel and reduce avoidable traffic with fused dequant-matmul, fused attention/norm kernels, contiguous weight layouts matched to the accelerator, KV-cache quantization/layout tuning, larger tiles where SRAM allows, and scheduling that limits competing memory clients during generation.
   common_mistake: |
     **The Pitfall:** Directly dividing the theoretical LPDDR5X bandwidth spec by the model size to calculate generation tokens per second.
     **The Rationale:** Candidates fail to account for row-buffer page open/close latency penalties and OS-level traffic contention on unified memory buses.
     **The Consequence:** Over-promising product KPIs to leadership and ignoring critical software-level memory layout optimizations.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Peak Hardware Bandwidth: 68.3 GB/s.
-       - Model Size: 3.5 GB (4-bit quantized 7B model).
-       - Expected generation: 19.5 tok/s. Actual: 11 tok/s.
-    2. **Calculations:**
-       - Hardware Refresh Penalty: -7% (loss of ~4.8 GB/s).
-       - System Contention (Display/CPU): -14% (loss of ~9 GB/s).
-       - Random Access / Page Overhead: -30% (loss of ~16.3 GB/s).
-       - Effective Realized Bandwidth: 68.3 - 4.8 - 9 - 16.3 = 38.2 GB/s.
-       - Measured Token Rate: 38.2 GB/s / 3.5 GB/token = 10.91 tokens/sec.
-    3. **Conclusion & Interpretation:**
-       **Result: 38.2 GB/s effective bandwidth (Memory-Bandwidth-Bound).** System overhead and unoptimized memory access patterns consistently bleed away nearly half of edge bandwidth.
+    **Assumptions & Constraints:**
+    - Peak hardware bandwidth: 68.3 GB/s.
+    - Naive roofline payload: 3.5 GB 4-bit weight footprint.
+    - Ideal roofline prediction: 19.5 tok/s. Measured generation: 11 tok/s.
+
+    **Calculations:**
+    - Naive ideal rate = 68.3 GB/s / 3.5 GB/token = 19.5 tok/s.
+    - Effective bandwidth implied by measurement = 11 tok/s * 3.5 GB/token = 38.5 GB/s.
+    - Effective utilization = 38.5 / 68.3 = 56%.
+    - Gap from peak = 1 - 0.56 = 44%.
+    - The 44% gap is an aggregate efficiency loss from KV-cache traffic, dequantization and activation movement, imperfect reuse, row-buffer and cache behavior, kernel overhead, synchronization, and other SoC clients. These are overlapping effects, not additive bandwidth debits.
+
+    **Conclusion & Interpretation:**
+    - **Result: about 38.5 GB/s effective bandwidth (Memory-Bandwidth-Bound).** The measured 11 tok/s means the implementation realizes about 56% of peak LPDDR bandwidth. The missing 44% should be investigated with kernel and memory-controller counters rather than explained as independent subtractive penalties.
 status: published
 provenance: imported
 requires_explanation: false

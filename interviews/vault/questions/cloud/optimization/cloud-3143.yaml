@@ -11,7 +11,8 @@ title: Full-Stack FlashAttention Deployment Decision
 scenario: 'You are the Staff ML engineer deciding the attention implementation for a new 405B model served on 64x H100 (8 nodes, NVLink + InfiniBand 400 Gb/s). Context window: 32K. Requirements: P99 TTFT < 2s, 1000 req/s throughput.'
 question: What is the complete attention stack, KV cache management, sequence parallelism, and prefix caching strategy, and why is 810 TFLOPs per token a unit error?
 details:
-  realistic_solution: 'Utilize FlashAttention-2 with block-sparse reads for PagedAttention compatibility. 405B model requires 810 GFLOPs/token, not 810 TFLOPs. At 989 TFLOPS on H100, this is ~0.82ms/token.'
+  realistic_solution: Use FlashAttention-2/FlashInfer-style decode kernels integrated with PagedAttention so KV pages can be gathered without copying into contiguous buffers. Keep KV cache in paged blocks with prefix-aware block sharing, eviction, and admission control; at 32K context, prefix caching is required for repeated system prompts because uncached prefill dominates TTFT. Use tensor parallelism for model weights and sequence/context parallelism for long prefill so the 32K attention work is split across the 64 H100s, then use paged KV for decode. A 405B dense model costs about 2 x 405B = 810 GFLOPs/token, not 810 TFLOPs/token; the unit error is a 1000x overestimate. At 64 H100s, peak compute is about 63 PFLOP/s, so an uncached token lower bound is ~13 us before utilization, communication, attention IO, and batching overheads. The design decision is therefore not "one request takes 0.5s"; it is to combine efficient attention kernels, paged KV, sequence-parallel prefill, and prefix
+    reuse to keep P99 TTFT under 2s while batching decode for throughput.
   common_mistake: |
     **The Pitfall:** Treating attention kernel, KV cache manager, and caching layer as independent choices.
     **The Rationale:** Engineers often evaluate optimizations in isolation without considering architectural interplay.
@@ -19,16 +20,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 405B model parameters.
-    - H100 compute at 989 TFLOPS.
+    - 64 H100s, each with 989 TFLOPS peak FP16/BF16 tensor compute.
     - P99 TTFT < 2s, 1000 req/s.
-    
+    - 32K context requires long-prefill and long-decode attention support.
+
     **Calculations:**
     - FLOPs per token: 2 * 405B = 810 GFLOPs/token (not 810 TFLOPs).
-    - Time per token at 100% util: 810G / 989T = 0.819ms per token.
-    - TP=16 throughput: requests span GPUs, so 16 / 0.5s = 32 req/s.
-    
+    - Cluster peak: 64 * 989 TFLOPS = 63,296 TFLOPS = 63.3 PFLOP/s.
+    - Ideal compute lower bound per generated token: 810 GFLOPs / 63.3 PFLOP/s = 0.0128 ms if one token used the whole cluster.
+    - In practice, tensor/pipeline communication, KV reads, batching limits, and prefill attention dominate the gap to the 2s P99 TTFT target.
+    - Required stack: FA-2-class attention kernels, paged KV cache, sequence-parallel prefill for 32K contexts, and prefix caching for shared prompts.
+
     **Conclusion & Interpretation:**
-    - **Result: 810 GFLOPs/token (Compute-Bound)**. A unit error (TFLOPs vs GFLOPs) drastically skews compute boundary estimations.
+    - **Result: Full-Stack Serving Decision**. The unit correction is 810 GFLOPs/token, and meeting 1000 req/s with 32K contexts depends on the attention/KV/cache architecture, not a standalone per-token FLOP estimate.
 status: published
 provenance: imported
 requires_explanation: true
@@ -42,8 +46,8 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- 'Unit error: 405B model takes 810 GFLOP/token, not 810 TFLOP.'
-- 'Throughput calculation incorrectly assumes 16 concurrent requests per GPU. With Tensor Parallelism, requests span all GPUs, so throughput should be 16 / 0.5s = 32 req/s, not 2048.'
+  - 'Unit error: 405B model takes 810 GFLOP/token, not 810 TFLOP.'
+  - Throughput calculation incorrectly assumes 16 concurrent requests per GPU. With Tensor Parallelism, requests span all GPUs, so throughput should be 16 / 0.5s = 32 req/s, not 2048.
 human_reviewed:
   status: not-reviewed
   by: null

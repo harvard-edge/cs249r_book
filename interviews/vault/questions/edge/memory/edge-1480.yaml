@@ -7,11 +7,11 @@ topic: memory-mapped-inference
 competency_area: memory
 bloom_level: evaluate
 phase: inference
-title: Architecting Multi-Model Memory-Mapped Inference on Cloud AI 100
+title: Shared Weight Mapping for Multi-Model Edge Inference
 scenario: You are designing an on-premise video analytics appliance powered by a single accelerator. The system must run 5 different computer vision models concurrently across 20 video streams. Total model weights exceed the 32GB memory capacity if loaded redundantly by separate processes.
 question: How would you design memory-mapped model sharing for 5 CV models across 20 streams on a 32 GB appliance?
 details:
-  realistic_solution: Utilize memory-mapped I/O (mmap) with MAP_SHARED across host applications to instantiate exactly one readonly weight block per model. Employ zero-copy DMA APIs strictly bound to these shared allocations, allowing the underlying hardware to seamlessly multiplex tensor reads directly from the singular host buffer across 20 logical queues.
+  realistic_solution: Utilize memory-mapped I/O (mmap) with MAP_SHARED across host applications so each model's read-only weights are backed by a single shared host mapping instead of being duplicated per process. Keep accelerator input/output buffers separate and use the accelerator driver's supported pinned-memory or copy API, because mmap alone does not guarantee zero-copy DMA or automatic multiplexing on the device. With 5 models at 4 GB each, the shared weight footprint is about 20 GB, leaving about 12 GB for activations, tensor arenas, queues, and runtime buffers on a 32 GB appliance.
   common_mistake: |
     **The Pitfall:** Copying weights into each process's memory space or ignoring DMA overhead.
     **The Rationale:** Candidates often rely on standard OS process isolation where each process loads its own copy of the model.
@@ -24,11 +24,11 @@ details:
        - Host RAM Limit: 32 GB
     **Calculations:**
        - Unique footprint: 5 * 4 GB = 20 GB
-       - Naive per-process load (4 streams/model): 20 processes * 4 GB = 80 GB (OOM)
+       - Naive per-stream workers: 5 models * 4 streams/model * 4 GB = 80 GB (OOM)
        - Mmap shared footprint: 20 GB
-       - RAM available for KV/Activations: 32 GB - 20 GB = 12 GB
+       - RAM available for activations, queues, and runtime buffers: 32 GB - 20 GB = 12 GB
     **Conclusion & Interpretation:**
-       - **Result: Memory-Bound Concurrency.** Using memory-mapped shared regions prevents an 80 GB OOM scenario, leaving 12 GB for activations.
+       - **Result: Memory-Bound Concurrency.** Shared read-only mappings prevent redundant 80 GB weight residency, but DMA behavior still depends on explicit accelerator-supported buffer management.
 status: published
 provenance: imported
 requires_explanation: true

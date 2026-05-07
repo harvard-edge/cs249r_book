@@ -7,11 +7,12 @@ topic: data-pipeline-engineering
 competency_area: data
 bloom_level: analyze
 phase: training
-title: Tinyml New 0022
+title: Clock Drift and Feature Misalignment in Time-Series Models
 scenario: An accelerometer-based anomaly detection model fails on a newly manufactured batch of devices. The hardware is theoretically identical, but the model classifies normal movements as anomalies.
 question: What sampling-rate drift in the new accelerometer batch makes normal movements look anomalous?
 details:
-  realistic_solution: Utilize a hardware timer to strictly trigger IMU sampling, or resample the data in software to enforce the 100Hz nominal rate to prevent feature-domain shifts.
+  realistic_solution: |
+    The new batch is sampling 5% fast: 105 Hz instead of the 100 Hz rate used during training. A 100-sample model window that was trained to represent 1.0 second now covers only about 0.95 seconds of real motion, compressing temporal features and shifting frequency-domain features upward by about 5%. Use a hardware timer to trigger IMU sampling or resample in software back to the 100 Hz nominal rate before feature extraction.
   common_mistake: |
     **The Pitfall:** Deploying time-series models without strict hardware sample rate enforcement.
     **The Rationale:** Assuming low-cost sensor internal RC oscillators are perfectly accurate and consistent across manufacturing batches.
@@ -19,17 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Original sample rate: 100Hz (10ms period).
-    - New batch sample rate: 105Hz (9.5ms period).
+    - New batch sample rate: 105Hz (9.52ms period).
     - Window size: 100 samples (1 second nominal).
 
     **Calculations:**
-    - Expected duration: 100 samples * 10 ms = 1000 ms.
-    - Actual duration: 100 samples * 9.5 ms = 950 ms.
-    - Temporal shift over 1 window: 50 ms.
-    - Frame misalignment: 50 ms / 10 ms = 5 full frames.
+    - Rate error: (105 - 100) / 100 = 5% fast.
+    - Expected training-window duration: 100 samples / 100 Hz = 1.000 s.
+    - Actual new-batch duration: 100 samples / 105 Hz = 0.952 s.
+    - Time-scale compression: 1.000 s - 0.952 s = 0.048 s, or about 48 ms per nominal 1-second window.
+    - A motion pattern at 5 Hz during training appears at 5 Hz * 1.05 = 5.25 Hz in sample-indexed features.
 
     **Conclusion & Interpretation:**
-    - **Result: 5% frequency shift (5 frames) (Synchronization-Bound)**. The system is synchronization-bound. The CNN filters misalign with the expected features, triggering false anomalies.
+    - **Result: 5% sampling-rate drift, compressing each 100-sample window to about 952 ms of real time.** The model sees normal motions at the wrong time scale, triggering false anomalies unless the stream is timer-controlled or resampled.
 status: published
 provenance: imported
 requires_explanation: false

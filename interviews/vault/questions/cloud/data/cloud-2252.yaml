@@ -8,11 +8,11 @@ competency_area: data
 bloom_level: create
 phase: training
 title: Designing the End-to-End Pre-Training Data Pipeline
-scenario: 'You are hired as the founding data infrastructure engineer at a new LLM lab. Your mandate is to design the complete data pipeline from raw web crawl to training-ready token shards for a 2 trillion token pre-training corpus. The pipeline must handle ingestion of 500 TB/month, language detection, PII removal, deduplication, quality scoring, domain mixing, tokenization, and shard ordering. The pipeline must be fully reproducible and complete processing within 5 days using a budget of $50K/month in cloud compute.'
-question: 'How would you design the full reproducible pipeline for the 2T-token corpus, justify the technology choices, and test the $50K/month budget?'
+scenario: You are hired as the founding data infrastructure engineer at a new LLM lab. Your mandate is to design the complete data pipeline from raw web crawl to training-ready token shards for a 2 trillion token pre-training corpus. The pipeline must handle ingestion of 500 TB/month, language detection, PII removal, deduplication, quality scoring, domain mixing, tokenization, and shard ordering. The pipeline must be fully reproducible and complete processing within 5 days using a budget of $50K/month in cloud compute.
+question: How would you design the full reproducible pipeline for the 2T-token corpus, justify the technology choices, and test the $50K/month budget?
 details:
   realistic_solution: |
-    Use a staged, columnar architecture with heterogeneous compute. Stage 1 (Ingestion & Extraction, CPU): Download raw WARC files, extract text, detect language, write Parquet. Technology: Spark on spot instances. Stage 2 (Deduplication, CPU): Exact dedup via SHA-256 hash. Fuzzy dedup via MinHash LSH against an external persistent index. Technology: Ray actors for the LSH index service + Spark for batch MinHash. Stage 3 (Quality & Safety Scoring, GPU + CPU): GPU workload for perplexity/toxicity. CPU workload for heuristic scores. Technology: Ray for heterogeneous scheduling. Stage 4 (Composition & Packaging, CPU): Apply weights, tokenize, pack into 1 GB shards. Technology: Spark. Reproducibility: every stage logs a manifest.
+    Use a staged, columnar architecture with heterogeneous compute. Stage 1 (Ingestion & Extraction, CPU): download raw WARC files, extract text, normalize records, detect language, and write immutable Parquet with content hashes. Technology: Spark on spot instances. Stage 2 (Safety and Deduplication, CPU): remove PII with deterministic rules plus model-assisted detectors, exact-dedup by SHA-256, then fuzzy-dedup with MinHash LSH against an external persistent index. Technology: Spark for batch transforms and Ray actors for the LSH/index service. Stage 3 (Quality & Safety Scoring, GPU + CPU): run GPU perplexity/classifier scoring and CPU heuristic filters, writing versioned score columns. Stage 4 (Composition & Packaging, CPU): apply domain weights, deterministic sampling seeds, language/domain mixing constraints, tokenizer version, packing rules, and explicit shard ordering into 1 GB training shards. Reproducibility requires input manifests, code/container digests, model/tokenizer versions, random seeds, partition specs, index snapshots, filter thresholds, and output shard manifests so any stage can be rerun byte-for-byte. Test the budget by replaying a 1% stratified slice, measuring per-stage throughput and cost, then scaling with overhead factors before processing the monthly 500 TB batch.
   common_mistake: |
     **The Pitfall:** Building a single monolithic Airflow DAG that chains Spark jobs.
     **The Rationale:** Candidates try to force a complex, multi-stage, stateful process into a stateless batch paradigm.
@@ -21,16 +21,21 @@ details:
     **Assumptions & Constraints:**
     - 500 TB/month ingestion. Pipeline completion within 5 days.
     - $50K/month cloud compute budget.
+    - CPU spot instances cost $0.03/core-hour; GPUs cost $1.50/GPU-hour.
+    - Five-day SLA requires average end-to-end throughput of 500,000 GB / (5 * 24 * 3600s) = 1.16 GB/s before retry overhead.
+    - Use a 2x overhead factor for retries, skew, validation, and spot interruptions, so provision about 2.3 GB/s sustained pipeline capacity.
 
     **Calculations:**
-    - Stage 1 (Ingestion): 500 TB / (0.1 GB/s * 3600) = 1,389 core-hours. With overhead: ~10,000 core-hours * $0.03 = $300.
-    - Stage 2 (Dedup): MinHash 6.4M core-seconds = 1,778 core-hours * $0.03 = $53. LSH index queries: 100M core-seconds at $0.05/hr = $1,389.
-    - Stage 3 (Scoring): GPUs 100M GPU-seconds = 27,778 GPU-hours * $1.50 = $41,667. CPU heuristics: ~5,000 core-hours * $0.03 = $150.
-    - Stage 4 (Packaging): ~2,000 core-hours * $0.03 = $60.
-    - Total: $300 + $53 + $1,389 + $41,667 + $150 + $60 = $43,619/month.
+    - Stage 1 ingestion/extraction: assume 20 MB/s effective parse throughput per CPU core after decompression and HTML cleanup. 500,000 GB / 0.02 GB/s = 25,000,000 core-seconds = 6,944 core-hours; with 2x overhead = 13,889 core-hours, cost = $417.
+    - Stage 2 PII, exact dedup, MinHash, and LSH: if the 1% replay costs 1,200 CPU core-hours including index queries and compaction, scale by 100 to 120,000 core-hours. Cost = 120,000 * $0.03 = $3,600.
+    - Stage 3 GPU quality/safety scoring: if the 1% replay costs 250 GPU-hours for the scorer mix, scale by 100 to 25,000 GPU-hours. Cost = 25,000 * $1.50 = $37,500.
+    - Stage 3 CPU heuristics: if the 1% replay costs 200 core-hours, scale by 100 to 20,000 core-hours. Cost = 20,000 * $0.03 = $600.
+    - Stage 4 tokenization, mixing, packing, manifests, and validation: if the 1% replay costs 500 core-hours, scale by 100 to 50,000 core-hours. Cost = 50,000 * $0.03 = $1,500.
+    - Total estimated compute = $417 + $3,600 + $37,500 + $600 + $1,500 = $43,617/month, leaving about $6.4K for orchestration, failed shards, and spot-price variance.
+    - SLA check: over 5 days, 120,000 CPU core-hours means about 1,000 average CPU cores; 25,000 GPU-hours means about 209 average GPUs. Those fleet sizes are plausible for a temporary monthly batch if the 1% replay confirms throughput.
 
     **Conclusion & Interpretation:**
-    - **Result: Pipeline fits within the $50K budget, leaving a ~$6K margin. (Cost-Bound Architecture)**. Heterogeneous compute with Ray/Spark enables immense scale inside budget.
+    - **Result: Cost-Bound Architecture**. The design fits within the $50K compute budget only if the measured 1% replay supports the assumed CPU-stage throughput, GPU scorer throughput, and 2x operational overhead.
 status: published
 provenance: imported
 requires_explanation: true

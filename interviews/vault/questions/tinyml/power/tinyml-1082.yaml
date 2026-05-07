@@ -9,9 +9,9 @@ bloom_level: evaluate
 phase: inference
 title: Energy-Efficient Audio Pipeline Design on Corstone-300
 scenario: You are architecting an always-on keyword spotting application for a battery-powered IoT device utilizing the ARM Cortex-M7 + Ethos-U55 (Corstone-300) platform. The system operates with a 480 MHz M7 and an Ethos-U55 NPU that shares a strict 512 KB of SRAM. You must design the data flow and partition the workload between the CPU and NPU to minimize the total energy per operation, specifically addressing the energy cost of memory access versus compute.
-question: How should Corstone-300 partition CPU, NPU, and SRAM work to minimize energy for always-on keyword spotting?
+question: Which partition should win under energy modeling, and when would you reject an NPU-heavy design that spills beyond 512 KB SRAM?
 details:
-  realistic_solution: The optimal architecture strictly boundaries the 512 KB SRAM as the active working set. The M7 performs lightweight DSP feature extraction (e.g., MFCCs) and streams features directly into SRAM. The model must be aggressively INT8 quantized and sized so weights, activations, and the OS stack comfortably fit within 512 KB. This ensures the Ethos-U55 avoids all costly external DRAM fetches, relying purely on its native MAC throughput to finish quickly and return the SoC to deep sleep.
+  realistic_solution: The optimal architecture treats the 512 KB SRAM as the active inference working set, not as a blanket requirement that the whole firmware image and every model byte reside there at once. The M7 performs lightweight DSP feature extraction, control, and tensor handoff, while the Ethos-U55 runs the supported INT8 CNN layers from tensors staged in shared SRAM. The winning partition is the one with the lowest measured energy per inference, not the highest NPU utilization. Reject an NPU-heavy model if its live weights or activations cause repeated host-mediated external-memory fetches; choose tiling, a smaller CNN, or more M7-side preprocessing when that reduces total memory traffic.
   common_mistake: |
     **The Pitfall:** Assuming that maximizing NPU utilization via large models is always the most energy-efficient approach.
     **The Rationale:** Candidates optimize compute FLOPs but ignore the exponentially higher energy cost of off-chip memory IO.
@@ -25,11 +25,12 @@ details:
 
     **Calculations:**
     - Compute Cost: 10M MACs * 0.1 pJ = 1 µJ.
-    - In-SRAM Model (300 KB): 300,000 * 10 pJ = 3 µJ IO cost.
-    - Spilled Model (288 KB extra): 288,000 * 1000 pJ = 288 µJ IO cost.
+    - Example in-SRAM traffic: if each inference reads about 300 KB of weights/activations from SRAM once on average, IO cost is 300,000 bytes * 10 pJ/byte = 3 µJ. Reuse or extra activation passes change this number, but the access remains on-chip.
+    - Example spill traffic: if 288 KB of working-set data must be fetched from external memory once per inference, external IO cost is 288,000 bytes * 1000 pJ/byte = 288 µJ. If the same bytes are reread across layers or due to eviction, the external IO energy scales with total bytes transferred, not just model size.
+    - Under the one-pass example, total energy is about 4 µJ in SRAM versus about 289 µJ plus remaining SRAM traffic when spilled.
 
     **Conclusion & Interpretation:**
-    - **Result: 288 µJ Tax Prevented (Memory-Energy Dominance)**. Even with NPU acceleration, memory IO governs total energy. Fitting within SRAM prevents a 288 µJ tax, saving >98% of system power.
+    - **Result: memory traffic dominates energy per inference**. Keeping the active working set inside the 512 KB SRAM avoids high-energy external reads. The benefit should be stated as lower energy per inference; exact savings depend on measured weight and activation traffic and cannot be converted into a system-power percentage without the full duty cycle and baseline energy.
 status: published
 provenance: imported
 requires_explanation: true

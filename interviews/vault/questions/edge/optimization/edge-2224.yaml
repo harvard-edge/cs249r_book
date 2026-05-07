@@ -1,17 +1,17 @@
 schema_version: '1.0'
 id: edge-2224
 track: edge
-level: L5
+level: L3
 zone: mastery
 topic: autograd-computational-graphs
 competency_area: optimization
 bloom_level: create
 phase: training
-title: 'Federated learning gradient compression with autograd hooks on Jetson Orin'
-scenario: 'You are implementing PowerSGD gradient compression for federated learning across 100 Jetson Orin devices with 1Mbps uplink bandwidth. Each device has a 30M parameter model producing 120MB FP32 gradients per step. Uploading 120MB on a 1Mbps link takes 960 seconds — orders of magnitude too slow.'
-question: 'How would you apply PowerSGD so 120 MB gradients can be uploaded over a 1 Mbps link within a federated round?'
+title: Federated learning gradient compression with autograd hooks on Jetson Orin
+scenario: You are implementing PowerSGD gradient compression for federated learning across 100 Jetson Orin devices with 1Mbps uplink bandwidth. Each device has a 30M parameter model producing 120MB FP32 gradients per step. Uploading 120MB on a 1Mbps link takes 960 seconds — orders of magnitude too slow.
+question: How would you apply PowerSGD to reduce memory pressure and test whether 120 MB gradients fit a 1 Mbps federated round?
 details:
-  realistic_solution: 'Use gradient hooks registered with module.register_backward_hook() to intercept gradients layer-by-layer as they are produced during backward. Apply rank-1 PowerSGD compression (UV decomposition) immediately before accumulation into .grad. Maintain an error feedback buffer per layer. With rank-1 compression: 30M params -> (n_layers * (in_dim + out_dim) * rank) ~ 1000 layers * 256 values = 1MB transmitted. 120x compression.'
+  realistic_solution: Use per-parameter tensor hooks, such as `param.register_hook(...)`, to process each gradient tensor as it is formed during backward. For matrix-shaped gradients, apply rank-1 PowerSGD to produce the low-rank factors, maintain an error-feedback buffer per layer, and stream or queue only the compressed factors for upload. The memory benefit comes from compressing and releasing layer gradients as they arrive instead of waiting to materialize and store the full 120MB dense gradient. At 100x compression the upload is still about 9.6 seconds on a 1 Mbps link, so a shorter round needs more compression, fewer participating layers, delta sparsification, or asynchronous overlap. Avoid deprecated module.register_backward_hook(), which can miss or mis-order gradients; module-level full backward hooks are better for module instrumentation than per-tensor compression.
   common_mistake: |
     **The Pitfall:** Applying gradient compression after the full backward pass completes.
     **The Rationale:** Candidates focus solely on communication bandwidth, ignoring the fact that materializing the full 120MB uncompressed gradient on the device before compression causes massive memory pressure. They also frequently forget to implement error feedback for the compression algorithm.
@@ -20,15 +20,17 @@ details:
     **Assumptions & Constraints:**
     - Uplink: 1 Mbps.
     - Uncompressed gradients: 30M params in FP32 = 120MB.
+    - Target average PowerSGD compression ratio: 100x for transmitted tensor payloads after selecting eligible matrix layers; metadata must be included in the real round budget.
 
     **Calculations:**
-    - PowerSGD rank-1 (e.g., for a 256x1024 matrix): Transmit (256+1024)*4 bytes = 5.12 KB vs 1 MB original (200x compression).
-    - Average compression across all layers: ~100x.
+    - Example rank-1 matrix gradient: 256x1024 FP32 dense = 256 * 1024 * 4 = 1.05 MB.
+    - Rank-1 factors for that matrix = (256 + 1024) * 4 = 5.12 KB, about 205x smaller before metadata.
+    - If profiling confirms the eligible gradients achieve a model-wide transmitted-payload ratio of 100x:
     - Compressed gradient size: 120MB / 100 = 1.2MB.
     - Upload time at 1Mbps: 1.2MB * 8 bits/byte = 9.6 Mb / 1 Mbps = 9.6 seconds.
 
     **Conclusion & Interpretation:**
-    - **Result: 9.6 Seconds (Network-Bound)**. Using backward hooks to compress gradients layer-by-layer allows the 9.6-second upload to comfortably fit within a federated round.
+    - **Result: about 1.2MB and 9.6 seconds of upload time under the stated 100x payload assumption (Network-Bound).** Streaming compression during backward avoids holding the full 120MB gradient and cuts transfer time by 100x, but it does not prove feasibility for a strict round shorter than 9.6 seconds without further compression or asynchronous overlap.
 status: published
 provenance: imported
 requires_explanation: true

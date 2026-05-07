@@ -7,11 +7,11 @@ topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: both
-title: LLM KV Cache Bandwidth Ceiling
+title: Edge LLM Decode Bandwidth Ceiling
 scenario: You are deploying a 2B parameter LLM (INT4, 1GB weights) on an edge device with a 50 TOPS NPU and 25 GB/s memory bandwidth. During the prefill phase (prompt length 1024), you achieve 200 tokens/s. During decoding, token generation drops abruptly to 22 tokens/s. The KV cache size averages 128MB during decoding.
-question: 'Why does decoding drop to 22 tokens/s, and what optimization would improve edge LLM decode throughput?'
+question: Why is decode bandwidth-bound despite 50 TOPS, and what single optimization best improves throughput?
 details:
-  realistic_solution: 'The decoding phase of an LLM operates with an effective batch size of 1. For every single generated token, the entire 1GB of model weights must be streamed from DRAM, plus the KV cache. The theoretical maximum decoding speed is dictated entirely by memory bandwidth, not compute TOPS. To optimize decoding on the edge, you must reduce memory traffic using Grouped-Query Attention (GQA) to shrink the KV cache, or Speculative Decoding to evaluate multiple tokens per weight load.'
+  realistic_solution: The decoding phase of an LLM runs at low batch size, so arithmetic intensity is low and the 50 TOPS peak is not the bottleneck. Weights are reused across layers during the token step, but the active KV cache must be read and extended incrementally for each generated token, making decode sensitive to memory bandwidth. The single best model-level optimization is grouped-query or multi-query attention because it shares K/V heads and directly shrinks KV-cache reads and writes during decode.
   common_mistake: |
     **The Pitfall:** Assuming the NPU compute units are underutilized due to software bugs or overheating.
     **The Rationale:** Candidates try to optimize matrix multiplication kernels, missing the fundamental difference in arithmetic intensity between prefill (compute-bound) and decode (memory-bound).
@@ -20,15 +20,16 @@ details:
     **Assumptions & Constraints:**
     - Model: 1 GB weights (INT4).
     - KV Cache: 128 MB (0.128 GB).
-    - Memory Bandwidth: 25 GB/s. NPU Compute: 50 TOPS.
+    - Memory Bandwidth: 25 GB/s.
 
     **Calculations:**
-    - Memory load per token = 1 GB (weights) + 0.128 GB (KV) = 1.128 GB.
-    - Max memory-bound throughput = 25 GB/s / 1.128 GB/token = 22.16 tokens/s.
-    - Compute required per token = ~4 GOPS. Compute ceiling = 50 TOPS / 4 GOPS = 12,500 tokens/s.
+    - The 1GB weight footprint is resident model state; it should not be added as a full extra payload for every decoded token in a simple throughput proof.
+    - The incremental decode traffic includes reading the active KV cache, writing the new token's K/V entries, and moving layer weights/activations according to the runtime schedule.
+    - The measured 22 tokens/s implies an effective bandwidth cost of 25 GB/s / 22 tokens/s ≈ 1.14 GB/token across all decode traffic.
+    - A 128MB active KV cache is a large recurring component of that traffic, so reducing K/V heads with GQA/MQA lowers per-token bytes moved.
 
     **Conclusion & Interpretation:**
-    - **Result: 22.16 tokens/s (Memory-Bandwidth Bound)**. LLM decoding is bottlenecked by streaming weights from DRAM, not compute capacity.
+    - **Result: decode is memory-bandwidth bound, but not because weights are newly loaded once per token.** Use grouped-query or multi-query attention to reduce KV-cache traffic, then reprofile effective GB/token and tokens/s.
 status: published
 provenance: imported
 requires_explanation: false

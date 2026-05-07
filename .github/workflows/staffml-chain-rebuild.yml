@@ -1,0 +1,156 @@
+name: '🎯 StaffML · 🔗 Chain Rebuild'
+
+# =============================================================================
+# Periodic chain rebuild — Phase 4.6 of vault-cli/docs/CHAIN_ROADMAP.md.
+#
+# Re-runs build_chains_with_gemini.py on the current published corpus and
+# opens an auto-PR with the proposed delta vs the live chains.json. The
+# rebuild is opt-in initially (workflow_dispatch only) — flip the cron
+# trigger on once the rebuild has demonstrated stable diffs against
+# small corpus deltas (the failure mode this guards against is
+# Gemini drift producing cosmetic chain churn that floods the PR queue).
+#
+# How it differs from manual `build_chains_with_gemini.py --all`:
+#   - runs in a clean, reproducible CI environment
+#   - opens a PR rather than mutating chains.json in place
+#   - posts a digest of structural changes (+/- chain count per track,
+#     net qid coverage delta) in the PR body
+#
+# Required secrets:
+#   - GEMINI_API_KEY  (for the gemini CLI; configure once at the repo level)
+#
+# Cost: a full --all run is ~40-90 calls depending on bucket count.
+# A weekly cadence keeps daily-budget impact negligible.
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Build mode'
+        type: choice
+        options: [strict, lenient]
+        default: strict
+      open_pr:
+        description: 'Open a PR with the delta (uncheck for dry-run)'
+        type: boolean
+        default: true
+
+  # Cron disabled until the run has shown stable diffs at least 3x.
+  # When enabling, prefer Sunday 04:00 UTC (low repo activity) to
+  # batch with the periodic rebuild PRs that auto-fire.
+  # schedule:
+  #   - cron: '0 4 * * 0'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  VAULT_DIR:      ${{ vars.VAULT_DIR     || 'interviews/vault' }}
+  VAULT_CLI_DIR:  ${{ vars.VAULT_CLI_DIR || 'interviews/vault-cli' }}
+  PYTHON_VERSION: ${{ vars.PYTHON_VERSION || '3.12' }}
+
+jobs:
+  rebuild:
+    name: chain rebuild (${{ github.event.inputs.mode }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 90       # full sweep is ~25-45 min wall, plus margin
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          # Use a PAT or app token if you want the auto-PR to itself
+          # trigger downstream workflows (default GITHUB_TOKEN doesn't).
+          # token: ${{ secrets.CHAIN_REBUILD_PAT }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install vault-cli
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "$VAULT_CLI_DIR/[dev]"
+
+      - name: Install gemini CLI
+        # Pinned version intentionally — Gemini-CLI behavioural drift
+        # (output format changes, retry semantics) has bitten this
+        # workflow before. Bump only after re-running the smoke build
+        # locally and confirming the JSON parser still extracts cleanly.
+        run: |
+          npm install -g @google/gemini-cli@0.38.2
+          gemini --version
+
+      - name: Stage chain rebuild
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          MODE: ${{ github.event.inputs.mode || 'strict' }}
+        run: |
+          set -euo pipefail
+          cd "$VAULT_CLI_DIR"
+          python3 scripts/build_chains_with_gemini.py \
+            --all --mode "$MODE" \
+            --output "../vault/chains.proposed.json"
+          # Validate the proposed file before going further.
+          python3 scripts/apply_proposed_chains.py \
+            --proposed "../vault/chains.proposed.json" \
+            --dry-run
+
+      - name: Compute delta vs live chains.json
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, subprocess
+          from collections import Counter
+          live = json.load(open(f"{os.environ['VAULT_DIR']}/chains.json"))
+          new  = json.load(open(f"{os.environ['VAULT_DIR']}/chains.proposed.json"))
+          live_ids = {c["chain_id"] for c in live}
+          new_ids  = {c["chain_id"] for c in new}
+          added    = sorted(new_ids - live_ids)
+          removed  = sorted(live_ids - new_ids)
+          live_track = Counter(c["track"] for c in live)
+          new_track  = Counter(c["track"] for c in new)
+          summary = (
+              f"### Chain rebuild delta\n\n"
+              f"- live chains: **{len(live)}** → proposed: **{len(new)}**\n"
+              f"- added: {len(added)}, removed: {len(removed)}\n\n"
+              f"### Per-track count\n\n"
+              + "| track | live | proposed | Δ |\n|---|---:|---:|---:|\n"
+              + "\n".join(
+                  f"| {t} | {live_track[t]} | {new_track[t]} | "
+                  f"{new_track[t]-live_track[t]:+d} |"
+                  for t in sorted(set(live_track) | set(new_track))
+              )
+          )
+          with open("delta.md","w") as f: f.write(summary + "\n")
+          print(summary)
+          PY
+
+      - name: Open PR
+        if: ${{ github.event.inputs.open_pr == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MODE: ${{ github.event.inputs.mode || 'strict' }}
+        run: |
+          set -euo pipefail
+          BRANCH="auto/chain-rebuild-$(date +%Y%m%d)-$MODE"
+          git config user.name "staffml-chain-rebuild[bot]"
+          git config user.email "staffml-chain-rebuild@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          # Only stage the proposed file + the gaps companion; the
+          # apply step is intentionally manual for human review.
+          git add "$VAULT_DIR/chains.proposed.json" \
+                  "$VAULT_DIR/gaps.proposed.json" 2>/dev/null || true
+          if git diff --cached --quiet; then
+              echo "no-op: staged tree matches HEAD; closing without PR"
+              exit 0
+          fi
+          git commit -m "chore(chains): periodic rebuild (mode=$MODE)"
+          git push -u origin "$BRANCH"
+          gh pr create \
+            --base dev \
+            --title "chore(chains): periodic chain rebuild ($MODE) — $(date +%Y-%m-%d)" \
+            --body-file delta.md \
+            --label automated

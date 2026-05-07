@@ -7,30 +7,28 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: analyze
 phase: training
-title: Diagnosing Loss Spikes During Elastic Training Scaling
-scenario: Your training job for a 13B parameter LLM is configured for elastic scaling
-  on AWS EC2 P4d (8x A100 40GB) instances. The job starts with 16 nodes (128 GPUs).
-  When spot instances become available, the orchestrator scales the cluster up to
-  32 nodes (256 GPUs). Immediately after scaling, the training loss spikes drastically
-  and the model diverges. The optimizer is AdamW with a learning rate of 1e-4, and
-  the per-GPU micro-batch size is hardcoded to 8.
-question: Why did elastic scaling from 128 to 256 GPUs cause divergence, and how should
-  you adjust per-GPU batch size to keep GBS constant?
+title: Unstructured Sparsity Without Sparse Kernels
+scenario: Your team prunes a 13B parameter LLM to 50% unstructured sparsity before fine-tuning on AWS EC2 P4d instances with A100 GPUs. The dense model trains at 120 TFLOP/s per GPU. After masking half the weights, throughput only improves to 125 TFLOP/s and memory use barely changes because the tensors remain stored in dense format.
+question: Why did 50% unstructured pruning fail to speed training, and what should you change to get real sparsity benefits?
 details:
-  realistic_solution: 'Diagnose that the effective global batch size inadvertently
-    doubled from 1024 to 2048 because the per-GPU batch size was hardcoded. The correct
-    fix is to implement constant batch size scaling: dynamically reduce the per-GPU
-    micro-batch size to 4 or decrease gradient accumulation steps proportionally so
-    the global batch size remains exactly 1024.'
-  common_mistake: Candidates often blame the loss spike on stale gradients, network
-    congestion during the topology change, or optimizer state corruption during the
-    checkpoint resume, failing to realize the effective batch size doubled, altering
-    optimization dynamics.
-  napkin_math: 'Total Global Batch Size (GBS) before scaling: 128 GPUs * 8 micro-batch
-    = 1024 samples. When cluster elastically scales to 256 GPUs (32 nodes), keeping
-    the micro-batch at 8 would double GBS to 2048, altering convergence dynamics.
-    To maintain strict mathematical equivalence with a constant GBS of 1024, adjust
-    the per-GPU batch size: 1024 / 256 GPUs = 4 samples per GPU.'
+  realistic_solution: The mask removed model capacity but did not change the executed kernels or tensor layout. Dense GEMM still touches the same dense matrices, so zero-valued weights consume bandwidth and FLOPs almost like ordinary weights. To get a real speedup, use a hardware-supported sparsity pattern such as 2:4 structured sparsity with compatible kernels, or switch to sparse tensor formats and kernels whose overhead is justified by the achieved sparsity.
+  common_mistake: |
+    **The Pitfall:** Assuming that zero weights automatically halve training compute.
+    **The Rationale:** Dense GPU kernels do not skip arbitrary zero entries unless the sparsity pattern and kernel implementation explicitly support that behavior.
+    **The Consequence:** The team loses accuracy or capacity from pruning while seeing little or no throughput, memory, or cost benefit.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - Dense training throughput: 120 TFLOP/s per GPU.
+    - Measured masked-model throughput: 125 TFLOP/s per GPU.
+    - The mask is 50% unstructured, but tensors and kernels remain dense.
+
+    **Calculations:**
+    - Ideal skip-zero speedup from perfect 50% sparsity would be about 2x.
+    - Measured speedup = 125 / 120 = 1.04x, or only about 4%.
+    - Because dense kernels still issue dense matrix multiplies, most FLOPs and memory traffic remain.
+
+    **Conclusion & Interpretation:**
+    - **Result: sparsity-format-bound.** Unstructured masking alone does not deliver the expected 2x gain; use supported structured sparsity or sparse kernels before counting pruning as a systems speedup.
 status: published
 provenance: imported
 requires_explanation: false

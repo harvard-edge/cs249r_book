@@ -11,7 +11,8 @@ title: Carbon-Aware Scheduling Tradeoffs
 scenario: Your 2,000-GPU cluster runs flexible offline RLHF training. The grid's carbon intensity fluctuates daily from 200g CO2/kWh to 600g CO2/kWh. The sustainability team proposes pausing all training for 6 hours daily during peak carbon hours to meet ESG goals. A hardware engineer objects, citing idle power and TCO.
 question: Should you pause RLHF training for 6 high-carbon hours, or use another strategy to reduce carbon, and why?
 details:
-  realistic_solution: Pausing jobs is often suboptimal because a suspended GPU node still draws significant idle power (often 20-30% of peak) while accomplishing zero useful work, degrading the overall energy-efficiency metrics. Furthermore, prolonging the training time reduces the amortization of the embedded carbon (manufacturing footprint) of the GPUs over useful jobs. Instead of a full pause, a better tradeoff is implementing DVFS (Dynamic Voltage and Frequency Scaling) during peak carbon hours. Capping power to 60% of peak TDP might retain 80% of throughput due to non-linear power-to-frequency scaling. This reduces the immediate power draw when grid carbon is dirty, keeps the GPUs in a high-efficiency regime (perf/watt), and avoids wasting baseline idle power.
+  realistic_solution: |
+    A simple pause is often suboptimal if suspended GPU nodes remain powered, because idle nodes draw substantial power while accomplishing zero useful work. The scheduler should compare carbon per unit of training progress: if work can be deferred to genuinely low-carbon hours and nodes can be power-gated, pausing or checkpointing may win; if nodes must stay allocated or deadlines matter, DVFS during peak carbon hours can reduce power while retaining useful throughput. The best policy is carbon-aware scheduling with checkpoint/power-down for flexible jobs and DVFS for jobs that must keep making progress.
   common_mistake: |
     **The Pitfall:** Assuming pausing jobs completely during high-carbon periods will strictly reduce total carbon footprint.
     **The Rationale:** Candidates fail to factor in the substantial idle power draw of a suspended GPU node (often 20-30% of peak) accomplishing zero useful work.
@@ -21,13 +22,18 @@ details:
        - Active node power: 8 GPUs * 400W + 1000W host = 4.2 kW.
        - Idle node power: 8 GPUs * 75W + 500W host = 1.1 kW.
        - Grid peak carbon intensity: 600g CO2/kWh.
+       - Low-carbon resume window: 200g CO2/kWh.
        - DVFS cap at 250W/GPU yields ~80% throughput.
     2. **Calculations:**
-       - Pause strategy for 6h: 1.1 kW * 6h = 6.6 kWh. Total CO2 = 6.6 * 600g = 3.96 kg CO2 per node for 0 tokens.
+       - Six hours of full-speed work = 6 node-hours of training progress.
        - DVFS capped node power: 8 * 250W + 1000W = 3.0 kW.
-       - DVFS strategy for 6h: 3.0 kW * 6h = 18.0 kWh (while retaining 80% throughput).
+       - DVFS for 6h completes 0.8 * 6h = 4.8 full-speed node-hours of work.
+       - DVFS carbon during peak = 3.0 kW * 6h * 600g/kWh = 10.8 kg CO2 for 4.8 node-hours, or 2.25 kg CO2 per full-speed node-hour.
+       - Idle-pause for 6h emits 1.1 kW * 6h * 600g/kWh = 3.96 kg CO2 for 0 work.
+       - If the deferred 4.8 node-hours run later at 200g/kWh, resume carbon = 4.2 kW * 4.8h * 200g/kWh = 4.03 kg CO2.
+       - Pause-plus-resume carbon for the same 4.8 node-hours = 3.96 + 4.03 = 7.99 kg CO2, or 1.66 kg CO2 per full-speed node-hour.
     3. **Conclusion & Interpretation:**
-       - **Result: Energy-Efficiency Bound.** DVFS radically improves the carbon-per-token compared to idling by keeping GPUs in a high-efficiency regime.
+       - **Result: Compare carbon per unit of completed training, not peak-window energy alone.** With idle nodes and a 200g/kWh resume window, pause-plus-resume has lower carbon than DVFS but worse wall-clock progress; if nodes can be power-gated, pausing improves further, while DVFS is the better choice when progress or allocation constraints prevent deferral.
 status: published
 provenance: imported
 requires_explanation: false

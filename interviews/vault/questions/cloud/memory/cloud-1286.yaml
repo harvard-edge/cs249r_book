@@ -11,22 +11,29 @@ title: Diagnosing SRAM Spills in Tiled Attention
 scenario: A team optimizes a custom Transformer for 16K sequences on A100 GPUs. They implement a tiled, IO-aware attention kernel in FP16 with head dimension d=128 and tiling blocks Br=256 and Bc=256. Profiling reveals intermediate matrix blocks are silently spilling to HBM, yielding only a 1.2x speedup.
 question: Why do the Br=256 and Bc=256 attention tiles spill to HBM on A100, and what tile sizing fixes the bottleneck?
 details:
-  realistic_solution: The chosen block sizes require more shared memory than the A100 SM provides. Reduce the tile sizes (e.g., Br=64, Bc=128) so the loaded Q, K, V, and O blocks strictly fit within the 164 KB SRAM limit, entirely preventing HBM roundtrips and unlocking FlashAttention-2 speeds.
+  realistic_solution: The kernel's live shared-memory model exceeds the A100 per-SM limit for Br=256 and Bc=256. A typical implementation keeps one Q tile, double-buffered K and V tiles, and scratch space while accumulating O in registers, so the 256x256 tile choice leaves no room for the required buffers. Reduce the tile sizes, for example Br=64 and Bc=128, so the live shared-memory footprint fits within the 164 KB A100 limit with occupancy headroom.
   common_mistake: |
     **The Pitfall:** Assuming the bottleneck is poor Tensor Core arithmetic intensity or suggesting larger tile sizes.
     **The Rationale:** Candidates ignore the hard architectural limits of shared memory (SRAM) per SM on the GPU.
     **The Consequence:** Exacerbating the memory spilling and failing to achieve the expected performance.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Target hardware: A100 (164 KB usable shared SRAM per SM).
-       - Tile dimensions: Br=256, Bc=256, d=128.
-       - Data type: FP16 (2 bytes per element).
-    2. **Calculations:**
-       - Current Tile Size: Q, K, V, and Output blocks each take 256 * 128 * 2 bytes = 64 KB.
-       - Total Required SRAM = 4 * 64 KB = 256 KB.
-       - 256 KB > 164 KB SM limit (spills to HBM).
-       - Reduced Tile Size (Br=64, Bc=128): Q (64*128*2 = 16 KB), K (128*128*2 = 32 KB), V (128*128*2 = 32 KB), O (64*128*2 = 16 KB). Total = 96 KB.
-    3. **Conclusion & Interpretation:** **The 256 KB requirement exceeds the 164 KB limit. The reduced 96 KB tile size strictly fits in SRAM, preventing HBM spills and unlocking FlashAttention-2 speeds.**
+    **Assumptions & Constraints:**
+    - Target hardware: A100 with at most 164 KB shared memory per SM.
+    - Tile dimensions: Br=256, Bc=256, d=128.
+    - Data type: FP16, 2 bytes per element.
+    - Kernel storage model: Q tile in shared memory, double-buffered K and V tiles, O accumulator in registers, plus small softmax scratch.
+
+    **Calculations:**
+    - Q tile: Br * d * 2 bytes = 256 * 128 * 2 = 64 KB.
+    - One K tile: Bc * d * 2 bytes = 256 * 128 * 2 = 64 KB.
+    - One V tile: Bc * d * 2 bytes = 256 * 128 * 2 = 64 KB.
+    - Double-buffered K and V: 2 * (64 KB + 64 KB) = 256 KB.
+    - Live shared-memory footprint before scratch: Q + double-buffered K/V = 64 KB + 256 KB = 320 KB.
+    - 320 KB exceeds the 164 KB A100 shared-memory limit, so the implementation cannot keep the intended tiles on chip.
+    - With Br=64, Bc=128: Q = 16 KB, each K/V tile = 32 KB, double-buffered K/V = 128 KB, total before scratch = 144 KB.
+
+    **Conclusion & Interpretation:**
+    - **Result: Tile Storage Exceeds SRAM.** Br=256 and Bc=256 exceed the kernel's live shared-memory budget; Br=64 and Bc=128 fit the modeled 144 KB footprint with limited scratch headroom.
 status: published
 provenance: imported
 requires_explanation: false

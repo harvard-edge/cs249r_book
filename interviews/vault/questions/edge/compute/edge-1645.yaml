@@ -8,10 +8,10 @@ competency_area: compute
 bloom_level: create
 phase: both
 title: Multi-Model Dataflow Compute and PCIe Bandwidth Estimation
-scenario: 'You are designing the perception compute architecture for an autonomous drone using a single Hailo-8 dataflow accelerator. The drone must run three concurrent 8-bit quantized vision pipelines on a single 1080p camera stream: an object detector, a depth estimator, and a semantic segmenter, all operating at 30 FPS. Because the Hailo-8 lacks local DRAM and streams directly from host memory over a PCIe connection, you must design a unified dataflow pipeline that prevents host memory bottlenecks.'
+scenario: 'You are designing the perception compute architecture for an autonomous drone using a single Hailo-8 dataflow accelerator. The drone must run three concurrent 8-bit quantized vision pipelines on a single 1080p camera stream: an object detector, a depth estimator, and a semantic segmenter, all operating at 30 FPS. The raw input is 6.22 MB per frame, and the fused final outputs total 1.78 MB per frame. Because the Hailo-8 lacks local DRAM and streams directly from host memory over a PCIe connection, you must design a unified dataflow pipeline that prevents host memory bottlenecks.'
 question: How would you fuse the detector, depth estimator, and segmenter on Hailo-8, and what host bandwidth and compute utilization would result?
 details:
-  realistic_solution: An L6+ engineer will recognize that in a pure dataflow architecture streaming from host memory, PCIe I/O is the limiting factor. The required solution is to co-compile the three models into a single unified spatial graph. By doing this, the Hailo-8 maps the combined weights to its distributed on-chip SRAM, meaning only the initial raw image enters the chip and only the final small output tensors leave it, entirely eliminating intermediate host memory streaming.
+  realistic_solution: Co-compile the detector, depth estimator, and segmenter into one fused Hailo dataflow graph so shared input preprocessing and intermediate feature maps remain on chip instead of round-tripping through host memory. With the stated tensor sizes, host traffic is only the 6.22 MB input plus 1.78 MB of final outputs, or 8.0 MB/frame. At 30 FPS, host bandwidth is 8.0 * 30 = 240 MB/s. Combined compute is 40 + 15 + 10 = 65 GOPS/frame, so at 30 FPS the workload is 1.95 TOPS, which is 1.95 / 26 = 7.5% of Hailo-8 peak.
   common_mistake: |
     **The Pitfall:** Treating the system like a traditional GPU and sequentially executing models.
     **The Rationale:** Candidates verify GOPS fits within the 26 TOPS limit, entirely ignoring the architectural constraint of "no local DRAM".
@@ -21,11 +21,12 @@ details:
     - Single Hailo-8 (26 TOPS).
     - Three models: Detector (40 GOPS), Depth (15 GOPS), Segmenter (10 GOPS).
     - Target: 30 FPS on 1080p camera stream (6.22 MB/frame).
+    - Fused final outputs: 1.78 MB/frame.
 
     **Calculations:**
     - Compute per frame: 40 + 15 + 10 = 65 GOPS.
     - Total compute at 30 FPS: 65 GOPS x 30 = 1,950 GOPS = 1.95 TOPS.
-    - Compute Utilization: 1.95 TOPS / 26 TOPS = 7.5%.
+    - Combined Compute Utilization: 1.95 TOPS / 26 TOPS = 7.5%.
     - Fused Memory I/O per frame: 6.22 MB (input) + ~1.78 MB (outputs) = 8.0 MB.
     - Required Host PCIe Bandwidth: 8.0 MB/frame x 30 FPS = 240 MB/s.
 
@@ -40,8 +41,8 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The Napkin Math for Compute Utilization should explicitly state that it is for the combined model, not a single model.
-- The power calculation uses 'less than 33' which is imprecise; it should state the calculated power consumption more directly.
+  - The Napkin Math for Compute Utilization should explicitly state that it is for the combined model, not a single model.
+  - The power calculation uses 'less than 33' which is imprecise; it should state the calculated power consumption more directly.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

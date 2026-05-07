@@ -60,6 +60,7 @@ from audit.scan import CHECK_REGISTRY, REPO_ROOT
 
 SAFE_HOOK_IDS = [
     "book-validate-citations",
+    "book-check-source-citations",
     "book-validate-footnotes",
     "book-check-forbidden-footnotes",
     "book-check-figure-div-syntax",

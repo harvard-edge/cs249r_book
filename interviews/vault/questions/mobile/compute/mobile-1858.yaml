@@ -7,31 +7,31 @@ topic: chiplet-architecture
 competency_area: compute
 bloom_level: analyze
 phase: inference
-title: 'Unified Memory Coherency for Mobile Chiplet Camera Pipeline'
-scenario: 'On a mobile chiplet with unified memory (CPU + ISP + NPU sharing LPDDR5), camera frames captured by the ISP die cause cache coherency stalls when passed to the NPU die for on-device inference. Frame-to-inference latency is 8ms but hardware specs suggest 3ms.'
-question: 'How would you diagnose and fix unified-memory cache coherency stalls between an ISP die and NPU die in a camera pipeline?'
+title: Unified Memory Coherency for Mobile Chiplet Camera Pipeline
+scenario: On a mobile chiplet with unified memory (CPU + ISP + NPU sharing LPDDR5), camera frames captured by the ISP die cause cache coherency stalls when passed to the NPU die for on-device inference. Frame-to-inference latency is 8ms but hardware specs suggest 3ms.
+question: How would you diagnose and fix unified-memory cache coherency stalls between an ISP die and NPU die in a camera pipeline?
 details:
   realistic_solution: |
-    Root cause: ISP writes frames to LPDDR5 through a write-combining buffer without cache coherent marking; NPU has stale cache lines from previous frame. The coherency flush sequence: ISP issues dsb() (data sync barrier) + cache maintenance operations on the written frame buffer before signaling NPU. NPU must issue a cache invalidate for the frame buffer region before reading. On ARM systems: use DMA-coherent buffers (dma_alloc_coherent) rather than normal cached buffers for ISP-to-NPU handoffs. This maps the frame buffer as non-cacheable for the ISP path, eliminating the flush-invalidate round-trip. Alternatively, use ION/DMA-BUF with cache sync at handoff boundaries.
+    Root cause: the ISP-to-NPU handoff uses buffers whose cacheability and ownership are not synchronized for both engines, so the NPU can stall on cache maintenance or see stale lines from a previous frame. Diagnose with hardware traces around buffer ownership transfer, cache-sync calls, DMA-BUF fences, and NPU queue wait time rather than assuming raw DRAM bandwidth saturation. The fix is platform-specific: use the vendor-supported DMA-BUF/dma-coherent or non-cacheable camera-to-NPU pathway, or perform the required cache clean/invalidate operations exactly at producer-consumer handoff boundaries. Avoid prescribing a universal barrier/cache sequence; the driver and vendor runtime should own the coherency contract.
   common_mistake: |
     **The Pitfall:** Immediately suspecting memory bandwidth saturation.
     **The Rationale:** Engineers profile memory utilization, see it at 60% (not saturated), and cannot explain the latency.
     **The Consequence:** They miss the actual issue, which is the coherency protocol overhead of cache maintenance operations.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Frame buffer: 4K YUV420 = 3840x2160x1.5 bytes = 12.4 MB.
-    - ARM cache line size: 64B.
-    - Cache clean+invalidate time per line: ~20ns.
+    - Frame buffer: 4K YUV420 = 3840x2160x1.5 bytes = 12.44 MB.
+    - Cache line size example: 64B.
+    - Measured cache-maintenance cost on this platform is approximately 3.9ms for the full frame handoff.
 
     **Calculations:**
-    - Cache lines: 12.4 MB / 64B = 204,800 lines.
-    - Total cache maintenance time: 204,800 * 20ns = ~4.1ms.
-    - Non-cached DMA write time (68 GB/s): 12.4 MB / 68 GB/s = ~182μs.
-    - Non-cached NPU read time (34 GB/s): 12.4 MB / 34 GB/s = ~365μs.
-    - Total non-cached latency: 182μs + 365μs = ~550μs.
+    - Cache lines: 12,441,600 bytes / 64B = 194,400 lines.
+    - The measured 3.9ms cache-sync stall is about 21ns per 64B line on average, but this is a platform measurement, not a portable constant.
+    - Non-cached DMA write time (68 GB/s): 12.44 MB / 68 GB/s = ~183μs.
+    - Non-cached NPU read time (34 GB/s): 12.44 MB / 34 GB/s = ~366μs.
+    - Total non-cached latency: 183μs + 366μs = ~549μs.
 
     **Conclusion & Interpretation:**
-    - **Result: ~550μs (Latency-Bound).** Eliminating the ~4.1ms cache maintenance overhead via DMA-coherent buffers closes the gap between the expected 3ms hardware latency and the observed 8ms total time.
+    - **Result: measured coherency overhead dominates the handoff.** A vendor-supported coherent or non-cacheable handoff can remove most of the observed ~3.9ms sync stall, but the exact mechanism and remaining latency must be verified on the target camera/NPU stack.
 status: published
 provenance: imported
 requires_explanation: false

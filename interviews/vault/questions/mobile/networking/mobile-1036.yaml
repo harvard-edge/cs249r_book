@@ -1,17 +1,20 @@
 schema_version: '1.0'
 id: mobile-1036
 track: mobile
-level: L4
+level: L3
 zone: specification
 topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: create
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Specification — Bandwidth Requirements for Voice Assistant Pipeline'
+title: A17 Pro Voice Assistant LPDDR5X Bandwidth
 scenario: Specify the complete LPDDR5X bandwidth requirements for a voice assistant pipeline on A17 Pro (8GB, 68 GB/s). Tasks are (1) Wake-word detection (1M INT8, always-on at 20Hz), (2) ASR (whisper-tiny 39M FP16, on-demand), (3) LLM assistant (1B INT4, on-demand), (4) TTS synthesis (a small neural vocoder, 5M INT8, real-time). Define peak bandwidth for each state and verify total does not exceed 68 GB/s.
 question: What are the peak LPDDR5X bandwidth requirements for each stage of the A17 Pro voice assistant pipeline?
 details:
-  realistic_solution: 'State 1 (Idle/wake-word): WW at 20Hz is 1M x 1B / 50ms = 20MB/s = 0.02GB/s. State 2 (ASR active): whisper-tiny 39M FP16 = 78MB. 10s audio: 1 pass. BW: 78MB/pass, 1 pass/10s = 7.8MB/s = 0.008GB/s. WW still running: 0.02GB/s. Total: 0.028GB/s. State 3 (LLM active): 1B INT4 = 500MB. TPOT: 500 / 68 = 7.35ms. BW: 68GB/s peak during decode. WW paused. State 4 (TTS active): 5M INT8 = 5MB. TTS at 22kHz x 10s = 220K samples. FLOPs-bound (vocoder). BW: 5MB x 100 passes/s = 500MB/s = 0.5GB/s. All states peak: 68GB/s (LLM state 3 dominates). LLM does not overlap with TTS (sequential pipeline). Max simultaneous: LLM (68GB/s) < 68GB/s.'
+  realistic_solution: |
+    Report each stage separately and avoid adding sequential stages as if they run together. Wake-word detection is 1M INT8 parameters at 20Hz, so the weight traffic is about 1MB * 20 = 20MB/s = 0.02GB/s. Whisper-tiny is 39M FP16, or about 78MB. If it processes a 10s utterance in real time, that is 78MB / 10s = 0.008GB/s; if compressed into a 1s on-demand burst, the peak is 0.078GB/s. With wake-word still active, ASR remains below 0.1GB/s.
+
+    The 1B INT4 LLM has about 500MB of weights. Its bandwidth requirement depends on the token service target: bandwidth = 0.5GB / TPOT. At a 25ms token target, that is 20GB/s. The 68GB/s bus would make the weight-sweep lower bound 0.5 / 68 = 7.35ms, but that is a minimum latency estimate, not the required bandwidth by itself. TTS has about 5MB of INT8 weights; at 100 vocoder steps/s it needs roughly 0.5GB/s. The maximum planned stage peak is therefore the LLM stage at about 20GB/s for a 25ms TPOT target, well below 68GB/s, assuming ASR, LLM, and TTS are scheduled sequentially.
   common_mistake: |
     **The Pitfall:** Adding peak bandwidths of all components simultaneously.
     **The Rationale:** Candidates do not realize that these components operate sequentially in a pipeline (wake-word -> ASR -> LLM -> TTS).
@@ -23,12 +26,12 @@ details:
 
     **Calculations:**
     - Wake-word idle bandwidth = 1M * 1B * 20Hz = 20MB/s (0.02 GB/s).
-    - ASR (whisper-tiny) bandwidth = 78MB/pass / 10s = 7.8MB/s.
-    - LLM decode bandwidth = 500MB / 7.35ms = 68GB/s.
+    - ASR (whisper-tiny) bandwidth = 78MB/pass / 10s = 7.8MB/s for real-time processing, or 78MB/s (0.078GB/s) for a 1s burst.
+    - LLM decode bandwidth at 25ms TPOT = 500MB / 25ms = 20GB/s. The bus-saturation lower bound is 500MB / 68GB/s = 7.35ms/token.
     - TTS bandwidth = 5MB * 100 passes/s = 500MB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: 68 GB/s (Memory-Bound)**. Peak bandwidth is 68 GB/s during the LLM stage, which perfectly matches the hardware limit without oversubscribing.
+    - **Result: ~20 GB/s planned peak for the LLM stage.** Wake-word, ASR, and TTS are tiny by comparison. The pipeline fits under 68GB/s when the on-demand stages are sequential; claiming 68GB/s as the requirement would only mean intentionally saturating the bus.
 status: published
 provenance: imported
 requires_explanation: true

@@ -8,10 +8,11 @@ competency_area: memory
 bloom_level: analyze
 phase: inference
 title: Memory Optimization for 7B LLM Inference on Samsung Exynos 2400 NPU
-scenario: You are deploying a 7B parameter (FP16) LLM for real-time inference on a Samsung Exynos 2400. Initial deployment attempts encounter Out-Of-Memory (OOM) errors, as the model's FP16 weights alone consume 14 GB. The inference pipeline processes sequences of up to 512 input tokens and 128 output tokens.
+scenario: You are deploying a 7B parameter (FP16) LLM for real-time inference on a Samsung Exynos 2400 with about 10 GB usable app memory. Initial attempts hit OOM because FP16 weights consume 14 GB. Assume a 32-layer, 4096-hidden transformer, FP16 KV cache, and that weights, KV cache, activations, runtime buffers, and OS headroom must fit. The inference pipeline processes up to 512 input tokens and 128 output tokens.
 question: What minimum integer quantization bit-width is required to fit the weights, and what is the KV cache size for 128 tokens?
 details:
-  realistic_solution: Employ a multi-pronged optimization strategy. First, apply Weight Quantization (e.g., AWQ or GPTQ) to compress weights to INT8. Second, implement PagedAttention to efficiently manage KV cache memory, eliminating memory fragmentation and pre-allocating fixed-size blocks. Finally, utilize fused attention kernels (e.g., FlashAttention-2 adapted for NPU) to avoid materializing large attention score matrices in SRAM/DRAM, keeping memory usage deterministic.
+  realistic_solution: |
+    Answer the sizing directly. FP16 weights require 14 GB and cannot fit. With a roughly 10 GB application memory envelope, the least aggressive standard integer weight format that fits is INT8: 7B parameters at 1 byte each use about 7 GB, leaving room for KV cache, activations, runtime buffers, and headroom. For the asked 128-token KV cache, compute the cache from K and V tensors across layers and hidden dimension; it is 67,108,864 bytes, about 64 MiB in FP16 for a 32-layer, 4096-hidden model. Cache paging and fused kernels can help allocation and scratch memory, but they do not change this capacity calculation.
   common_mistake: |
     **The Pitfall:** Overlooking the cumulative memory footprint of activations and the dynamically growing KV cache.
     **The Rationale:** Engineers often focus solely on fitting the static model weights into the memory envelope.
@@ -20,17 +21,17 @@ details:
     **Assumptions & Constraints:**
     - Target app memory budget: ~10 GB.
     - Model size: 7B parameters.
-    - KV Cache requirements: 32 layers, 4096 dim, up to 640 tokens, FP16 (2 bytes).
+    - KV cache requirements for the asked quantity: 32 layers, hidden dim 4096, 128 tokens, FP16 cache.
 
     **Calculations:**
-    - Required weight compression: < 10 GB total budget.
-    - Max bytes per parameter: 10 GB / 7B params = 1.42 bytes/param.
-    - INT8 footprint: 7B * 1 byte = 7 GB.
-    - KV Cache per token: 2 (K&V) * 32 layers * 4096 dim * 2 bytes = 524 KB.
-    - Total KV Cache footprint (640 tokens): 640 tokens * 524 KB = 335.5 MB.
+    - FP16 weight footprint: 7B params * 2 bytes = 14 GB, which does not fit.
+    - Max weight bytes per parameter before other runtime memory: 10 GB / 7B params = 1.42 bytes/param.
+    - INT8 weight footprint: 7B params * 1 byte = 7 GB, which fits the weight budget; INT16 does not.
+    - KV cache per token: 2 (K+V) * 32 layers * 4096 hidden elements * 2 bytes = 524,288 bytes.
+    - KV cache for 128 tokens: 128 * 524,288 bytes = 67,108,864 bytes, about 64 MiB.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound**. INT8 is the minimum bit-width required. With 7 GB allocated for weights and ~336 MB for KV cache, the total footprint comfortably fits within the 10 GB envelope.
+    - **Result: INT8 is the least aggressive standard integer weight format that fits, and the 128-token FP16 KV cache is about 64 MiB.** The remaining budget must cover activations, runtime buffers, and OS headroom.
 status: published
 provenance: imported
 requires_explanation: false

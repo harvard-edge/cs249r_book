@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: cloud-2994
 track: cloud
-level: L5
+level: L3
 zone: optimization
 topic: kernel-fusion
 competency_area: optimization
@@ -9,26 +9,28 @@ bloom_level: evaluate
 phase: inference
 title: 'Kernel Fusion: Optimize CUDA Kernel Fusion for Transformer LayerNorm'
 scenario: Your profiler shows LayerNorm is taking 8% of total training time for a 30B model. The unfused LayerNorm requires 3 passes over the data (compute mean, compute variance, normalize). A fused single-pass LayerNorm is possible using Welford's online algorithm.
-question: How much HBM bandwidth does a fused single-pass LayerNorm save versus a naive three-pass LayerNorm for the 30B model?
+question: For a 256x2048x6144 BF16 LayerNorm activation tensor, how many HBM bytes are transferred by naive three-pass versus fused LayerNorm, and how many bytes are saved per call?
 details:
-  realistic_solution: 'Naive LayerNorm: Pass 1: read X, compute mean → write mean. Pass 2: read X + mean, compute variance → write variance. Pass 3: read X + mean + variance, compute normalized output → write output. 3 reads of X. Welford''s single pass: compute mean AND variance simultaneously → 1 read of X.'
+  realistic_solution: LayerNorm operates independently on each token hidden vector. The large HBM traffic is the activation tensor, not the per-token mean/variance scalars. A naive implementation reads X to compute mean, reads X again to compute variance, then reads X a third time and writes the normalized output. A fused row-wise kernel can keep one 6144-element BF16 row on chip while computing Welford statistics and writing the normalized row, reducing the large-tensor traffic to one read plus one write.
   common_mistake: |
     **The Pitfall:** Claiming that kernel fusion significantly reduces total FLOPs.
     **The Rationale:** Candidates misunderstand optimization paradigms and assume fusion changes the fundamental mathematics of the operation.
     **The Consequence:** Applying fusion logic to heavily compute-bound operations expecting massive speedups, when fusion only optimizes memory-bound overheads.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Tensor Size: 256 batch * 2048 seq * 6144 hidden * 2 bytes = 6.44 GB per call.
-    - Naive HBM Traffic: 3 reads + 1 write = 4 passes.
-    - Fused HBM Traffic: 1 read + 1 write = 2 passes.
+    - Activation tensor: 256 batch * 2048 seq * 6144 hidden * 2 bytes = 6.44 GB per LayerNorm call.
+    - Per-token mean/variance tensors are 256 * 2048 scalars each and are negligible compared with X.
+    - Naive large-tensor HBM traffic: 3 reads of X + 1 write of output = 4 passes.
+    - Fused row-wise traffic: 1 read of X + 1 write of output = 2 passes.
 
     **Calculations:**
     - Naive Traffic: 4 * 6.44 GB = 25.76 GB per call.
     - Fused Traffic: 2 * 6.44 GB = 12.88 GB per call.
-    - Forward Pass Total (192 calls): Naive = 4.95 TB, Fused = 2.47 TB.
+    - Saved Traffic: 25.76 GB - 12.88 GB = 12.88 GB per call.
+    - At 3.35 TB/s HBM bandwidth, the upper-bound time saved is 12.88 GB / 3350 GB/s = 3.8 ms per call.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.48 TB Saved (Memory-Bound)**. Kernel fusion halves the HBM traffic, saving ~2.48 TB of memory bandwidth per forward pass.
+    - **Result: ~12.88 GB saved per LayerNorm call.** This is a byte-traffic saving, not a change in LayerNorm FLOPs; total model savings require the actual number of LayerNorm calls.
 status: published
 provenance: imported
 requires_explanation: false

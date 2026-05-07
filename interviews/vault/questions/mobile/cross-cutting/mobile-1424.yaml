@@ -12,7 +12,7 @@ scenario: You are deploying an on-device generative AI chat feature. To adhere t
 question: How do you diagnose the guardrail bottleneck and quantify an optimized execution strategy on a mobile TPU?
 details:
   realistic_solution: |
-    The optimal approach is to distill the guardrail into a sub-10M parameter model, quantize it to INT8, and pipeline its execution on the TPU concurrently with the LLM's token generation. Since the mobile TPU has ample memory bandwidth and high TOPS, the smaller guardrail can evaluate chunks of tokens asynchronously, hiding its latency entirely behind the generative process.
+    Distill the guardrail into a sub-10M parameter model, quantize it to INT8, and run it on sentence-sized or sliding-window chunks at the display boundary. Some preparation can overlap with LLM token generation, but the final safety decision must still gate display, so the design should budget a small residual synchronization delay rather than claiming the guardrail is free. Use batching and a supported TPU delegate path to keep this residual below the 200ms time-to-display budget.
   common_mistake: |
     **The Pitfall:** Suggesting offloading the safety check to the cloud or applying extreme quantization without architectural changes.
     **The Rationale:** Candidates often default to cloud offloading to save compute, ignoring strict on-device privacy requirements.
@@ -23,13 +23,17 @@ details:
     - Distilled INT8 5M model: ~5 MB memory, 1 GOp.
     - TPU Compute: 7.5 TOPS.
     - Gemini Nano generation: ~15ms/token.
+    - Guardrail runs after each sentence-sized chunk, assume about 20 tokens/chunk.
+    - Delegate scheduling and synchronization overhead: about 2-5ms per guardrail call.
 
     **Calculations:**
-    - Compute time (110M): 22 / 7500 = ~3ms (dominates memory bandwidth sequentially).
-    - Compute time (5M): 1 / 7500 = ~0.13ms.
+    - Original Compute Time: 22 GOPS / 7,500 GOPS/sec = 2.9ms before memory and scheduling overhead.
+    - Distilled Compute Time: 1 GOP / 7,500 GOPS/sec = 0.13ms before memory and scheduling overhead.
+    - Chunk Generation Time: 20 tokens * 15ms/token = 300ms.
+    - Residual Guardrail Delay: compute is sub-ms, but display still waits for about 2-5ms of delegate scheduling, synchronization, and result handling.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.13ms (Compute-Bound avoided via Pipelining)**. The 0.13ms guardrail can be pipelined concurrently, effectively zeroing out the latency overhead.
+    - **Result: about 2-5ms residual per gated chunk (Synchronization-Bound)**. Distillation removes the guardrail as a major compute bottleneck, but a safety check that gates display cannot be hidden entirely.
 status: published
 provenance: imported
 requires_explanation: false

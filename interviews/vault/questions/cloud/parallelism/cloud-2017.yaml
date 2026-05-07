@@ -11,26 +11,27 @@ title: Evaluating TP Topology Across Network Boundaries
 scenario: 'You are serving a 175B parameter LLM (FP16, ~350GB weights) on a cluster of 8-GPU nodes connected via 200 Gbps (25 GB/s) InfiniBand. To fit the model and an active KV cache, you must distribute the deployment across 16 GPUs (2 nodes). You must evaluate two serving strategies: Tensor Parallelism of 16 (TP=16) spanning both nodes, or Tensor Parallelism of 8 (TP=8) within each node combined with Pipeline Parallelism of 2 (PP=2) across the nodes.'
 question: Should you serve the 175B model with TP=16 across nodes or TP=8 within each node plus PP=2 across nodes, and why?
 details:
-  realistic_solution: 'Choose TP=8 and PP=2. Tensor Parallelism must be confined within a single node to leverage the ultra-high bandwidth NVLink, as it requires blocking All-Reduce operations inside every transformer layer. Pipeline Parallelism perfectly matches the lower-bandwidth InfiniBand link.'
+  realistic_solution: Prefer TP=8 within each node plus PP=2 across nodes. TP can technically span nodes, but it performs frequent blocking collectives inside every transformer layer, so putting TP traffic on the slower inter-node InfiniBand link usually dominates serving latency. TP=8 keeps those all-reduces on NVLink and uses InfiniBand mainly for less frequent pipeline activation transfers between the two stages.
   common_mistake: |
     **The Pitfall:** Choosing TP=16 to maximize aggregate memory bandwidth and minimize per-device compute.
     **The Rationale:** Candidates prioritize lowering the per-GPU FLOPs and memory footprint without evaluating network topology.
     **The Consequence:** They ignore the severe latency penalty of executing high-frequency All-Reduce operations over the slow 25 GB/s inter-node network.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Activation Tensor: 64 * 12288 * 2 bytes =~ 1.5 MB.
+    - Activation tensor per microbatch/token boundary: 64 * 12288 * 2 bytes = 1,572,864 bytes ≈ 1.5 MiB.
     - Inter-node IB Bandwidth: 25 GB/s.
     - Model: 96 layers. TP requires 2 All-Reduces per layer.
+    - Collective startup latency and contention are ignored, so bandwidth-only results are lower bounds.
 
     **Calculations:**
-    - TP=16 requires 192 All-Reduces across nodes.
-    - Ring All-Reduce volume: 2*(N-1)/N * data =~ 1.875 * 1.5 MB = 2.81 MB.
-    - Transfer size over network: 192 * 2.81 MB = 540 MB per step.
-    - Network Latency for TP=16: 540 MB / 25 GB/s = 21.6ms per token.
-    - PP=2 transfers the 1.5 MB activation once between nodes: 1.5 MB / 25 GB/s = <0.1ms.
+    - TP=16 spanning two nodes performs 96 * 2 = 192 cross-node all-reduce collectives per forward path.
+    - Even a conservative lower bound of one 1.5 MiB activation crossing the inter-node link per collective gives 192 * 1.5 MiB = 288 MiB of inter-node traffic.
+    - Bandwidth-only lower bound for TP=16: 288 MiB / 25 GB/s ≈ 12 ms, before adding 192 collective startup latencies and network contention.
+    - TP=8+PP=2 keeps TP collectives inside each node and sends about one 1.5 MiB activation across the pipeline boundary per microbatch.
+    - Bandwidth-only lower bound for PP transfer: 1.5 MiB / 25 GB/s ≈ 0.06 ms, plus far fewer inter-node messages.
 
     **Conclusion & Interpretation:**
-    - **Result: PP=2 (<0.1ms) vastly outperforms TP=16 (21.6ms) for inter-node communication (Inter-Node-Network-Bound)**. 
+    - **Result: TP=8+PP=2 is generally preferable (Inter-Node-Network-Bound)** because it avoids hundreds of latency-sensitive cross-node TP collectives and uses the slower link for coarse pipeline transfers instead.
 status: published
 provenance: imported
 requires_explanation: false

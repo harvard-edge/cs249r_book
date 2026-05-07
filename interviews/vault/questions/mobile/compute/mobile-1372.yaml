@@ -12,27 +12,30 @@ scenario: You are architecting an on-device text summarization feature using a 1
 question: How should the model be sized and optimized across prefill, decode, and memory limits to meet the 2-second target?
 details:
   realistic_solution: |
-    LLM inference is split into a compute-bound prefill phase and a memory-bandwidth-bound decode phase. Aggressively quantize weights to INT4 to minimize the memory footprint and data transfer from unified memory. Since standard autoregressive decoding exceeds mobile memory bandwidth limits, implement speculative decoding or Medusa-style draft models to generate multiple tokens per forward pass, maximizing NPU utilization.
+    LLM inference is split into a compute-heavy prefill phase and a decode phase that is constrained by compute, KV-cache traffic, and scheduler overhead. With a 1.8B INT4 model kept resident, the 800-token prefill is roughly 2.88 TOP and takes about 0.96s at 3 effective TOPS. Decode adds about 0.24s of arithmetic work plus roughly 0.7s of KV-cache reads for a 24-layer, 2048-hidden model over the 800-to-1000-token context window. That leaves limited but plausible headroom under 2 seconds if the runtime avoids CPU fallback, bounds KV precision/length, fuses decode kernels, and falls back to a smaller model or shorter output when profiling shows contention.
   common_mistake: |
-    **The Pitfall:** Assuming token generation (decode) is a compute-bound problem rather than a memory-bandwidth-bound problem.
-    **The Rationale:** Candidates often see high TOPS numbers and assume generation will be fast, ignoring the memory bandwidth required to stream weights.
+    **The Pitfall:** Assuming token generation is determined only by peak TOPS or by repeatedly multiplying the full weight size by every output token.
+    **The Rationale:** Candidates often miss the actual decode working set: resident weights, growing KV-cache reads, activation traffic, and runtime scheduling overhead.
     **The Consequence:** The designed system completely fails to meet latency targets during autoregressive generation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: 1.8B parameters at INT4 (0.9 GB weights)
+    - Model: 1.8B parameters at INT4 (0.9 GB resident weights)
     - Target: 2.0s for 800 prefill + 200 decode
     - Effective NPU TOPS: 3 TOPS
     - Unified Bandwidth: 50 GB/s
+    - KV estimate: 24 layers, hidden size 2048, FP16 K/V, average decode context ~900 tokens
 
     **Calculations:**
-    - Prefill Compute: 800 * 1.8B * 2 ops = ~2.88 TOPS. Time = 2.88 / 3 = 0.96s.
-    - Remaining Budget: 2.0s - 0.96s = 1.04s.
-    - Decode Bandwidth Needed: 0.9 GB * 200 tokens = 180 GB transfer.
-    - Decode Time: 180 GB / 50 GB/s = 3.6s.
-    - Total Time: 0.96s + 3.6s = 4.56s.
+    - Prefill work = 800 tokens * 2 * 1.8B ops/token = 2.88e12 ops = 2.88 TOP.
+    - Prefill time = 2.88 TOP / 3 TOPS = 0.96s.
+    - Decode compute time = 200 * 2 * 1.8B ops / 3 TOPS = 0.24s.
+    - KV read per generated token ≈ 900 tokens * 24 layers * 2 (K,V) * 2048 values * 2 bytes = ~177 MB.
+    - KV read for 200 decode tokens ≈ 177 MB * 200 = ~35.4 GB.
+    - KV bandwidth time ≈ 35.4 GB / 50 GB/s = 0.71s.
+    - Estimated latency floor ≈ 0.96s prefill + max(0.24s compute, 0.71s KV bandwidth) = ~1.67s before runtime overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 4.56s (Memory Bandwidth-Bound)**. Standard decoding takes 4.56s, missing the 2s target.
+    - **Result: plausible but tight under corrected limits.** A 1.8B INT4 resident model can fit the 2-second target only with efficient decode scheduling, bounded KV cache traffic, and no CPU fallback; speculative or multi-token decoding is useful headroom, not a requirement derived from repeated full-weight streaming.
 status: published
 provenance: imported
 requires_explanation: true

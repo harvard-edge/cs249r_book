@@ -11,7 +11,7 @@ title: Evaluating Overparameterization and Double Descent in Vision Models
 scenario: Your ML team is training a custom vision model for medical anomaly detection using a dataset of 500,000 labeled images across 100 classes. A baseline model with 10M parameters shows the test error initially dropping but then increasing as training loss approaches zero (classic overfitting). One engineer suggests applying heavy dropout and early stopping for your strict 50ms P99 inference latency budget on T4 GPUs. Another engineer proposes scaling the architecture aggressively to 150M parameters and training well past the point of zero training error.
 question: Under what conditions is scaling to 150M parameters theoretically justified, and how do you reconcile it with the 50ms inference latency budget?
 details:
-  realistic_solution: Scale to the 150M parameter model to enter the overparameterized regime (Double Descent), where SGD implicitly finds smoother interpolating functions that generalize better. To meet the 50ms P99 latency budget on T4 GPUs, apply post-training quantization (INT8) or distill the 150M model back into a smaller student model, rather than artificially constraining the capacity during the initial training phase.
+  realistic_solution: Treat the 150M parameter model as an empirical candidate, not as a theory-guaranteed fix. Scaling past the interpolation region is justified only if held-out medical validation, calibration, and subgroup metrics improve versus the 10M baseline and the deployment path can still meet the 50ms P99 budget. For serving, measure the actual architecture on T4 GPUs at the target batch size; INT8 quantization, pruning, or distillation may help, but only a benchmarked P99 latency result should decide whether the 150M model ships directly or becomes a teacher for a smaller student.
   common_mistake: |
     **The Pitfall:** Assuming the classic U-shaped bias-variance curve holds indefinitely.
     **The Rationale:** Many engineers are trained strictly on classical ML theory and believe that adding capacity beyond the point of zero training error will permanently ruin generalization.
@@ -20,16 +20,16 @@ details:
     **Assumptions & Constraints:**
     - Dataset: 500k samples, 100 classes.
     - T4 GPU latency budget: 50ms P99.
-    - Interpolation Threshold: N_params ≈ N_samples * C.
+    - Candidate model: 150M parameters; architecture, image size, batch size, activation sizes, preprocessing, and kernel efficiency determine latency.
 
     **Calculations:**
-    - Critical peak: 500k * 100 ≈ 50M params.
-    - Regimes: 10M (under-parameterized), 50M (critical peak), 150M (over-parameterized/second descent).
-    - Deployment Memory (FP32): 150M params * 4 bytes = 600MB.
-    - Quantization (INT8): 150M params * 1 byte = 150MB.
+    - Parameter storage (FP32): 150M × 4 bytes = 600MB.
+    - Parameter storage (INT8): 150M × 1 byte = 150MB, before scales, metadata, activations, and framework overhead.
+    - Latency decision: benchmark P99 end-to-end latency on the T4 with the intended batch size and input resolution, including activation memory, data movement, preprocessing, and postprocessing.
+    - Deployment constraint: ship the 150M model only if measured P99 ≤ 50ms; otherwise distill or compress it and re-measure.
 
     **Conclusion & Interpretation:**
-    - **Result: 150MB (Memory-Bound)**. Over-parameterization achieves Double Descent, and INT8 quantization guarantees the latency budget is met.
+    - **Result: Benchmark-Gated**. Overparameterization is a hypothesis to validate, and INT8 reduces parameter storage but does not guarantee the 50ms P99 latency budget.
 status: published
 provenance: imported
 requires_explanation: false

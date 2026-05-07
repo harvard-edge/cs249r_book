@@ -7,49 +7,53 @@ topic: kv-cache-management
 competency_area: architecture
 bloom_level: analyze
 phase: both
-title: Orin Cache Line Fetch
-scenario: An edge inference device manages a KV cache expanding by 64KB per token. PagedAttention transfers blocks from LPDDR5 to computing cores via 32-byte cache lines.
-question: Design a block sizing strategy to minimize the 5us synchronization overhead per block fetch while keeping memory fragmentation under 10% for a 500-token chat.
+title: KV Cache Block Sizing for Edge Inference
+scenario: An edge inference device manages a KV cache expanding by 64KB per token. PagedAttention fetches token blocks from LPDDR5 to computing cores; each block fetch has a 5us synchronization overhead.
+question: Design a block sizing strategy to minimize the 5us synchronization overhead per block fetch while keeping memory fragmentation under 10% for a 500-token chat?
 details:
   realistic_solution: |
-    Applying a PagedAttention strategy, we must balance the coarse granularity of large blocks (which reduces fetch synchronization barriers) against internal memory fragmentation (unused tokens reserved in the last block). Choosing a block size of 16 tokens (1MB total size per block) keeps the absolute worst-case fragmentation well within the 10% bounds while drastically reducing the total number of 5us block fetch barriers compared to single-token (64KB) granularity.
+    Applying a PagedAttention strategy, choose the largest block size that still keeps worst-case internal fragmentation below 10% for the 500-token active cache. The active KV cache is 500 * 64KB = 32MB, so the waste cap is 3.2MB. A 64-token block can waste up to 63 tokens, or 63 * 64KB = 4032KB = 3.94MB, which exceeds the cap. A 32-token block can waste at most 31 tokens, or 1984KB = 1.94MB, while reducing the 500-token cache to ceil(500 / 32) = 16 block fetches. Thus 32-token blocks, about 2MB when full, are the largest power-of-two choice that satisfies the fragmentation cap and minimizes 5us fetch synchronization among valid block sizes.
   common_mistake: |
     **The Pitfall:** Using massive block sizes (e.g., 1000 tokens) to minimize synchronization.
     **The Rationale:** Candidates over-optimize for latency by minimizing synchronization calls, completely failing to validate the strict memory fragmentation constraints required on edge devices.
     **The Consequence:** Memory fragmentation radically exceeds the 10% limit, causing early and catastrophic out-of-memory (OOM) errors during inference.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Expansion rate: 64 KB per token.
-       - Sequence length: 500 tokens.
-       - Maximum allowed memory fragmentation: < 10%.
-       - Sync Barrier Cost: 5 µs per block fetch.
-    2. **Calculations:**
-       - Total active memory: 500 tokens * 64 KB = 32 MB.
-       - Maximum fragmentation limit: 10% of 32 MB = 3.2 MB.
-       - Candidate Block Size (16 tokens / 1 MB block):
-         - Worst-case internal fragmentation (last block holds 1 active token): 15 unused tokens * 64 KB = 0.96 MB.
-       - 0.96 MB < 3.2 MB (Passes Constraint).
-       - Synchronization overhead: 500 fetches reduced to 32 fetches (0.16 ms sync time vs 2.5 ms).
-    3. **Conclusion & Interpretation:**
-       **Result: 1MB blocks yield 0.96MB waste and 0.16ms sync (Synchronization-Bound solved).** 16-token blocks mathematically satisfy strict memory bounds while accelerating the critical path.
+    **Assumptions & Constraints:**
+    - Expansion rate: 64 KB per token.
+    - Sequence length: 500 tokens.
+    - Maximum allowed memory fragmentation: < 10%.
+    - Sync Barrier Cost: 5 \u00b5s per block fetch.
+    - Candidate block sizes are powers of two; worst-case internal waste is block_size - 1 tokens.
+
+    **Calculations:**
+    - Total active memory: 500 tokens * 64 KB = 32 MB.
+    - Maximum fragmentation limit: 10% of 32 MB = 3.2 MB.
+    - 64-token candidate: 63 unused tokens * 64 KB = 4032 KB = 3.94 MB, which exceeds 3.2 MB.
+    - 32-token candidate: 31 unused tokens * 64 KB = 1984 KB = 1.94 MB, which is under 3.2 MB.
+    - Fully occupied 32-token block size: 32 * 64 KB = 2048 KB = 2 MB.
+    - Blocks needed for 500 tokens with 32-token blocks: ceil(500 / 32) = 16 blocks.
+    - Synchronization overhead: 16 * 5 us = 80 us = 0.08 ms, versus 500 * 5 us = 2.5 ms for single-token blocks.
+
+    **Conclusion & Interpretation:**
+    - **Result: 32-token blocks yield at most 1.94MB waste and 0.08ms sync (Fragmentation-Capped Synchronization Tradeoff)**. This is the largest power-of-two block size whose worst-case token waste stays below the 3.2MB, 10% fragmentation cap.
 status: published
 provenance: llm-draft
-expected_time_minutes: 8
 requires_explanation: true
+expected_time_minutes: 8
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-design-L4
+  - gemini-generated
+  - target-design-L4
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

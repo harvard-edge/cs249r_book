@@ -9,9 +9,9 @@ bloom_level: create
 phase: training
 title: 'Dataset Curation: Mastery — End-to-End Data Strategy for TinyML Anomaly Detection'
 scenario: You are deploying a vibration-based machine anomaly detection model on ESP32-S3. The model must detect bearing failures from 3-axis accelerometer data. You have only 200 labeled anomaly examples (rare events) and 10,000 normal examples.
-question: How would you design the complete data strategy for an anomaly detection model that achieves < 5% false alarm rate and > 90% anomaly detection rate?
+question: How would you design the complete data strategy for an anomaly detection model that achieves 5% false alarm rate and 90% anomaly detection rate?
 details:
-  realistic_solution: Utilize an unsupervised or semi-supervised autoencoder strategy, training strictly on the augmented 10,000 'normal' telemetry sequences. At inference time, classify anomalies via reconstruction loss thresholds. Dedicate the 200 rare anomaly labels solely to the validation/test splits to rigorously dial in the 95th percentile reconstruction threshold guaranteeing the <5% false positive mandate.
+  realistic_solution: Use a semi-supervised anomaly-detection strategy. Train the autoencoder only on a clean normal-training split, but reserve normal validation/test data plus the 200 labeled anomalies for calibration and final evaluation. For example, split normal data into train/validation/test and split anomalies into calibration/test. Choose the reconstruction-loss threshold on the calibration set to meet the best tradeoff near 5% false alarm rate on held-out normal examples while checking anomaly recall on labeled failures, then report final FAR and detection rate once on the untouched test split. If the 90% anomaly-detection target is missed at 5% FAR, use the anomaly calibration labels for threshold adjustment, feature review, hard-negative mining, or a small supervised calibration layer rather than claiming the percentile threshold guarantees production behavior.
   common_mistake: |
     **The Pitfall:** Framing extreme-imbalance predictive maintenance as a standard supervised binary classification task.
     **The Rationale:** Candidates mechanically default to standard supervised learning paradigms without addressing the physical scarcity of failure data.
@@ -19,16 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Input Data: 10k normal * 1-sec * 100Hz * 3-axis * 1 byte (int8) = 3 MB (Fits PSRAM).
-    - Autoencoder Architecture: 300->64->16->64->300 = 40,448 parameters.
+    - Autoencoder Architecture: 300->64->16->64->300 dense int8 autoencoder.
     - Hardware limits: 512 KB SRAM.
 
     **Calculations:**
-    - Weights footprint = 40,448 bytes (~40 KB).
-    - Activations ~3 KB.
-    - Total memory = < 50 KB.
+    - Weights = 300*64 + 64*16 + 16*64 + 64*300 = 40,448.
+    - Biases = 64 + 16 + 64 + 300 = 444.
+    - Total parameters = 40,892, or about 40 KB if int8-quantized.
+    - Activations and scratch buffers are a few KB for a single 300-sample window; the 3 MB training corpus lives off-device or in PSRAM, not in SRAM during inference.
+    - Calibration data should include held-out normal windows and labeled anomaly windows to estimate FAR and detection rate with uncertainty.
 
     **Conclusion & Interpretation:**
-    - **Result: < 50 KB (SRAM Execution Verified)**. The lightweight 40KB autoencoder easily fits in SRAM, avoiding PSRAM bottlenecks and perfectly supporting threshold-based inference.
+    - **Result: ~45-50 KB runtime footprint plus calibration/test data outside the inference arena**. The model is plausible for SRAM execution, but the 5% FAR / 90% detection claim must be verified on held-out normal and anomaly splits; a validation percentile controls only the validation estimate, not production drift.
 status: published
 provenance: imported
 requires_explanation: true

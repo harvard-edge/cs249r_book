@@ -7,19 +7,14 @@ topic: extreme-quantization
 competency_area: deployment
 bloom_level: evaluate
 phase: both
-title: 'The Real-Time Compression Stack Design'
+title: The Real-Time Compression Stack Design
 scenario: 'You must deploy a 7B parameter language model on a Jetson AGX Orin (64 GB unified memory, 275 TOPS INT8) for a robotics application with a hard real-time constraint: 50ms per inference call (single token generation during decode). The model in FP16 is 14 GB and decode latency is 180ms.'
-question: 'What ordered compression pipeline, target ratios, and accuracy tradeoffs would meet the 50ms/token budget on the Jetson AGX Orin?'
+question: What ordered compression pipeline, target ratios, and accuracy tradeoffs would meet the 50ms/token budget on the Jetson AGX Orin?
 details:
-  realistic_solution: 'Start from the bottleneck analysis. At decode (batch=1, single token), the operation is memory-bandwidth-bound: the GPU must stream all weights from memory once per token. On the Orin, unified memory bandwidth is ~205 GB/s. Decode latency $\approx$ model_size / bandwidth. At FP16 (14 GB): 14/205 = 68ms \u2014 already over budget even at theoretical peak (real throughput ~70% \u2192 98ms, close to the observed 180ms with overhead). Target: 50ms \u2192 need model_size < 205 \u00d7 0.05 \u00d7 0.7 = ~7.2 GB after compression.
-
-Pipeline design (ordered):
-1. **Structured pruning** (20% of attention heads, 15% of FFN): reduces effective params from 7B to ~5.6B. Fine-tune on 5B tokens. FP16 size: 11.2 GB.
-2. **Knowledge distillation** (optional): use original 7B as teacher to recover accuracy lost from pruning during fine-tune.
-3. **INT4 weight-only quantization** (GPTQ or AWQ): 5.6B \u00d7 0.5 bytes = 2.8 GB weights + ~0.5 GB activations in FP16 = 3.3 GB total.
-4. Decode latency estimate: 3.3 GB / (205 \u00d7 0.7) = 23ms \u2014 well within 50ms budget, leaving headroom for kernel overhead.
-
-Accuracy impact: structured pruning ~0.3-0.5 perplexity increase (recoverable with distillation fine-tune), INT4 quantization ~0.2-0.4 perplexity increase. Total: ~0.5-0.8 perplexity degradation from baseline \u2014 acceptable for robotics NLU.'
+  realistic_solution: |
+    Start from the bottleneck analysis. At decode (batch=1, single token), the operation is memory-bandwidth-bound: the GPU must stream all weights from memory once per token. On the Orin, unified memory bandwidth is ~205 GB/s. Decode latency $\approx$ model_size / bandwidth. At FP16 (14 GB): 14/205 = 68ms \u2014 already over budget even at theoretical peak (real throughput ~70% \u2192 98ms, close to the observed 180ms with overhead). Target: 50ms \u2192 need model_size < 205 \u00d7 0.05 \u00d7 0.7 = ~7.2 GB after compression.
+    Pipeline design (ordered): 1. **Structured pruning** (20% of attention heads, 15% of FFN): reduces effective params from 7B to ~5.6B. Fine-tune on 5B tokens. FP16 size: 11.2 GB. 2. **Knowledge distillation** (optional): use original 7B as teacher to recover accuracy lost from pruning during fine-tune. 3. **INT4 weight-only quantization** (GPTQ or AWQ): 5.6B \u00d7 0.5 bytes = 2.8 GB streamed weights. Keep activations and KV-cache buffers separately budgeted in FP16/BF16; they affect memory capacity and kernel overhead but are not streamed as the full model weight set for every decode token. 4. Decode latency estimate: 2.8 GB / (205 \u00d7 0.7) = ~19.6ms for weight streaming. Allowing roughly 10ms for activation traffic, KV-cache access, launches, and scheduler overhead gives ~30ms/token, below the 50ms budget.
+    Accuracy impact: structured pruning ~0.3-0.5 perplexity increase (recoverable with distillation fine-tune), INT4 quantization ~0.2-0.4 perplexity increase. Total: ~0.5-0.8 perplexity degradation from baseline \u2014 acceptable for robotics NLU.
   common_mistake: |
     **The Pitfall:** Applying a single compression technique or multiple techniques in arbitrary order.
     **The Rationale:** Candidates assume that applying standard INT4 quantization will magically hit the target, without calculating the exact bandwidth requirements or considering the composition of pruning and quantization.

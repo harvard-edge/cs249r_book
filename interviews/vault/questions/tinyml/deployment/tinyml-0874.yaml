@@ -11,7 +11,7 @@ title: 'Model Format Conversion: Size TFLM Deployment for ESP32-S3 with PSRAM'
 scenario: You need to size the memory layout for deploying MobileNetV1-0.25 on ESP32-S3, allocating the model to PSRAM, activations to SRAM, and TFLM runtime to SRAM.
 question: What latency penalty comes from placing 475 KB MobileNetV1 weights in ESP32-S3 PSRAM instead of SRAM?
 details:
-  realistic_solution: 'Layout: model Flatbuffer → PSRAM (475KB, accessed once per inference for weight loading). Activation arena → SRAM (100KB). TFLM runtime → SRAM (30KB). Total SRAM: 130KB of 512KB ✓. PSRAM access: weights read 14.9M × 1B = 14.9MB total weight reads per inference? No: 475KB per layer pass. Weight reads: 14.9M MACs × 1B weight per MAC = 14.9MB of weight data read. At PSRAM BW ~40MB/s (SPI): 14.9MB/40MB/s = 373ms! Catastrophic. Fix: copy model to SRAM at startup? 475KB > 512KB SRAM. Use ping-pong: copy 1 layer at a time to SRAM → layer-by-layer.'
+  realistic_solution: 'Use an explicit access-pattern assumption. The 475KB FlatBuffer is allocated in PSRAM while activations and the TFLM runtime stay in SRAM. If the runtime stages or copies each stored weight once per inference, the PSRAM traffic is the model size: 475KB / 40MB/s = about 11.9ms of raw transfer time, plus per-layer scheduling and alignment overhead. A kernel that repeatedly rereads weights from PSRAM can be much slower, but MAC count alone does not determine unique weight bytes; 14.9M MACs is a compute count, not a principled traffic estimate. The correct answer is therefore a bandwidth-risk range: about 12ms for one-pass layer staging, with larger execution-time penalties only after profiling the actual kernel cache/reuse behavior.'
   common_mistake: |
     **The Pitfall:** Storing all data in PSRAM for simplicity without considering access latency.
     **The Rationale:** Candidates ignore that PSRAM operates over an SPI bus with 5-10x higher latency than internal SRAM.
@@ -22,13 +22,14 @@ details:
     - PSRAM Bandwidth: ~40 MB/s (SPI).
 
     **Calculations:**
-    - Weight Data Read: 14.9M MACs * 1 Byte = 14.9 MB.
-    - PSRAM Read Latency: 14.9 MB / 40 MB/s = ~373 ms.
-    - Ping-Pong SRAM Copy (73.7 KB max layer): 73.7 KB / 40 MB/s = 1.84 ms per layer.
-    - Total Layer Copies (13 layers): 13 * 1.84 ms = 23.9 ms.
+    - One-pass layer-staging assumption: each stored weight byte is read from PSRAM once per inference.
+    - PSRAM weight traffic: 475 KB of model weights, not 14.9M MACs converted to bytes.
+    - Raw transfer time: 475 KB / 40 MB/s = 0.0119 s = ~12 ms, plus scheduling/DMA overhead.
+    - Direct execute-in-place can be slower if kernels reread weights from PSRAM, but the penalty depends on cache/reuse behavior and must be profiled or modeled per layer.
+    - Full startup copy is not viable here because 475 KB weights + 100 KB arena + 30 KB runtime exceeds 512 KB SRAM.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound**. Direct PSRAM access causes a catastrophic 373 ms penalty; layer-by-layer SRAM ping-ponging reduces overhead to 23.9 ms.
+    - **Result: Memory-Bandwidth-Bound**. With one-pass layer staging, the raw PSRAM weight-transfer penalty is roughly 12 ms; larger direct-streaming penalties are possible but require an explicit cache/reuse model rather than a MAC-to-byte conversion.
 status: published
 provenance: imported
 requires_explanation: false

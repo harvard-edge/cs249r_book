@@ -7,9 +7,9 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: understand
 phase: training
-title: 'Why model.eval() Matters for Inference'
-scenario: 'A developer deploys a model without calling model.eval() and notices prediction quality varies between identical inputs.'
-question: 'Why do predictions vary between identical inputs when a deployed model is left in training mode, and which layers cause it?'
+title: Training Mode Inference with Dropout and BatchNorm
+scenario: A developer deploys a model without calling model.eval() and notices prediction quality varies between identical inputs.
+question: Why do predictions vary between identical inputs when a deployed model is left in training mode, and which layers cause it?
 details:
   realistic_solution: 'Two layer types behave differently in training vs eval mode: (1) Dropout: In training mode, randomly zeroes activations with probability p and scales remaining by 1/(1-p). In eval mode, dropout is disabled — all activations pass through unchanged. Without eval(), identical inputs produce different outputs each forward pass due to random dropout masks. (2) BatchNorm: In training mode, normalizes using the current batch''s mean and variance (noisy, batch-dependent). In eval mode, uses the stored running mean and running variance accumulated during training (deterministic). Without eval(), predictions depend on the batch composition. The fix is calling model.eval() before inference, which sets self.training=False for all submodules, changing these layers'' behavior to their deterministic inference variants.'
   common_mistake: |
@@ -20,13 +20,15 @@ details:
     **Assumptions & Constraints:**
     - Model left in training mode during inference.
     - Dropout p=0.5.
-    
+    - BatchNorm observes the current inference batch rather than fixed running statistics.
+
     **Calculations:**
-    - Dropout in Train Mode: 50% of features randomly zeroed out per forward pass.
-    - Dropout in Eval Mode: All features remain active deterministically.
-    
+    - Dropout in train mode samples a new mask each forward pass, so identical inputs can traverse different active subnetworks.
+    - BatchNorm in train mode recomputes mean/variance from the current batch, so the same example can be normalized differently when batched with different examples.
+    - Eval mode disables dropout sampling and uses stored BatchNorm running statistics, removing both sources of inference-time variation.
+
     **Conclusion & Interpretation:**
-    - **Result: >10% variance per prediction (Compute-Bound)**. Leaving stochastically driven layers active causes silent prediction instability on identical inputs.
+    - **Result:** The expected failure mode is nondeterministic and batch-dependent predictions, not a fixed percentage variance. Calling `model.eval()` switches these layers to deterministic inference behavior.
 status: published
 provenance: imported
 requires_explanation: false

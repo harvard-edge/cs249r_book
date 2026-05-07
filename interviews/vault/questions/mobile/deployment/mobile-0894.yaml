@@ -7,12 +7,12 @@ topic: compound-ai-systems
 competency_area: deployment
 bloom_level: create
 phase: inference
-title: 'Specifying Latency SLO Contracts for Each Stage of a Mobile Compound Pipeline on A17 Pro'
+title: Specifying Latency SLO Contracts for Each Stage of a Mobile Compound Pipeline on A17 Pro
 scenario: 'You are writing the technical specification for a 5-stage compound AI pipeline targeting a 1.5-second time-to-first-token SLA. Stages are: query embedding, FAISS retrieval, reranking, context assembly, and LLM prefill.'
-question: 'What per-stage latency SLOs and error budgets should a five-stage pipeline use for a 1.5s TTFT SLA?'
+question: What per-stage latency SLOs and error budgets should a five-stage pipeline use for a 1.5s TTFT SLA?
 details:
   realistic_solution: |
-    Variance-aware budget allocation is required. Stages with deterministic runtime get tight P95/P99 envelopes; variable stages get wider. Sum P95: 25+5+50+5+400=485ms. Total TTFT P95 budget: 485ms + generation budget. Error budget per stage must target 99% compliance to ensure the compounded pipeline P95 meets the 95.1% system SLO.
+    Use variance-aware stage contracts whose P95 latencies sum comfortably below the 1.5s TTFT target: query embedding 25ms, FAISS retrieval 5ms, reranking 50ms, context assembly 5ms, and LLM prefill-to-first-token 400ms. That gives a 485ms nominal P95 TTFT and leaves 1015ms of headroom for scheduler delay, thermal throttling, cache misses, and model variance. Set per-stage availability/error-budget targets so the compounded request succeeds at the desired level: for example, 99.0% per stage gives 0.99^5 = 95.1% end-to-end success, while 99.5% per stage gives 97.5% end-to-end success. Track both per-stage P95/P99 latency and per-stage timeout/error rates; TTFT is the sum through the first emitted token, not a separate decode step added after prefill.
   common_mistake: |
     **The Pitfall:** Allocating the 1.5s budget equally across all 5 stages (300ms each).
     **The Rationale:** Candidates fail to consider that stages have inherently different variances (e.g., deterministic FAISS vs. variable LLM prefill).
@@ -20,15 +20,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - TTFT Target: 1500ms.
-    - Generation decode step: 50ms.
+    - TTFT includes query embedding, retrieval, reranking, context assembly, and LLM prefill through the first emitted token.
+    - Candidate per-stage P95 SLOs: embedding 25ms, retrieval 5ms, reranking 50ms, assembly 5ms, prefill-to-first-token 400ms.
+    - Candidate per-stage success target: 99.0%.
 
     **Calculations:**
-    - Stage P95 sum = 25+5+50+5+400 = 485ms.
-    - First token generation = 485ms + 50ms = 535ms TTFT P95.
-    - Remaining budget = 1500ms - 535ms = 965ms.
-    - Extra tokens before 1.5s = 965ms / 50ms = ~19 tokens.
+    - TTFT P95 = 25 + 5 + 50 + 5 + 400 = 485ms.
+    - Remaining TTFT headroom = 1500ms - 485ms = 1015ms.
+    - End-to-end success from independent 99.0% stage targets = 0.99^5 = 0.951 = 95.1%.
+    - End-to-end error budget = 1 - 0.951 = 4.9%.
+    - Per-stage error budget at 99.0% = 1.0% per stage.
 
     **Conclusion & Interpretation:**
-    - **Result: 535ms TTFT (Latency-Bound)**. User sees the first token at 535ms.
+    - **Result: 485ms P95 TTFT target with 1015ms headroom and 99.0% per-stage success budgets**. The proposed stage SLOs fit the 1.5s first-token SLA while making the compounded error budget explicit.
 status: published
+provenance: imported
 validated: true

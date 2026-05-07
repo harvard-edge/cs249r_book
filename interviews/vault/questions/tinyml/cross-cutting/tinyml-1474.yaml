@@ -11,25 +11,29 @@ title: Optimizing Federated Averaging on Resource-Constrained Edge Devices
 scenario: You are designing a federated learning system for predictive maintenance in a large fleet of industrial sensors. Each sensor node collects vibration data. Due to privacy concerns and network unreliability, local model updates are trained on-device, and only aggregated model parameters are sent to a central server using federated averaging. The dataset on each device is highly non-IID due to variations in machine wear patterns. Your current challenge is that the communication overhead for sending model updates is exceeding the available bandwidth in many remote locations, and the on-device training time is consuming too much energy, impacting battery life.
 question: How should federated averaging on STM32F4 sensors reduce communication cost and on-device training energy for non-IID data?
 details:
-  realistic_solution: Implement a sparsification technique (e.g., Top-k or Random-k selection) for transmitting model updates, sending only the most significant 'k' parameters to the server to drastically reduce communication volume. For on-device training, optimize the model architecture and training process for integer arithmetic, completely avoiding floating-point operations to leverage the ARM Cortex-M4's capabilities efficiently without FPU emulation. Consider using adaptive federated optimization algorithms (e.g., FedProx) to handle non-IID data more robustly.
+  realistic_solution: |
+    Implement communication reduction first: Top-k or Random-k sparsification, 8-bit update quantization, entropy coding if affordable, and error feedback so each sensor transmits only a bounded subset of the model delta without losing accumulated residuals. For STM32F4-side training energy, keep the trainable head or adapter small, use fewer local steps, early stopping, simpler optimizers such as SGD, and profiled fixed-point arithmetic only for kernels that the firmware actually supports. Do not assume an STM32F4 can run accelerator-style mixed-precision or full on-device training at meaningful scale. For non-IID data, use bounded local steps plus FedProx or another federated optimizer so sparse updates do not amplify client drift.
   common_mistake: |
-    **The Pitfall:** Overlooking the computational limitations of lacking an FPU.
-    **The Rationale:** Candidates focus solely on generic model compression without considering the cost of floating-point emulation on an M4 without FPU.
-    **The Consequence:** This leads to inefficient floating-point emulation, drastically increasing training times and energy consumption.
+    **The Pitfall:** Treating communication compression as the whole federated-learning solution.
+    **The Rationale:** Candidates focus on smaller update payloads but leave local training unchanged, so CPU time, optimizer state, retries, and non-IID client drift still dominate energy and convergence.
+    **The Consequence:** The system sends fewer bytes per round but still misses the battery budget or requires extra rounds because unstable client updates are discarded or corrected later.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model has 'P' parameters, 'B' bytes per parameter.
-    - Floating-point emulation takes 100 cycles, integer math takes 10 cycles.
-    - Epoch has 100 batches. Device CPU runs at 168 MHz.
+    - Example model update has 100,000 parameters at 4 bytes per dense FP32 delta.
+    - A Top-k update sends 10% of parameters as 1-byte quantized deltas.
+    - With 100,000 parameters, 17 bits are needed for a flat parameter index; assume a block-sparse scheme or per-layer index tables that fit each transmitted index into 2 bytes.
+    - On-device training energy is proportional to active CPU time, radio time, and retransmissions.
 
     **Calculations:**
-    - Top-k sparsification sends 'k' parameters (k x B bytes). Communication reduction = P / k.
-    - Converting M=1000 operations saves: M x (100 - 10) = 90,000 cycles per training step.
-    - Epoch savings: 90,000 x 100 = 9,000,000 cycles.
-    - Time saved = 9,000,000 cycles / 168 MHz ≈ 53.6 ms.
+    - Dense update payload: 100,000 * 4 bytes = 400,000 bytes.
+    - Sparse quantized payload under the 16-bit-index assumption: 10,000 * (1 byte value + 2 byte index) = 30,000 bytes, plus headers and error-feedback state.
+    - Payload reduction: 400,000 / 30,000 ≈ 13.3x before protocol overhead and error-feedback state.
+    - If flat 17-bit indexes are sent without blocking, index payload grows above 20,000 bytes and the reduction is slightly smaller.
+    - If radio energy dominates and retries are unchanged, communication energy falls by roughly the same order; if CPU training dominates, reduce trainable parameters, local epochs, and optimizer state.
+    - Non-IID mitigation trades extra stability for work: FedProx/bounded local steps can reduce divergent updates and retransmitted or discarded rounds.
 
     **Conclusion & Interpretation:**
-    - **Result: 53.6 ms saved (Compute/Network-Bound)**. Saving ~53.6 milliseconds of active processing time per epoch heavily reduces energy consumption across thousands of training steps.
+    - **Result: a 10% Top-k, 8-bit update with a justified 16-bit index scheme cuts the example payload from 400 KB to about 30 KB per round.** Pair sparse or quantized updates with error feedback and FedProx/bounded local steps, and reduce training energy through fewer trainable parameters, fewer local steps, and only measured fixed-point kernels.
 status: published
 provenance: imported
 requires_explanation: false

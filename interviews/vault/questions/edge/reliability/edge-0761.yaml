@@ -7,11 +7,11 @@ topic: monitoring-observability
 competency_area: reliability
 bloom_level: analyze
 phase: both
-title: The Edge Fleet Dashboard Overload
+title: Prometheus Edge Aggregation for Camera Fleet Metrics
 scenario: A monitoring dashboard for 20,000 edge AI cameras streams 50 metric series per device to Prometheus, overwhelming the backend.
-question: How do you redesign the monitoring architecture?
+question: How should Prometheus telemetry be redesigned to avoid cardinality overload with edge aggregation?
 details:
-  realistic_solution: The problem is a cardinality explosion. The solution is edge-level pre-aggregation. Each device should compute 5-minute window aggregates (p50, p99, mean) and only upload the summarized metrics.
+  realistic_solution: 'The problem is a Prometheus cardinality and sample-volume explosion. The solution is edge-level pre-aggregation: each device should collapse raw 15-second samples into a small set of 5-minute summary series, such as p50, p99, mean, error count, and health counters, then upload only those bounded summaries.'
   common_mistake: |
     **The Pitfall:** Increasing the scrape interval from 15s to 60s to reduce load.
     **The Rationale:** Engineers often treat symptoms (high data volume) rather than the root cause (cardinality explosion and pulling raw metrics instead of aggregated data).
@@ -20,18 +20,24 @@ details:
     **Assumptions & Constraints:**
     - 20,000 devices.
     - 50 series per device.
-    - 15s interval (4/min).
+    - 15s scrape interval = 4 samples per series per minute.
+    - Raw sample storage estimate: 16 bytes per raw time-series sample.
+    - Aggregated record estimate: 100 bytes per 5-minute summary sample, including labels and protocol overhead.
 
     **Calculations:**
-    - Total samples/sec = (20,000 * 50 * 4) / 60 = 66,667 samples/sec.
-    - Daily size = 4M samples/min * 1440 * 16 bytes = 92 GB/day.
-    - Edge aggregation (5-min windows, 10 metrics) = 20,000 * 10 * 12/hr * 24hr * 100B = ~5.7 GB/day.
+    - Series count = 20,000 * 50 = 1,000,000 active series.
+    - Raw samples/min = 1,000,000 * 4 = 4,000,000 samples/min.
+    - Raw samples/day = 4,000,000 * 1440 = 5.76B samples/day.
+    - Raw storage/day = 5.76B * 16 bytes = 92.16 GB/day.
+    - Edge aggregation emits 10 summary samples per device per 5-minute window.
+    - Aggregated storage/day = 20,000 devices * 10 summaries * 12 windows/hr * 24 hr * 100 bytes = 5.76 GB/day.
+    - Reduction factor = 92.16 GB/day / 5.76 GB/day = 16x.
 
     **Conclusion & Interpretation:**
     - **Result: 16x Network/Storage Reduction (Telemetry-Bound)**. Edge pre-aggregation prevents catastrophic cardinality explosions in cloud monitoring backends.
-status: flagged
-tags:
-  - off-topic-general-eng
+status: published
 provenance: imported
 requires_explanation: false
 expected_time_minutes: 8
+tags:
+  - off-topic-general-eng

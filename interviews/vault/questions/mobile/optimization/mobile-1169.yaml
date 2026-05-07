@@ -11,23 +11,25 @@ title: Diagnosing TPU Utilization Drop in Gemini Nano Decoding
 scenario: You are deploying a quantized version of Gemini Nano on the Google Tensor G3. The model and KV cache comfortably fit within the 12 GB LPDDR5X memory. However, during autoregressive decoding, generation speed is heavily degraded. Profiling shows the on-device TPU is drastically underutilizing its 7.5 TOPS capability, while the LPDDR5X memory bandwidth is unexpectedly saturated.
 question: What operator scheduling or graph execution issue is most likely causing this symptom?
 details:
-  realistic_solution: The root cause is operator fragmentation preventing layer fusion in the scheduling graph. If an operation (like a custom activation or normalization) isn't supported by the TPU, the scheduler forces a context switch back to the CPU. This breaks layer fusion, forcing the system to write intermediate activations back to the 12 GB main memory instead of keeping them in the TPU's local SRAM, thereby saturating the memory bandwidth and stalling the TPU.
+  realistic_solution: The root cause is operator fragmentation preventing layer fusion in the execution graph. If an operation such as a custom activation, normalization, or shape transform is unsupported by the mobile accelerator delegate, the runtime falls back to CPU or crosses accelerator/delegate boundaries for that subgraph. Each boundary can materialize intermediate activations in shared LPDDR5X instead of keeping data in accelerator-managed buffers, so memory bandwidth saturates and the TPU/NPU sits idle waiting for transfers.
   common_mistake: |
     **The Pitfall:** Misdiagnosing memory saturation as a hardware limitation or overall model size issue.
     **The Rationale:** Candidates see 100% memory bandwidth usage and assume 7.5 TOPS isn't enough, failing to recognize that execution order dictates intermediate memory traffic.
     **The Consequence:** Over-quantizing the model when the real solution is fixing operator fragmentation in the scheduler.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Theoretical limit: ~33 tokens/sec.
-    - Fragmentation penalty: Unfused scheduler breaks fusion across 32 layers.
-    - Activation tensor size: 2MB per layer.
+    - Gemini Nano decoding graph has 32 layers.
+    - Unsupported op breaks fusion once per layer.
+    - Intermediate activation tensor crossing each delegate boundary: ~2 MB.
+    - LPDDR5X peak bandwidth: ~50 GB/s, with much lower effective bandwidth under contention.
 
     **Calculations:**
-    - Intermediate traffic: 2MB x 32 layers x 2 (read/write) = 128 MB of extra memory traffic per token.
-    - Wasted bandwidth at 5 tokens/sec: 5 x 128 MB = 640 MB/s wasted bandwidth.
+    - Extra intermediate traffic per token: 2 MB * 32 layers * 2 (write + read) = 128 MB.
+    - Transfer lower bound at peak: 128 MB / 50 GB/s = ~2.6 ms per token before synchronization overhead.
+    - At 5 tokens/sec, the graph emits 5 * 128 MB = 640 MB/s of avoidable LPDDR traffic, plus CPU/accelerator synchronization stalls.
 
     **Conclusion & Interpretation:**
-    - **Result: 640 MB/s Waste (Bandwidth-Bound)**. The host-device synchronization latency and memory traffic completely stall the TPU.
+    - **Result: Bandwidth and Synchronization Bottleneck.** The key diagnostic is unsupported ops breaking fusion and creating avoidable activation read/write traffic; fixing the graph or delegate coverage is more relevant than the nominal 7.5 TOPS rating.
 status: published
 provenance: imported
 requires_explanation: false

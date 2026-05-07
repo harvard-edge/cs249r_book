@@ -11,25 +11,28 @@ title: A17 Pro Neural Engine Latency Breakdown
 scenario: Your team is deploying a local voice-based smart assistant using a 1.5B parameter LLM (quantized to INT4) on an iPhone 15 Pro. The target platform is the Apple A17 Pro Neural Engine, sharing 8 GB of unified memory. You need to decompose the end-to-end latency for a user query consisting of a 50-token prompt (derived from an audio input) and a 100-token generated response.
 question: How should the A17 Pro voice assistant latency be decomposed for a 50-token prompt and 100-token response?
 details:
-  realistic_solution: 'A strong L5 candidate will break the latency into distinct phases: Audio Preprocessing (CPU), Time-to-First-Token (TTFT, which is compute-bound on the NPU), and Time-Per-Output-Token (TPOT, which is memory-bound). They will evaluate the tradeoff between NPU utilization for the prompt processing phase versus the memory bandwidth limits of the shared unified memory during the token generation phase.'
+  realistic_solution: A strong L5 candidate decomposes latency into audio preprocessing, prompt prefill/TTFT, and autoregressive decode/TPOT. For the 50-token prompt, prefill processes the prompt in a batched pass and is roughly the larger of compute time and one streamed read of the INT4 weights, about 15-20 ms under these assumptions. For the 100-token response, decoding is batch-size-1 and repeatedly moves weights plus KV-cache and activation data, so TPOT is bandwidth-bound at roughly 16-20 ms/token. End-to-end model latency is therefore dominated by generation, about 1.6-2.0 seconds plus audio and runtime overhead.
   common_mistake: |
     **The Pitfall:** Assuming autoregressive generation is bounded by the NPU's 35 TOPS compute speed.
     **The Rationale:** Candidates look only at the raw compute figure and fail to realize that Time-Per-Output-Token (TPOT) for batch-size 1 generation is strictly memory-bandwidth bound.
     **The Consequence:** Overpromising generation speed and failing to implement memory optimizations like INT4 quantization for the weights.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: 1.5B params, INT4 (0.75 GB)
-    - A17 Pro Compute: 35 TOPS (assume 30% utilization = 10.5 TOPS)
-    - LPDDR5 Bandwidth: ~50 GB/s
+    - Model: 1.5B params, INT4 weights ≈ 0.75 GB.
+    - A17 Pro Compute: 35 TOPS peak; assume 30% effective utilization for prefill = 10.5 TOPS.
+    - Effective shared-memory bandwidth available to the model: ~50 GB/s.
     - Prompt: 50 tokens, Response: 100 tokens
 
     **Calculations:**
-    - TTFT (Compute) = (50 * 1.5B * 2 MACs) / 10.5 TOPS = 150 GOPS / 10.5 TOPS = ~14.3 ms
-    - TPOT (Memory) = 0.75 GB / 50 GB/s = 15 ms/token
-    - Generation Latency = 100 tokens * 15 ms = 1500 ms
+    - Prefill compute work (rough estimate) = 50 tokens * 1.5B params * 2 ops ≈ 150 GOPS.
+    - Prefill compute time = 150 GOPS / 10.5 TOPS ≈ 14.3 ms.
+    - Prefill weight-stream floor = 0.75 GB / 50 GB/s ≈ 15 ms, so TTFT is roughly 15-20 ms after adding KV writes and runtime overhead.
+    - Decode per-token memory floor = 0.75 GB weights / 50 GB/s ≈ 15 ms/token before KV-cache and activation traffic.
+    - Practical TPOT estimate with KV/activation traffic = ~16-20 ms/token.
+    - Generation latency = 100 tokens * 16-20 ms/token = ~1.6-2.0 seconds.
 
     **Conclusion & Interpretation:**
-    - **Result: ~1.51 seconds (Memory-Bound Generation)**. Total latency is ~1.51 seconds (excluding audio), completely dominated by the memory-bound autoregressive decoding phase (1500 ms), while prompt processing takes a negligible 14 ms.
+    - **Result: ~1.6-2.0 seconds excluding audio (Memory-Bound Generation)**. TTFT is tens of milliseconds, while the 100-token autoregressive response dominates because each decoded token is limited by repeated model/KV/activation memory movement.
 status: published
 provenance: imported
 requires_explanation: false

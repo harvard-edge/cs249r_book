@@ -3,7 +3,7 @@ id: tinyml-0756
 track: tinyml
 level: L6+
 zone: design
-topic: on-device-learning
+topic: model-adaptation-systems
 competency_area: parallelism
 bloom_level: create
 phase: training
@@ -11,7 +11,7 @@ title: Continuous Learning on MCU
 scenario: Your Cortex-M7 (480 MHz, 1 MB SRAM) runs a 50 KB anomaly detection model on remote oil rigs utilizing expensive satellite connectivity (2400 bps, $8/MB). The data distribution has shifted, requiring an updated model.
 question: Is it economically and computationally feasible to perform on-device incremental learning on the Cortex-M7 rather than pushing a full model update via satellite?
 details:
-  realistic_solution: On-device incremental learning is highly practical if restricted to last-layer fine-tuning. By freezing the convolutional backbone and only updating the final classification head, the memory requirements for activation buffers, gradients, and optimizer states drop significantly (to ~92 KB). This comfortably fits inside the 1 MB SRAM, enabling the 480 MHz CPU to converge the network locally for less than a cent of electricity, entirely avoiding the exorbitant satellite data costs.
+  realistic_solution: On-device incremental learning is practical only if restricted to last-layer fine-tuning. By freezing the convolutional backbone and updating a small classification head, the memory requirements for activation buffers, gradients, optimizer state, and a local training buffer can be kept around 92 KB, which fits inside the 1 MB SRAM. The arithmetic kernel is small, but end-to-end training also includes data movement, loss computation, optimizer updates, and scheduling overhead, so the compute cost should be treated as a bounded local maintenance task rather than a negligible 10 ms operation. A full 50 KiB model update takes about 2.8 minutes over a 2400 bps link and costs about $0.41 per device before connection overheads or minimum billing. So last-layer local fine-tuning is feasible; full-model upload or frequent full-model replacement over satellite is link-bound and should be avoided.
   common_mistake: |
     **The Pitfall:** Dismissing backpropagation on microcontrollers outright.
     **The Rationale:** Engineers assume standard backpropagation memory footprints mathematically rule out any form of on-device training.
@@ -20,15 +20,23 @@ details:
     **Assumptions & Constraints:**
     - 50 KB model on 480 MHz Cortex-M7 (1 MB SRAM).
     - Satellite Cost: $8/MB at 2400 bps.
-    - Training samples: 100 samples at 5000 MACs/sample.
+    - Training samples: 100 samples, buffered locally at 800 bytes/sample.
+    - Last-layer training cost: 5000 MACs/sample/epoch for 10 epochs.
+    - Best-case effective kernel throughput: 1 MAC/cycle for the small last-layer MAC loop.
 
     **Calculations:**
+    - Data buffer: 100 samples * 800 bytes/sample = 80 KB.
     - SRAM Footprint: Activations (4 KB) + Gradients (4 KB) + Optimizer (4 KB) + Data Buffer (80 KB) = 92 KB.
-    - Local Compute Time: (10 epochs * 100 samples * 5000 MACs) / (480,000,000 * 2) = 5.2 ms.
-    - Satellite Cost: 50 KB = 0.05 MB * $8/MB = $0.40 per device.
+    - Local compute: 10 epochs * 100 samples * 5000 MACs = 5,000,000 MACs.
+    - Best-case MAC kernel time: 5,000,000 cycles / 480,000,000 cycles/s = 10.4 ms.
+    - End-to-end local training time will be higher after loss, optimizer, memory traffic, and firmware scheduling overhead, but it remains a local task rather than a satellite transfer.
+    - Satellite transfer size: 50 KiB = 409,600 bits.
+    - Satellite transfer time at 2400 bps: 409,600 / 2400 = 171 seconds, or about 2.8 minutes per device.
+    - Satellite transfer size in decimal MB: 50 KiB = 51,200 bytes = 0.0512 MB.
+    - Satellite data charge: 0.0512 MB * $8/MB = $0.4096, about $0.41 per device, before connection overhead or minimum billing.
 
     **Conclusion & Interpretation:**
-    - **Result: Cost-Bound Deployment**. Last-layer fine-tuning requires only 92 KB of SRAM and 5ms of compute, reducing the $0.40/device satellite update cost to absolute zero.
+    - **Result: last-layer on-device fine-tuning is feasible; full-model satellite updates are link-bound.** Local fine-tuning requires about 92 KB of SRAM and has a small best-case MAC workload, while one full model update costs about $0.41 and occupies the 2400 bps link for about 2.8 minutes per device.
 status: published
 provenance: imported
 requires_explanation: true

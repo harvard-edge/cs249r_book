@@ -9,27 +9,29 @@ bloom_level: analyze
 phase: training
 title: Optimizing On-Device ML with Coreset Selection on Snapdragon 8 Gen 3
 scenario: Your team is deploying a real-time object detection model on a device powered by an NPU. You need to retrain the model periodically on device using new user-generated data. You've identified coreset selection as a potential technique to manage this.
-question: How would you determine the maximum feasible coreset size for on-device retraining given a 1 hour target time?
+question: What maximum coreset size fits a 1 hour retrain if each sample needs 2e9 ops total and 1 KB in a 10 GB sample cache?
 details:
-  realistic_solution: Implement a lightweight, NPU-optimized coreset selection algorithm that can efficiently run on the NPU. The solution should consider the available LPDDR5X bandwidth and the INT8 processing capabilities. The coreset size would be determined by balancing the retraining time budget, memory capacity, and the NPU's processing throughput for the selection algorithm and subsequent fine-tuning steps.
+  realistic_solution: Compute separate limits for time and memory, then take the smaller value. At 45 TOPS for 3,600 seconds, the device has about 1.62e17 operations available. With 2e9 operations per sample across the retraining run, compute allows about 81 million samples. A 10 GB sample cache at 1 KB per sample holds about 10 million samples, so the maximum feasible coreset size is about 10 million samples before accounting for additional safety margin.
   common_mistake: |
     **The Pitfall:** Ignoring memory bandwidth limitations and assuming raw TOPS dictates training speed.
     **The Rationale:** Engineers focus purely on the compute rating without factoring in data movement costs.
     **The Consequence:** The proposed training plan stalls on I/O, drastically missing the 1-hour retraining deadline.
   napkin_math: |
     **Assumptions & Constraints:**
-    - NPU Compute: 45 TOPS. Target time: 3600 seconds (1 hour).
-    - Memory limit: 12 GB.
-    - Sample size: 1 KB. 5 epochs, 400M ops per epoch.
+    - NPU compute: 45 TOPS = 45e12 ops/sec.
+    - Target time: 3600 seconds (1 hour).
+    - Usable sample cache after model/runtime overhead: 10 GB.
+    - Sample size: 1 KB.
+    - Training cost: 2e9 ops/sample across all epochs.
 
     **Calculations:**
-    - Available Ops: 45e12 * 3600 = 1.62e17 ops.
-    - Ops per sample (5 epochs): 400M * 5 = 2e9 ops.
-    - Max samples (compute): 1.62e17 / 2e9 = 81 million.
-    - Max samples (memory): 12 GB / 1 KB = 12 million.
+    - Available ops: 45e12 x 3600 = 1.62e17 ops.
+    - Max samples by compute: 1.62e17 / 2e9 = 81 million samples.
+    - Max samples by memory: 10 GB / 1 KB ≈ 10 million samples.
+    - Feasible coreset size: min(81 million, 10 million) = 10 million samples.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory limits the maximum coreset size to 12 million samples (Memory-Capacity-Bound).** Compute capacity is vastly greater than memory limits.
+    - **Result: About 10 million samples (Memory-Capacity-Bound).** Under these explicit assumptions, memory capacity is the first limit; a production design would reserve more margin for activations, checkpoints, and I/O stalls.
 status: published
 provenance: imported
 requires_explanation: false

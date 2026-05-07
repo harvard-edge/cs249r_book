@@ -11,17 +11,28 @@ title: Sizing On-Device Guardrails on Hexagon NPU
 scenario: You are deploying a 3B-parameter generative AI assistant on flagship devices featuring the Qualcomm Hexagon NPU (Snapdragon 8 Gen 3). Corporate governance mandates a strict on-device Responsible AI guardrail to intercept toxic output before displaying it to the user. The device shares 12-16 GB LPDDR5X memory and features a 45 TOPS INT8 NPU.
 question: How would you size on-device guardrail inference on Hexagon NPU for low-latency generated text checks?
 details:
-  realistic_solution: The optimal approach is to deploy a heavily distilled, INT8-quantized encoder model (e.g., 100M parameters) dedicated to guardrails, running chunk-by-chunk on the generated text. By utilizing the NPU's 45 TOPS INT8 capability for the guardrail while the main model generates tokens, we can hide the verification latency. Pinning the 100MB guardrail model in memory prevents expensive reloading and bandwidth contention with the main model's KV cache.
+  realistic_solution: |
+    Size the guardrail as a small resident INT8 classifier or encoder, not as a second autoregressive model. Pick the largest architecture that keeps its weights resident, checks each generated chunk within the per-chunk latency budget, and does not contend heavily with the 3B assistant's decode path or KV-cache traffic. A roughly 50-100M parameter encoder is a reasonable starting range, but the release criterion should be measured validation quality per millisecond and per MB: reduce chunk size, use early-exit heads, or shrink the model if profiling shows bandwidth or scheduling contention.
   common_mistake: |
     **The Pitfall:** Proposing a secondary LLM for the guardrail.
     **The Rationale:** Candidates assume LLMs are required for text evaluation, failing to realize the extreme memory bandwidth contention caused by running two large autoregressive models simultaneously.
     **The Consequence:** The system experiences massive latency spikes due to KV cache thrashing and memory bus saturation.
   napkin_math: |
-    1. **Memory:** 12GB total - 4GB (OS) = 8GB ML budget. 3B model (INT4) + KV Cache = ~2.0GB. Guardrail (100M params, INT8) = 100MB.
-    2. **Compute (per 50 tokens):** 100M params × 50 tokens × 2 MACs = 10 Billion Ops = 0.01 TOPS.
-    3. **Compute Latency:** 0.01 TOPS / 45 TOPS = ~0.22ms.
-    4. **Memory Latency:** 100MB read at 68 GB/s (LPDDR5X) = ~1.47ms.
-    **Result:** A distilled 100M INT8 guardrail adds only **~1.7ms total overhead** per chunk, running asynchronously without bottlenecking the main LLM.
+    **Assumptions & Constraints:**
+    - 12-16 GB shared memory; reserve roughly 4 GB for OS/apps, leaving about 8-12 GB for ML. Use the 12 GB device as the conservative case with an 8 GB ML budget. 3B model (INT4) + KV Cache = ~2.0 GB.
+    - Candidate guardrail range: 50-100M params, INT8 (50-100 MB).
+    - NPU Compute: 45 TOPS.
+    - LPDDR5X Bandwidth: 68 GB/s.
+
+    **Calculations:**
+    - Weight footprint: 50-100M params * 1 byte = ~50-100 MB, small enough to keep resident beside the assistant.
+    - Representative dense work for a 100M encoder pass: about 2 * 100M = 200M ops, plus attention, pooling, and classifier overhead.
+    - Ideal compute lower bound for the upper candidate: 200M ops / 45e12 ops/s = 4.4e-6s = 0.0044 ms, so peak TOPS is not the sizing limiter.
+    - Weight-read lower bound for the upper candidate: 100 MB / 68 GB/s = ~1.5 ms if the weights are touched from memory and bandwidth is available.
+    - Practical chunk budget: add tokenization, launch/scheduling, NPU sharing, and main-model KV traffic, so accept only models whose measured per-chunk latency stays in the low single-digit millisecond range.
+
+    **Conclusion & Interpretation:**
+    - **Result:** Size the guardrail by measured quality per millisecond and per MB. A 50-100M INT8 resident encoder is a plausible range; larger guardrails should be rejected unless profiling shows they still meet the per-chunk latency budget without starving the main assistant.
 status: published
 provenance: imported
 requires_explanation: false

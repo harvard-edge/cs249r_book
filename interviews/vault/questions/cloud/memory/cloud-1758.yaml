@@ -9,25 +9,29 @@ bloom_level: evaluate
 phase: both
 title: Evaluating 32K Context Scaling on A100 GPUs
 scenario: 'Your team is extending a 7B parameter LLM''s context window from 4K to 32K tokens for document Q&A, training on an 8x A100 (80GB) node. At 4K, training succeeds with a micro-batch size of 4. At 32K, the system immediately throws OOM errors. The team debates three solutions: 1) applying Tensor Parallelism (TP=8), 2) implementing FlashAttention-2 with Activation Checkpointing, or 3) switching to a Sparse/Sliding Window Attention architecture.'
-question: 'Which of TP=8, FlashAttention-2 with checkpointing, or sparse attention should you choose to fit 32K context while preserving exact attention?'
+question: Which of TP=8, FlashAttention-2 with checkpointing, or sparse attention should you choose to fit 32K context while preserving exact attention?
 details:
-  realistic_solution: 'Implement FlashAttention-2 combined with activation checkpointing. FlashAttention computes exact attention via hardware-aware tiling, completely bypassing the materialization of the N x N attention matrix in HBM and reducing activation memory scaling from O(N^2) to O(N). If OOM persists, Sequence Parallelism should be layered on top.'
+  realistic_solution: Implement FlashAttention-2 combined with activation checkpointing. FlashAttention computes exact attention via hardware-aware tiling, avoiding materialization of the N x N attention matrix in HBM and reducing activation memory scaling from O(N^2) to O(N). TP=8 does not remove the quadratic attention activation, and sparse/sliding-window attention changes the attention pattern rather than preserving exact attention.
   common_mistake: |
     **The Pitfall:** Suggesting Tensor Parallelism to solve the attention OOM, or suggesting sparse attention when exact attention is required.
     **The Rationale:** Candidates know TP splits weights and activations, but misunderstand that it does not fundamentally change the O(N^2) activation memory scaling per head.
     **The Consequence:** Choosing an architecture that fails to solve the OOM (TP) or sacrifices model quality (sparse attention) when a mathematically exact, memory-efficient solution (FlashAttention) exists.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Standard materialized attention matrix size: B * h * N^2 * 2 bytes.
-    - Batch B=4, heads h=32.
+    - Standard materialized attention-score tensor size per layer: B * h * N^2 * 2 bytes, using fp16/bf16 scores only.
+    - Micro-batch B=4, heads h=32, 32 transformer layers.
+    - The comparison is about preserving exact dense attention, not changing model semantics.
 
     **Calculations:**
-    - At N=4,096: 4 * 32 * 16.7M * 2 = ~4.2GB per layer.
-    - At N=32,768: 4 * 32 * 1.07B * 2 = ~274GB per layer.
-    - Across 32 layers, activation memory reaches 8.7TB.
+    - At N=4,096: 4 * 32 * 4,096^2 * 2 bytes = 4.29 GB per layer for materialized attention scores.
+    - At N=32,768: 4 * 32 * 32,768^2 * 2 bytes = 274.9 GB per layer.
+    - Across 32 layers, the score tensors alone would be about 8.8 TB before other activations, gradients, and optimizer state.
+    - TP=8 may shard weights and some activations, but it does not remove the N^2 dense attention score tensor, so it is not the root fix.
+    - Sparse/sliding-window attention reduces memory by changing the attention pattern, so it violates the exact-attention requirement.
+    - FlashAttention-2 tiles exact dense attention and avoids storing the full N * N score matrix in HBM; checkpointing further reduces retained activations.
 
     **Conclusion & Interpretation:**
-    - **Result: 8.7TB Activation Memory (OOM Failure)**. FlashAttention prevents this by keeping intermediate blocks in SRAM, bypassing the N^2 materialization.
+    - **Result: choose FlashAttention-2 with activation checkpointing**. It is the option that addresses the quadratic HBM materialization while preserving exact attention.
 status: published
 provenance: imported
 requires_explanation: false

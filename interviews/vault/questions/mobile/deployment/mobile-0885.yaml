@@ -11,7 +11,7 @@ title: Mastering End-to-End Optimization of a 4-Stage Compound Pipeline on Snapd
 scenario: A Snapdragon 8 Gen 3 compound AI system currently processes queries in 3.8 seconds. The pipeline includes OCR (400ms), embedding+retrieval (250ms), cross-encoder reranking of 20 docs (600ms), and 3B LLM generation of 80 tokens (2550ms). The target is 1.5 seconds P95.
 question: How would you design a comprehensive optimization strategy that achieves this target without changing models or hardware?
 details:
-  realistic_solution: 'Restructure the pipeline: (1) Parallelize OCR + query embedding (run concurrently on CPU and NPU). (2) Reduce reranker candidates via Top-K Sparsification. (3) Apply INT4 quantization to LLM. (4) Reduce generation length context via prompt engineering. Apply pipeline overlap to start LLM prefill during final reranker chunks.'
+  realistic_solution: 'Restructure the pipeline and verify each change with P95 traces: (1) parallelize OCR and query embedding where dependencies allow, (2) reduce reranker candidates with quality-gated top-K sparsification, (3) quantize or tune kernels only if accuracy and measured latency hold for the same 3B model, (4) cap generated tokens or stream partial answers when the product can tolerate shorter output, and (5) overlap prompt construction/prefill with the final reranker chunks if the runtime supports it. The 1.5s target is aggressive; it should be treated as a profiling target, not as proven by unsupported halving assumptions.'
   common_mistake: |
     **The Pitfall:** Applying standard latency optimizations independently without restructuring the pipeline dependencies.
     **The Rationale:** Candidates fail to realize that the 3B LLM generation is heavily memory-bandwidth-bound, so quantization alone will not bridge the gap to the 1.5s target.
@@ -19,17 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target: < 1.5s P95 total latency.
-    - Original total: 400ms + 250ms + 600ms + 2550ms = 3800ms.
+    - Original serial total: 400ms + 250ms + 600ms + 2550ms = 3800ms.
+    - The scenario does not provide measured speedups for quantization, shorter outputs, overlap, or reranker pruning.
 
     **Calculations:**
-    - Step 1 (Parallel OCR + Embed): max(400ms, 50ms) = 400ms. Retrieval = 200ms.
-    - Step 2 (Rerank top-8 instead of 20): 600ms * (8/20) = 240ms.
-    - Step 3 (Quantize LLM to INT4): 2550ms / 2 = 1275ms.
-    - Step 4 (Reduce generation to 35 tokens): 1275ms * (35/80) = 557ms.
-    - Total Restructured: 400ms + 200ms + 240ms + 557ms = 1397ms.
+    - Non-LLM work is 400ms + 250ms + 600ms = 1250ms before overlap or candidate pruning.
+    - LLM generation alone is 2550ms for 80 tokens, or about 31.9ms/token under the current stack.
+    - To fit a 1500ms end-to-end budget without overlap, non-LLM work would leave only 250ms for generation, which is about 8 tokens at the current rate.
+    - Therefore the strategy must both reduce/overlap non-LLM stages and reduce measured LLM decode latency; a made-up INT4 2x gain or 35-token cap is not sufficient proof.
+    - A defensible release plan reports before/after P95 traces for each stage and counts only overlap that the dependency graph and runtime actually permit.
 
     **Conclusion & Interpretation:**
-    - **Result: 1467ms (Pipeline-Latency-Bound)**. Applying a 5% jitter buffer results in 1467ms, which safely meets the <1.5s P95 target via parallelization and memory-bandwidth reduction.
+    - **Result: Pipeline-latency target, not arithmetic proof.** The target may be reachable only with measured gains from overlap, reranker pruning, shorter streamed outputs, and faster same-model kernels; exact P95 success cannot be claimed from the provided numbers alone.
 status: published
 provenance: imported
 requires_explanation: true

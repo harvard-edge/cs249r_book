@@ -9,9 +9,10 @@ bloom_level: apply
 phase: inference
 title: Embedding Table Memory Bandwidth Optimization with Mixed Precision
 scenario: Embedding table lookups are the memory bandwidth bottleneck in a DLRM training system. The tables are stored in FP32 (4B per value). Switching to FP16 reduces quality. A colleague suggests INT8 with row-wise scaling.
-question: 'How would you evaluate FP32, FP16, and INT8 row-wise scaling for DLRM embedding tables, and what precision mix would you choose?'
+question: How would you evaluate FP32, FP16, and INT8 row-wise scaling for DLRM embedding tables, and what precision mix would you choose?
 details:
-  realistic_solution: 'Precision comparison for embedding tables: (1) FP32: 4B per value. Full precision. Bandwidth: highest. (2) FP16: 2B per value (2x bandwidth reduction). Dynamic range: [-65504, 65504]. Risk: values near 0 (common in initialized embeddings) may have precision loss. For trained embeddings: typically fine. (3) INT8 (per-tensor): 1B per value + 4B scale + 4B zero_point per table. Effective: ~1B per value at large table sizes. Dynamic range issues: gradient updates to quantization levels are coarse. (4) INT8 (per-row): 1B per value + 4B scale per row. For a row of 64 values: overhead = 4B/64 = 6.25% overhead vs 1B per value. Effective: 1.0625B per value. 3.76x bandwidth reduction vs FP32. Quality: preserves relative precision within each row. (5) Recommendation: use INT8 per-row for embedding tables in training (FBGEMM supports this natively). Use FP32 for the upper MLP layers. Mixed precision: embedding INT8 + MLP FP32. Training quality: <0.5% AUC delta vs FP32-only in production deployments.'
+  realistic_solution: |
+    Precision comparison for embedding tables: (1) FP32: 4B per value, maximum numerical fidelity, but highest memory bandwidth. Use it as the baseline and for tables or updates shown to be quality-sensitive. (2) FP16: 2B per value and about 2x less bandwidth than FP32, but still stores every value with floating-point dynamic range. It is a reasonable compromise when INT8 quality loss is too high, especially for frequently updated or small tables. (3) INT8 row-wise scaling: store 64 one-byte values plus one 4B scale per row, or 68B/row. This is 1.0625B/value and a 3.76x storage/bandwidth reduction versus FP32. Per-row scaling preserves the shape of each embedding row better than table-wide quantization, but it still needs validation for training stability and ranking metrics. (4) Recommendation: use row-wise INT8 for large, bandwidth-bound embedding tables that pass offline and online quality checks; keep FP16 or FP32 for sensitive tables, optimizer/master weights, and the upper MLP as needed.
   common_mistake: |
     **The Pitfall:** Applying uniform INT8 quantization across all embedding tables.
     **The Rationale:** Uniform INT8 maps the entire row to 256 levels. For embedding rows with a wide dynamic range, this loses precision for small values.
@@ -24,10 +25,11 @@ details:
     - FP32 Bandwidth: 10M rows * 64 * 4B = 2.56 GB.
     - INT8 Bandwidth: 10M * 64 * 1B + 10M * 4B = 640 MB + 40 MB = 680 MB.
     - Bandwidth Reduction: 2560 / 680 = 3.76x.
-    - Total Speedup: 1/(0.7 + 0.3/3.76) = 1.28x.
+    - If embedding memory traffic is 70% of step time, Amdahl speedup = 1/(0.30 + 0.70/3.76) = 2.06x.
+    - If embedding memory traffic is only 30% of step time, speedup = 1/(0.70 + 0.30/3.76) = 1.28x.
 
     **Conclusion & Interpretation:**
-    - **Result: 3.76x Reduction (Memory-Bandwidth-Bound)**. 28% training throughput improvement.
+    - **Result: 3.76x Bandwidth Reduction.** End-to-end throughput gain depends on the fraction of time spent on embedding memory traffic and must be validated against model quality.
 status: published
 provenance: imported
 requires_explanation: false

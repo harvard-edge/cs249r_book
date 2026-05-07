@@ -7,28 +7,31 @@ topic: real-time-deadlines
 competency_area: architecture
 bloom_level: apply
 phase: inference
-title: The YOLO vs ViT Question
+title: YOLOv8-S vs ViT-B/16 Latency on Jetson Orin NX
 scenario: A researcher on your team wants to replace your YOLOv8-S detector with a ViT-B/16 vision transformer because it scores 2% higher mAP on COCO. You're deploying on a Jetson Orin NX.
 question: Why do you push back against replacing YOLOv8-S with ViT-B/16 on the Jetson Orin NX at 30 FPS?
 details:
-  realistic_solution: 'ViT-B/16 has ~17.6 GFLOPs vs YOLOv8-S''s ~28.4 GFLOPs — fewer FLOPs, yet it runs slower on edge GPUs. The reason: attention''s memory access pattern. Self-attention computes QxK^T (an NxN matrix for N=196 patches at 224x224), which has low arithmetic intensity — it''s a series of small matrix multiplies with large intermediate tensors that must be written to and read from DRAM. Convolutional layers in YOLO have regular, predictable memory access patterns that map efficiently to GPU SRAM tiling and TensorRT optimization. Additionally, ViT''s dynamic shapes (variable sequence length) prevent many TensorRT optimizations (layer fusion, kernel auto-tuning) that assume fixed tensor dimensions. On the Orin NX: YOLOv8-S runs at ~45 FPS with TensorRT INT8. ViT-B runs at ~15 FPS because TensorRT can''t fuse the attention layers effectively.'
+  realistic_solution: ViT-B/16 has ~17.6 GFLOPs vs YOLOv8-S's ~28.4 GFLOPs — fewer FLOPs, yet it can run slower on edge GPUs. The reason is attention memory traffic and limited fusion. Self-attention computes QxK^T (an NxN matrix for N=196 patches at 224x224), creating intermediate tensors that must be written to and read from DRAM. Convolutional layers in YOLO have regular memory access patterns that map efficiently to GPU SRAM tiling and TensorRT kernel fusion. On the Orin NX, the profiled deployment builds show YOLOv8-S at ~45 FPS (~22ms) with TensorRT INT8, while ViT-B/16 is ~15 FPS (~67ms) because attention layers have lower arithmetic intensity and are harder to fuse efficiently. That misses a 30 FPS budget despite the lower FLOP count.
   common_mistake: |
     **The Pitfall:** Assuming parameter count correlates linearly with latency.
     **The Rationale:** Candidates rely on cloud heuristics, failing to account for the low arithmetic intensity and memory access patterns of self-attention on edge devices.
     **The Consequence:** Misdiagnosing why transformers are slow, missing the critical difference in memory I/O, and wasting time on parameter reduction.
   napkin_math: |
     **Assumptions & Constraints:**
-    - YOLOv8-S: 28.4 GFLOPs, ~55 MB memory traffic.
-    - ViT-B: 17.6 GFLOPs, ~120 MB memory traffic.
-    - Orin NX Ridge Point ≈ 976 Ops/Byte.
+    - Use the profiled per-inference operation counts and modeled DRAM traffic from the deployment build.
+    - YOLOv8-S: 28.4 GFLOPs and ~55 MB moved.
+    - ViT-B/16: 17.6 GFLOPs and ~120 MB moved.
+    - Arithmetic intensity = operations / bytes moved.
 
     **Calculations:**
-    - YOLOv8-S AI ≈ 28.4 x 10^9 / (55 x 10^6) ≈ 516 Ops/Byte.
-    - ViT-B AI ≈ 17.6 x 10^9 / (120 x 10^6) ≈ 147 Ops/Byte.
-    - ViT is 3.5x more memory-hungry per FLOP due to attention matrices.
+    - YOLOv8-S AI = 28.4 x 10^9 ops / 55 x 10^6 bytes ≈ 516 Ops/Byte.
+    - ViT-B/16 AI = 17.6 x 10^9 ops / 120 x 10^6 bytes ≈ 147 Ops/Byte.
+    - YOLO has about 516 / 147 ≈ 3.5x higher arithmetic intensity.
+    - Even though ViT-B/16 has fewer total FLOPs, it moves more bytes per unit of work and stresses DRAM/cache behavior more heavily.
+    - Profiled latency: YOLOv8-S at ~45 FPS is about 22ms; ViT-B/16 at ~15 FPS is about 67ms, above the 33ms frame budget for 30 FPS.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound (Memory-Bound).** The 2% mAP gain comes with a 3x FPS penalty because TensorRT cannot fuse dynamic attention layers effectively, crippling the system.
+    - **Result: ViT-B/16 is more memory-bound on Jetson Orin NX (Memory-Bound).** The 2% mAP gain is not enough to justify missing the 30 FPS target because attention has lower arithmetic intensity and is harder for TensorRT to fuse efficiently than YOLO's convolutional layers.
 status: published
 provenance: imported
 requires_explanation: false

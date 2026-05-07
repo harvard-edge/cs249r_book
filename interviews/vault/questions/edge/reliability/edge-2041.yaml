@@ -11,7 +11,7 @@ title: Graceful Degradation for Edge Defect Detection on Hailo-8
 scenario: You are designing a defect detection system for a high-speed manufacturing line using a Hailo-8 accelerator. Model A provides 99% accuracy requiring 20 TOPS, while a fallback Model B offers 95% accuracy at 10 TOPS. The system processes 100 FPS normally, but must maintain operations under strict thermal limits or power surges where total system power is capped at a strict 3W.
 question: How would you design degradation ladders, model fallbacks, fail-safe behavior, and QoS shedding for the Hailo-8 defect detector under a 3W budget?
 details:
-  realistic_solution: 'Implement a deterministic, multi-tiered graceful degradation ladder governed by a hardware watchdog and telemetry agent monitoring thermal states and instantaneous power draw. Level 0 (Normal): Model A at 100 FPS. Level 1 (Compute/Thermal Stress): Hot-swap to Model B (10 TOPS) reducing NPU utilization. Level 2 (Severe Power Constraints): Maintain Model B but enforce QoS shedding (temporal decimation to 50 FPS) to aggressively lower active duty cycles and reduce host CPU/I/O power overhead. Level 3 (Fail-Safe): Disengage the NPU, fallback to heuristic filters on the host CPU, and signal the PLC for line deceleration.'
+  realistic_solution: 'Implement a deterministic degradation ladder governed by a hardware watchdog and telemetry agent monitoring thermal state, instantaneous power, queue depth, and frame deadlines. Level 0: run Model A at 100 FPS while total power stays below 3W with margin. Level 1: switch to resident Model B at 100 FPS when power or thermal headroom shrinks. Level 2: keep Model B but shed QoS to 50 FPS by temporal decimation when projected power, temperature slope, or queueing risk remains high. Level 3 fail-safe: stop NPU inference, use minimal host heuristics only if they fit the cap, and signal the PLC to slow or stop the line when neither Model B tier can maintain power and deadlines.'
   common_mistake: |
     **The Pitfall:** Designing a binary 'on/off' system or neglecting the strict 3W system-level power constraint.
     **The Rationale:** Overlooking the nuances of a graceful degradation ladder, latency overheads during model switching, and host-side power draw.
@@ -19,16 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - System power budget: 3W.
-    - Hailo-8 typical power: 2.5W.
-    - Host CPU/memory remaining budget: 0.5W.
+    - Hailo-8 active NPU budget at 100 FPS with Model A: 2.0W.
+    - Host CPU/memory/I/O at 100 FPS: 0.8W.
+    - Host CPU/memory/I/O at 50 FPS: 0.4W.
+    - NPU power scales roughly with active TOPS for this estimate.
     - Model A: 20 TOPS (77% utilization). Model B: 10 TOPS (38% utilization).
 
     **Calculations:**
-    - NPU power reduction by switching to Model B: Decreases active time but I/O and host CPU polling remain constant at 100 FPS, risking the 0.5W host budget.
-    - QoS shedding to 50 FPS: Halves I/O bandwidth, PCIe transfers, and host CPU preprocessing overhead, reducing the whole-system baseline power.
+    - Model A at 100 FPS: 2.0W NPU + 0.8W host = 2.8W, inside 3W but with little surge margin.
+    - Model B at 100 FPS: 2.0W * (10 / 20) + 0.8W host = 1.8W.
+    - Model B NPU at 100 FPS is 1.0W; halving the frame rate gives 1.0W * 0.5 = 0.5W NPU.
+    - Model B at 50 FPS: 0.5W NPU + 0.4W host = 0.9W.
 
     **Conclusion & Interpretation:**
-    - **Result: 50 FPS (Power-Bound)**. Frame shedding to 50 FPS is required because switching models alone is insufficient to reduce whole-system power below 3W.
+    - **Result: ordered fallbacks are A/100 FPS, B/100 FPS, B/50 FPS, then fail-safe line slowdown or stop.** Model B at 100 FPS fits the 3W cap in this model; 50 FPS shedding is the severe-stress tier, and fail-safe triggers when projected power or thermal state cannot hold deadlines even after shedding.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,18 +11,9 @@ title: The Budget Phone Crash
 scenario: Your ML-powered camera app works perfectly on the Samsung Galaxy S24 (Snapdragon 8 Gen 3, 8 GB RAM) but crashes on the Samsung Galaxy A15 (MediaTek Helio G99, 4 GB RAM) within 30 seconds of opening the camera. Logcat shows `java.lang.OutOfMemoryError` followed by a native crash in the TFLite runtime. The model is a 15 MB INT8 segmentation model.
 question: Why does a 15 MB model crash a 4 GB phone?
 details:
-  realistic_solution: 'The 15 MB model file expands dramatically at runtime, and the Galaxy A15''s memory budget is far smaller than you think:
-
-    1. **Model weights in memory:** 15 MB (INT8, loaded into SRAM for inference)
-    2. **Input tensor:** Camera feed at 1080p = 1920×1080×3 bytes ≈ 6 MB (FP32: 24 MB)
-    3. **Intermediate activations:** The segmentation model''s peak activation tensor (the largest feature map kept in memory between layers) can be 100-200 MB for a 1080p input.
-    4. **Output mask:** 1920×1080×1 = 2 MB
-    5. **Runtime overhead:** TFLite runtime, delegates, memory allocator ≈ 10-20 MB
-    6. **Total runtime footprint:** ~247 MB
-
-    On the Galaxy S24 (8 GB), the per-app memory budget is ~1.5 GB, leaving plenty of headroom. On the Galaxy A15 (4 GB), the per-app budget is ~768 MB, but this is shared with WebViews, ad SDKs, and analytics. A single camera autofocus event can allocate ~200 MB in temporary buffers, pushing total usage past the native heap limit and triggering the OOM crash.
-
-    **The fix:** Reduce the model''s input resolution from 1080p to 256×256. This shrinks activation memory by ~18×, dropping the runtime footprint from 247 MB to ~169 MB and providing enough headroom to survive memory spikes.'
+  realistic_solution: |
+    The 15 MB model file is not the runtime footprint. TFLite loads the INT8 weights into the app process and also allocates tensor arenas, input/output tensors, delegate buffers, camera frame buffers, and intermediate activations. For segmentation, high-resolution feature maps dominate memory: a 1080p input can require hundreds of MB of temporary activation storage even when weights are only 15 MB.
+    On the Galaxy S24, the same footprint has enough headroom. On the Galaxy A15, lower practical process headroom, background SDKs, camera buffers, allocator fragmentation, and native heap pressure can make the same graph fail. The fix is to reduce the peak tensor arena: downscale or tile the input, use a model trained for lower resolution, reuse camera buffers, avoid extra RGB copies, release tensors promptly, and profile Java plus native heap on the A15.
   common_mistake: |
     **The Pitfall:** "The model is too big for the phone — use a smaller model."
     **The Rationale:** Candidates focus solely on the model's static file size (15 MB) and ignore the runtime memory expansion.
@@ -30,18 +21,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Galaxy A15 total RAM: 4 GB
-    - Android per-app heap limit (budget): ~512 MB to 768 MB
+    - Practical app headroom varies by build and memory pressure; native OOM can occur well below total device RAM.
     - Model weights: 15 MB
-    - Input: 1080p (1920x1080x3 = ~6 MB)
-    - Camera focus buffers: ~200 MB spike
+    - Input: 1080p RGB tensor (1920x1080x3 uint8 = ~6 MB)
+    - Output mask: 1920x1080x1 uint8 = ~2 MB
+    - Peak intermediate activations for 1080p segmentation: ~180-220 MB
+    - TFLite/delegate/runtime overhead and camera buffers: ~80-150 MB
 
     **Calculations:**
-    - Base Runtime memory = 15 MB (weights) + 6 MB (input) + 200 MB (activations) + 26 MB (OS/overhead) = ~247 MB
-    - Background overhead (WebViews, Ads) = ~150 MB
-    - Total App Usage during focus = 247 MB + 150 MB + 200 MB = 597 MB
+    - ML runtime at 1080p = 15 MB weights + 6 MB input + 2 MB output + ~200 MB activations + ~30 MB TFLite/delegate overhead = ~253 MB.
+    - Add camera pipeline copies and app/SDK overhead: ~253 MB + ~100-200 MB = ~353-453 MB process pressure.
+    - If input is reduced to 512x512, activation and tensor sizes scale by roughly (512*512)/(1920*1080) ≈ 0.126.
+    - Reduced ML runtime ≈ 15 MB weights + <1 MB input/output + 200 MB*0.126 activations + ~30 MB overhead = ~71 MB before camera/app overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: 597 MB (OOM Crash)**. The high-resolution activations plus the camera buffer spike push total memory to 597 MB, exceeding the strict ~512 MB heap limit on 4GB devices. Resolution must be downscaled.
+    - **Result: Runtime-Activation OOM.** The crash is driven by high-resolution activation and camera-buffer peaks, not by the 15 MB model file; downscaling, tiling, and buffer reuse reduce the peak by hundreds of MB.
 status: published
 provenance: imported
 requires_explanation: false

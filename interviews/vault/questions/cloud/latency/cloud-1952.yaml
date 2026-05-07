@@ -17,11 +17,20 @@ details:
     **The Rationale:** Candidates see a latency problem and immediately jump to model-level optimizations, failing to realize that 'Daily Top Picks' do not require real-time session context and are highly predictable.
     **The Consequence:** Engineering effort is wasted on complex optimizations while the fundamental architectural flaw remains, keeping the system vulnerable to bursty traffic.
   napkin_math: |
-    - **Dynamic Peak:** 10,000 req/s.
-    - **Dynamic GPU Throughput:** At 50ms/batch (BS=32), one GPU handles ~640 req/s. Needs 16+ GPUs at perfect utilization, but bursty traffic causes massive queueing delays.
-    - **Static Offline Job:** 50M users / 256 (larger offline batch size) = ~195,312 batches.
-    - **Offline Time:** On 10 GPUs at 100ms/batch: (195,312 * 0.1s) / 10 = 1,953 seconds = ~32.5 minutes to pre-compute everything.
-    - **Result:** **Serving latency drops to Redis network RTT (<2ms).**
+    **Assumptions & Constraints:**
+    - Peak login load: 10,000 req/s.
+    - Dynamic serving throughput: 32 requests per 50ms batch per GPU.
+    - Offline throughput: 256 users per 100ms batch per GPU across all 50 GPUs.
+
+    **Calculations:**
+    - Dynamic capacity per GPU = 32 / 0.05s = 640 req/s.
+    - The 50-GPU cluster has theoretical capacity of 50 * 640 = 32,000 req/s, but login-time generation spends that capacity on synchronous, latency-sensitive bursts; queueing and stragglers drive P99 above 2.5s.
+    - Static offline job batches = 50M / 256 = 195,313 GPU-batches.
+    - Across 50 GPUs, wall time = (195,313 * 0.1s) / 50 = 391s, or about 6.5 minutes at the stated batch throughput.
+    - Login-time serving then becomes a key-value lookup instead of a transformer forward pass.
+
+    **Conclusion & Interpretation:**
+    - **Result: Latency-Critical Path Bound.** Static inference moves predictable recommendation compute out of the peak login path; GPUs can precompute all 50M users offline, and login latency drops to cache/network RTT rather than model-serving queue time.
 status: published
 provenance: imported
 requires_explanation: false

@@ -18,12 +18,22 @@ details:
     **The Rationale:** Candidates forget that unstructured sparsity requires auxiliary data structures (like bitmasks or CSR format) which consume memory.
     **The Consequence:** Irregular memory access patterns prevent the ESP32-S3's INT8 vector extensions from utilizing SIMD instructions effectively, and the model still fails to fit in SRAM.
   napkin_math: |
-    1. Original footprint: 800 KB INT8 weights (in PSRAM).
-    2. 50% Unstructured: 400 KB weights + 100 KB bitmask (1 bit per 8-bit weight) = 500 KB total.
-    3. With ~100 KB needed for activations and the RTOS, this exceeds the 512 KB SRAM limit, forcing data back to slow PSRAM.
-    4. 50% Structured: 400 KB dense weights + 0 KB overhead = 400 KB total. Safely fits in the 512 KB SRAM.
-    5. Latency impact: Moving 400 KB of reads from PSRAM (4x memory bandwidth penalty) to single-cycle SRAM.
-    6. **Combined with unhindered vector extension usage, latency drops from 120ms to ~30ms, safely meeting the 50ms budget.**
+    **Assumptions & Constraints:**
+    - Original footprint: 800 KB INT8 weights (in PSRAM).
+    - Physical SRAM: 512 KB, with ~100 KB reserved for activations and RTOS.
+    - Effective SRAM available for weights: 512 KB - 100 KB = 412 KB.
+    - Unstructured sparse storage must encode both nonzero values and locations; a 1-bit mask is a lower-bound overhead, while CSR/block formats often need more index bytes.
+    - PSRAM reads have 4x memory bandwidth penalty compared to single-cycle SRAM.
+
+    **Calculations:**
+    - Lower-bound 50% unstructured footprint with only a bitmask: 400 KB nonzero weights + (800 KB / 8) mask = 400 KB + 100 KB = 500 KB.
+    - More realistic sparse encodings add indices or block metadata, so the footprint is at least 500 KB and can be larger.
+    - Fit check: >=500 KB sparse footprint > 412 KB available weight SRAM, so it does not reliably fit and will still spill to PSRAM.
+    - 50% Structured: 400 KB dense weights + 0 KB indexing overhead = 400 KB, leaving ~12 KB margin inside the weight budget.
+    - Latency impact: If the PSRAM-dominated portion of the original 120 ms runtime scales with the stated 4x bandwidth penalty, moving the dense structured weights to SRAM can reduce that memory-bound portion by up to 4x.
+
+    **Conclusion & Interpretation:**
+    - **Result: unstructured pruning does not reliably solve the SRAM fit (Memory-Bound)**. Even the optimistic bitmask model exceeds the 412 KB weight budget, and practical sparse metadata can be worse. Structured pruning is the defensible fix because it produces a dense 400 KB tensor that fits the budget and preserves vector-friendly access; any ~30 ms latency estimate is an upper-bound projection from the stated 4x PSRAM penalty, not a guarantee from the footprint alone.
 status: published
 provenance: imported
 requires_explanation: false

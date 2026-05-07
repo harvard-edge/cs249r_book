@@ -11,11 +11,11 @@ title: 'MoE Training Instability: Expert Collapse Diagnosis'
 scenario: During MoE training on 128 GPUs, training loss suddenly spikes after 50K steps. Inspecting the router statistics, you find that expert 5 receives 0 tokens and expert 2 receives 45% of all tokens. The remaining 55% is spread across the other 6 experts.
 question: What caused this expert collapse, and how do you recover the training run?
 details:
-  realistic_solution: 'This is expert collapse — a runaway feedback loop: (1) expert 2''s weights become slightly better → router sends more tokens → expert 2 gets better training signal → router sends even more tokens → expert 5 gets zero tokens → expert 5''s weights don''t update → expert 5 becomes permanently dead. The loss spike occurs when expert 2 becomes overloaded and starts dropping tokens (capacity overflow), suddenly losing 45% of the batch''s MLP computation. Recovery strategy: (1) Roll back to a checkpoint before collapse (monitor router entropy during training — when entropy drops below threshold, save). (2) Reinitialize the dead expert: copy expert 2''s weights to expert 5 (with small noise perturbation), then add noise to the router''s bias toward expert 5. (3) Increase α (load-balancing coefficient) from 0.01 to 0.03-0.05 for a warmup period. (4) Add a Z-loss (penalizes large router logits) to prevent any expert from dominating the softmax. (5) Use expert choice routing for the recovery phase. Prevention: set α appropriately from the start, use Z-loss, monitor per-expert token counts with early-stopping alerts.'
+  realistic_solution: 'This is expert collapse: a router-imbalance feedback loop where expert 2 attracts too many tokens while expert 5 receives none. The likely loss spike comes from expert 2 overflowing its capacity and dropping routed assignments, while expert 5 gets little or no gradient signal. A zero-token expert is hard to recover from the same unstable state, but not mathematically unrecoverable. Recovery should start by rolling back to a checkpoint before collapse, then increasing the load-balancing coefficient for a warmup period, adding or strengthening router Z-loss to prevent saturated logits, and monitoring router entropy and per-expert token counts. If rollback is not enough, reinitialize or perturb the dead expert/router bias, or temporarily use a more balanced routing scheme such as expert-choice routing. Prevention: set load balancing appropriately from the start, use Z-loss, and trigger early alerts on hot experts, zero-token experts, and capacity overflow.'
   common_mistake: |
     **The Pitfall:** Simply restarting training from the same exact checkpoint with a higher load-balancing coefficient.
     **The Rationale:** Engineers assume forcing better distribution will magically pull the router out of its rut.
-    **The Consequence:** If collapse has already occurred, the router's weights are stuck. The dead expert's routing scores are heavily negative and will completely fail to recover with standard gradient updates.
+    **The Consequence:** If collapse has already occurred, the same checkpoint may keep reinforcing the imbalance. The dead expert receives little gradient signal, so recovery usually requires rollback plus router/load-balancing changes rather than only continuing unchanged.
   napkin_math: |
     **Assumptions & Constraints:**
     - 8 experts.
@@ -23,10 +23,11 @@ details:
     - Collapsed state: E2 = 0.45, E5 = 0, Other 6 = 0.55 / 6 ≈ 0.0917 each.
 
     **Calculations:**
-    - Collapsed H ≈ -(0.45*ln(0.45) + 6*0.0917*ln(0.0917)) ≈ 1.67.
+    - Collapsed H ≈ -(0.45*ln(0.45) + 6*0.0917*ln(0.0917) + 0*ln(0)) ≈ 1.67 nats.
+    - Entropy drop = (2.08 - 1.67) / 2.08 ≈ 20%.
 
     **Conclusion & Interpretation:**
-    - **Result: ~20% drop in entropy signals total collapse (Routing Capacity Overflow)**. Bottleneck: Routing Capacity Overflow.
+    - **Result: Router distribution collapse.** The entropy drop plus one zero-token expert and one 45% hot expert indicates severe router imbalance; capacity overflow is a consequence on the hot expert, not the metric being computed.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,8 @@ title: Exynos 2400 NPU Real-Time Power Budgeting
 scenario: You are designing a real-time video segmentation pipeline for a smartphone. The system requires processing 4K video at 30 FPS using the dual-core NPU. To prevent thermal throttling during prolonged recording, the AI workload is strictly capped at a 2.5W power budget.
 question: How would you specify a power management strategy and deployment architecture that ensures sustained 30 FPS performance without exceeding the 2.5W cap?
 details:
-  realistic_solution: Specify aggressive quantization (INT8) and operator fusion to maximize operational intensity and keep activations in the NPU's local SRAM. Propose using DVFS to drop the dual-core NPU to its lowest viable P-state that still meets the 33.3ms frame deadline, exploiting the P ∝ fV^2 relationship to reduce dynamic power while leaving memory bandwidth for the ISP.
+  realistic_solution: |
+    Specify a concrete 4K segmentation pipeline: run ISP preprocessing and resize/tiling first, execute an INT8 encoder-decoder segmentation model on the dual-core NPU at the lowest DVFS state that sustains 3 TOPS, keep intermediate feature maps in local SRAM through fused conv/activation/upsample blocks, and write only the final mask or compact logits back to DRAM. Use double buffering so ISP, NPU, and compositor stages overlap without unbounded queues, and fall back to lower mask resolution or skipped refinement if measured power approaches the 2.5W cap.
   common_mistake: |
     **The Pitfall:** Focusing solely on the massive NPU compute capacity.
     **The Rationale:** Candidates fail to account for the energy cost of shared memory bandwidth, proposing models that require continuous, power-hungry DRAM fetches.
@@ -19,18 +20,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Latency budget: 30 FPS -> 33.3 ms/frame.
-    - Memory energy cost: 10 pJ/bit.
-    - Compute requirement: INT8 model uses 100 GOPS/frame.
+    - Memory energy cost for unavoidable mask/logit DRAM traffic: 10 pJ/bit.
+    - Compute requirement for tiled INT8 4K segmentation model: 100 GOPS/frame.
+    - External AI memory traffic after SRAM tiling: about 8 MB/frame for input tiles, compact logits, and mask output.
+    - Low-P-state NPU efficiency for this fused INT8 workload: 3.75 TOPS/W.
 
     **Calculations:**
-    - Bad optimization fetch: 50MB/frame = 400 Mbits.
-    - Fetch energy: 400 Mbits x 10 pJ = 4 mJ/frame.
-    - Memory power at 30 FPS: 4 mJ x 30 = 120 mW.
-    - Compute Power at low P-state: ~800 mW.
-    - Total Power: 800 mW (Compute) + 120 mW (Memory) = 920 mW (0.92W).
+    - Sustained compute rate required: 100 GOPS/frame * 30 FPS = 3000 GOPS/s = 3 TOPS.
+    - Compute power at low P-state: 3 TOPS / 3.75 TOPS/W = 0.8W.
+    - External traffic energy: 8 MB/frame * 8 bits/byte * 10 pJ/bit = 0.64 mJ/frame.
+    - Memory power at 30 FPS: 0.64 mJ * 30 = 19.2 mW.
+    - Total modeled AI power: 800 mW (compute) + 19.2 mW (memory) = about 0.82W before runtime overhead.
+    - Headroom under cap: 2.5W - 0.82W = about 1.68W for control overhead, scheduling variance, and thermal guard band.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.92W (Power-Feasible)**. At 0.92W, the workload safely runs continuously under the 2.5W thermal cap.
+    - **Result: about 0.82W modeled AI power (Power-Feasible)**. With a tiled INT8 model, SRAM locality, bounded queues, and DVFS set to the minimum P-state that sustains 3 TOPS, the deployment remains under the 2.5W cap with meaningful headroom.
 status: published
 provenance: imported
 requires_explanation: true

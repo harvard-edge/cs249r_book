@@ -7,11 +7,12 @@ topic: mixed-precision-training
 competency_area: precision
 bloom_level: analyze
 phase: training
-title: 'Dataflow Pipeline Bottlenecks in Mixed-Precision'
-scenario: 'You are deploying an object detection model to a smart camera powered by a Hailo-8 accelerator. The Hailo-8 is a pure dataflow architecture with no local DRAM, streaming weights and activations directly from host memory via PCIe. Post-training quantization to INT8 causes an unacceptable drop in accuracy, so the team proposes running the sensitive attention layers in FP16 on the host CPU while the rest of the convolutions run on the Hailo-8.'
-question: 'What is the system-level cost of host FP16 fallback on Hailo-8, and how would you keep the whole model on the INT8 dataflow path?'
+title: Dataflow Pipeline Bottlenecks in Mixed-Precision
+scenario: You are deploying an object detection model to a smart camera powered by a Hailo-8 accelerator. The Hailo-8 is a pure dataflow architecture with no local DRAM, streaming weights and activations directly from host memory via PCIe. Post-training quantization to INT8 causes an unacceptable drop in accuracy, so the team proposes running the sensitive attention layers in FP16 on the host CPU while the rest of the convolutions run on the Hailo-8.
+question: What is the system-level cost of host FP16 fallback on Hailo-8, and how would you keep the whole model on the INT8 dataflow path?
 details:
-  realistic_solution: 'The correct diagnosis is that context-switching between the host CPU (FP16) and Hailo-8 (INT8) destroys the dataflow efficiency. Instead of fallback, the solution is to apply Quantization-Aware Training (QAT) with learnable clipping parameters, or use per-channel quantization to keep the entire network in INT8 on the Hailo-8. This maintains a single continuous stream from host memory, maximizing the compute without latency-heavy pipeline breaks.'
+  realistic_solution: |
+    The system-level cost is PCIe round-trips and pipeline stalls: the Hailo-8 dataflow path must stop, export intermediate activations to the host for FP16 CPU execution, then import them again before the next supported layer can run. Keep the graph on-device by retraining and calibrating the sensitive layers for INT8, using per-channel quantization where supported, rewriting unsupported operations, or redesigning those layers with INT8-friendly equivalents so execution never falls back to the host.
   common_mistake: |
     **The Pitfall:** Assuming the only cost of fallback is the CPU computation time.
     **The Rationale:** Engineers ignore the physical constraints of dataflow architectures lacking local DRAM.
@@ -19,17 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Intermediate activation: 128x128x256.
+    - Fallback precision for host execution: FP16, 2 bytes/element.
     - Target FPS: 30 FPS (33ms budget).
-    - PCIe Gen2 x2 bus (~1 GB/s practical).
+    - Deployment host interface: practical sustained host-device bandwidth is assumed to be about 3 GB/s after protocol overhead and contention.
 
     **Calculations:**
-    - Tensor Size: INT8 = 4MB, FP16 = 8MB.
-    - Transfer Cost per break: Write 4MB out, stream 4MB back = 8MB total transfer.
-    - Bus Latency per break: 8MB / 1 GB/s = 8ms.
-    - For 3 layer breaks: 3 * 8ms = 24ms transfer overhead.
+    - FP16 tensor size: 128 * 128 * 256 * 2 bytes = 8,388,608 bytes = 8 MiB.
+    - Transfer cost per break: export 8 MiB to host, then re-import 8 MiB to resume the dataflow graph = 16 MiB total.
+    - Host-device transfer latency per break: 16 MiB / ~3 GB/s = about 5.6ms before synchronization overhead.
+    - For 3 layer breaks: 3 * 5.6ms = about 16.8ms transfer overhead before CPU FP16 compute and pipeline restart costs.
 
     **Conclusion & Interpretation:**
-    - **Result: 24ms transfer overhead (I/O Bound)**. To hit 30 FPS (33ms budget), only 9ms remains for compute, dropping accelerator utilization to under 30% and failing real-time requirements.
+    - **Result: ~17ms idealized transfer overhead before CPU work (I/O Bound)**. FP16 host fallback requires host-device round-trips, synchronization, and dataflow pipeline stalls; even with a realistic multi-GB/s interface, several breaks consume much of the 33ms frame budget before CPU FP16 compute, so the model should stay on the INT8 accelerator path.
 status: published
 provenance: imported
 requires_explanation: false

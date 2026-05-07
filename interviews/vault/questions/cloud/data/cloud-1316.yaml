@@ -11,22 +11,25 @@ title: Mitigating Gradient Inversion in Medical Federated Learning
 scenario: In a federated learning setup for a medical imaging model (ResNet-50, 25M parameters), clients (hospitals) train locally on 8x NVIDIA A100 nodes and send FP32 gradient updates to the central cloud aggregator. A security audit reveals that a malicious aggregator can perfectly reconstruct the raw 256x256 patient X-ray images from these updates when the local batch size is set to 1.
 question: Why do batch-size-1 federated gradients allow exact X-ray reconstruction, and what mitigation prevents it with under 1% accuracy loss?
 details:
-  realistic_solution: Increase the minimum local batch size to at least 16 to average gradients across multiple images (breaking the 1:1 mapping), and implement DP-SGD by clipping gradients to a maximum L2 norm (e.g., C=1.0) and adding Gaussian noise (e.g., σ=0.01) before transmission.
+  realistic_solution: |
+    Batch-size-1 gradients can expose a nearly direct per-example signal, making gradient inversion far easier for a malicious aggregator. The mitigation that best fits an under-1% accuracy-loss budget is secure aggregation: the server receives only an aggregate across clients and cannot inspect a single hospital's gradient update. Larger local batches can reduce leakage, and DP-SGD can provide a formal privacy budget, but DP noise must be tuned and may cost more accuracy than secure aggregation.
   common_mistake: |
     **The Pitfall:** Assuming TLS/encryption in transit solves the privacy problem.
     **The Rationale:** Engineers treat the aggregator as inherently trusted because it sits inside the company's cloud VPC.
-    **The Consequence:** The aggregator decrypts the packets to do the math, and the mathematical mapping from gradients to input data remains perfectly intact, allowing a compromised aggregator to reconstruct raw PHI data.
+    **The Consequence:** The aggregator decrypts the packets to do the math, so a compromised or malicious aggregator can still attack the gradients. Batch size, architecture, and defenses affect recoverability, but encryption in transit does not protect gradients after receipt.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Image size: 256x256 (65,536 pixels).
-    - B=1 allows analytic recovery.
+    - A malicious aggregator sees client gradient updates after transport encryption is terminated.
+    - Batch size 1 ties the update to one image/label pair, making inversion highly identifiable.
+    - The accuracy budget is under 1%, so the preferred mitigation should not perturb training gradients.
 
     **Calculations:**
-    - If B=16, the gradient is ∑(x_i * δ_i^T).
-    - Number of unknowns: 16 * 256 * 256 = 1,048,576 pixels.
+    - Batch size alone is not a privacy proof; it only mixes examples within one client's update.
+    - Secure aggregation changes the attack surface: the aggregator observes a sum over multiple clients rather than any individual hospital gradient, while the mathematical training update can remain unchanged.
+    - DP-SGD adds clipping and noise for formal privacy, but the noise level must be calibrated to epsilon/delta and validated against the 1% accuracy-loss budget.
 
     **Conclusion & Interpretation:**
-    - **Result: Optimization Search Space Bound**. Batch size > 1 exponentially increases the search space (over 1M unknowns), thwarting reconstruction attacks.
+    - **Result: use secure aggregation for the tight accuracy budget.** Larger batches reduce identifiability but do not prevent a malicious aggregator from attacking visible client gradients; secure aggregation hides those individual updates with minimal expected accuracy impact.
 status: published
 provenance: imported
 requires_explanation: false

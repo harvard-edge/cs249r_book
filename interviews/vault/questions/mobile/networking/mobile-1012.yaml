@@ -7,11 +7,14 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: evaluate
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Master Roofline Analysis for Mobile LLM Scaling'
-scenario: Apply roofline model analysis to determine the minimum batch size at which a 3B INT4 LLM transitions from memory-bandwidth-bound to compute-bound on a mobile SoC.
-question: At what batch size does a 3B INT4 LLM transition from bandwidth-bound to compute-bound decode, and what does this mean for mobile serving?
+title: Mobile SoC Roofline Analysis for INT4 LLM Decode
+scenario: Apply roofline model analysis to determine whether batching a 3B INT4 LLM decode step can transition it from memory-bandwidth-bound to compute-bound on a mobile SoC.
+question: If each sequence streams its own 3B INT4 weights from DRAM, does batching shift the workload from bandwidth-bound to compute-bound, and what does that mean for mobile serving?
 details:
-  realistic_solution: 'INT4 effective TOPS: 90 TOPS. BW: 77 GB/s. Ridge point: 90T/77G=1169 FLOPs/byte. Per-token decode FLOPs: 2x3B=6B FLOPs. Bytes: 1.5GB. AI per token: 6B/1.5GB=4 FLOPs/byte << 1169. Transition batch: B * 6B FLOPs / 1.5GB = 1169 -> B = 292 tokens. At batch=292: compute-bound. TPOT at batch=292: max(292*6B/90T, 1.5/77) = 19.5ms. Mobile reality: batch=292 means 292 concurrent users \u2014 impractical on device. Mobile is always memory-bandwidth-bound for LLM decode.'
+  realistic_solution: |
+    INT4 effective compute is 90 TOPS and memory bandwidth is 77 GB/s, so the hardware ridge point is 90T / 77G = 1169 FLOPs/byte. A 3B INT4 decode token performs about 2 × 3B = 6B FLOPs and streams 1.5GB of weights, giving 4 FLOPs/byte. In the conservative decode model stated in the question, batching B independent sequences scales both work and DRAM traffic by B: FLOPs = B × 6B and bytes = B × 1.5GB, so arithmetic intensity remains 4 FLOPs/byte. There is no finite batch-size crossover under this model. TPOT remains bandwidth-bound at 1.5GB / 77GB/s = 19.5ms per token per sequence, while compute time is only 6B / 90T = 0.067ms.
+
+    Batching could improve arithmetic intensity only if the implementation reuses one streamed weight tile across multiple sequences before evicting it, so bytes stay near 1.5GB while FLOPs scale with B. That requires a different memory-residency assumption and is usually impractical for single-user mobile decode because it adds latency, memory for many active sequences, and scheduling complexity.
   common_mistake: |
     **The Pitfall:** Using INT8 TOPS for INT4 arithmetic intensity calculations.
     **The Rationale:** Candidates forget that NPUs with native INT4 support can achieve 2x the compute throughput of INT8.
@@ -25,11 +28,12 @@ details:
     **Calculations:**
     - Hardware Ridge Point: 90 TOPS / 77 GB/s = 1169 FLOPs/byte.
     - Single Token AI: 6B FLOPs / 1.5 GB = 4 FLOPs/byte.
-    - Transition Batch (B): B * 4 FLOPs/byte = 1169 -> B = 292.
+    - Conservative batch model: AI(B) = (B * 6B FLOPs) / (B * 1.5 GB) = 4 FLOPs/byte.
+    - Since 4 FLOPs/byte << 1169 FLOPs/byte for every B, there is no finite transition batch.
     - TPOT at Batch 1: max(6B/90T, 1.5GB/77G) = 19.5ms (Memory Bound).
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound.** Auto-regressive decode on mobile will strictly remain bandwidth-bound because batching 292 users is impossible on a single device.
+    - **Result: Memory-Bound.** Under the stated per-sequence DRAM streaming model, batching does not change operational intensity; mobile decode remains bandwidth-bound unless the implementation can reuse each streamed weight tile across multiple sequences.
 status: published
 provenance: imported
 requires_explanation: true

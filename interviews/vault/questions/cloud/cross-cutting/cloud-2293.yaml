@@ -12,26 +12,29 @@ scenario: 'You are the Staff engineer tasked with designing a company-wide Respo
 question: How would you design the Responsible AI infrastructure, specifying key components, data flows, storage requirements, and the hardest systems challenge?
 details:
   realistic_solution: |
-    Architecture: a platform approach with four layers. (1) Fairness SDK (client-side): a lightweight library each team integrates into their training. (2) Fairness Gate Service (CI/CD integration): a gRPC service that receives evaluation reports and enforces deployment policies. (3) Production Monitoring Pipeline: a streaming pipeline (Flink) that consumes prediction logs, joins with outcome data, computes metrics, and auto-rollbacks on breaches. (4) Provenance & Explanation Layer: an immutable lineage store (DVC/S3) that records manifests, DAGs, and artifacts. Hardest challenge: provenance at scale. With 50 models and billions of predictions, query latency requires a graph database or specialized lineage system.
+    Architecture: build a governed platform with enforcement in the training, deployment, and serving paths. (1) A model-team SDK emits signed evaluation reports with dataset slices, protected-attribute coverage, metrics, thresholds, model card fields, and links to training data/code/config artifacts. (2) A CI/CD fairness gate verifies the report, writes it to an immutable provenance store, and blocks deployment unless required disaggregated metrics pass policy. (3) A registry ties every deployed model version to dataset hashes, feature definitions, training image, source commit, approval record, and explanation method. (4) Production logging emits prediction IDs, model version, feature schema version, decision output, confidence, and available protected/outcome fields into a streaming monitor that computes slice metrics and triggers rollback when policies are breached. (5) An explanation service serves precomputed or on-demand explanations for high-risk models by joining the prediction record to the exact model, feature snapshot, and approved explainer. The hardest systems challenge is not just fairness scoring; it is making provenance and explanations queryable, privacy-aware, and complete across 12 teams without turning the central platform into a deployment bottleneck.
   common_mistake: |
     **The Pitfall:** Designing a monolithic centralized fairness service.
     **The Rationale:** Candidates attempt to build a central bottleneck that executes evaluations for all 50 models, ignoring the massive variability in model frameworks, dependencies, and environments.
     **The Consequence:** Creating a massive organizational and technical bottleneck; the platform team becomes blockers for every model deployment.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 50 models, 1M predictions/day per model.
-    - Record size: 2KB.
+    - Company-wide system has 50 models.
+    - Average prediction volume is 1M predictions/day per model, so 50M predictions/day total.
+    - Record size: 2 KB, using decimal units.
     - Retention period: 7 years.
+    - Lineage manifests average 50 MB per training run.
 
     **Calculations:**
-    - Storage Volume: 50 models × 1M predictions/day = 50M records/day × 2KB = 100 GB/day.
-    - Long-term Retention: 100 GB/day × 365 days × 7 years = 255 TB total audit storage.
-    - Lineage Metadata: ~10 GB per run. 50 models × 12 retrains/year = 600 runs = 6 TB/year.
+    - Storage Volume: 50 models × 1M predictions/day = 50M records/day × 2 KB = 100 GB/day.
+    - Long-term Retention: 100 GB/day × 365 days × 7 years = 255.5 TB total audit storage.
+    - Lineage Metadata ingest rate: 50 MB/run × 50 models × 12 retrains/year = 30,000 MB/year = 30 GB/year.
+    - Lineage Metadata retained for 7 years: 30 GB/year × 7 = 210 GB, small versus audit logs but critical for provenance joins.
     - Monitoring Throughput: 50M predictions/day / 86400 = ~580 events/sec.
-    - SHAP Pre-computation: 50 models × 100 patterns × ~2s/explanation = ~2.8 hrs/day on a single GPU.
+    - Explanation support should not compute every SHAP value inline. If 0.1% of predictions require stored or on-demand explanations, that is 50,000 explanation lookups/day, which needs an indexed explanation path tied to prediction/model IDs.
 
     **Conclusion & Interpretation:**
-    - **Result: Storage-Bound**. The event stream is easily handled (~580 EPS), but the 255 TB audit log dictates specialized graph and blob storage for compliance.
+    - **Result: Provenance/Policy-Enforcement-Bound**. The event stream is moderate (~580 EPS), but 255.5 TB of retained audit records plus 210 GB of lineage metadata must support reliable provenance joins, privacy controls, and policy enforcement across teams.
 status: published
 provenance: imported
 requires_explanation: true

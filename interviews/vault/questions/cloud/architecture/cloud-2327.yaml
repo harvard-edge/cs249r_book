@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: both
 title: Large Vocabulary Cross-Entropy Overflow
 scenario: You are pre-training a multilingual LLM with a massive vocabulary size of 256,000 tokens and a global batch size of 4096. To optimize memory, you configure the final language modeling head and the cross-entropy loss calculation to run entirely in FP16. Training collapses to NaN loss within the first 10 steps.
-question: "Why does FP16 language-model head and cross-entropy cause NaN loss with a 256,000-token vocabulary?"
+question: Why does FP16 language-model head and cross-entropy cause NaN loss with a 256,000-token vocabulary?
 details:
-  realistic_solution: The collapse is due to numeric overflow in the denominator of the Softmax function within the Cross-Entropy loss. With a vocabulary of 256,000, you are summing 256,000 exponential terms. Even if the pre-softmax logits are perfectly centered and average to 0 (where exp(0) = 1), the sum of 256,000 ones is 256,000. This massively exceeds the FP16 maximum of 65504, causing the denominator to evaluate to Infinity, and the loss to evaluate to NaN. The architecture must enforce that the final logits are upcast to FP32, and the cross-entropy loss/softmax is computed purely in FP32.
+  realistic_solution: The collapse is due to numeric instability in the final softmax and cross-entropy path. With a vocabulary of 256,000, the loss kernel must reduce a very large row of logits. A naive FP16 implementation can overflow exponentials, overflow or lose precision in the log-sum-exp accumulator, or create invalid values during normalization. Production loss kernels avoid this by upcasting logits or at least the max, exp/sum, and log-sum-exp reductions to FP32. The architecture must enforce that the final logits and cross-entropy intermediates are computed in FP32, even if the model head stores weights or activations in FP16.
   common_mistake: |
     **The Pitfall:** Believing that the final linear layer weights are diverging, requiring gradient clipping to stabilize the outputs.
     **The Rationale:** Exploding loss or NaNs early in training are often incorrectly attributed to learning rate or gradient scale issues.
@@ -20,14 +20,13 @@ details:
     1. **Assumptions & Constraints:**
        - Vocabulary size = 256,000 tokens.
        - FP16 maximum representable value = 65,504.
-       - Assume average exp(logit) = 0.5 for centering.
+       - Naive FP16 softmax/log-sum-exp is used.
     2. **Calculations:**
-       - Softmax denominator = Sum(exp(logits)) for 256k tokens.
-       - Sum = 256,000 * 0.5 = 128,000.
-       - 128,000 > 65,504, causing Infinity in FP16.
-       - Log(Softmax) = Log(exp(x) / Inf) = Log(0) = -Inf.
+       - If logits are centered near 0, exp(0) = 1, so a naive denominator can be on the order of 256,000.
+       - 256,000 is larger than the FP16 max of 65,504, so an FP16 accumulator can overflow even before considering larger positive logits.
+       - A stable FP32 path computes max(logits), then log(sum(exp(logits - max))) with FP32 accumulation, avoiding FP16 range and precision failures.
     3. **Conclusion & Interpretation:**
-       - **Result: Loss = NaN due to FP16 overflow.** The final logits and cross-entropy loss must be computed in FP32.
+       - **Result: FP16 Loss-Kernel Instability.** Large-vocabulary cross-entropy needs FP32 logits/reduction intermediates; otherwise overflow or invalid arithmetic can quickly produce NaN loss.
 status: published
 provenance: imported
 requires_explanation: false
@@ -46,6 +45,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- training
-- fp16
-- loss
+  - training
+  - fp16
+  - loss

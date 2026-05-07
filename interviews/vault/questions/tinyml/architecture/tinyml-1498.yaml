@@ -1,17 +1,18 @@
 schema_version: '1.0'
 id: tinyml-1498
 track: tinyml
-level: L4
+level: L3
 zone: optimization
 topic: pruning-sparsity
 competency_area: architecture
 bloom_level: create
 phase: training
-title: 'NAS Search Space Design for MCU-Deployable Model'
-scenario: 'You are configuring a Hardware-Aware Neural Architecture Search (NAS) to find an image classifier for an ESP32-S3. The deployment constraints are <100KB peak SRAM, <500KB flash, >80% CIFAR-10 accuracy, and <50ms latency.'
-question: 'How would you design an ESP32-S3 NAS search space under 100 KB SRAM, 500 KB flash, 80% accuracy, and 50 ms latency?'
+title: ESP32-S3 NAS Search Space Under SRAM Flash and Latency Limits
+scenario: You are configuring a Hardware-Aware Neural Architecture Search (NAS) to find an image classifier for an ESP32-S3. The deployment constraints are under 100KB peak SRAM, under 500KB flash, above 80% CIFAR-10 accuracy, and under 50ms latency.
+question: How would you design an ESP32-S3 NAS search space under 100 KB SRAM, 500 KB flash, 80% accuracy, and 50 ms latency?
 details:
-  realistic_solution: 'Valid operators: depthwise separable conv (3×3, 5×5), pointwise conv (1×1), average pooling, skip connections. Forbidden: standard 3×3 conv with >16 channels at resolution >16×16 (activation too large). SRAM constraint: largest activation layer must fit in 100KB (effectively ~60KB after OS overhead). Resolution reduction: CIFAR-10 32×32 input; must reduce to 16×16 before >32 channels. Channel search: [8, 16, 32] for early layers, max 64 for later. Estimated architecture: 4 blocks, ~200K params → ~200KB INT8 (flash OK), peak activation ~60KB.'
+  realistic_solution: 'Valid operators: depthwise separable conv (3×3, 5×5), pointwise conv (1×1), average pooling, and skip connections only when their tensor lifetimes do not create a second large live branch. Forbidden: standard 3×3 conv with high channel counts at 32×32 because it inflates both MACs and simultaneous input/output activation memory. SRAM constraint: with 100KB total SRAM and roughly 40KB reserved for runtime, stacks, and I/O, the TFLM arena should keep peak live tensors near 60KB, not just the single largest tensor. Resolution reduction: CIFAR-10 32×32 input should downsample to 16×16 before allowing >32 channels, and to 8×8 before 64 channels. Channel search: [8, 16, 24, 32] early, max 64 later. Use a constrained objective such as maximize validation accuracy subject to measured SRAM <=60KB, model blob <=250-300KB after quantization, and profiled ESP32-S3 latency <=50ms; prune any candidate as soon as an estimated layer sum exceeds 45ms before full training. Estimated
+    architecture: 4-6 depthwise-separable blocks, ~200K params -> ~200KB INT8 plus metadata, leaving roughly 200KB+ of the 500KB flash budget for code/runtime, with peak live activations around 50-60KB.'
   common_mistake: |
     **The Pitfall:** Including large standard convolution operators at high resolutions (e.g., 3x3 with 64 channels at 32x32) in the search space.
     **The Rationale:** Candidates fail to constrain the search space with hard SRAM limits for intermediate activation tensors.
@@ -23,12 +24,15 @@ details:
     - Flash limit is 500KB (~500K INT8 params).
 
     **Calculations:**
-    - 32x32 resolution with 16 channels INT8 = 32 * 32 * 16 bytes = 16,384 bytes (16 KB).
-    - 16x16 resolution with 64 channels INT8 = 16 * 16 * 64 bytes = 16,384 bytes (16 KB).
-    - Standard 3x3 conv at 32x32x32 = 32 KB activation, pushing the 60 KB limit if double-buffered.
+    - 32x32 resolution with 16 channels INT8 output = 32 * 32 * 16 bytes = 16,384 bytes (16 KB).
+    - 32x32 resolution with 32 channels INT8 output = 32 * 32 * 32 bytes = 32,768 bytes (32 KB).
+    - If a layer keeps both a 32x32x16 input and a 32x32x32 output live, peak live activation memory is about 16 KB + 32 KB = 48 KB before scratch.
+    - A standard 3x3 32->32 conv at 32x32 also has 3 * 3 * 32 * 32 = 9,216 weights and much higher MAC cost than a depthwise-separable alternative, so it should be excluded early.
+    - A 200K-parameter INT8 model is about 200KB before scales, metadata, and alignment, so a 250-300KB model-blob ceiling leaves roughly 200KB+ flash for code/runtime under the 500KB total.
+    - 16x16 resolution with 64 channels INT8 output = 16 * 16 * 64 bytes = 16,384 bytes (16 KB), allowing later channel expansion without increasing activation footprint.
 
     **Conclusion & Interpretation:**
-    - **Result: ~60KB Peak Activation (Memory-Bound)**. The NAS must enforce aggressive spatial downsampling (32->16->8) early in the network before allowing channel expansion >32 to prevent peak activation from exceeding the 60 KB boundary.
+    - **Result: target ~50-60KB peak live tensor memory and <=50ms profiled latency (Memory/Latency-Bound)**. The NAS must constrain simultaneous input/output/scratch lifetimes, reserve flash for runtime code, and reject candidates whose profiled or estimated latency cannot meet 50ms.
 status: published
 provenance: imported
 requires_explanation: false

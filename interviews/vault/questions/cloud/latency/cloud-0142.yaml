@@ -8,24 +8,28 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: The Continuous Batching Plateau
-scenario: 'A team migrates their Llama-70B service from static batching to a continuous batching system (like PagedAttention) on H100 GPUs. They expected a 2-3x throughput increase based on papers, but they only observe a modest ~30% gain at their target latency. Profiling shows high KV cache utilization, but the GPU is not at 100% utilization.'
-question: 'What practical system constraint is preventing them from reaching the theoretical throughput gains from continuous batching?'
+scenario: A team migrates their Llama-70B service from static batching to a continuous batching system (like PagedAttention) on H100 GPUs. They expected a 2-3x throughput increase based on papers, but they only observe a modest ~30% gain at their target latency. Profiling shows high KV cache utilization, but the GPU is not at 100% utilization.
+question: What practical system constraint is preventing them from reaching the theoretical throughput gains from continuous batching?
 details:
-  realistic_solution: "Continuous batching brilliantly solves the problem of memory fragmentation by allowing requests of different lengths to be packed together efficiently. This is why KV cache utilization is high. However, it does not eliminate the fundamental costs of inference. The modest throughput gain and sub-100% GPU utilization suggest the system is now bottlenecked by the *prefill phase* for new, incoming requests. While the GPU is efficiently decoding tokens for the existing batch (a memory-bandwidth bound task), it must periodically switch to the compute-heavy prefill operation for new requests. If new requests arrive frequently, the system spends a significant fraction of its time in this compute-bound prefill state, which has a lower arithmetic intensity than the decode phase and can't always saturate the H100's massive compute resources. The 'plateau' occurs because they have traded a memory capacity/fragmentation bottleneck for a prefill compute bottleneck."
+  realistic_solution: |
+    Continuous batching improves packing by letting requests of different lengths share decode slots and by reducing KV-cache fragmentation. That explains the high KV utilization. The remaining plateau is a scheduler-latency tradeoff: new requests still need prefill before they can join the decode loop, and the scheduler cannot delay those prefills too long without violating TTFT. Frequent prefill work competes with decode for GPU time, memory bandwidth, and scheduler slots, so the decode-only packing gain is not fully realized at the target latency. The bottleneck is not generic fragmentation anymore; it is prefill/decode interference under latency constraints.
   common_mistake: |
     **The Pitfall:** Assuming continuous batching is a "free" throughput win and solves all scaling issues.
     **The Rationale:** Engineers often realize it solves memory fragmentation but fail to recognize it trades one bottleneck for another (often prefill compute or memory bandwidth).
     **The Consequence:** The team might incorrectly diagnose the lower-than-expected gains as a network issue or a bug in the implementation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: Llama-70B (70B params * 2 bytes/param = 140 GB).
-    - Memory Bandwidth: H100 at 3.35 TB/s.
+    - Continuous batching improves decode packing and KV-cache utilization.
+    - New requests still require prefill work before they can join the decode loop.
+    - Target latency limits how long the scheduler can delay prefill.
 
     **Calculations:**
-    - Decode Phase streaming time: 140 GB / 3350 GB/s = 41.8 ms.
+    - If decode slots are well packed but arrivals are frequent, the scheduler must periodically pause or interleave decode to run prefill.
+    - Those prefill bursts consume compute and memory bandwidth that cannot be used for decode tokens at the same time.
+    - The observed high KV utilization shows fragmentation improved; the sub-100% GPU utilization and modest throughput gain point to prefill scheduling overhead and latency limits, not a full-model streaming limit.
 
     **Conclusion & Interpretation:**
-    - **Result: ~42ms (Compute-Bound)**. The system trades memory capacity limits for compute-heavy prefill bottlenecks, lowering overall arithmetic intensity.
+    - **Result: Prefill-Scheduler-Bound.** Continuous batching removed much of the KV-cache packing waste, but frequent prefill work at the target latency prevents the theoretical 2-3x decode-only gain.
 status: published
 provenance: imported
 requires_explanation: false

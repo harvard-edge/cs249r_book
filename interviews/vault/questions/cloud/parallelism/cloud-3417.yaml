@@ -11,23 +11,25 @@ title: H100 Tensor Parallelism and Communication Overlap
 scenario: You are tasked with deploying a large transformer model requiring tensor parallelism across 8 H100 GPUs connected by NVLink. A critical layer in your model uses column partitioning for its weight matrix.
 question: What communication challenges does column-partitioned tensor parallelism create on H100s, and how would you overlap communication with compute?
 details:
-  realistic_solution: 'To maximize communication-computation overlap, one would strategically pipeline computation and communication. For a column-partitioned linear layer, the partial results on each GPU can be computed first. Then, an all-gather operation can be initiated for the full output, which overlaps with the computation of the subsequent, independent layers or the next stage of the current layer. Utilizing the H100''s high NVLink bandwidth (e.g., 900 GB/s bidirectional for SXM5) is crucial, ensuring that communication is as efficient as possible. Advanced techniques like asynchronous communication primitives and careful workload balancing across GPUs would be employed.'
+  realistic_solution: For a column-partitioned linear layer, each H100 owns a shard of the output features and computes its local output slice. If the next operation needs the full activation, the tensor-parallel group must all-gather those output slices; if the layer formulation instead accumulates partial sums from row-sharded inputs, the synchronization is an all-reduce or reduce-scatter. The main challenge is that this collective can serialize the layer boundary and leave tensor cores idle. Use asynchronous NCCL collectives, group GEMM tiles so communication starts as soon as a slice is ready, overlap the all-gather with independent compute or the next pipeline stage, and keep tensor-parallel groups within the local NVLink domain. For the math below, treat H100 SXM NVLink as roughly 450 GB/s effective one-way per GPU for this collective after overheads, which corresponds to a higher bidirectional headline number but is the bandwidth relevant to the transfer-time estimate.
   common_mistake: |
     **The Pitfall:** Underestimating the latency and bandwidth costs of inter-GPU communication.
     **The Rationale:** Engineers design fine-grained tensor parallelism that serializes computation and communication.
     **The Consequence:** Failing to utilize the high compute capabilities due to frequent synchronization stalls.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 8 H100 GPUs via NVLink (900 GB/s bidirectional).
-    - All-Gather total size: 10 GB.
+    - 8 H100 GPUs connected by NVLink.
+    - The all-gather output tensor is 10 GB total across the tensor-parallel group, sharded evenly before the collective.
+    - Use 450 GB/s effective one-way per-GPU bandwidth for this collective after protocol and contention overhead.
 
     **Calculations:**
-    - Chunk per GPU: 10 GB / 8 = 1.25 GB.
-    - Data Received: 7 * 1.25 GB = 8.75 GB.
-    - Transfer Time: 8.75 GB / 900 GB/s = 0.0097 seconds (9.7ms).
+    - Per-rank shard before all-gather = 10 GB / 8 = 1.25 GB.
+    - Each GPU receives the other 7 shards: 7 * 1.25 GB = 8.75 GB.
+    - Transfer time per GPU = 8.75 GB / 450 GB/s = 0.0194 seconds = 19.4 ms.
+    - At this 10 GB scale the collective is bandwidth-dominated; small tensors would be more sensitive to launch and synchronization latency.
 
     **Conclusion & Interpretation:**
-    - **Result: 9.7ms (Compute-Communication-Overlap)**. Overlapping this 9.7ms transfer with independent computation is critical to prevent pipeline stalls.
+    - **Result: about 19 ms of non-overlapped all-gather time under the stated bandwidth assumption.** Overlapping that transfer with independent compute or the next pipeline stage is what prevents tensor-parallel stalls.
 status: published
 provenance: imported
 requires_explanation: false

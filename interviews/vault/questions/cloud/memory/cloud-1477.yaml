@@ -9,23 +9,27 @@ bloom_level: analyze
 phase: both
 title: Diagnosing Output Degradation in INT8 KV Cache
 scenario: You deploy a Llama-2-70B model on an 8x A100 cluster using vLLM. To double your concurrent request capacity from 64 to 128, you enable naive INT8 per-tensor KV cache quantization. While the memory savings are realized, users report that after generating ~500 tokens, the model's output abruptly degrades into infinite repetitive loops and gibberish. The FP16 baseline does not exhibit this.
-question: "What is the root cause of this failure?"
+question: What is the root cause of this failure?
 details:
-  realistic_solution: 'Diagnose that large LLMs exhibit massive, systematic outlier channels in their Key vectors. Naive per-tensor INT8 quantization clips these outliers, destroying the attention score distribution and causing the model to attend to wrong tokens. The fix is mixed-precision KV cache: keep the top 1% outlier Key channels in FP16 while quantizing the remaining 99% to INT8. This restores full FP16 accuracy while retaining ~99% of the memory savings.'
+  realistic_solution: 'Diagnose naive per-tensor INT8 KV-cache quantization as the root cause. Large LLM KV caches can contain outlier channels, especially in attention keys, so a single tensor-wide scale either clips those outliers or wastes precision on the rest of the cache. That corrupts attention scores and can drive repetitive loops. The fix is mixed-precision or per-channel/per-head KV quantization: preserve outlier KV channels at higher precision or scale them separately while quantizing the remaining values to INT8.'
   common_mistake: |
     **The Pitfall:** Misdiagnosing KV cache degradation as a context window or scaling bug.
     **The Rationale:** Output loops usually implicate RoPE scaling or temperature misconfigurations.
     **The Consequence:** Wasting time tuning sampling parameters without profiling the underlying quantized KV cache value distributions.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Llama-2-70B KV cache footprint, naive INT8 vs Mixed-Precision (1% FP16).
+    - Llama-2-70B KV cache with 80 layers, 8 KV heads, head dim 128, K+V tensors, and ~512 cached tokens when degradation appears.
+    - FP16 uses 2 bytes/value; INT8 uses 1 byte/value.
 
     **Calculations:**
-    - FP16 cache per sequence = 2.68 GB. INT8 cache = 1.34 GB.
-    - Top 1% in FP16 = 0.01 * 1.34 GB = ~13.4 MB overhead per request.
+    - KV values = 2 (K+V) × 80 × 8 × 128 × 512 = 83,886,080 values.
+    - FP16 cache = 83,886,080 values × 2 bytes = 167,772,160 bytes = 160 MiB per request.
+    - Naive INT8 cache = 83,886,080 values × 1 byte = 80 MiB per request.
+    - If 1% of KV values are kept in FP16 and 99% in INT8, mixed precision = 99% × 80 MiB + 1% × 160 MiB = 80.8 MiB per request.
+    - Extra memory over naive INT8 = 80.8 MiB - 80 MiB = 0.8 MiB per request.
 
     **Conclusion & Interpretation:**
-    - **Result: Precision-Bound.** Keeping outlier channels in FP16 restores quality for a negligible 13.4 MB cost per request.
+    - **Result: Precision-Bound.** Naive per-tensor INT8 corrupts attention by mishandling KV outlier channels. Keeping outliers in FP16 or using per-channel/per-head KV scaling costs about 0.8 MiB per request in this 1% mixed-precision approximation while preserving the attention distribution.
 status: published
 provenance: imported
 requires_explanation: false

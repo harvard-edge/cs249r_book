@@ -8,27 +8,34 @@ competency_area: networking
 bloom_level: create
 phase: both
 title: Designing ECN Thresholds for ML Traffic
-scenario: You are designing the DCQCN parameters for a new 1024-MI300X training cluster with 400G RoCE v2 links. The fabric uses a 3-tier Clos with 12MB shared buffer per switch ASIC. Training workloads include both large AllReduce (up to 2GB) and small control-plane RPCs (<1KB).
-question: What ECN thresholds, PFC thresholds, and DCQCN rate-reduction parameters would you set for the 1024-MI300X 400G RoCE cluster?
+scenario: You are designing the DCQCN parameters for a new 1024-GPU AMD Instinct MI300X training cluster with 400G RoCE v2 links. The fabric uses a 3-tier Clos with 12MB shared buffer per switch ASIC. Training workloads include both large AllReduce (up to 2GB) and small control-plane RPCs (<1KB).
+question: What ECN thresholds, PFC thresholds, and DCQCN rate-reduction parameters would you set for this 400G RoCE cluster?
 details:
-  realistic_solution: 'Configure ECN Kmin tightly to the buffer threshold (e.g. 10%) while leaving ample delta before the PFC threshold (60%). This ensures ECN triggers TCP rate reduction sufficiently early across the 400G links to prevent pause-frame storms.'
+  realistic_solution: 'Set ECN to start early and leave a clear gap before PFC: for a 12MB shared buffer, use Kmin around 1.0-1.5MB, Kmax around 4-5MB, and keep the PFC XOFF threshold around 7-8MB with XON below it. Configure DCQCN for prompt but stable RDMA throttling, such as additive recovery with multiplicative decrease around 50% on sustained marks and conservative rate increase after several unmarked RTTs. Keep small RPCs in a separate class or queue so bulk AllReduce marking does not add control-plane latency.'
   common_mistake: |
     **The Pitfall:** Setting ECN thresholds too close to the PFC threshold or using the same thresholds for all traffic classes.
     **The Rationale:** Candidates lack deep intuition for how long DCQCN takes to throttle transmitters.
     **The Consequence:** ECN marking starts too late and PFC fires anyway, causing pause-frame storms and head-of-line blocking between bulk and latency-sensitive flows.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Shared buffer: 12MB. Link speed: 400Gbps (50 GB/s).
-    - PFC threshold: 60% (7.2MB). ECN Kmin: 10% (1.2MB).
+    - Shared buffer: 12MB. Link speed: 400Gbps = 50GB/s.
+    - Proposed ECN Kmin: 1.2MB. ECN Kmax: 4.8MB.
+    - Proposed PFC XOFF threshold: 7.2MB.
+    - Leave at least a few MB for in-flight bytes after ECN marks before PFC.
+    - Use decimal MB/GB for rough switch-buffer sizing.
 
     **Calculations:**
-    - Time to fill buffer to ECN Kmin: 1.2MB / 50 GB/s = 24us.
-    - Time to fill buffer to PFC threshold: 7.2MB / 50 GB/s = 144us.
-    - Delta for DCQCN to react: 144us - 24us = 120us.
-    - 120us corresponds to ~2 data center round trips.
+    - Time to fill buffer to ECN Kmin: 1.2MB / 50GB/s = 24us.
+    - Time to fill buffer to ECN Kmax: 4.8MB / 50GB/s = 96us.
+    - Time to fill buffer to PFC XOFF: 7.2MB / 50GB/s = 144us.
+    - Margin from first ECN mark to PFC: 144us - 24us = 120us.
+    - Margin from Kmax to PFC: 144us - 96us = 48us.
+    - Buffer gap from Kmax to XOFF: 7.2MB - 4.8MB = 2.4MB.
+    - A 400G sender contributes 50GB/s * 48us = 2.4MB while the queue moves from Kmax to XOFF, so DCQCN must react before Kmax is sustained.
+    - A practical policy is probabilistic ECN from Kmin to Kmax, multiplicative decrease of roughly 50% under sustained marks, and conservative additive recovery after several unmarked RTTs.
 
     **Conclusion & Interpretation:**
-    - **Result: 120us safety margin for DCQCN response (Pause-Frame-Bound)**. The system prevents traffic collapse by triggering ECN early enough to avoid PFC.
+    - **Result: ECN begins about 120us before PFC would fire under a 400G fill-rate model (Pause-Frame-Bound)**. The threshold gap gives DCQCN an early signal, while PFC remains a last-resort guardrail rather than the normal control loop.
 status: published
 provenance: imported
 requires_explanation: true

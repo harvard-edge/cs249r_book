@@ -8,10 +8,10 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: Optimal Prefill Batch Size for TTFT
-scenario: 'On an H100 SXM5 running prefill for a 13B parameter FP16 model, you want to choose the batch size that maximizes GPU utilization without hurting TTFT.'
-question: 'At what sequence length and batch size does the prefill become compute-bound versus memory-bandwidth-bound?'
+scenario: On an H100 SXM5 running prefill for a 13B parameter FP16 model, you want to choose the batch size that maximizes GPU utilization without hurting TTFT.
+question: At what sequence length and batch size does the prefill become compute-bound versus memory-bandwidth-bound?
 details:
-  realistic_solution: 'For attention and MLP layers combined, GEMMs dominate the forward pass. FLOPs = 2 × N_params × B × S. Memory reads ≈ N_params × 2 bytes (FP16). Calculate the hardware ridge point and set Arithmetic Intensity equal to the ridge point to find the crossover sequence length. Prefill typically operates deep in the compute-bound regime.'
+  realistic_solution: 'For the simplified prefill roofline, GEMMs dominate: FLOPs = 2 × N_params × B × S, while each batch reuses one stream of FP16 weights, so weight traffic is about 2 × N_params bytes. Arithmetic intensity is therefore B × S FLOP/byte. The H100 ridge point is about 295 FLOP/byte, so prefill becomes compute-bound when B × S ≥ 295. For S=512, batch size 1 is already compute-bound; for S=128, use B≥3 if TTFT queueing allows. Choose the smallest batch that crosses the ridge point rather than batching so deeply that TTFT suffers.'
   common_mistake: |
     **The Pitfall:** Using total model capacity instead of analyzing the FLOPs-to-Bytes ratio of the forward pass.
     **The Rationale:** Treating the forward pass as a black box and failing to decompose memory reads vs matrix multiplications.
@@ -20,15 +20,18 @@ details:
     1. **Assumptions & Constraints:**
        - Hardware: H100 SXM5 (989 TFLOPS FP16, 3.35 TB/s HBM3).
        - Model: 13B parameters, FP16 (2 bytes).
-       - Scenario: Batch size (B) = 1, Sequence length (S) = 512.
+       - Simplified weight-streaming model: one read of FP16 weights per prefill batch.
     2. **Calculations:**
        - H100 Ridge Point: 989 TFLOPS / 3.35 TB/s = 295 FLOP/byte.
-       - FLOPs (B=1, S=512): 2 × 13e9 × 512 = 13.3 TFLOPs.
+       - FLOPs: 2 × 13e9 × B × S.
        - Bytes (Weights): 13e9 × 2 bytes = 26 GB.
-       - Arithmetic Intensity: 13.3e12 / 26e9 = 512 FLOP/byte.
-       - Crossover S: S = 295 × (2 × 13e9) / (2 × 13e9) = 295 tokens.
+       - Arithmetic Intensity: (2 × 13e9 × B × S) / (2 × 13e9) = B × S FLOP/byte.
+       - Crossover condition: B × S ≥ 295.
+       - At B=1, crossover sequence length is S ≥ 295 tokens.
+       - At S=512, minimum batch size is B ≥ ceil(295 / 512) = 1.
+       - At S=128, minimum batch size is B ≥ ceil(295 / 128) = 3.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound. The arithmetic intensity (512) exceeds the ridge point (295). Prefill is compute-bound for any sequence ≥ 295 tokens at B=1.**
+       - **Result: Compute-Bound when B × S ≥ 295. For 512-token prompts, B=1 is enough; for shorter prompts, increase batch size only as far as TTFT allows.**
 status: published
 provenance: imported
 requires_explanation: false

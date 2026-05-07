@@ -7,19 +7,29 @@ topic: model-adaptation-systems
 competency_area: architecture
 bloom_level: evaluate
 phase: inference
-title: PEFT Strategy Selection for 100B+ Models at Cloud Scale
+title: 140B PEFT Comparison for 10K Enterprise Examples
 scenario: Your team must fine-tune a 140B parameter model on a 10K example dataset for a specialized enterprise task. Full fine-tune requires 48xH100. Compare LoRA, (IA)^3, and prefix tuning on memory efficiency, performance, and training time.
 question: For a 140B model and 10K examples, how do LoRA, (IA)^3, and prefix tuning compare on memory, performance, and training time?
 details:
-  realistic_solution: 'Method comparison for 140B model with 10K examples: (1) LoRA (r=16): Risk: may overfit with 10K examples. (2) (IA)^3: ~1M adapter params. Better regularization for small datasets. (3) Prefix tuning: inference overhead: prefixes add to KV cache for every request. Recommendation: (IA)^3 for 10K dataset.'
+  realistic_solution: 'Full fine-tuning is the baseline but is impractical here because it trains all 140B parameters and has the highest memory, optimizer-state, and overfitting risk on only 10K examples. LoRA r=16 is usually the strongest PEFT quality baseline and trains quickly on far less memory than full fine-tuning, but it still exposes tens of millions of trainable parameters and should use validation, dropout, and early stopping. (IA)^3 trains only per-channel scaling vectors, so it has the smallest memory footprint and fastest training; use it first for narrow classification, routing, or style-control tasks where lightweight modulation is enough. Prefix tuning can be competitive for generation style control or prompt-like conditioning, but it increases prompt/KV-cache length at inference and is less attractive for latency-sensitive serving. Recommendation: benchmark (IA)^3 and LoRA against a held-out enterprise set, choose LoRA when quality needs more capacity, choose (IA)^3 when
+    speed and memory dominate, and avoid full fine-tuning unless PEFT validation fails.'
   common_mistake: |
-    **The Pitfall:** Selecting LoRA by default without evaluating parameter scale.
+    **The Pitfall:** Selecting LoRA by default without checking the dataset-size and serving tradeoffs.
     **The Rationale:** It's the most popular PEFT method in the ecosystem.
-    **The Consequence:** Severe overfitting on small datasets (10K examples) due to LoRA introducing tens of millions of trainable parameters.
+    **The Consequence:** LoRA may still be the best-quality PEFT choice, but on 10K examples it can add more trainable capacity than the task needs and can waste memory or overfit unless validated against lighter methods such as (IA)^3.
   napkin_math: |
-    1. **Assumptions & Constraints:** 140B model, 10K dataset. LoRA r=4 (~120 layers, d=8192). (IA)^3 parameters.
-    2. **Calculations:** LoRA params = 2 (matrices) × 120 layers × 8192 dim × 4 rank × 2 (K+V) = ~15.7M trainable parameters. (IA)^3 params = 3 (vectors) × 120 layers × 8192 dim = 2.95M trainable parameters.
-    3. **Conclusion & Interpretation:** **Result: (IA)^3 has 5x fewer params, preventing overfitting. Model-Capacity-Bound.**
+    1. **Assumptions & Constraints:**
+       - 140B model, 10K examples, about 120 transformer layers with hidden size d=12,288.
+       - LoRA target for comparison: Q and V projections at rank r=16.
+       - (IA)^3 target for comparison: K, V, and FFN channel scaling vectors.
+       - Prefix tuning comparison: 32 virtual tokens with learned K/V prefixes per layer.
+    2. **Calculations:**
+       - LoRA params = 120 layers * 2 matrices * 2*d*r = 120 * 2 * 2 * 12,288 * 16 = 94.4M trainable params.
+       - (IA)^3 params = 120 layers * 3 vectors * 12,288 = 4.4M trainable params.
+       - Prefix params = 120 layers * 32 prefix tokens * 2 K/V tensors * 12,288 = 94.4M trainable params, plus extra KV-cache work at inference.
+       - Full fine-tuning trains 140B params, about 280GB of BF16 weights before gradients and optimizer state.
+    3. **Conclusion & Interpretation:**
+       - **Result: Data-Capacity Tradeoff.** (IA)^3 is about 21x smaller than this LoRA setup and fastest to train, while LoRA is the stronger quality backstop; prefix tuning has similar trainable scale to LoRA under these assumptions but carries serving overhead.
 status: published
 provenance: imported
 requires_explanation: true

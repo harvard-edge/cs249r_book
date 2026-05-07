@@ -11,24 +11,27 @@ title: Architecting Multi-Model Inference on Qualcomm Cloud AI 100
 scenario: Your team needs to deploy a real-time conversational AI pipeline consisting of an ASR model, an LLM, and a TTS model on an on-premise edge server equipped with a single Qualcomm Cloud AI 100 accelerator.
 question: How would you quantize and place the ASR, LLM, and TTS models on one Cloud AI 100 so they fit in 32 GB and stay within 75W?
 details:
-  realistic_solution: Design an architecture that mandates INT8 (W8A8) quantization for the LLM to capitalize on the 400 TOPS INT8 compute and halve the memory footprint. Structure the memory layout to pin the heavy LLM weights in the 32 GB LPDDR4x memory while leaving a dedicated, hard-capped memory pool for the ASR/TTS models and dynamic KV cache, ensuring deterministic performance and power stability under the 75W limit.
+  realistic_solution: Place all latency-critical execution on the Cloud AI 100, with host memory used only for orchestration, audio I/O, and non-hot artifacts. Quantize the 14B LLM to W8A8 or weight-only INT8 after accuracy validation, keep ASR and TTS in INT8 or FP16 depending on operator support and quality targets, and reserve separate accelerator memory pools for LLM weights, ASR/TTS weights, KV cache, activations, and staging buffers. A practical 32 GB budget is about 14 GB for the INT8 LLM, 2 GB ASR, 1 GB TTS, 4-6 GB KV cache for bounded context and batch size, and several GB for activations/runtime overhead. Sequence ASR, token generation, and TTS with admission control rather than running all peak phases simultaneously, so power remains under the 75W envelope.
   common_mistake: |
     **The Pitfall:** Proposing to serve models at FP16 or isolating quantization strategies independently.
     **The Rationale:** Candidates focus on raw parameter counts and forget that KV caches and simultaneous model executions add significant overhead.
     **The Consequence:** The architecture exceeds the hard 32 GB memory limit or fails to leverage the accelerator's peak 400 TOPS INT8 capability, causing OOMs and massive latency.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hardware: 32 GB memory limit.
-    - Models: 14B parameter LLM, 2 GB ASR, 1 GB TTS.
+        - Hardware: 32 GB accelerator memory limit and 75W board power envelope.
+        - Models: 14B parameter LLM, 2 GB ASR, 1 GB TTS.
+        - Reserve memory separately for weights, bounded LLM KV cache, activations, and runtime staging.
 
     **Calculations:**
-    - FP16 Footprint: 14B * 2 bytes = 28 GB. With ASR/TTS (3 GB), total weights = 31 GB. Leaves 1 GB for KV cache (guaranteed OOM).
-    - INT8 Footprint: 14B * 1 byte = 14 GB.
-    - Total INT8 Memory: 14 GB (LLM) + 2 GB (ASR) + 1 GB (TTS) = 17 GB.
-    - Remaining Memory: 32 GB - 17 GB = 15 GB safely available for high-throughput batching and KV caching.
+        - FP16 weights: 14B * 2 bytes = 28 GB for the LLM, plus 3 GB ASR/TTS = 31 GB. That leaves only 1 GB for KV cache, activations, runtime staging, and fragmentation, so it is not viable.
+        - INT8 LLM weights: 14B * 1 byte = 14 GB.
+        - Total INT8/static model memory: 14 GB LLM + 2 GB ASR + 1 GB TTS = 17 GB.
+        - Remaining memory: 32 GB - 17 GB = 15 GB for a bounded KV cache, activations, runtime overhead, and staging.
+        - Example reserve: 5 GB KV cache + 4 GB activations/runtime + 2 GB staging leaves about 4 GB headroom.
+        - Power policy: do not run ASR peak, LLM prefill/decode peak, and TTS peak concurrently; use admission control and sequencing so measured board power stays below 75W.
 
     **Conclusion & Interpretation:**
-    - **Result: 15 GB Free (Memory Capacity-Bound)**. INT8 quantization ensures the system comfortably fits within 32 GB while unlocking the peak 400 TOPS.
+        - **Result: INT8 placement fits only with explicit reserves and power sequencing.** Quantization creates a 15 GB dynamic-memory budget, but KV cache and runtime overhead must be capped, and admission control is required to stay within 75W.
 status: published
 provenance: imported
 requires_explanation: true

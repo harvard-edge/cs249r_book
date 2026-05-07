@@ -11,25 +11,27 @@ title: KV-Cache Radix Tree for Prefix Sharing
 scenario: Your serving system uses a radix tree to manage prefix KV-cache sharing. You have 200 active system prompts, each used by ~50 users simultaneously, with 512-token system prompts and 128-token user suffixes. The GPU has a 52 GB KV pool allocated.
 question: How much memory does radix-tree prefix sharing save, and how many concurrent requests fit with versus without sharing?
 details:
-  realistic_solution: 'Without prefix sharing: each request stores full 640-token KV (512 system prompt + 128 user). KV per token (70B, GQA 8 heads, head_dim 128, 96 layers, FP16): 2×8×128×1×96×2 = 393,216 bytes ≈ 0.375 MB/token. Full request KV: 640 × 0.375 MB = 240 MB. 52 GB / 240 MB = 216 concurrent requests. With prefix sharing: prefix KV (512 tokens) stored once per unique system prompt. 200 system prompts × 512 tokens × 0.375 MB = 38.4 GB for all prefix caches. Remaining for user suffix KV: 52 - 38.4 = 13.6 GB. User suffix KV: 128 tokens × 0.375 MB = 48 MB per request. 13.6 GB / 48 MB = 283 concurrent user suffix KV slots. Total concurrent requests: 283 (limited by suffix KV). Improvement: 283 vs 216 = 31% more concurrent requests. Memory saved: 10,000 users × 192 MB = 1,920 GB unshared vs 38.4 GB shared (saves 1,881.6 GB) — but constrained by 52 GB pool anyway.'
+  realistic_solution: 'Without prefix sharing: each simultaneous request stores full 640-token KV (512 system prompt + 128 user). KV per token (70B, GQA 8 heads, head_dim 128, 96 layers, FP16): 2×8×128×1×96×2 = 393,216 bytes = 384 KiB, or about 0.375 MiB/token. Full request KV: 640 × 0.375 MiB = 240 MiB. A 52 GiB pool is 53,248 MiB, so 53,248 / 240 = 221 maximum simultaneous requests. With prefix sharing: prefix KV (512 tokens) is stored once per unique system prompt. 200 system prompts × 512 tokens × 0.375 MiB = 38,400 MiB = 37.5 GiB for all prefix caches. Remaining for user suffix KV: 53,248 - 38,400 = 14,848 MiB. User suffix KV: 128 tokens × 0.375 MiB = 48 MiB per request, so 14,848 / 48 = 309 simultaneous requests. At 309 active requests, storing prefixes per request would consume 309 × 192 MiB = 59.3 GiB, while radix sharing uses 37.5 GiB for prefixes, saving about 21.8 GiB of prefix duplication. Improvement: 309 vs 221 = 40% more concurrent requests. The nominal workload is about 200
+    × 50 = 10,000 users, so this 52 GiB pool cannot hold all active users in either design; radix sharing only raises the simultaneous-request ceiling.'
   common_mistake: |
     **The Pitfall:** Forgetting how prefix memory constraints scale.
     **The Rationale:** Candidates forget that the radix tree stores the prefix KV once per unique prefix, but total memory is still heavily constrained by the 38.4 GB dedicated to those 200 system prompts.
     **The Consequence:** Grossly overestimating the number of users that can fit in the remaining memory pool.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Per-token KV size (70B GQA): 384 KB/token.
-    - 512-token prefix: 192 MB. 128-token suffix: 48 MB.
-    - Total GPU pool: 52 GB.
+    - Per-token KV size (70B GQA): 393,216 bytes = 384 KiB = 0.375 MiB.
+    - 512-token prefix: 192 MiB. 128-token suffix: 48 MiB.
+    - Total GPU pool: 52 GiB = 53,248 MiB.
 
     **Calculations:**
-    - No sharing: 240 MB/request. 52 GB / 240 MB = 216 concurrent requests.
-    - With sharing: 200 prefixes * 192 MB = 38.4 GB prefix store.
-    - Suffix pool: 52 GB - 38.4 GB = 13.6 GB.
-    - 13.6 GB / 48 MB = 283 concurrent requests.
+    - No sharing: 640 tokens * 0.375 MiB = 240 MiB/request. 53,248 MiB / 240 MiB = 221 concurrent requests.
+    - With sharing: 200 prefixes * 192 MiB = 38,400 MiB = 37.5 GiB prefix store.
+    - Suffix pool: 53,248 MiB - 38,400 MiB = 14,848 MiB.
+    - 14,848 MiB / 48 MiB = 309 concurrent requests.
+    - Prefix memory at 309 requests without sharing would be 309 * 192 MiB = 59.3 GiB; shared prefix memory is 37.5 GiB, saving about 21.8 GiB.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Capacity Bound.** Radix sharing yields a 31% increase in concurrency.
+    - **Result: Memory-Capacity Bound.** Radix sharing saves about 21.8 GiB of prefix duplication at the shared-cache concurrency point and raises concurrency from 221 to 309 requests, a 40% increase.
 status: published
 provenance: imported
 requires_explanation: false

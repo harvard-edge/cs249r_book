@@ -7,11 +7,11 @@ topic: differential-privacy
 competency_area: cross-cutting
 bloom_level: analyze
 phase: both
-title: Optimizing DP-SGD on Google TPU v5e with Privacy Budget Constraints
+title: Optimizing DP-SGD on a 16 GB Accelerator with Privacy Budget Constraints
 scenario: Your team is training a sensitive recommendation model using DP-SGD on an accelerator with 16 GB of HBM. The model has 1 billion parameters (FP32). You've been allocated a privacy budget of ε=8 over 10 epochs. Each epoch uses a dataset of 10 million samples, with a batch size of 2048.
-question: "How would you calibrate the noise scale (σ) per step to meet the privacy budget while considering hardware constraints?"
+question: How would you calibrate the noise scale (σ) per step to meet the privacy budget while considering hardware constraints?
 details:
-  realistic_solution: 'Utilize a framework like TensorFlow Privacy or Opacus. Dynamically set `noise_multiplier` based on ε, δ, and total mini-batch steps. For a 1 billion parameter model, per-sample gradient clipping is critical but requires materializing per-sample gradients, which risks memory explosion. The implementation must ensure in-place efficient gradient clipping and aggregation to avoid OOMing the 16 GB HBM.'
+  realistic_solution: Use TensorFlow Privacy, Opacus, or an equivalent accountant-backed DP-SGD implementation. Set δ from the policy, compute q=batch_size/N and the number of optimizer steps, then binary-search the noise multiplier σ with an RDP or moments accountant until ε≤8. Choose the clipping norm from observed per-example gradient norms. A 1B-parameter FP32 model already uses about 4 GB for weights, so 16 GB HBM requires memory-efficient per-example norm computation, activation checkpointing, small physical micro-batches, and accumulation of clipped sums rather than materializing full per-sample gradients.
   common_mistake: |
     **The Pitfall:** Overlooking the memory footprint of per-sample gradients required for DP clipping.
     **The Rationale:** Candidates correctly identify the noise mathematics but treat gradients as a single aggregated batch, forgetting that DP-SGD requires storing individual gradients for norm clipping.
@@ -25,13 +25,13 @@ details:
     **Calculations:**
     - Total Steps (T) = 10 * (10,000,000 / 2048) = 48,828.
     - Sampling prob (q) = 2048 / 10,000,000 = 0.0002048.
-    - Noise multiplier (μ) ≈ (q * sqrt(T * ln(1/δ))) / ε.
-    - μ ≈ (0.0002048 * sqrt(48828 * 11.51)) / 8 = 0.153 / 8 = 0.019.
-    - Gradient Memory = 10^9 params * 2 bytes (BF16) = 2 GB.
-    - Per-sample gradients = 2048 * 2 GB = 4 TB.
+    - Noise multiplier σ must be solved with an RDP/moments accountant using q, T, δ, target ε, sampling assumptions, and the accountant's neighboring-dataset definition.
+    - This napkin calculation identifies q and T; it should not invent σ without running the accountant because the privacy bound depends on the exact DP-SGD accountant and sampling model.
+    - Gradient Memory = 10^9 params * 4 bytes (FP32) = 4 GB.
+    - Naively storing full per-sample gradients would be 2048 * 4 GB = about 8 TB, but efficient implementations compute norms and clipped aggregates without holding that tensor.
 
     **Conclusion & Interpretation:**
-    - **Result: 4 TB (Memory-Bound)**. 4 TB drastically exceeds the 16 GB HBM, dictating an in-place clipping strategy.
+    - **Result: Accountant-Calibrated and Memory-Bound**. σ should come from the privacy accountant, while the 16 GB HBM forces small physical micro-batches and memory-efficient clipping rather than full per-sample-gradient storage.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,28 +9,31 @@ bloom_level: evaluate
 phase: inference
 title: On-Device Intersectional Fairness Telemetry Pipeline
 scenario: You are designing an on-device fairness evaluation telemetry system for a visual avatar feature running on an Apple A17 Pro. The system must compute demographic parity and equalized odds across 5 intersectional subgroups locally, without sending raw user images to the cloud. The A17 Pro features a 16-core Neural Engine and shares 8 GB of unified memory with the CPU/GPU, which is heavily utilized by the main application.
-question: 'How would you architect the evaluation pipeline, detailing how you schedule the evaluation models, manage memory contention, and aggregate subgroup metrics securely?'
+question: How would you architect the evaluation pipeline, detailing how you schedule the evaluation models, manage memory contention, and aggregate subgroup metrics securely?
 details:
-  realistic_solution: The system should use asynchronous, opportunistic evaluation running during device idle times (e.g., plugged in). The evaluation models (e.g., lightweight INT8 classifiers for subgroup detection) should be scheduled explicitly on the Neural Engine. To protect privacy, local metrics should be aggregated using local differential privacy (LDP) before transmission, ensuring individual demographic performance data is mathematically protected.
+  realistic_solution: |
+    The system should use an asynchronous, memory-aware evaluation queue that runs only when the foreground app is below explicit RAM and thermal thresholds. Cached inputs should be downscaled or represented as embeddings, batched in small chunks, and processed with backpressure so the evaluation model can be evicted immediately when the main app needs the Neural Engine or unified memory. Model placement should prefer the Neural Engine for supported INT8 classifiers, but fall back to GPU/CPU only when graph partitioning would not create extra copies. Subgroup metrics should be aggregated locally as bounded counters for demographic parity and equalized-odds numerators/denominators, stored in an encrypted local database or secure enclave-backed key store; only aggregate counts or secure-aggregation payloads leave the device, never raw images or per-user records.
   common_mistake: |
     **The Pitfall:** Designing a synchronous pipeline that evaluates fairness immediately after primary inference.
     **The Rationale:** Engineers focus purely on the evaluation logic, completely ignoring the strict limits of the device's shared unified memory architecture.
     **The Consequence:** Crashing the foreground app via memory contention, causing massive UI stutter, and risking privacy leaks by transmitting raw metrics.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Available RAM: < 3 GB (App uses ~5 GB of 8 GB).
-    - Subgroup Classifier: ~50 MB INT8 model.
+    - Unified memory pool: 8 GB, with the foreground app heavily utilized.
+    - Subgroup classifier: ~50 MB INT8 model.
     - Workload: 500 cached interactions/day.
-    - Compute Limit: 35 TOPS (5W thermal budget).
+    - Conservative sustained evaluation throughput: 5 TOPS while running in the background.
+    - Per-sample compute: 2 GOPS.
+    - Evaluation batch: 16 downscaled samples at ~2 MB each.
 
     **Calculations:**
-    - Single Pass Compute: 2 GOPS.
-    - Theoretical Latency: 2 / 35,000 = ~0.057 ms.
-    - Daily Evaluation Workload: 500 images * 2 GOPS = 1 TOPS total.
-    - Execution Time: ~0.028 seconds of continuous NPU load.
+    - Per-sample latency at 5 TOPS: 2 GOPS / 5,000 GOPS/s = 0.4 ms.
+    - Daily evaluation work: 500 x 2 GOPS = 1,000 GOPS = 1 Tera-operation.
+    - Daily accelerator time: 1,000 GOPS / 5,000 GOPS/s = 0.2 s.
+    - Batch memory: 50 MB model + ~25 MB activations + (16 x 2 MB inputs) = ~107 MB, plus small encrypted counters.
 
     **Conclusion & Interpretation:**
-    - **Result: 1 TOPS (Memory-Bound)**. Compute and thermal overheads are trivial, but the architecture must prioritize memory isolation.
+    - **Result: about 0.2 s/day of background compute and ~107 MB per evaluation batch.** Compute is modest, but the architecture must prioritize memory isolation, backpressure, and secure local aggregation.
 status: published
 provenance: imported
 requires_explanation: true

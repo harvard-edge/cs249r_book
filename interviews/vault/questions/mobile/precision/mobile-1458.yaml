@@ -7,12 +7,15 @@ topic: quantization-fundamentals
 competency_area: precision
 bloom_level: evaluate
 phase: inference
-title: 'Quantization Sizing for Exynos 2400 Shared Memory Budget'
-scenario: 'Your team is porting a 4-billion parameter language model to the Samsung Exynos 2400 NPU for an on-device translation feature. The device features 34.7 TOPS from a dual-core NPU, but relies on a unified 12 GB LPDDR5X memory pool shared heavily with the CPU, GPU, and the camera ISP. Given the shared memory contention, you must evaluate whether standard PTQ INT8 or an aggressive mixed-precision INT4/INT8 strategy is required.'
-question: 'What quantization plan fits a generative model into the Exynos 2400 shared memory budget?'
+title: Quantization Sizing for Exynos 2400 Shared Memory Budget
+scenario: Your team is porting a 4-billion parameter language model to the Samsung Exynos 2400 NPU for an on-device translation feature. The device features 34.7 TOPS from a dual-core NPU, but relies on a unified 12 GB LPDDR5X memory pool shared heavily with the CPU, GPU, and the camera ISP. Given the shared memory contention, you must evaluate whether standard PTQ INT8 or an aggressive mixed-precision INT4/INT8 strategy is required.
+question: What quantization plan fits a generative model into the Exynos 2400 shared memory budget?
 details:
-  realistic_solution: 'At L5, the candidate should immediately identify that generative tasks are memory-bandwidth bound rather than compute-bound. They should recommend INT4 weight-only quantization with INT8 or FP16 activations to minimize memory footprint and bandwidth usage, ensuring the 12 GB shared pool has enough headroom for the camera ISP and OS while maintaining acceptable token generation speeds.'
-  common_mistake: 'Candidates often solely focus on the NPU''s 34.7 TOPS compute capacity and conclude that INT8 is sufficient since the NPU has plenty of compute. They fail to account for the shared nature of the 12 GB memory pool, ignoring that a naive INT8 model will severely bottleneck the ISP and GPU during concurrent workloads.'
+  realistic_solution: At L5, the candidate should immediately identify that generative tasks are constrained by shared memory capacity and bandwidth, not just peak TOPS. They should recommend INT4 weight-only quantization with INT8 or FP16 activations, then budget additional memory for KV cache, activations, runtime workspace, and OS/ISP/GPU contention. INT8 may fit only in a lightly loaded configuration; INT4 is the safer plan for longer contexts or concurrent camera workloads.
+  common_mistake: |
+    **The Pitfall:** Candidates often solely focus on the NPU's 34.7 TOPS compute capacity and conclude that INT8 is sufficient since the NPU has plenty of compute.
+    **The Rationale:** They fail to account for the shared nature of the 12 GB memory pool.
+    **The Consequence:** Ignoring this means that a naive INT8 model will severely bottleneck the ISP and GPU during concurrent workloads.
   napkin_math: |
     **Assumptions & Constraints:**
     - Model size: 4B parameters.
@@ -20,12 +23,13 @@ details:
     - Compute: 34.7 TOPS.
 
     **Calculations:**
-    - FP16 Footprint: 4B * 2 bytes = 8 GB (leaves only 4 GB for OS/GPU/ISP -> OOM risk).
-    - INT8 Footprint: 4B * 1 byte = 4 GB. Speed: 4 GB / ~50-60 GB/s = ~12-15 tokens/sec.
-    - INT4 Footprint: 4B * 0.5 bytes = 2 GB. Speed: 2 GB / ~50-60 GB/s = ~24-30 tokens/sec.
+    - FP16 weights: 4B * 2 bytes = 8 GB before KV cache or runtime workspace, which is too risky in a 12 GB shared pool.
+    - INT8 weights: 4B * 1 byte = 4 GB. With ~1-2 GB for KV cache, activations, and runtime overhead, the working set can reach ~5-6 GB.
+    - INT4 weights: 4B * 0.5 bytes = 2 GB. With the same ~1-2 GB runtime budget, the working set is ~3-4 GB.
+    - Token throughput cannot be estimated by dividing memory bandwidth by the static model footprint; it requires per-token memory traffic for weights, KV cache, and kernels.
 
     **Conclusion & Interpretation:**
-    - **Result: 2 GB Footprint (Memory-Bound).** INT4 weight quantization securely fits within the 12 GB shared budget and maximizes generation speed up to 30 tokens/sec.
+    - **Result: INT4 Weight-Only Quantization (Shared-Memory Safe).** INT4 provides the most reliable headroom for a generative model under shared-memory contention, while actual tokens/sec remains conditional on context length and implementation.
 status: published
 provenance: imported
 requires_explanation: false

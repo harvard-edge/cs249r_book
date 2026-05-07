@@ -11,7 +11,7 @@ title: Drift Detection Strategies for Mobile NPU Deployments
 scenario: Your team is developing a critical on-device machine learning application for real-time sensor data processing on a smartphone, utilizing the Snapdragon 8 Gen 3 Hexagon NPU. The model's performance is sensitive to data drift and concept drift. Architecture A (Server-Assisted) periodically samples and transmits compressed features to the cloud for KL divergence analysis. Architecture B (On-Device) implements a rolling window average of PSI (Population Stability Index) directly on the device.
 question: Should Snapdragon 8 Gen 3 drift detection use server KL divergence, on-device PSI, or a hybrid design?
 details:
-  realistic_solution: 'For this scenario, a hybrid approach combining lean on-device monitoring with selective, server-assisted deep analysis offers the best balance. Architecture B, with on-device PSI, is a strong candidate for immediate, low-latency drift detection. PSI is computationally efficient and can leverage the NPU''s INT8 capabilities for binning and histogram calculations, minimizing power consumption. The 12-16 GB LPDDR5X provides ample memory for storing baselines and rolling window data without impacting main model inference. However, PSI might miss subtle concept drift. Thus, Architecture A could be employed as a secondary, less frequent check: small, anonymized feature summary statistics (not raw data) could be uploaded during device charging or Wi-Fi availability for a more thorough, server-side KL divergence analysis. This ensures comprehensive drift detection while respecting mobile constraints and user privacy.'
+  realistic_solution: Use a hybrid design. Run PSI as a lightweight on-device CPU/DSP-side heuristic over rolling histograms so the app can detect obvious covariate drift without uploading raw sensor data. Keep the bins, baselines, and counters compact in memory and schedule the work around the main NPU inference path. When PSI crosses a threshold, the device should upload only compressed feature summaries during Wi-Fi/charging windows for deeper server-side KL divergence or related distribution analysis. This separates the cheap local trigger from the heavier cloud diagnosis and avoids treating histogram drift monitoring as a natural INT8 NPU workload.
   common_mistake: |
     **The Pitfall:** Directly porting server-side drift detection mechanisms to mobile devices.
     **The Rationale:** Candidates fail to account for severe resource constraints (battery, memory, compute cycles) and intermittent connectivity on mobile platforms.
@@ -19,18 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target Hardware: Snapdragon 8 Gen 3 Hexagon NPU.
-    - Compute Budget: 45 TOPS ($45 \times 10^{12}$ Ops/sec).
+    - Sustained available compute for monitoring while the main model runs: 1 TOPS = 1,000 GOPS/sec.
     - Memory Budget: 12-16 GB LPDDR5X.
+    - Main model rate: 30 inferences/sec.
 
     **Calculations:**
     - Binning Ops: 10 features * 2 ops = 20 ops/inference.
     - PSI Calculation (Amortized): (10 features * 50 bins * 5 ops) / 100 inferences = 25 ops/inference.
     - Total PSI Compute: 45 ops/inference.
-    - Execution Time: 45 / $45 \times 10^{12}$ = 1 picosecond.
+    - Monitoring work per second = 45 ops/inference * 30 inferences/sec = 1,350 ops/sec.
+    - Share of 1 TOPS monitoring budget = 1,350 / 1,000,000,000,000 = 0.000000135%.
     - PSI Memory Footprint: 10 features * 50 bins * 4 bytes = 2 KB.
 
     **Conclusion & Interpretation:**
-    - **Result: 0% NPU Overhead**. On-device PSI is computationally trivial and requires only 2 KB of memory, serving as a highly efficient primary trigger before costly server offloading.
+    - **Result: Very low arithmetic overhead, not literally zero.** On-device PSI is cheap enough to serve as the primary trigger, while memory access, scheduling, and upload policy still justify a hybrid design for deeper server analysis.
 status: published
 provenance: imported
 requires_explanation: false
@@ -40,8 +42,8 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The napkin math calculates 'approximately 2500 o' (operations) but does not complete the word or specify the unit, leaving the calculation unclear.
-- The reasoning_competency, knowledge_area, and mode fields are all set to 'None', which should be specified for a Staff-level question.
+  - The napkin math calculates 'approximately 2500 o' (operations) but does not complete the word or specify the unit, leaving the calculation unclear.
+  - The reasoning_competency, knowledge_area, and mode fields are all set to 'None', which should be specified for a Staff-level question.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

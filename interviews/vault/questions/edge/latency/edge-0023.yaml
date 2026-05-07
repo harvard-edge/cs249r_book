@@ -9,9 +9,10 @@ bloom_level: analyze
 phase: inference
 title: The Camera-to-Inference Latency Budget
 scenario: 'Your autonomous vehicle''s perception pipeline runs at 30 FPS on a Jetson Orin. The budget per frame is 33.3ms. Your measured average breakdown: ISP (5ms) -> resize/normalize (3ms) -> YOLO inference (20ms) -> NMS post-processing (2ms) = 30ms total. That leaves 3.3ms of margin. During road testing, the system occasionally drops frames — about 1 in 200. The safety team says zero dropped frames are acceptable.'
-question: "What's going wrong, and how do you fix it without buying faster hardware?"
+question: What's going wrong, and how do you fix it without buying faster hardware?
 details:
-  realistic_solution: The 1-in-200 frame drops are caused by tail latency — the p99.5 inference time exceeds 33.3ms even though the average is 30ms. The fix is to pipeline the execution stages (ISP -> CPU -> GPU -> CPU) and lock the hardware clocks to prevent dynamic voltage and frequency scaling (DVFS) jitter.
+  realistic_solution: |
+    The 1-in-200 frame drops are caused by tail latency in the end-to-end pipeline, not by the 30ms average path. With only 3.3ms of nominal margin, occasional jitter from inference, memory contention, CPU scheduling, or DVFS can push total camera-to-result latency over 33.3ms. Fix it by reducing variance and isolating the pipeline: lock appropriate clocks, remove competing workloads, use real-time scheduling where applicable, preallocate buffers, and pipeline stages if throughput contention is part of the tail.
   common_mistake: |
     **The Pitfall:** Blindly attempting to "optimize the model to run faster" to add more margin.
     **The Rationale:** Candidates focus on the 3.3ms average margin, believing a slightly smaller model will eliminate the drops.
@@ -20,15 +21,16 @@ details:
     **Assumptions & Constraints:**
     - Frame budget: 33.3ms (30 FPS).
     - Breakdown: ISP (5ms), resize/normalize (3ms), YOLO inference (20ms), NMS (2ms).
-    - Sequential pipeline at p99.9: inference spikes to 32ms.
+    - Observed drop rate: about 1 in 200 frames, so the deadline is being exceeded in the latency tail.
 
     **Calculations:**
-    - Sequential pipeline at p99.9: 5 + 3 + 32 + 2 = 42ms (frame drop).
-    - Pipelined at p99.9: max(5, 3, 32, 2) = 32ms (fits in 33.3ms with 1.3ms margin).
-    - With clock locking to eliminate DVFS jitter: max(5, 3, 25, 2) = 25ms (8.3ms margin).
+    - Average end-to-end latency = 5 + 3 + 20 + 2 = 30ms.
+    - Average slack = 33.3 - 30 = 3.3ms.
+    - Any tail event adding more than 3.3ms across any stage causes a missed frame.
+    - A 1/200 drop rate implies roughly the p99.5 end-to-end frame latency is at or above the 33.3ms budget.
 
     **Conclusion & Interpretation:**
-    - **Result: 25ms (Latency-Bound)**. Frame drop rate drops from 1/200 to <1/100,000. Throughput cost of pipelining adds 1 frame of end-to-end latency (33ms extra), which is acceptable.
+    - **Result: Tail-Latency Bound**. The average pipeline fits, but the tail does not. The fix is to measure per-stage tail latency and remove jitter sources until the required tail/WCET bound is below 33.3ms.
 status: published
 provenance: imported
 requires_explanation: false

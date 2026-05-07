@@ -11,7 +11,8 @@ title: AMD MI300X Accelerator Selection for Large Language Model Inference
 scenario: Your team is tasked with deploying a new large language model (LLM) for real-time inference, which requires extremely low latency and high throughput. You are considering various accelerator options, and the AMD MI300X has been proposed as a primary candidate.
 question: How would you design an MI300X-based LLM inference architecture and justify it against GPUs, TPUs, and custom ASICs?
 details:
-  realistic_solution: A realistic solution would involve a detailed breakdown of the LLM's memory footprint (model weights, activations, key-value cache), estimated computational requirements for a given batch size and sequence length, and a comparative analysis of the MI300X's specifications against those of competing hardware. This should include discussing the benefits of the MI300X's 192 GB HBM3 for large models that don't fit on typical GPUs, its high memory bandwidth for efficient data movement, and the potential for sparse computation. Furthermore, the solution should address the software ecosystem (ROCm vs. CUDA, compilers, inference engines) and the effort required for optimization, especially when integrating with existing cloud infrastructure.
+  realistic_solution: |
+    Use MI300X where its large 192 GB HBM pool reduces the number of shards for large-model inference, but do not plan a single-card 100B FP16 deployment: 100B FP16 weights need about 200 GB before KV cache, activations, runtime buffers, and fragmentation. The practical MI300X design is either weight-only INT8/INT4 on one accelerator with careful KV budgeting, or 2-way or larger tensor parallelism for FP16/BF16 quality with weights resident in HBM. Compared with NVIDIA GPUs, MI300X can reduce capacity pressure but usually carries more ROCm/kernel integration risk than a mature CUDA stack. Compared with TPUs, it is more flexible for custom serving engines and heterogeneous cloud deployment, while TPUs can be attractive when the model and serving stack are already XLA/SAX-oriented. Compared with a custom ASIC, MI300X has lower specialization and efficiency but avoids NRE cost and supports changing model architectures. For real-time serving, size latency from HBM bandwidth, KV-cache traffic, collectives, and achieved kernel efficiency rather than peak TFLOPS alone.
   common_mistake: |
     **The Pitfall:** Overemphasizing raw TFLOPS.
     **The Rationale:** Peak compute numbers are highly marketed and easy to compare.
@@ -20,12 +21,14 @@ details:
     1. **Assumptions & Constraints:**
        - 100B parameter model (FP16) = 200 GB weights.
        - MI300X: 192 GB HBM3, 5.3 TB/s bandwidth, 1300 TFLOPs FP16.
-       - Compute per inference: 100 TFLOPs.
+       - Batch-1 decode, weights resident if quantized or sharded; KV-cache traffic is additional.
     2. **Calculations:**
-       - Compute bound max throughput: 1300 TFLOPs / 100 TFLOPs = 13 inferences/sec.
-       - Memory bandwidth max throughput: 5.3 TB/s / 200 GB = 26 inferences/sec.
+       - FP16 capacity check: 100B * 2 bytes = 200 GB, which exceeds 192 GB before KV cache and runtime overhead.
+       - INT8 weight-only size is about 100 GB, leaving HBM for KV cache and activations on one MI300X; FP16 serving needs at least 2-way sharding or offload.
+       - Decode HBM-read lower bound if each batch-1 step streams resident weights through the compute units: 200 GB/token in FP16 or 100 GB/token in INT8. Bandwidth lower bounds are 200/5300 = ~37.7 ms/token FP16 and 100/5300 = ~18.9 ms/token INT8, before KV-cache traffic, collectives, and kernel overheads.
+       - Compute lower bound per token is about 2 * 100B = 200 GFLOPs; 200 GFLOPs / 1300 TFLOPs/s = ~0.15 ms at peak, so small-batch decode is dominated by memory movement.
     3. **Conclusion & Interpretation:**
-       - **Result: Compute-Bound. The bottleneck shifts between compute and memory bandwidth depending on batch size, but MI300X's 192 GB HBM3 natively fits near-100B models.**
+       - **Result: Capacity and bandwidth constrained at low batch.** A 100B FP16 model does not fit on one MI300X once KV cache and runtime memory are included; use quantization or multi-accelerator sharding, then compare MI300X, CUDA GPUs, TPUs, and ASICs from memory capacity, bandwidth, software maturity, and workload stability.
 status: published
 provenance: imported
 requires_explanation: true
@@ -39,7 +42,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- MI300X TFLOPS is 1300 instead of 1307
+  - MI300X TFLOPS is 1300 instead of 1307
 human_reviewed:
   status: not-reviewed
   by: null

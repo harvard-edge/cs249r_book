@@ -34,7 +34,10 @@ from pathlib import Path
 import yaml
 
 VAULT_DIR = Path(__file__).resolve().parents[2] / "vault"
-PROPOSED = VAULT_DIR / "chains.proposed.json"
+# AI-pipeline staging artifacts live under _pipeline/ (gitignored).
+# See interviews/CLAUDE.md.
+PIPELINE_DIR = VAULT_DIR / "_pipeline"
+PROPOSED = PIPELINE_DIR / "chains.proposed.json"
 LIVE = VAULT_DIR / "chains.json"
 LIVE_BACKUP = VAULT_DIR / "chains.json.bak"
 

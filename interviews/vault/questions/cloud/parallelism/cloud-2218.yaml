@@ -11,7 +11,7 @@ title: The Opportunistic Training Checkpoint Race
 scenario: Your cluster runs high-priority inference serving alongside opportunistic (preemptible) training jobs. When a traffic spike triggers autoscaling, training jobs must be preempted to free GPUs for inference within 60 seconds to meet SLA. Training jobs take 15 minutes to checkpoint a 70B model. Three times this week, training jobs were killed mid-checkpoint, losing 4 hours of work each time.
 question: How do you redesign the preemption protocol to guarantee the 60-second SLA while minimizing lost training work?
 details:
-  realistic_solution: 'The solution requires decoupling checkpoint frequency from preemption response time. Three-pronged approach: (1) **Proactive checkpointing**: opportunistic jobs must checkpoint frequently enough that maximum lost work is bounded. (2) **Tiered preemption signal**: send a ''warning'' signal 5-10 minutes before hard preemption, allowing the job to initiate an emergency checkpoint. Use inference traffic prediction to send warnings proactively. (3) **Fast checkpointing**: use async checkpointing to NVMe (4 GB/s per drive) instead of network storage. A 140GB checkpoint at 4 GB/s = 35 seconds — fits within the 60-second preemption budget.'
+  realistic_solution: The solution requires a 60-second-safe preemption protocol, not a long grace period. On autoscale trigger, fence the training job from starting new work, send an interrupt, drain or flush only bounded in-flight state to local durable storage or replicated NVMe, then force-kill at the 60-second deadline so inference gets the GPUs. Full 15-minute checkpoints must happen proactively in the background, and resumable/async checkpointing should bound lost work. Predictive 5-10 minute warnings can help reduce loss, but the SLA must be guaranteed by the immediate drain-and-kill path.
   common_mistake: |
     **The Pitfall:** Setting a long preemption grace period to allow full checkpointing.
     **The Rationale:** Engineers prioritize saving the training state over the rigid inference constraints.
@@ -26,11 +26,12 @@ details:
     **Calculations:**
     - Network checkpoint time: 140 GB / 125 MB/s = 1,120 seconds (18.6 minutes).
     - NVMe checkpoint time: 140 GB / 4 GB/s = 35 seconds.
+    - Preemption protocol budget: interrupt/fence immediately, allow bounded flush if it fits under 60 seconds, then force-kill at the deadline.
     - Lost work per kill without checkpoints: 4 hours * 64 GPUs * $2/hr = $512.
     - Lost work with 30-min NVMe checkpoints: 0.5 hr * 64 * $2 = $64.
 
     **Conclusion & Interpretation:**
-    - **Result: 35 Seconds (I/O-Bound)**. Writing checkpoints asynchronously to local NVMe takes 35 seconds (fitting within the 60s SLA) and reduces financial loss by 8x compared to unoptimized network writes.
+    - **Result: 60-Second-Safe Preemption (I/O-Bound)**. The scheduler must guarantee GPU release by fencing, bounded flushing to fast local storage when possible, and forced kill at 60 seconds; proactive checkpoints reduce lost work but cannot be required for SLA compliance.
 status: published
 provenance: imported
 requires_explanation: false

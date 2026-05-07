@@ -12,7 +12,7 @@ scenario: You are architecting an edge NVR (Network Video Recorder) system using
 question: How would you design the Hailo-8 memory hierarchy and streaming strategy for 4 1080p30 streams without stalling PCIe?
 details:
   realistic_solution: |
-    The correct architecture exploits the Hailo-8's spatial dataflow paradigm by pinning the entire 45MB model's weights into the distributed on-chip SRAM. The host DRAM is used strictly as a ring buffer for incoming frames and final bounding box outputs. By streaming the 4 video feeds sequentially into the dataflow pipeline, intermediate activations remain entirely on-chip, decoupling the compute throughput from host memory latency.
+    The correct architecture exploits the Hailo-8's spatial dataflow paradigm without assuming the entire 45MB model is resident on chip. Keep host DRAM as the backing store for frame rings, compiled graph segments, and outputs, while the compiler schedules weights and activations as tiles through limited on-chip buffers. Stream the 4 video feeds through a stable dataflow schedule so each layer's working set is prefetched and consumed without reloading the full model per frame.
   common_mistake: |
     **The Pitfall:** Treating the dataflow accelerator like a traditional GPU and proposing layer-by-layer execution.
     **The Rationale:** Assuming intermediate activations must be constantly spilled and reloaded from host DRAM due to the lack of on-board device DRAM.
@@ -22,14 +22,17 @@ details:
     - Streams: 4x 1080p at 30 fps.
     - PCIe Gen3 x4: ~3.2 GB/s practical bandwidth.
     - Model: 45MB weights.
+    - Compiled dataflow tiles weights and intermediates through on-chip buffers; the full 45MB model is not assumed to fit on chip.
 
     **Calculations:**
-    - Input Payload: 4 * (1920 * 1080 * 3 B) * 30 fps = 746 MB/s.
-    - Total FPS: 120 fps. Compute required: ~7.2 TOPS.
-    - PCIe Bus Saturation Risk: Swapping 45MB weights per frame takes 45MB * 120 = 5.4 GB/s (Exceeds 3.2 GB/s).
+    - Input payload: 4 * (1920 * 1080 * 3 bytes) * 30 fps = 746,496,000 bytes/s = ~746 MB/s for all four streams.
+    - Compact detection outputs are small by comparison; even 1 MB/frame would add 120 MB/s at 120 fps.
+    - Bad design check: reloading 45 MB weights for every frame would be 45 MB * 120 fps = 5.4 GB/s, exceeding the ~3.2 GB/s PCIe budget before frame input is counted.
+    - Steady-state visible PCIe traffic is at least ~746 MB/s input plus compact outputs and scheduled tile traffic.
+    - Remaining headroom after raw inputs is ~3.2 GB/s - 0.746 GB/s = ~2.45 GB/s, so the compiler must avoid per-frame full-model reloads or large activation spills.
 
     **Conclusion & Interpretation:**
-    - **Result: PCIe requires pinning the 45MB weights in SRAM (PCIe Bandwidth-Bound)**.
+    - **Result: compiler-tiled streaming can be PCIe-safe only with bounded outputs and no full-model reload per frame.** PCIe becomes infeasible if weights or large intermediates are reloaded naively; the design depends on compiler-managed tiling through on-chip buffers and steady streaming from host memory.
 status: published
 provenance: imported
 requires_explanation: true

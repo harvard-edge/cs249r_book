@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: inference
 title: Per-Channel INT8 Latency on Exynos 2400
 scenario: You are deploying an INT8 quantized transformer model on an NPU. When switching from per-tensor to per-channel quantization to recover a 3% accuracy drop, you observe a 20% increase in inference latency, despite the dual-core NPU being rated for a massive 34.7 TOPS.
-question: Why changing the quantization granularity causes this latency regression on this specific hardware architecture?
+question: Why does changing quantization granularity cause this latency regression on this NPU?
 details:
-  realistic_solution: Per-channel quantization requires loading a unique scale and zero-point for every output channel during the matrix multiplication, which interrupts continuous burst-reads of weights and stalls the NPU.
+  realistic_solution: The latency regression is usually a kernel and data-movement issue, not extra MAC work. Per-channel quantization keeps the same INT8 matrix multiply, but it adds scale handling per output channel and may prevent the NPU from using its fastest fused per-tensor INT8 kernels. If the backend must run a less vectorized kernel or insert separate requantization/dequantization steps, it adds scale reads, intermediate writes, and synchronization around each layer. On a shared-memory mobile NPU, that extra traffic and weaker fusion can reduce utilization enough to explain a 20% slowdown even though the headline TOPS rating is unchanged.
   common_mistake: |
     **The Pitfall:** Assuming latency changes are strictly compute-driven.
     **The Rationale:** Candidates incorrectly guess that per-channel quantization increases the number of MAC operations required, failing to realize the core matrix multiplication compute remains identical.
@@ -21,15 +21,17 @@ details:
     - NPU Compute: 34.7 TOPS.
     - Memory Bandwidth: ~50-60 GB/s (LPDDR5X shared).
     - Layer dimension: 4096x4096 linear layer.
+    - Per-channel scales: 4096 FP16 scale values, plus possible unfused requantization traffic.
 
     **Calculations:**
-    - Compute required: 2 * 4096 * 4096 = 33.5 Mega-Operations.
-    - Ideal compute time: 33.5M / 34.7 TOPS = ~0.96 $\mu$s.
-    - INT8 weights size: 16.7 MB.
-    - Required bandwidth for ideal execution: 16.7 MB / 0.96 $\mu$s = ~17.4 TB/s.
+    - INT8 weight matrix size: 4096 x 4096 x 1 byte = 16.8 MB.
+    - Core MAC count is unchanged when switching from per-tensor to per-channel quantization.
+    - Scale metadata alone is small: 4096 x 2 bytes = 8 KB, so metadata size is not the main cost.
+    - The practical cost comes from less efficient kernels or unfused requantization. If that adds one extra read/write pass over a 4096x4096 INT8-sized activation/weight tile, it can add up to ~16.8 MB of traffic per layer.
+    - At 50 GB/s effective bandwidth, 16.8 MB / 50 GB/s = ~0.34 ms of added memory traffic before scheduling and synchronization overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Burst Interruption**. The system is severely memory-bound. Adding per-channel parameters (4096 unique fetches) breaks the contiguous 16.7 MB burst read, further bottlenecking memory access and increasing latency by 20%.
+    - **Result: Kernel-fusion and memory-traffic overhead**. Per-channel quantization can be more accurate, but on this NPU it may fall off the fastest fused INT8 path and add scale handling plus intermediate memory traffic, explaining the observed 20% latency regression.
 status: published
 provenance: imported
 requires_explanation: false

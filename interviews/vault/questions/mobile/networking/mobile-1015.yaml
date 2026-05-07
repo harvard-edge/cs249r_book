@@ -7,11 +7,14 @@ topic: network-bandwidth-bottlenecks
 competency_area: networking
 bloom_level: evaluate
 phase: inference
-title: 'Network Bandwidth Bottlenecks: Optimize Mobile Camera Pipeline Memory Bandwidth'
+title: Mobile Camera Pipeline Memory Bandwidth Optimization on A17 Pro
 scenario: A mobile camera app on A17 Pro (68 GB/s) runs YOLOv8-n (3.2M INT8, 4.2 GOPs) + portrait segmentation (MobileNetV3-S, 2.5M INT8, 2.4 GOPs) in the live viewfinder at 30fps. Measured total memory bandwidth is 15GB/s. Target is to reduce to < 8GB/s while maintaining 30fps.
 question: What memory bandwidth components explain the 15GB/s camera pipeline load, and which optimizations reduce it below 8GB/s?
 details:
-  realistic_solution: 'BW breakdown: Camera ISP (1080p 30fps YUV420): 1080x1920x1.5x30=93MB/s=0.09GB/s. YOLO-n inference (3.2MB INT8, 30fps): 3.2MBx30=96MB/s=0.096GB/s. Segmentation: 2.5MBx30=75MB/s=0.075GB/s. Total model BW: 0.27GB/s. Measured 15GB/s >> 0.27GB/s. Root cause: activation tensors. YOLO at 640x640x3: intermediate features at 640x640x64=25MB per layer. Reducing input resolution from 640->320: 1/4 activation memory. 4x reduction in activation BW: 15GB/sx0.75=11.25GB/s saving. New: 3.75GB/s + models: 4.02GB/s < 8GB/s.'
+  realistic_solution: |
+    The model weights and camera frame are too small to explain 15GB/s by themselves. Treat the 3.2M INT8 and 2.5M INT8 model sizes as parameter footprints, about 3.2MB and 2.5MB. Even a pessimistic estimate that rereads each full footprint once per frame adds only 3.2MB×30 = 0.096GB/s and 2.5MB×30 = 0.075GB/s. Camera ISP traffic for 1080p YUV420 at 30fps is 1920×1080×1.5×30 = 93MB/s = 0.09GB/s, so direct frame plus pessimistic weight traffic is only about 0.26GB/s. The measured 15GB/s must therefore be dominated by activation tensors, intermediate feature maps, texture conversions, and avoidable copies between camera, GPU, and NPU buffers.
+
+    Use the 15GB/s measurement to build an illustrative decomposition: about 5.0GB/s activation traffic, about 9.7GB/s copy/format-conversion overhead inferred as the residual, and 0.26GB/s direct frame/weight traffic. Reducing the model input from 640 to 320 cuts 2D activation traffic by 4x, from 5.0GB/s to 1.25GB/s. Zero-copy camera/NPU buffers and fused preprocessing remove the inferred 9.7GB/s copy overhead. The optimized total is 0.09 + 0.17 + 1.25 = 1.51GB/s, well below the 8GB/s target while preserving 30fps.
   common_mistake: |
     **The Pitfall:** Trying to quantize the models further.
     **The Rationale:** Candidates ignore that the models are already INT8 and fail to check if camera buffer copies and large activation tensors are the actual bandwidth hogs.
@@ -19,20 +22,24 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - ISP Bandwidth (1080p 30fps YUV420): 1920 * 1080 * 1.5 bytes * 30 = 0.09 GB/s.
-    - Model Weights (INT8 30fps): (3.2MB + 2.5MB) * 30 = 0.17 GB/s.
-    - Total Accounted Memory Bandwidth: ~5.26 GB/s.
+    - Model parameter footprints: 3.2M INT8 ≈ 3.2MB and 2.5M INT8 ≈ 2.5MB.
+    - Pessimistic per-frame weight traffic: (3.2MB + 2.5MB) * 30 = 171MB/s = 0.171 GB/s.
+    - Activation traffic estimate: 5.0 GB/s.
+    - Copy/format-conversion overhead is inferred as the residual from the 15GB/s measurement, not directly derived from model size.
     - Measured Memory Bandwidth: 15 GB/s.
 
     **Calculations:**
     - Activation Writes (YOLO @ 640x640): ~100MB per forward pass * 30fps = ~3.0 GB/s.
     - Activation Writes (Seg @ 640x640): ~2.0 GB/s.
-    - Missing Bandwidth (15 - 5.26): ~9.7 GB/s.
+    - Direct traffic: 0.09 + 0.17 = 0.26 GB/s.
+    - Accounted traffic before copies: 0.26 + 5.0 = 5.26 GB/s.
+    - Copy/format-conversion overhead: 15 - 5.26 = 9.74 GB/s.
     - Optimization 1 (Resolution): Reduce input from 640 to 320. Activations drop by 4x. (5.0 GB/s -> 1.25 GB/s).
-    - Optimization 2 (Zero-copy): Eliminate 9.7 GB/s overhead via unified memory pointers.
+    - Optimization 2 (Zero-copy): Eliminate 9.74 GB/s overhead via shared camera/NPU buffers and fused preprocessing.
     - Optimized Total: 0.09 (ISP) + 0.17 (Weights) + 1.25 (Activations) = ~1.51 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: ~1.51 GB/s total bandwidth (Memory-Bandwidth Bound)**. By reducing activation tensor sizes and eliminating zero-copy overhead, the pipeline easily operates under the 8GB/s target.
+    - **Result: ~1.51 GB/s total bandwidth (Memory-Bandwidth Bound)**. By reducing activation tensor sizes and eliminating copy/format-conversion overhead, the pipeline easily operates under the 8GB/s target.
 status: published
 provenance: imported
 requires_explanation: false

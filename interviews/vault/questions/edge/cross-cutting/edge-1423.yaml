@@ -7,31 +7,32 @@ topic: fairness-evaluation
 competency_area: cross-cutting
 bloom_level: analyze
 phase: both
-title: Analyzing INT8 Quantization Disparities on Cloud AI 100
+title: INT8 Mixed-Precision Fairness Tradeoff on Edge Accelerators
 scenario: You are deploying a vision model for an on-premise access control system targeting an edge accelerator. To maximize throughput, the system compiles the model using purely INT8 quantization. During deployment, the overall Equalized Odds metric remains stable, but the false rejection rate for a specific minority demographic spikes by 18% compared to the FP32 baseline.
 question: Why does pure INT8 raise one subgroup's false rejection rate, and what throughput cost comes from keeping the final 20% of compute in FP16?
 details:
-  realistic_solution: 'The accuracy drop occurs because INT8 quantization maps the continuous activation ranges into just 256 discrete bins. Features critical for distinguishing minority subgroups often represent a smaller portion of the overall calibration dataset, causing their activations to fall into the long tails of the distribution. These rare tail features are clipped or collapsed during INT8 quantization, destroying discriminative power. A mitigation strategy uses mixed-precision inference, keeping sensitive layers at FP16 at the cost of throughput.'
+  realistic_solution: The accuracy drop occurs because INT8 quantization maps continuous activation ranges into 256 discrete bins. Features critical for distinguishing the affected subgroup may be underrepresented in calibration data, so their activations sit in tails that are clipped or collapsed by INT8 scales even when aggregate Equalized Odds looks stable. A mitigation is to keep the sensitive final 20% of compute in FP16 and run the remaining 80% in INT8. Under the simplified compute-only rates here, latency rises from about 0.5 ms to 0.6 ms, reducing throughput from about 2000 FPS to 1667 FPS, an approximate 16.7% drop before memory or scheduling overhead.
   common_mistake: |
-    **The Pitfall:** Assuming the underlying training dataset is the sole cause of the bias, ignoring hardware deployment constraints.
-    **The Rationale:** Treating fairness as exclusively a data or algorithmic problem rather than a systems-level issue exacerbated by precision reduction.
-    **The Consequence:** Attempting to solve the problem by endlessly retraining the model with balanced data, rather than addressing the fact that fixed-point math fundamentally collapses the decision boundaries for underrepresented features.
+    **The Pitfall:** Assuming pure INT8 preserves subgroup behavior because the overall validation metric stayed stable.
+    **The Rationale:** Calibration sets often underrepresent minority-feature tails, so INT8 scale selection can clip or collapse activations that matter for one subgroup even when aggregate accuracy looks unchanged.
+    **The Consequence:** The team tries only more retraining or broader aggregate calibration, instead of checking subgroup activation ranges and selectively keeping sensitive layers in FP16 despite the throughput cost.
   napkin_math: |
     **Assumptions & Constraints:**
     - Model compute: 200 GOPs.
-    - INT8 throughput: 400 TOPS.
-    - FP16 throughput: 200 TFLOPS (half of INT8).
+    - INT8 effective operation rate: 400 TOPS for INT8-counted ops.
+    - FP16 effective operation rate: 200 TFLOPS for FP16-counted ops.
     - FP16 protection: 20% of compute (40 GOPs).
+    - This is a first-order compute-only estimate; memory movement, graph partitioning, and scheduling overhead are excluded.
 
     **Calculations:**
     - Pure INT8 latency: 200 GOPs / 400 TOPS = 0.5 ms (2,000 FPS).
     - Mixed-precision INT8 portion: 160 GOPs / 400 TOPS = 0.4 ms.
     - Mixed-precision FP16 portion: 40 GOPs / 200 TFLOPS = 0.2 ms.
     - Total mixed latency: 0.4 ms + 0.2 ms = 0.6 ms (1,666 FPS).
-    - Throughput drop: (2,000 - 1,666) / 2,000 = 16.7%.
+    - Approximate throughput drop: (2,000 - 1,666) / 2,000 = 16.7%.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound Tradeoff**. Fixing the fairness degradation via mixed precision costs exactly 16.7% of total throughput, highlighting the direct tension between algorithmic fairness and hardware efficiency.
+    - **Result: Compute-Bound Tradeoff**. Mixed precision protects subgroup-sensitive layers but costs about 16.7% throughput in this simplified compute-only estimate; real systems may lose more once memory and scheduling overhead are included.
 status: published
 provenance: imported
 requires_explanation: false

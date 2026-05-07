@@ -11,25 +11,26 @@ title: KV-Cache Growth in RAG Pipelines
 scenario: 'Your RAG system retrieves 10 document chunks (each 512 tokens) and prepends them to the user query (256 tokens) before sending to Llama 3 70B. Total prompt: 5376 tokens. Users send follow-up questions that add another retrieval round. By turn 3, the context is 16,128 tokens.'
 question: How does the RAG context growth to 16,128 tokens scale KV-cache memory, and what does that imply for serving cost?
 details:
-  realistic_solution: 'KV-cache growth per turn: Turn 1: 5,376 tokens × 320 KB = 1.72 GB. Turn 2: 10,752 tokens × 320 KB = 3.44 GB. Turn 3: 16,128 tokens × 320 KB = 5.16 GB. At turn 3, each conversation consumes 5.16 GB — a single GPU supports only ~1-2 concurrent conversations. Optimizations: (1) Prefix caching: if multiple users query the same documents, cache those documents'' KV entries (shared across users). If 70% of retrieved chunks are from a popular corpus, save 70% × 5120 tokens = 3584 tokens of redundant KV computation.'
+  realistic_solution: 'For Llama 3 70B with 80 layers, 8 KV heads, head_dim=128, and FP16/BF16 KV, the cache is 2 × 8 × 128 × 2B × 80 = 327,680 bytes, or 320 KiB per token across all layers. KV-cache grows linearly with accumulated RAG context: turn 1 is 5,376 tokens × 320 KiB ≈ 1.64 GiB, turn 2 is ≈ 3.28 GiB, and turn 3 is 16,128 tokens × 320 KiB ≈ 4.92 GiB. With only about 10 GiB available for KV, this supports roughly 2 turn-3 conversations before overhead, so serving cost is dominated by HBM capacity unless contexts are shortened, evicted, quantized, or shared. Prefix caching helps when retrieved documents repeat: each shared 512-token chunk saves 512 × 320 KiB = 160 MiB of duplicate KV per additional request; if 70% of one 5120-token retrieval round is shared, the saved duplicate KV is 3584 tokens ≈ 1.09 GiB for that round.'
   common_mistake: |
     **The Pitfall:** Treating RAG retrieval context identically to unique user-generated text.
     **The Rationale:** Candidates assume all context requires unique KV-cache allocations, ignoring that retrieved documents are often shared across many users.
-    **The Consequence:** Grossly overestimating HBM requirements and missing the opportunity to use prefix caching to slash costs by 3x.
+    **The Consequence:** Grossly overestimating duplicate HBM requirements and missing the opportunity to use prefix caching to reduce marginal cost when retrieved documents repeat.
   napkin_math: |
     **Assumptions & Constraints:**
     - Turn 1: 5,376 tokens.
     - Turn 3: 16,128 tokens.
-    - KV Cache size: 320 KB per token.
-    - Available HBM per GPU: ~10 GB.
+    - KV Cache size: 320 KiB per token across all layers.
+    - Available HBM per GPU for KV: ~10 GiB.
 
     **Calculations:**
-    - Turn 3 KV size: 16,128 * 320 KB = 5.16 GB per user.
-    - Concurrent users per GPU: 10 GB / 5.16 GB = ~1-2 users.
-    - With 70% shared prefix caching: 1.72 GB - (0.7 * 1.64 GB) = 0.57 GB marginal growth.
+    - Turn 1 KV size: 5,376 * 320 KiB = 1.64 GiB per user.
+    - Turn 3 KV size: 16,128 * 320 KiB = 4.92 GiB per user.
+    - Concurrent users per GPU before overhead: 10 GiB / 4.92 GiB ≈ 2 users.
+    - Shared retrieval savings for one round: 70% * 5120 tokens = 3584 tokens; 3584 * 320 KiB = 1.09 GiB saved per additional request sharing those chunks.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.57 GB Marginal Growth (Memory-Capacity-Bound)**. Without prefix caching, a single GPU supports only 1-2 concurrent users at Turn 3. Prefix caching reduces the marginal KV footprint by nearly 3x, rescuing the unit economics.
+    - **Result: About 4.92 GiB per turn-3 conversation before sharing.** Prefix caching reduces duplicate KV for repeated retrieved chunks, but the cost reduction depends on actual overlap and should be computed from saved tokens.
 status: published
 provenance: imported
 requires_explanation: false

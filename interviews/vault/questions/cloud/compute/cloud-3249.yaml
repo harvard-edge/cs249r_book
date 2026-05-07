@@ -8,27 +8,35 @@ competency_area: compute
 bloom_level: analyze
 phase: both
 title: 'Real-time LLM Inference: Accelerator Selection for Performance and Cost'
-scenario: 'Your team is tasked with deploying a new, large transformer-based language model for real-time inference, which requires high throughput and low latency. The model has a significant memory footprint and benefits from mixed-precision (BF16) computation. Specifically, you need to assess the suitability of a Google TPU v5e instance compared to a cluster of high-end GPUs or a fleet of general-purpose CPUs to meet a target inference latency of 100ms per query and handle 10,000 QPS at peak load.'
-question: 'What serving architecture and accelerator choice would meet 100 ms latency and 10,000 QPS for the BF16 transformer on Google Cloud?'
+scenario: Your team is tasked with deploying a 20B-parameter transformer for real-time BF16 inference on Google Cloud. Assume an average request has 512 prompt tokens and 64 generated tokens. You need to assess TPU v5e slices versus high-end GPUs or CPUs to meet 100 ms latency and 10,000 QPS at peak load.
+question: What serving architecture and accelerator choice would meet 100 ms latency and 10,000 QPS for the BF16 transformer on Google Cloud?
 details:
-  realistic_solution: 'A realistic solution would involve a phased approach. Initially, the candidate would estimate the computational (BF16 operations) and memory (model parameters, activations) requirements per inference. They would then evaluate the Google TPU v5e''s 197 TFLOPS BF16 and 1.6 TB/s HBM bandwidth against these requirements, considering optimal batching strategies to maximize utilization while staying within the 100ms latency budget. They should compare this to a GPU-based solution, highlighting the TPU''s BF16 efficiency for specific tensor operations and potential cost advantages for continuous, high-volume inference. The system architecture should include a load balancer, queues for asynchronous inference, and a strategy for dynamic scaling based on QPS, potentially using a combination of accelerators or optimized model serving frameworks (e.g., Triton Inference Server).'
+  realistic_solution: |
+    Use replicated model-parallel serving groups rather than a single accelerator. For this SLA, high-end GPU replicas are the likely primary choice: a 20B BF16 model is about 40 GB, so an H100-class 80 GB GPU can hold the weights with room for KV cache, while 2-way tensor parallel replicas may still be useful for latency and bandwidth headroom. TPU v5e is plausible for cost-optimized BF16 serving only if the team accepts many more chips and is already invested in the TPU serving stack; each v5e chip has 16 GB HBM, so each replica needs at least 4 chips once KV cache and overhead are included. Put a regional load balancer in front of admission-control queues, route requests to many identical GPU serving replicas, and use bucketed batching with separate prefill and decode scheduling so batching does not violate the 100 ms target. CPUs should be reserved for control-plane or fallback paths, not the primary 10,000 QPS low-latency path.
   common_mistake: |
     **The Pitfall:** Overemphasizing peak FLOPS without adequately considering memory bandwidth and its impact on model loading and intermediate activations.
     **The Rationale:** Candidates often fixate on raw compute metrics rather than the memory wall that typically bottlenecks LLM inference.
     **The Consequence:** Recommending an accelerator that theoretically has enough FLOPS but will stall waiting for memory accesses, failing to meet the latency SLA.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Required Throughput: 10,000 QPS.
-    - Per-query Latency SLA: 100ms.
-    - TPU v5e HBM bandwidth: 1.6 TB/s.
+    - Required throughput: 10,000 QPS; latency SLA: 100 ms.
+    - Model: 20B BF16 parameters = 40 GB weights.
+    - Request shape: 512-token prefill and 64-token decode.
+    - TPU v5e chip: 16 GB HBM, 197 TFLOPS BF16 peak, and 819 GB/s HBM bandwidth.
+    - H100-class GPU planning point: 80 GB HBM and roughly 989 TFLOPS BF16 peak.
+    - Planning efficiency: 35% sustained BF16 throughput after sharding, batching, and overhead.
 
     **Calculations:**
-    - If a single TPU v5e achieves 500 QPS at 100ms latency: 10,000 QPS / 500 QPS/TPU = 20 TPU v5e units needed.
-    - Assuming total data moved is 10 GB per inference and latency is 100ms, the required bandwidth is 10 GB / 0.1s = 100 GB/s.
-    - 100 GB/s < 1.6 TB/s.
+    - Memory capacity: TPU v5e needs ceil(40 GB / 16 GB) = 3 devices minimum, so use at least 4 v5e devices per serving replica for KV cache and overhead. H100-class GPUs can use 2- to 4-way TP replicas mainly for latency, bandwidth, and headroom rather than bare weight capacity.
+    - Dense-transformer compute lower bound: about 2 * params per processed token. For 512 prompt + 64 generated tokens, that is 2 * 20B * 576 = 23.0 TFLOPs/request before attention overhead, collectives, sampling, and padding.
+    - Fleet lower-bound sustained compute: 23.0 TFLOPs/request * 10,000 QPS = 230 PFLOPs/s.
+    - TPU v5e sustained planning point: 197 * 0.35 = ~69 TFLOPs/s per chip, so the rough throughput floor is 230,000 / 69 = ~3,334 chips before redundancy and latency headroom.
+    - H100-class sustained planning point: 989 * 0.35 = ~346 TFLOPs/s per GPU, so the rough throughput floor is 230,000 / 346 = ~665 GPUs before redundancy and latency headroom.
+    - Latency concurrency from Little's Law: 10,000 QPS * 0.1 s = 1,000 in-flight requests; with 4-device replicas, enough replicas are needed to keep per-replica batches small enough for the P99 target.
+    - Decode HBM traffic for resident weights is roughly a 40 GB model pass per generated token, split across the replica's devices. Memory bandwidth, KV-cache reads, and collectives must be profiled separately from the throughput FLOP floor.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute/Scale Bound** (This is well within the 1.6 TB/s HBM bandwidth of the TPU v5e, suggesting memory bandwidth won't be the primary bottleneck).
+    - **Result: choose replicated high-end GPU serving groups for the 100 ms SLA, with TPU v5e as a larger cost-optimized alternative if the TPU stack is already in place.** The serving architecture should be sized separately from model capacity, sustained prefill/decode compute, KV-cache bandwidth, and the 1,000-request concurrency implied by the SLA.
 status: published
 provenance: imported
 requires_explanation: true

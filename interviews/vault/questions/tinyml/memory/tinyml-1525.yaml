@@ -7,29 +7,29 @@ topic: tensor-arena-planning
 competency_area: memory
 bloom_level: create
 phase: inference
-title: 'Arena Fragmentation in Dynamic TinyML Workloads'
-scenario: 'Your MCU application on Cortex-M7 (512 KB SRAM) previously switched between 3 TFLite Micro models using a max-sized 300 KB fixed arena. A new requirement adds a fourth model requiring a 350 KB arena, but you can only dedicate 310 KB to the tensor arena.'
-question: 'How would you design an arena management strategy that supports all 4 models without exceeding the strict 310 KB SRAM limit?'
+title: TFLite Micro Arena Budgeting Under a 310 KB SRAM Limit
+scenario: Your MCU application on Cortex-M7 (512 KB SRAM) previously switched between 3 TFLite Micro models using a max-sized 300 KB fixed arena. A new requirement adds a fourth model requiring a 350 KB arena, but you can only dedicate 310 KB to the tensor arena.
+question: Can all 4 models fit under a fixed 310 KB tensor arena, and what changes are required if not?
 details:
-  realistic_solution: 'The 350 KB model doesn''t fit in 310 KB — so you must reduce its arena size or restructure memory. Options: (1) Model-specific optimizations: analyze the 350 KB model''s memory plan. Often, 10-15% of arena is padding/alignment waste. Re-running the TFLite Micro memory planner with tighter alignment (4-byte vs 16-byte) might reduce to 310 KB. (2) Overlay strategy: partition the 310 KB arena into a fixed region (used by all models, ~180 KB) and a swappable region (130 KB). For the 350 KB model: use the fixed 180 KB + swappable 130 KB = 310 KB. Spill the remaining 40 KB of tensors to flash (sequential write/read for skip connections). (3) Model surgery: the 350 KB model likely has one bottleneck layer. Apply channel splitting (as in tensor-arena-planning) to reduce the peak layer''s activation size by splitting into 2 passes. Target: reduce peak from 350 to 310 KB. (4) Two-tier arena: 310 KB in SRAM + use the flash-backed memory for cold tensors. All approaches maintain static allocation — no malloc at runtime.'
+  realistic_solution: 'A pure arena-management trick cannot make a 350 KB peak fit into a strict 310 KB tensor-arena budget. The right design is: (1) keep one static arena profile per model and reuse a shared overlay only for tensors that are not live at the same time; (2) move non-live weights or cold constants out of SRAM if the runtime supports flash/const storage; and (3) reduce the 350 KB model''s peak by changing the model itself, such as pruning, operator fusion, lowering input resolution, or splitting one large activation into smaller staged passes. If the peak activation really needs 350 KB live at once, that model is infeasible under 310 KB until the model is redesigned. In other words, the answer is not a clever allocator but a smaller live set and a static per-model memory plan. Static allocation still matters: do not use malloc/free for the arena.'
   common_mistake: |
     **The Pitfall:** Implementing dynamic memory allocation (`malloc`/`free`) for each model's arena.
     **The Rationale:** Candidates think allocating and freeing memory perfectly matches the memory footprint of the currently active model.
     **The Consequence:** Dynamic allocation causes heap fragmentation over time, leading to non-deterministic allocation times and inevitable hard faults in long-running embedded systems.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Current Max Arena: 300 KB.
-    - New Max Arena requirement: 350 KB.
+    - Existing 3 models fit in the previous max-sized 300 KB arena.
+    - New fourth model requires a 350 KB arena.
     - Strict SRAM limit: 310 KB.
 
     **Calculations:**
-    - Memory Exceedance: 350 KB exceeds 310 KB by 40 KB.
-    - Channel Splitting: Splitting an 80 KB peak activation layer 2-way saves 40 KB. New arena size = 310 KB.
-    - Flash Spill: Spill 40 KB of cold tensors to Flash.
-    - Write penalty: 40 KB at 1 MB/s = 40 ms. Read at 50 MB/s = 0.8 ms. Total = ~41 ms per inference.
+    - Existing models: 300 KB <= 310 KB, so the original 3 models remain feasible under the new fixed arena.
+    - Fourth model exceedance: 350 KB - 310 KB = 40 KB.
+    - Therefore all 4 models cannot fit unless the fourth model removes at least 40 KB from its peak live tensor set.
+    - Flash spill can help only for cold tensors or weights; it does not solve a live 350 KB activation peak inside the tensor arena.
 
     **Conclusion & Interpretation:**
-    - **Result: 310 KB peak (Memory-Bound)**. Combining channel splitting or Flash spilling reliably avoids dynamic memory fragmentation and fits the strict limit.
+    - **Result: the original 3 models fit, but the unmodified 350 KB fourth model does not.** To support all 4 models under 310 KB, redesign or partition the largest model and keep a static per-model memory plan, not runtime allocation.
 status: published
 provenance: imported
 requires_explanation: false

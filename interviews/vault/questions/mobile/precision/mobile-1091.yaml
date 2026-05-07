@@ -7,12 +7,12 @@ topic: extreme-quantization
 competency_area: precision
 bloom_level: apply
 phase: inference
-title: 'Analyzing 3-bit AWQ Overhead on Tensor G3'
-scenario: 'You are deploying a 7-billion parameter LLM on a mobile TPU capable of 7.5 TOPS. To fit within a strict 3 GB memory allocation, you apply 3-bit AWQ. Profiling reveals that while memory is reduced, generation is severely compute-bound and misses latency targets.'
-question: 'Why does 3-bit AWQ quantization cause a severe compute bottleneck on the mobile TPU architecture?'
+title: Analyzing 3-bit AWQ Overhead on Mobile TPUs
+scenario: You are deploying a 7-billion parameter LLM on a mobile TPU capable of 7.5 TOPS. To fit within a strict 3 GB memory allocation, you apply 3-bit AWQ. Profiling reveals that while memory is reduced, generation is severely compute-bound and misses latency targets.
+question: Why does 3-bit AWQ quantization cause a severe compute bottleneck on the mobile TPU architecture?
 details:
   realistic_solution: |
-    The mobile TPU is heavily optimized for native 8-bit or 16-bit precision and lacks dedicated silicon ALUs for custom 3-bit matrix multiplications. Consequently, the 3-bit weights must be explicitly unpacked, bitmasked, and cast to INT8 in software on-the-fly, consuming massive compute cycles.
+    The mobile TPU is heavily optimized for native 8-bit or 16-bit precision, while 3-bit weights usually require packing formats that do not map cleanly to the accelerator's fast matrix kernels. Before the multiply, the runtime often has to unpack groups of 3-bit values, apply scales/zero-points, and materialize or emulate a supported representation such as INT8. That conversion work adds scalar or custom-kernel overhead, irregular memory access, and poor utilization. The result can be compute-bound unpacking and dequantization even though the packed model fits in memory.
   common_mistake: |
     **The Pitfall:** Assuming aggressive sub-4-bit quantization linearly lowers inference latency by scaling down memory bandwidth.
     **The Rationale:** Candidates accurately calculate bandwidth savings but entirely neglect the lack of native hardware support for custom bit-widths.
@@ -20,18 +20,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 7B parameters.
-    - 3-bit = 2.625 GB.
-    - TPU Peak = 7.5 TOPS.
-    - Ideal compute = 14 GOPS/token.
+    - 3-bit packed footprint: 7B x 3 bits = 21 Gbits = 2.625 GB.
+    - The TPU has native fast paths for INT8/FP16, not arbitrary 3-bit matrix multiply.
+    - 3-bit values must be unpacked and scaled before or during the native compute kernel.
 
     **Calculations:**
-    - Ideal compute time = 14 / 7500 = 1.86 ms/token.
-    - Unpacking penalty = 3 extra ALU ops per weight (mask, shift, cast).
-    - Total compute load = 5 * 7B = 35 GOPS.
-    - Actual time = 35 / 7500 = 4.66 ms.
+    - Storage savings versus INT8: 7 GB - 2.625 GB = 4.375 GB.
+    - Packing density is not equal to accelerator throughput: every group of packed weights needs bit extraction, sign/zero-point handling, and scaling.
+    - If that unpack/dequantize path is not fused into a native high-throughput kernel, the added instructions and temporary data movement can dominate the saved DRAM traffic.
+    - Therefore the bottleneck is the unsupported-bit-width emulation path, not the nominal packed model size.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound**. The software unpacking overhead multiplies the computational load, causing a 2.5x latency regression.
+    - **Result: Inefficient Emulation/Unpacking Bottleneck**. The 3-bit format saves storage, but latency can regress when the TPU must emulate it through unpacking and dequantization before native INT8/FP16 execution.
 status: published
 provenance: imported
 requires_explanation: false

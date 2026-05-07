@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: inference
 title: Prefill-Decode Affinity and Context Caching
 scenario: Your service adds prompt caching where if a request shares a prefix with a recently processed request, the KV-cache for that prefix is reused.
-question: "Where should prefix KV-caches live in a disaggregated architecture, how should they be invalidated, and what TTFT savings come from a 60% hit rate?"
+question: Where should prefix KV-caches live in a disaggregated architecture, how should they be invalidated, and what TTFT savings come from a 60% hit rate?
 details:
-  realistic_solution: Store prefix KV-caches on decode nodes. On a cache hit, the request skips prefill entirely, and decode starts immediately without any KV transfer. Use consistent hashing on the prefix to route requests to the correct decode node. Invalidate via LRU eviction when KV pool utilization exceeds an 85% watermark.
+  realistic_solution: Store reusable prefix KV-caches on the decode nodes that will consume them, or route matching requests to the decode shard that owns the prefix. On a local cache hit, the request skips prefix prefill and avoids a remote KV transfer; on a remote hit, either route to the owner or account for the transfer cost. Invalidate by model/version/tokenizer/cache-configuration key, tenant isolation policy, TTL, and LRU eviction when KV pool utilization exceeds an 85% watermark.
   common_mistake: |
     **The Pitfall:** Storing prefix caches on prefill nodes.
     **The Rationale:** Candidates intuitively associate "prompt caching" with the "prefill phase" since prefill creates the cache.
@@ -21,17 +21,18 @@ details:
     - Prefix length: 2048 tokens.
     - Model: 96 layers, 8 KV heads, 128 dim, FP16 (2 bytes).
     - Network: 50 GB/s InfiniBand.
-    - Baseline Prefill: 10.2 ms.
+    - Baseline prefill compute: 10.2 ms.
 
     **Calculations:**
-    - KV cache payload: 2 * 8 * 128 * 2048 * 96 * 2 bytes = 805 MB (768 MiB).
-    - Transfer latency over network: 805 MB / 50,000 MB/s = 16.1 ms.
-    - Hit penalty if stored on prefill node: 16.1 ms (transfer) > 10.2 ms (compute).
-    - Hit savings if stored on decode node: 10.2 ms + 15.4 ms = ~25.6 ms total.
-    - At 60% hit rate: 0.6 * 25.6 ms = 15.36 ms average savings.
+    - KV cache payload: 2 * 8 * 128 * 2048 * 96 * 2 bytes = 1,006,632,960 bytes = 1006.6 MB = 960 MiB.
+    - Transfer latency over network: 1006.6 MB / 50,000 MB/s = 20.1 ms.
+    - Miss path in a disaggregated system: prefill compute + KV transfer = 10.2 + 20.1 = 30.3 ms for this prefix.
+    - Remote cache hit on a prefill node still pays 20.1 ms transfer, saving only 10.2 ms of compute.
+    - Local decode-node cache hit avoids both prefix prefill and remote transfer, saving 30.3 ms.
+    - At 60% local hit rate: 0.6 * 30.3 ms = 18.2 ms average TTFT savings.
 
     **Conclusion & Interpretation:**
-    - **Result: 15.36 ms avg savings (Network-Bound)**. Moving the 768 MiB KV cache takes longer than recomputing it, so caches must reside natively on the decode nodes.
+    - **Result: 18.2 ms avg savings (Network-Bound)**. Prefix caches are most useful when decode can consume the cached KV locally; otherwise the 960 MiB transfer erodes much of the TTFT benefit.
 status: published
 provenance: imported
 requires_explanation: true

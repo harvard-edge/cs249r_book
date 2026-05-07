@@ -8,23 +8,28 @@ competency_area: optimization
 bloom_level: analyze
 phase: inference
 title: PagedAttention Block Size Tradeoff
-scenario: 'After switching from block_size=16 to block_size=1 in vLLM''s PagedAttention on A100, you observe memory utilization improves from 92% to 99%, but decode latency increases by 35%.'
-question: "Why did switching PagedAttention from block_size=16 to block_size=1 improve memory utilization but increase decode latency by 35%?"
+scenario: After switching from block_size=16 to block_size=1 in vLLM's PagedAttention on A100, you observe memory utilization improves from 92% to 99%, but decode latency increases by 35%.
+question: Why did switching PagedAttention from block_size=16 to block_size=1 improve memory utilization but increase decode latency by 35%?
 details:
-  realistic_solution: 'With block_size=1, each token''s KV is a separate allocation. During attention, the GPU must gather K/V values from random memory locations, creating non-coalesced memory accesses and destroying L2 cache locality. Optimal block sizes balance fragmentation against access locality.'
+  realistic_solution: With block_size=1, each token's KV is a separate allocation. During attention, the GPU must gather K/V values from random memory locations, creating non-coalesced memory accesses and destroying L2 cache locality. Optimal block sizes balance fragmentation against access locality.
   common_mistake: |
     **The Pitfall:** Blaming the CPU overhead of looking up entries in the block table.
     **The Rationale:** Candidates don't understand how GPU memory coalescing and L2 cache locality work for small block sizes.
     **The Consequence:** Attempting to optimize data structures rather than tuning the block size to balance fragmentation and memory coalescing.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Block_size=1 vs Block_size=16.
-    2. **Calculations:**
-       - Block_size=1: 4,096 random 800 KB accesses per head. Effective BW ~0.8 TB/s.
-       - Block_size=16: 256 sequential 12.8 MB reads. Effective BW ~1.7 TB/s.
-       - Decode regression: 1.7 / 0.8 = 2.1x slower memory access.
-    3. **Conclusion & Interpretation:**
-       **Result: Memory Bandwidth Bound. The non-coalesced access patterns result in the 35% net latency increase.**
+    **Assumptions & Constraints:**
+    - Decode streams KV pages through the GPU memory system.
+    - block_size=1 minimizes wasted slots but maximizes page-table entries and scattered gathers.
+    - block_size=16 trades some fragmentation for contiguous 16-token KV runs.
+
+    **Calculations:**
+    - At seq_len=4096, block_size=1 requires 4096 block-table entries per request.
+    - block_size=16 requires 4096/16 = 256 entries and lets each lookup feed a 16-token contiguous KV read.
+    - The observed 35% latency increase means effective end-to-end decode throughput falls by 1/1.35 = 74% of the previous rate.
+    - That smaller regression than a pure random-vs-contiguous bandwidth ratio is plausible because only part of decode latency is the KV gather path.
+
+    **Conclusion & Interpretation:**
+    - **Result: Locality Tradeoff**. block_size=1 improves memory utilization by reducing internal fragmentation, but it hurts coalescing and L2 locality enough to explain the observed 35% net decode latency increase.
 status: published
 provenance: imported
 requires_explanation: false

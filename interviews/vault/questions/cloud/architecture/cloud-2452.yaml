@@ -11,7 +11,8 @@ title: Prefill and Decode Cluster Disaggregation
 scenario: Your high-traffic chatbot service uses Llama-3-70B. Average input is 2000 tokens; average output is 50 tokens. Prefill takes 400ms, which starves continuous batching decode requests, causing TPOT spikes up to 100ms. You propose disaggregating the architecture into dedicated Prefill and Decode GPU nodes connected via a 100 Gbps RoCE network.
 question: Should you disaggregate prefill and decode over 100Gbps RoCE, and what latency tradeoff must you evaluate?
 details:
-  realistic_solution: Disaggregation solves the compute-bound (prefill) vs. memory-bandwidth-bound (decode) interference, completely eliminating decode TPOT spikes. However, the strict architectural tradeoff is the network transfer latency of the KV cache from the prefill node to the decode node. You must calculate if the added Time To First Token (TTFT) overhead is acceptable to the user in exchange for stable, low-variance TPOT.
+  realistic_solution: |
+    Disaggregation can reduce compute-bound prefill versus memory-bandwidth-bound decode interference by keeping long prefill kernels off the decode workers. The decision hinges on the KV-cache transfer from the prefill node to the decode node: for a 2000-token prompt on Llama-3-70B, the cache is roughly 655 MB, or about 52 ms over an ideal 100 Gbps link before overhead and contention. Disaggregate only if that added TTFT is acceptable in exchange for lower decode TPOT variance; otherwise the network handoff can erase the benefit.
   common_mistake: |
     **The Pitfall:** Assuming disaggregation always improves latency without calculating KV cache network IO.
     **The Rationale:** Focusing entirely on compute isolation benefits while neglecting the data movement costs.
@@ -22,11 +23,11 @@ details:
        - Network: 100 Gbps RoCE (12.5 GB/s).
        - Context Length: 2000 tokens.
     2. **Calculations:**
-       - KV Cache per Token: 2 bytes * 80 * 8 * 128 * 2 (K+V) = ~320 KB/token.
-       - Total KV Cache: 2000 * 320 KB = ~655 MB.
-       - Transfer Time: 655 MB / 12.5 GB/s = 52.4 ms.
+       - KV Cache per Token: 2 (K,V) * 80 layers * 8 KV heads * 128 head_dim * 2 bytes = 327,680 bytes ≈ 320 KiB/token.
+       - Total KV Cache: 2000 * 327,680 bytes = 655,360,000 bytes ≈ 655 MB.
+       - Transfer Time: 655 MB / 12.5 GB/s = 52.4 ms before protocol overhead and contention.
     3. **Conclusion & Interpretation:**
-       - **Result: TTFT increases by ~52ms.** Disaggregation prevents 100ms TPOT spikes, but the strict tradeoff is an unavoidable 52ms network transfer latency added directly to TTFT.
+       - **Result: TTFT increases by roughly 52ms for a synchronous full-cache transfer.** Disaggregation can reduce decode TPOT variance, but the tradeoff is added KV-transfer latency and sensitivity to network contention.
 status: published
 provenance: imported
 requires_explanation: true

@@ -12,7 +12,7 @@ scenario: 'Design and quantify the model registry architecture for a production 
 question: How would you design the model registry schema and cross-region replication strategy to deduplicate 13B artifacts and allow <5-minute rollback?
 details:
   realistic_solution: |
-    Registry: central S3 bucket (us-east-1) with model artifacts. Artifact hash-addressed (SHA256 of weights file). Regions pull on deploy → pre-warm regional caches. 14GB model at S3: $0.023/GB = $0.32/month per copy. Cross-region replication: 14GB × 2 replicas × $0.02/GB transfer = $0.56 per deploy. Total: $0.32 + $0.56 = $0.88/deploy vs. $0.96 for 3 copies. Rollback: update 'current' pointer in registry → serving pods reload → <5min with pre-warm. Schema: {model_id, version, sha256, s3_uri, deploy_time, region_status}.
+    Registry: central metadata table with hash-addressed artifacts (SHA256 of weights file) and regional S3 replicas for hot versions. The source artifact is written once, then replicated to EU and APAC before the deploy is marked ready. For one 14GB version, storage is 14GB × 3 regions × $0.023/GB = $0.97/month. Cross-region transfer to create the two remote replicas is 14GB × 2 × $0.02/GB = $0.56 per new version. At 30 deploys/month, transfer is $16.80 and hot replicated storage for 30 versions is $28.98/month. Rollback: update the 'current' pointer in the registry to an already replicated version, then serving pods reload from the local regional bucket in <5 minutes. Schema: {model_id, version, sha256, source_s3_uri, region_s3_uris, deploy_time, region_status}.
   common_mistake: |
     **The Pitfall:** Storing full model checkpoints independently in every deployment region.
     **The Rationale:** DevOps engineers optimize for raw availability, ignoring the fact that redundant multi-region storage and repeated cross-region pulls compound costs exponentially.
@@ -22,12 +22,12 @@ details:
        - 13B model (14GB). S3 Storage: $0.023/GB/month.
        - Egress transfer: $0.02/GB. 3 regions.
     2. **Calculations:**
-       - Multi-region storage: 14GB * 3 * $0.023 = $0.97/month.
-       - Central S3 + Transfer: $0.32/month storage.
-       - Transfer cost per deploy: 14GB * 2 replicas * $0.02 = $0.56.
-       - At 30 deploys/month: $0.56 * 30 = $16.80 in transfer fees.
+       - Storage for one replicated version: 14GB * 3 regions * $0.023 = $0.97/month.
+       - Storage for 30 hot versions: 14GB * 30 versions * 3 regions * $0.023 = $28.98/month.
+       - Transfer to create EU/APAC replicas per new version: 14GB * 2 replicas * $0.02 = $0.56.
+       - Transfer at 30 deploys/month: $0.56 * 30 = $16.80/month.
     3. **Conclusion & Interpretation:**
-       - **Result: Cost-Bound**. Transfer fees dominate storage costs; maintaining regional S3 replicas (avoiding per-deploy cross-region transfer) is the optimal financial architecture.
+       - **Result: Cost-Bound**. Use content-addressed artifacts plus regional replicas for hot versions. The monthly TCO for 30 new versions is about $45.78, and rollback is fast because each region reads a local pre-replicated artifact.
 status: published
 provenance: imported
 requires_explanation: false

@@ -8,27 +8,29 @@ competency_area: reliability
 bloom_level: apply
 phase: inference
 title: Spot Instance Preemption Handling in Training Clusters
-scenario: 'You run a 32-GPU A100 training job on AWS spot instances to save 70% on costs. Spot interruption notices arrive with a 2-minute warning. Your training step takes 15 seconds and checkpoints take 8 minutes (full model save). You need to handle preemptions without losing more than 10 minutes of training.'
-question: 'How would you design a fault-tolerant checkpointing strategy for 32 A100 spot training so a 2-minute interruption notice loses under 10 minutes of work?'
+scenario: You run a 32-GPU A100 training job on AWS spot instances to save 70% on costs. Spot interruption notices arrive with a 2-minute warning. Your training step takes 15 seconds and checkpoints take 8 minutes (full model save). You need to handle preemptions without losing more than 10 minutes of training.
+question: How would you design a fault-tolerant checkpointing strategy for 32 A100 spot training so a 2-minute interruption notice loses under 10 minutes of work?
 details:
-  realistic_solution: 'Implement incremental/delta checkpointing: save only changed optimizer state tensors (typically 20-30% of full state per step). Use PyTorch''s FSDP with save_on_each_rank=True and write to local NVMe first, then async-copy to S3. On receiving SIGTERM (2-min warning), trigger an emergency lightweight checkpoint: save only model weights (not optimizer state), accepting a slight training regression. Full checkpoint every 30 steps (7.5 min).'
+  realistic_solution: Do not rely on a full checkpoint during the 2-minute spot notice because the full save takes 8 minutes. Keep frequent asynchronous incremental checkpoints to local NVMe or per-rank storage, copy them to durable storage in the background, and compact into full checkpoints separately. For example, make a durable incremental checkpoint at least every 4 minutes and use the SIGTERM window only to flush a small final delta or mark the latest complete checkpoint. That bounds lost work well below 10 minutes.
   common_mistake: |
     **The Pitfall:** Using a 'save checkpoint every N steps' policy with a fixed interval of 60 steps (15 min).
     **The Rationale:** Candidates assume standard periodic checkpointing is sufficient, ignoring the strict 2-minute termination window.
     **The Consequence:** When a 2-minute preemption notice arrives, the job cannot complete a full checkpoint before termination, losing up to 15 minutes of work.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 32 GPUs * 5 GB model shard = 160 GB full checkpoint.
-    - Write Speed Limit: NFS/EFS bottleneck often limits to 10-20 GB/s total.
+    - Training step time: 15 seconds.
+    - Full checkpoint time from the scenario: 8 minutes.
     - 2-minute preemption window.
+    - Lost-work target: < 10 minutes.
 
     **Calculations:**
-    - Full Checkpoint Time: 160 GB / 10 GB/s = 16 seconds.
-    - Emergency Checkpoint (Weights Only): 160 GB / 2 = 80 GB.
-    - Emergency Write Time: 80 GB / 10 GB/s = 8 seconds.
+    - A full checkpoint cannot finish after notice: 8 minutes > 2 minutes.
+    - Checkpoint every 30 steps means interval = 30 × 15s = 450s = 7.5 minutes.
+    - Worst-case loss with only periodic full checkpoints is about 7.5 minutes, but only if the last full checkpoint already completed before the notice.
+    - To leave margin, use async incremental checkpoints every 16 steps: 16 × 15s = 240s = 4 minutes, then flush only the final delta during the 2-minute warning.
 
     **Conclusion & Interpretation:**
-    - **Result: 8 seconds emergency write time (Storage Bandwidth-Bound)**. The weight-only checkpoint easily fits within the 2-minute preemption window.
+    - **Result: Interruption-Window Bound.** Full 8-minute checkpoints cannot be the emergency path; frequent async incremental checkpoints plus a small SIGTERM delta bound lost work to about 4-6 minutes, under the 10-minute requirement.
 status: published
 provenance: imported
 requires_explanation: false

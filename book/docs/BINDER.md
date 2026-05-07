@@ -131,7 +131,7 @@ To run the same pipeline **by hand** on the whole tree (e.g. before a big merge)
 ./book/binder bib normalize --vol1        # only under book/quarto/contents/vol1
 ```
 
-This runs, in order: `book/tools/bib_apply_mechanical_fixes.py` (safe §5 field fixes) → `pre-commit run bibtex-tidy --all-files` (until it passes) → `python3 book/tools/bib_lint.py --all --check`. Optional metadata refresh from Crossref is separate: **`./book/binder bib update`**.
+This runs, in order: `book/tools/bib_apply_mechanical_fixes.py` (safe §5 field fixes) → `pre-commit run bibtex-tidy --all-files` (until it passes) → `python3 book/tools/bib_lint.py --all --check`. Optional metadata refresh via betterbib is separate: **`./book/binder bib update`**. That command runs `betterbib sync` on a temp copy, propagates any citekey renames into companion prose files, and rejects ambiguous collisions.
 
 Machine-readable output is available for editor/CI integration:
 

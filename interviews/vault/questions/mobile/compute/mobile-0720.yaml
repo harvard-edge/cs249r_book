@@ -9,9 +9,9 @@ bloom_level: analyze
 phase: inference
 title: The SoC Interconnect Bottleneck
 scenario: 'On a mobile SoC, you pipeline your ML workload: the CPU preprocesses a frame, the GPU runs a segmentation model, and the TPU runs a classification model on the segmented output. Each stage takes ~5ms individually. You expect 5ms total with perfect pipelining, but measure 14ms. The compute units are not overloaded.'
-question: 'What is eating the other 9ms in the pipelined execution?'
+question: What is eating the other 9ms in the pipelined execution?
 details:
-  realistic_solution: 'The bottleneck is the **SoC interconnect (NoC — Network on Chip)** and the cache coherency protocol. When the CPU finishes preprocessing and the GPU needs the result, the data must traverse the NoC from the CPU''s L2 cache to the GPU''s texture memory. On the SoC, this involves:'
+  realistic_solution: The missing 9ms is heterogeneous handoff overhead across the SoC interconnect and coherency fabric. The CPU output must be made visible outside CPU caches, converted or imported into the GPU-visible buffer layout, fenced, then handed from GPU memory state to the TPU/NPU input path with another fence and transfer. Even though each compute stage can run in about 5ms, the pipeline still pays synchronization, cache flush/invalidate, NoC transfer, layout/import, and driver scheduling costs at each accelerator boundary.
   common_mistake: |
     **The Pitfall:** Assuming the pipeline is simply executing sequentially instead of overlapping properly.
     **The Rationale:** Developers completely ignore the physical hardware reality of cache coherency protocols and NoC transfers between heterogeneous compute cores.
@@ -19,17 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Compute Time: 5ms per stage (CPU, GPU, TPU).
-    - Pipeline Structure: 3 sequential handoffs (CPU -> GPU -> TPU).
+    - Pipeline structure: 3 sequential stages with 2 accelerator boundaries (CPU -> GPU and GPU -> TPU).
     - Measured Latency: 14ms (vs 5ms expected).
 
     **Calculations:**
     - Theoretical Cost per Handoff: Flush (0.5ms) + NoC Transfer (1ms) + Fence (0.5ms) = ~2ms ideal.
     - Real-World Handoff with Contention: ~4.5ms per boundary.
-    - Total Interconnect Overhead: 4.5ms * 2 boundaries = 9ms.
+    - Total interconnect overhead: 4.5ms * 2 boundaries = 9ms.
     - Total Latency = 5ms compute + 9ms overhead = 14ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 9ms (I/O-Bound)**. The Network-on-Chip (NoC) latency completely negates pipelining benefits.
+    - **Result: 14ms total latency, including 9ms of interconnect/coherency overhead.** The extra time is the cost of CPU -> GPU and GPU -> TPU handoffs, not additional model compute.
 status: published
 provenance: imported
 requires_explanation: false

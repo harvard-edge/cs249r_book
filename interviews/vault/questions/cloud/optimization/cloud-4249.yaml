@@ -7,15 +7,15 @@ topic: autograd-computational-graphs
 competency_area: optimization
 bloom_level: analyze
 phase: training
-title: Analyzing the computational graph captured by TorchDynamo for a complex model
+title: Debugging torch.compile MoE routing graph breaks on H100
 scenario: You are optimizing inference for a mixture-of-experts (MoE) model on H100. torch.compile generates a graph but the TorchInductor-generated CUDA kernels are slower than hand-written ones.
 question: How would you inspect and fix the torch.compile graph breaks or missed fusion in the H100 MoE routing path?
 details:
-  realistic_solution: Use torch._dynamo.explain(model)(inputs) to inspect captured graphs. Use TORCH_LOGS='output_code' to see generated Triton kernels. Identify that torch.topk() followed by scatter creates a graph break or inhibits fusion. Replace with torch._C._VariableFunctions.topk (same) but wrapped in a custom operator registered via torch.library.custom_op to give TorchInductor a fusion hint. Alternatively, use Triton kernels directly for the routing logic.
+  realistic_solution: Use `torch._dynamo.explain(model)(inputs)` and `TORCH_LOGS="graph_breaks,output_code"` to locate breaks and inspect generated Inductor/Triton code. Isolate the MoE router, then check whether Python control flow, data-dependent indexing, topk/scatter patterns, or dynamic expert loops prevent fusion. Prefer refactoring into supported tensor operations with stable shapes, bucketing experts, or hoisting Python decisions out of the compiled region. If the routing primitive is still unsupported, implement a real custom op with `torch.library` plus an Inductor lowering, or call a dedicated Triton routing kernel.
   common_mistake: |
-    **The Pitfall:** Treating torch.compile entirely as a magical black box that cannot be inspected or manually guided.
-    **The Rationale:** Engineers generally trust high-level API abstractions implicitly, assuming that if TorchInductor splits a graph, it must be the theoretical optimum, missing the nuance of explicit custom operator hints.
-    **The Consequence:** The team tolerates the slower, highly-fragmented execution graphs caused by expert routing loops and eventually abandons native compilation tools to manually rewrite thousands of lines of raw CUDA code instead.
+    **The Pitfall:** Assuming every graph break in the router is harmless because `torch.compile` still returns a callable model.
+    **The Rationale:** Engineers look only at end-to-end correctness and miss that Python-side expert loops or unsupported scatter patterns can split the hot routing path into many small kernels.
+    **The Consequence:** The compiled model remains correct but dispatch-heavy, so H100 time is lost to launch overhead and missed fusion instead of expert computation.
   napkin_math: |
     **Assumptions & Constraints:**
     - 1024 tokens, 8 experts, top-2 routing (8192 values).

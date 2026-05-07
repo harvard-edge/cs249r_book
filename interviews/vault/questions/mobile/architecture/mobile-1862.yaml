@@ -7,29 +7,32 @@ topic: model-adaptation-systems
 competency_area: architecture
 bloom_level: apply
 phase: inference
-title: 'On-Device LoRA Training: Gradient Checkpointing on Mobile'
+title: On-Device LoRA OOM on an 8GB Phone
 scenario: A mobile application fine-tunes a 1B model on-device using LoRA. Training on an 8GB device causes OOM errors at batch size 1, sequence length 128.
 question: Why does LoRA training for a 1B model OOM at batch 1 on an 8GB phone, and how do you fix it?
 details:
-  realistic_solution: 'Memory breakdown for 1B model LoRA training (r=4, Q+V only): (1) Model weights FP16: 2GB. (2) LoRA adapter weights: ~0.78MB (negligible). (3) Optimizer states (Adam, only adapter params): ~1.56MB (negligible). (4) Activations for backward: 12 layers * 128 * 2048 * 7 (stored tensors per layer) * 2B = ~44MB. Not the issue. The real cause of OOM with 8GB available (OS reserves 2-3GB on mobile = 5-6GB usable): likely ML runtime loads 2-3x model copies during JIT compilation (TorchScript or CoreML compilation cache), plus gradient tape for all operators if base model requires_grad is not False. Fix: (1) Explicitly set requires_grad=False for all base model parameters; (2) Use gradient checkpointing for LoRA forward (torch.utils.checkpoint); (3) Use torch.compile with dynamic=True to avoid recompilation; (4) Delete JIT compilation cache after first run.'
+  realistic_solution: 'Memory breakdown for 1B model LoRA training: (1) Base model weights in FP16: ~2GB. (2) LoRA adapter weights and optimizer state are small relative to the base model when only adapters are trainable. Those parts are not usually the dominant peak. The real peak comes from training-time activations, autograd tape, temporary kernels, allocator slack, and runtime workspace. If any base weights accidentally require gradients, gradients and optimizer state can add multiple GB and make OOM almost guaranteed. On an 8GB phone, the OS and allocator usually leave only about 5-6GB usable, so FP16 base weights plus backward activations/workspace can exceed the budget even at batch size 1. Fix: freeze every base-model parameter, verify only LoRA params require grad, use gradient checkpointing and shorter sequence length, and use quantized frozen weights or an explicit QLoRA-style setup if FP16 frozen weights still do not fit. Do not rely on torch.compile or JIT caching to reduce
+    memory; those can increase peak usage.'
   common_mistake: |
-    **The Pitfall:** Immediately reducing model size or sequence length to save memory.
-    **The Rationale:** Assuming activation tensors or weights are the culprit, ignoring the massive memory overhead of ML runtime JIT compilation.
-    **The Consequence:** Degrading model quality unnecessarily while failing to address the actual framework-level memory leak.
+    **The Pitfall:** Assuming LoRA is always memory-cheap because only the adapter weights are trainable.
+    **The Rationale:** Candidates count the small adapter tensors but forget that backward activations, autograd metadata, optimizer state, temporary workspaces, and accidental unfrozen base weights still consume memory.
+    **The Consequence:** The app OOMs at batch size 1 even though the LoRA adapter itself is tiny, and the team chases model-size changes before verifying what actually requires gradients.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Device RAM: 8GB (~6GB usable).
-    - Model Weights (BF16): 1B params = 2 GB.
-    - Activations (LoRA only): ~6 MB.
-    - Adapter + Optimizer state: ~2 MB.
+    - Device RAM: 8GB (~5.5-6GB usable after OS/runtime overhead).
+    - Base model weights if stored in FP16: 1B params * 2 bytes = ~2 GB.
+    - Correct LoRA setup: base weights frozen, only adapter tensors require gradients.
+    - LoRA adapter weights and Adam state are small relative to the base model, but accidental unfrozen base weights add gradients and optimizer state for the full 1B params.
+    - Training activations, autograd tape, temporary buffers, allocator slack, and runtime workspace can be several GB for a 1B transformer even at batch size 1.
 
     **Calculations:**
-    - Memory before compilation: 2 GB + 6 MB + 2 MB = ~2.008 GB.
-    - JIT Compilation Cache Overhead: Tracing clones the model = 4-5 GB.
-    - Total Peak Memory: ~2.008 GB + 5 GB = ~7 GB.
+    - Frozen FP16 base weights: ~2 GB resident before training workspace.
+    - Plausible backward activations/workspace/temporary buffers: ~3-4+ GB.
+    - Peak with a correct frozen-base LoRA setup: ~2 GB + ~3-4+ GB + adapter state + allocator slack = ~5-6+ GB, which can exceed a 5.5-6 GB usable budget.
+    - If the base is accidentally unfrozen, base gradients alone add ~2 GB and Adam moments can add ~4 GB or more, far beyond the phone budget.
 
     **Conclusion & Interpretation:**
-    - **Result: ~7 GB peak memory (Memory-Bound)**. PyTorch JIT compilation tracing blows past the 6GB usable RAM, causing an OOM.
+    - **Result: OOM from training-time activations/workspace, or from accidentally training base weights, not from adapter size alone.** First verify the base is fully frozen, then checkpoint activations, reduce sequence length, and use quantized frozen weights/QLoRA if FP16 frozen weights still exceed the practical memory budget.
 status: published
 provenance: imported
 requires_explanation: false

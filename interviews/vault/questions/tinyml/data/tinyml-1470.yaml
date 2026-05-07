@@ -7,27 +7,29 @@ topic: streaming-ingestion
 competency_area: data
 bloom_level: analyze
 phase: inference
-title: 'Real-time Sensor Data Ingestion Optimization on ARM Cortex-M4 TinyML'
-scenario: 'A Cortex-M4 STM32F4 (168 MHz, 256 KB SRAM, no FPU) ingests 500 Hz 16-bit 3-axis vibration data. It extracts RMS features over 1-second windows and transmits via wireless. The system drops 15% of data during peak loads.'
-question: 'How should you diagnose and eliminate STM32F4 sensor data loss in a fixed-point streaming feature pipeline?'
+title: Real-time Sensor Data Ingestion Optimization on Cortex-M4 TinyML
+scenario: A Cortex-M4 microcontroller build running at 168 MHz with 256 KB SRAM and no enabled FPU support ingests 500 Hz 16-bit 3-axis vibration data. It extracts RMS features over 1-second windows and transmits via wireless. The system drops 15% of data during peak loads.
+question: How should you diagnose and eliminate Cortex-M4 sensor data loss in a fixed-point streaming feature pipeline?
 details:
-  realistic_solution: |
-    Refactor RMS extraction to use fixed-point arithmetic, circumventing the slow software-emulated FPU. Decouple sensor ingestion from wireless transmission using DMA and implement a non-blocking transmission architecture.
+  realistic_solution: Refactor RMS extraction to use fixed-point arithmetic when the deployed Cortex-M4 build lacks usable FPU support, avoiding software-emulated floating point in the streaming path. Decouple sensor ingestion from wireless transmission with DMA, double or ring buffers, and non-blocking transmit queues so radio stalls cannot block sample capture. Profile ISR time, DMA service time, feature-update time per sample, and the once-per-window RMS finalization separately; the goal is to keep the per-sample path below the 2 ms interval and schedule the 1-second window finalization outside the capture ISR.
   common_mistake: |
-    **The Pitfall:** Retaining floating-point feature extraction on a non-FPU core.
-    **The Rationale:** Candidates overlook the hardware constraint (no FPU) and ignore the blocking nature of synchronous wireless transmissions.
+    **The Pitfall:** Retaining floating-point feature extraction on a Cortex-M4 build without usable FPU support.
+    **The Rationale:** Candidates overlook the deployed math configuration and ignore the blocking nature of synchronous wireless transmissions.
     **The Consequence:** Software emulation burns hundreds of thousands of CPU cycles, bottlenecking the RTOS and dropping live samples.
   napkin_math: |
     **Assumptions & Constraints:**
     - CPU: 168 MHz; Sensor Rate: 500 Hz
-    - Interval: 2ms (336,000 cycles/sample)
+    - Sample interval: 2 ms = 336,000 cycles/sample.
+    - RMS window: 1 second = 500 samples.
 
     **Calculations:**
-    - FP Emulation Cost = ~200k cycles + 150k I/O = 350,000 cycles (exceeds budget)
-    - Fixed-Point Cost = ~20k cycles + 150k I/O = 170,000 cycles
+    - Per-sample floating-point update path: ~200,000 cycles feature update + 150,000 cycles blocking I/O = 350,000 cycles, which exceeds the 336,000-cycle sample interval.
+    - Per-sample fixed-point/non-blocking path: ~20,000 cycles feature update + 30,000 cycles DMA/queue overhead = 50,000 cycles.
+    - Per-sample headroom after the fix: 336,000 - 50,000 = 286,000 cycles.
+    - One-second window finalization budget: 168,000,000 cycles/window; even a 500-sample fixed-point RMS reduction is small if it is kept out of the sample-capture ISR.
 
     **Conclusion & Interpretation:**
-    - **Result: 170,000 cycles (Compute-Bound)**. Fixed-point conversion secures 180,000 cycles of headroom, easily clearing the 336,000 cycle limit.
+    - **Result: 286,000 cycles of per-sample headroom after fixed-point and non-blocking I/O**. The data loss is caused by a per-sample streaming path that can exceed 2 ms during peak loads, not by the 1-second RMS window itself.
 status: published
 provenance: imported
 requires_explanation: false

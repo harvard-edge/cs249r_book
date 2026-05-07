@@ -7,11 +7,11 @@ topic: systolic-dataflow
 competency_area: compute
 bloom_level: create
 phase: both
-title: The Custom Fused Kernel Design
+title: Triton Fusion for RMSNorm, RoPE, and Attention Scores
 scenario: You need to implement a fused RMSNorm + Rotary Position Embedding (RoPE) + attention score computation kernel in Triton for a LLaMA-70B deployment. The three operations are currently separate kernels, each reading and writing the full hidden state (8,192 dims) to HBM. Your target is an accelerator with 3.35 TB/s HBM bandwidth and 228 KB shared memory per SM.
-question: "What tiling strategy, work partitioning, HBM traffic reduction, and primary risk would you choose for this fused Triton kernel?"
+question: What tiling strategy, work partitioning, HBM traffic reduction, and primary risk would you choose for this fused Triton kernel?
 details:
-  realistic_solution: 'Design a tiling strategy that keeps the hidden state for a group of tokens in SRAM across all operations. Tile size: load 8 tokens per thread block (8 * 16KB = 128KB, fitting well within the 228KB shared memory). Work partition: load Q/K, compute RMSNorm using warp-level reductions, apply RoPE via precomputed registers, and compute Q@K^T partials. This fusion slashes HBM traffic by nearly 3x by eliminating intermediate materialized states. The primary risk is warp-synchronization bottlenecks during the hidden-dimension reduction for RMSNorm.'
+  realistic_solution: 'Use a query tile of 8 tokens by the 8,192 hidden dimension: 8 × 8,192 × 2 bytes = 128 KB, leaving headroom in 228 KB of shared memory for reduction scratch and metadata. Partition work by token and hidden-dimension blocks: load the tile once, compute RMSNorm with warp/block reductions, apply RoPE to Q/K in registers, then feed per-head Q/K fragments into the attention-score dot products without materializing normalized or rotated hidden states. This removes the intermediate full-hidden reads and writes, reducing removable hidden-state HBM traffic from 96 KB/token to about 16 KB/token, a 6x reduction before counting final score/output traffic common to both designs. The primary risk is exceeding shared-memory/register limits and causing spills or local-memory traffic, especially around RMSNorm reductions and per-head Q/K fragments.'
   common_mistake: |
     **The Pitfall:** Naively concatenating kernel code without restructuring the underlying data flow.
     **The Rationale:** Engineers treat kernel fusion like standard function inlining, failing to explicitly manage shared memory limits and register pressure.
@@ -21,14 +21,16 @@ details:
        - Hidden dim: 8,192. Precision: FP16 (2 bytes/element).
        - Token size: 16 KB. Shared Memory: 228 KB.
        - Batch=256, Seq=4096.
+       - Compare only removable hidden-state traffic; final attention-score/output traffic is common to both implementations.
     2. **Calculations:**
-       - Separate Kernels (Per Token): RMSNorm (16KB Read + 16KB Write) + RoPE (16R + 16W) + QK_prep (16R + 16W) = 96 KB traffic.
-       - Fused Kernel (Per Token): 16KB Read + ~2KB Write (QK scores) = 18 KB traffic.
-       - Total traffic separate: 256 * 4096 * 96 KB = 100.6 GB.
-       - Total traffic fused: 256 * 4096 * 18 KB = 18.8 GB.
-       - Time saved at 3.35 TB/s: (100.6 - 18.8) / 3350 = 24.4 ms per forward pass.
+       - Separate kernels per token: RMSNorm (16 KB read + 16 KB write) + RoPE (16 KB read + 16 KB write) + attention prep (16 KB read + 16 KB write) = 96 KB hidden-state traffic.
+       - Fused kernel per token: load the 16 KB hidden state once and keep normalized/rotated Q/K fragments in SRAM/registers before score computation.
+       - Tokens per pass: 256 * 4096 = 1,048,576.
+       - Removable traffic separate: 1,048,576 * 96 KB = 100.7 GB.
+       - Removable traffic fused: 1,048,576 * 16 KB = 16.8 GB.
+       - Ideal HBM time saved: (100.7 GB - 16.8 GB) / 3350 GB/s ≈ 25.0 ms.
     3. **Conclusion & Interpretation:**
-       - **Result: ~5x Traffic Reduction, 24.4ms Saved.** The separate kernels are strictly **Memory-Bandwidth-Bound**, fully mitigated by aggressive SRAM retention.
+       - **Result: ~6x reduction in removable hidden-state traffic and up to ~25 ms of ideal HBM time saved.** The design is only beneficial if SRAM/register pressure stays below the spill threshold.
 status: published
 provenance: imported
 requires_explanation: true

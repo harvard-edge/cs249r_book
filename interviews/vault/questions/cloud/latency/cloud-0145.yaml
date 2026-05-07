@@ -9,24 +9,25 @@ bloom_level: analyze
 phase: both
 title: 'The SLO Squeeze: Interactive vs. Batch Throughput'
 scenario: 'You run a unified inference service for a 70B parameter model on a cluster of 8 GPUs. Your traffic is mixed: 80% is low-latency interactive chat with a P99 Time-to-First-Token (TTFT) SLO of 500ms, and 20% is high-throughput batch summarization jobs. Your current system uses a single FIFO queue with continuous batching. You are meeting your batch throughput goals, but violating the chat TTFT SLO due to head-of-line blocking from large summarization requests.'
-question: "Should you use priority scheduling or partition the 8 GPUs between chat and batch jobs, and what trade-off does that create?"
+question: Should you use priority scheduling or partition the 8 GPUs between chat and batch jobs, and what trade-off does that create?
 details:
-  realistic_solution: The trade-off is isolation vs. efficiency. A preemptive priority queue (single pool) maximizes GPU utilization but requires complex starvation prevention and preemption logic. Partitioning the cluster (e.g., 6 GPUs for chat, 2 for batch) guarantees the chat SLO via physical isolation but strands idle capacity when interactive traffic dips. Given the massive head-of-line blocking of LLM prefill, priority scheduling with preemption is preferred to maintain both SLOs and high utilization.
+  realistic_solution: |
+    The trade-off is isolation vs. efficiency. Priority scheduling in a shared pool lets chat requests bypass or preempt large summarization work, preserving utilization when traffic is bursty, but it requires careful starvation prevention, admission control, and preemption-safe execution. Partitioning the 8 GPUs, such as reserving some for chat and some for batch, gives a simpler and stronger SLO boundary, but it can strand capacity when either workload is quiet. The right answer depends on how hard the chat SLO is and how variable the traffic is: use partitioning for strict isolation, priority scheduling for higher utilization, or combine both with a small protected chat pool plus overflow priority scheduling.
   common_mistake: |
     **The Pitfall:** Assuming static partitioning is the optimal, flawless solution.
     **The Rationale:** Engineers seek the easiest path to guarantee SLOs (physical separation) but ignore the dynamic, bursty nature of interactive traffic.
     **The Consequence:** Severe cluster underutilization during off-peak hours, wasting hundreds of thousands of dollars in idle GPU time.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - 8x GPUs (3.35 TB/s each). Total bandwidth: 26.8 TB/s.
-       - 70B Model size: 140 GB.
-       - Batch job: 2,000 input tokens.
+       - Chat SLO: P99 TTFT < 500ms.
+       - Shared FIFO queue currently allows summarization prefills to run ahead of chat requests.
+       - Large prefills are non-preemptible at the scheduler level unless the serving system explicitly supports preemption or chunked prefill.
     2. **Calculations:**
-       - TP parallel decode token time: 140 GB / 26.8 TB/s = 5.2 ms per token.
-       - Batch job prefill compute time: 2,000 tokens * 5.2 ms = 10,400 ms (10.4 seconds).
-       - Head-of-line wait time for a chat request: 10.4 seconds.
+       - If a chat request arrives behind a summarization prefill lasting T ms, its TTFT includes roughly T ms of queueing before its own prefill begins.
+       - To meet a 500ms P99 TTFT, the scheduler must bound high-priority queueing plus chat prefill below 500ms.
+       - A dedicated chat partition bounds this by reserving capacity; priority scheduling bounds it by letting chat bypass or interrupt lower-priority work.
     3. **Conclusion & Interpretation:**
-       - **Result: 10.4s Head-of-Line Blocking.** The FIFO queue is fatally **Queue-Bound**, causing a 20x violation of the 500ms TTFT SLO without preemption.
+       - **Result: Isolation vs. Utilization Trade-off.** Partitioning buys predictable chat latency at the cost of idle GPUs; priority scheduling keeps the pool efficient but must enforce a hard queueing bound for chat.
 status: published
 provenance: imported
 requires_explanation: false

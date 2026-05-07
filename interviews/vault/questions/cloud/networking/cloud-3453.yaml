@@ -11,23 +11,26 @@ title: Designing High-Performance Interconnects for Large-Scale A100 Clusters
 scenario: You are designing the interconnect strategy for a distributed training system powering a large language model. The system requires 128 GPUs. The training workload is highly communication-intensive, with frequent all-reduce and all-gather operations.
 question: What interconnect architecture would you choose for 128 GPUs with communication-heavy training, and how would NVLink, NVSwitch, InfiniBand, and topology factor in?
 details:
-  realistic_solution: 'An optimal solution typically employs a hierarchical approach. Within each node (e.g., 8 GPUs), NVLink and NVSwitch are crucial for maximizing GPU-to-GPU communication, leveraging NVLink''s 600 GB/s bidirectional per GPU pair and NVSwitch''s ability to create a full-mesh topology with 6.4 TB/s aggregate bandwidth per SXM board. For inter-node communication, a high-radix, non-blocking Fat-tree topology built with InfiniBand (e.g., HDR 200 Gb/s or NDR 400 Gb/s) is highly effective. This ensures high bisection bandwidth and low latency across the cluster, critical for global collective operations. While Dragonfly could offer cost savings for very large clusters by using fewer global switches, Fat-tree is generally preferred for its predictable performance and easier scaling up to hundreds of nodes for HPC/AI workloads.'
+  realistic_solution: |
+    Use a hierarchical 16-node design with 8 GPUs per node. Inside each node, connect the GPUs through NVLink and NVSwitch so local collectives, tensor-parallel traffic, and intra-node reduce-scatter/all-gather stay on the high-bandwidth GPU fabric. Across nodes, use NDR-class InfiniBand in a non-blocking or low-oversubscription fat-tree for predictable global collective performance. NVLink is per-GPU high-bandwidth local connectivity through the switch fabric; it is not 600 GB/s to every GPU pair, and NVSwitch board bandwidth should not be treated as inter-node bisection. For 128 GPUs, topology matters because global collectives eventually cross the node boundary, so the inter-node fabric should be sized from per-node injection and expected bisection traffic, then tuned with hierarchical collectives.
   common_mistake: |
     **The Pitfall:** Underestimating the bisection bandwidth requirements for inter-node communication.
     **The Rationale:** Candidates focus too heavily on the fast intra-node NVLink speeds and treat the inter-node network as an afterthought.
     **The Consequence:** The design becomes severely imbalanced, with the inter-node InfiniBand network becoming a massive bottleneck for global all-reduce operations.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 128 GPUs, distributed training.
-    - Target per-GPU All-Reduce bandwidth: ~50 GB/s.
+    - 128 GPUs = 16 nodes with 8 GPUs per node.
+    - Each node has one 400 Gb/s NDR InfiniBand port for the inter-node fabric, about 50 GB/s raw before protocol overhead.
+    - Global collectives are hierarchical: reduce within the node over NVLink/NVSwitch, then exchange one node-level shard across InfiniBand.
 
     **Calculations:**
-    - Intra-node (NVSwitch): 12 links × 50 GB/s = 600 GB/s bidirectional per GPU.
-    - Inter-node (InfiniBand HDR): 8 links × 200 Gb/s = 1.6 Tb/s (200 GB/s) per node.
-    - Cluster Bisection Bandwidth Target: 128 GPUs × 50 GB/s = 6.4 TB/s.
+    - Cluster inter-node injection bandwidth: 16 nodes * 50 GB/s = 800 GB/s raw.
+    - A balanced bisection splits the cluster into 8 nodes and 8 nodes, so a non-blocking fabric should provide about 8 * 50 = 400 GB/s raw bisection in each direction.
+    - With 2:1 oversubscription, the bisection drops to about 200 GB/s, so cross-node all-reduce and all-gather phases can take roughly twice as long under load.
+    - NVLink/NVSwitch reduces pressure on InfiniBand by keeping intra-node traffic local, but it cannot compensate for an undersized inter-node bisection.
 
     **Conclusion & Interpretation:**
-    - **Result: 6.4 TB/s bisection bandwidth necessitates a non-blocking Fat-tree spine topology (Network-Bandwidth Bound)**.
+    - **Result: choose NVLink/NVSwitch within nodes plus a non-blocking or lightly oversubscribed NDR InfiniBand fat-tree across nodes.** The inter-node bisection target is derived from node injection, not from multiplying all 128 GPUs by an intra-node bandwidth number.
 status: published
 provenance: imported
 requires_explanation: true

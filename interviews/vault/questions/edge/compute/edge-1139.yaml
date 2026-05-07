@@ -1,32 +1,41 @@
 schema_version: '1.0'
 id: edge-1139
 track: edge
-level: L6+
+level: L5
 zone: mastery
 topic: systolic-dataflow
 competency_area: compute
 bloom_level: create
 phase: both
-title: 'Edge Systolic Array Mastery: Optimal Dataflow Selection for Edge Deployment'
-scenario: 'You are deploying a custom vision transformer (ViT-Tiny: 5M params, 1.3 GOPS, patch_size=16, seq=196+1, hidden=192, heads=3) for plant disease detection on Jetson Orin (275 TOPS INT8, 60W, DLA 11 TOPS).'
-question: 'For ViT-Tiny on Jetson Orin, should attention, FFN, and patch embedding run on GPU or DLA, and what latency and energy meet 30 FPS?'
+title: ViT-Tiny on Jetson Orin GPU vs DLA Placement, Latency, and Energy
+scenario: 'You are deploying a custom vision transformer (ViT-Tiny: 5M params, 1.3 GOPS, patch_size=16, seq=196+1, hidden=192, heads=3) for plant disease detection on Jetson Orin (275 TOPS INT8, 60W, DLA 11 TOPS). Assume GPU transformer blocks are memory/scheduling dominated with about 5MB traffic per block at 204.8GB/s, and DLA active power for patch embedding is 2W.'
+question: For ViT-Tiny on Jetson Orin, should attention, FFN, and patch embedding run on GPU or DLA, and what latency and energy meet 30 FPS?
 details:
-  realistic_solution: 'DLA supports: Conv, FC, pooling. Does NOT support attention (gather/scatter, softmax). GPU handles attention. Strategy: run patch embedding (conv) on DLA, then run the 12 ViT blocks (Attention + FFN) entirely on GPU to avoid passing activations back and forth between GPU and DLA every block. ViT-Tiny attention FLOPs: 4 projections (Q,K,V,O) = 4*(2*197*192*192)=58.1M FLOPs. QK^T and Softmax+V = 2*(2*197^2*64*3)=29.8M. Total attention = 87.9M. FFN FLOPs: 2*(2*197*192*768)=116.2M. Total per block = 204.1M FLOPs. GPU computes block in 204.1M/275T = 0.74µs. But memory is the bottleneck: moving ~5MB of activations per block at 204.8 GB/s takes 24.4µs. DLA patch embed: 2*192*14*14*(16^2*3) = 57.8M FLOPs. AI=57.8M/335KB=172 (compute bound on DLA). DLA time = 57.8M/11T = 5.25µs.'
-  common_mistake: 'Running ViT on DLA without checking if the self-attention operation (irregular data access pattern) is supported by the DLA''s fixed dataflow engine, which typically only supports CNNs and simple FC layers.'
+  realistic_solution: |
+    Attention should run on the GPU because DLA does not support the softmax, gather/scatter, and dynamic attention pattern. Although FFN/linear layers look like FC operations, keep the FFN on the GPU with attention so each transformer block stays on one device; moving activations to the DLA and back inside all 12 blocks would cost more synchronization and transfer overhead than it saves. Patch embedding is a strided convolution, so it can run on the DLA, followed by one DLA-to-GPU activation transfer of about 38KB for the 196x192 patch tokens.
+
+    A coherent deployment is therefore: patch embedding on DLA, one activation handoff, and all 12 attention+FFN blocks plus the classifier on GPU. Patch embedding costs about 57.8M FLOPs, so the DLA compute lower bound is 57.8M / 11 TOPS = 5.3us. The GPU blocks are memory/scheduling dominated: using about 5MB of traffic per block at 204.8GB/s gives 24.4us per block, or 293us for 12 blocks. Add a small single handoff/synchronization allowance, about 50us, for the DLA-to-GPU boundary. End-to-end latency is therefore about 5us + 293us + 50us = 0.35ms, far below the 33.3ms budget for 30 FPS. Energy is roughly 2W*5.3us + 60W*(293us+50us) = 0.011mJ + 20.6mJ, so budget about 21mJ/frame.
+  common_mistake: |
+    **The Pitfall:** Running ViT on DLA without checking if self-attention is supported.
+    **The Rationale:** The DLA's fixed dataflow engine typically only supports CNNs and simple FC layers, not irregular data access patterns like self-attention.
+    **The Consequence:** Execution failure or severe performance degradation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - ViT-Tiny params on Jetson Orin.
+    - ViT-Tiny on Jetson Orin.
     - 275 TOPS INT8 GPU, 11 TOPS DLA.
+    - Attention is GPU-only; DLA supports patch embedding conv.
+    - Use one DLA-to-GPU activation handoff after patch embedding, not per block.
 
     **Calculations:**
-    - Patch embed (DLA): 57.8M FLOPs. Weights: 147KB. IO: 335KB. Time = 57.8M / 11 TOPS = 5.25µs.
-    - GPU Attention+FFN (1 block): 204.1M FLOPs. Bandwidth bound: 5MB / 204.8 GB/s = 24.4µs per block.
-    - 12 blocks: 12 * 24.4µs = 293µs = 0.293ms.
-    - Total latency: 5.25µs (DLA) + 293µs (GPU) = 0.298ms.
-    - Energy: DLA (2W * 5.25µs) = 10.5µJ. GPU (60W * 293µs) = 17.6mJ.
+    - Patch embed as a conv: 14 * 14 output positions, 192 output channels, and a 16 * 16 * 3 dot product per output. FLOPs = 2 * 14 * 14 * 192 * 16 * 16 * 3 = 57.8M. Time = 57.8M / 11 TOPS = 5.25us.
+    - Patch token output transfer: 196 * 192 INT8 values ≈ 37.6KB. Bandwidth time is tiny, but include ~50us for device handoff and synchronization.
+    - GPU Attention+FFN traffic estimate: ~5MB per block. Bandwidth bound = 5MB / 204.8 GB/s = 24.4us per block.
+    - 12 GPU blocks: 12 * 24.4us = 293us = 0.293ms.
+    - Total latency ≈ 5.25us DLA + 50us handoff + 293us GPU = 348us = 0.35ms.
+    - Energy: DLA ≈ 2W * 5.25us = 10.5uJ. GPU/handoff window ≈ 60W * (293us + 50us) = 20.6mJ.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.298ms (Memory-Bandwidth Bound)**. At 30 FPS, budget is 33ms, so 0.298ms easily meets it. Total energy per frame ≈ 17.6mJ.
+    - **Result: GPU for attention and FFN, DLA only for patch embedding if the single handoff is acceptable.** Estimated latency is about 0.35ms and energy is about 21mJ/frame, comfortably meeting the 30 FPS target.
 status: published
 provenance: imported
 requires_explanation: true

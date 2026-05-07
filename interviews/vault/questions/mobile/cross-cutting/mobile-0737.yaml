@@ -7,29 +7,32 @@ topic: differential-privacy
 competency_area: cross-cutting
 bloom_level: create
 phase: inference
-title: Local-Local RAG & On-Device Telemetry
+title: On-Device Vector Store with CoreML Embeddings and LDP
 scenario: Siri needs to proactively suggest contextual actions based on a user's local message history. We want to update a semantic index dynamically on-device, but we must guarantee strict Local Differential Privacy (LDP). The entire indexing and query pipeline must consume <50MB of RAM and <10ms latency per query.
 question: How do you architect the local vector store, the CoreML embedding pipeline, and the LDP mechanism?
 details:
-  realistic_solution: Implement a direct-to-flash Product Quantization (PQ) index. The embedding model is an ultra-lite dual-encoder (~10M parameters, INT8). The vector index uses memory-mapped (mmap) files backed by NVMe flash storage, completely bypassing the RAM limit for storage. The ANE handles the embedding extraction, while the Apple Matrix AMX coprocessor handles the PQ asymmetric distance calculations. For telemetry, we use DP-FTRL. We never send embeddings or text. We calculate local gradients on-device using a tiny federated learning task, clip the gradients, add Gaussian noise, and only send the noisy gradients to the server.
+  realistic_solution: |
+    Keep the semantic indexing and query path entirely local. Run a small INT8 CoreML dual-encoder on the ANE, normalize embeddings, and store only compressed vectors plus document ids in an mmap-backed product-quantized index. Keep centroids, PQ lookup tables, and the current query workspace in RAM; keep the code arrays and doc-id table page-backed so the resident set stays small. New or edited messages go through an append-only delta segment: embed the message, encode it to PQ codes, append codes/doc id to the mmap file, and update a small in-memory posting map or tombstone table. Query scans the main index plus the bounded delta segment, then periodically compacts deltas in the background when the device is idle so foreground queries stay under 10ms. For strict LDP telemetry, do not upload text, embeddings, raw queries, or gradients. If aggregate telemetry is required, compute only coarse counters on-device, such as bucketed query latency, index size bucket, or success/failure bit, and apply a local mechanism such as randomized response before upload. Each device perturbs its own report before the server sees it; the server only estimates population statistics from noisy reports.
   common_mistake: |
-    **The Pitfall:** Using standard vector databases like FAISS or HNSW locally.
-    **The Rationale:** Candidates default to cloud-native vector search tools, ignoring their massive memory overhead and latency spikes.
-    **The Consequence:** HNSW triggers watchdog terminations due to memory spikes, and raw text embedding noise destroys local utility.
+    **The Pitfall:** Treating federated learning or server-side privacy accounting as a substitute for Local Differential Privacy.
+    **The Rationale:** LDP requires the device to randomize or suppress telemetry before upload; clipping gradients with central accounting is a different privacy model and does not protect a single report from the server.
+    **The Consequence:** The indexing path may stay local, but telemetry can still leak sensitive behavioral signals unless each uploaded statistic is locally privatized or not uploaded at all.
   napkin_math: |
     **Assumptions & Constraints:**
     - Memory budget: <50 MB RAM. Latency: <10ms.
     - Model: ~10M parameters, INT8.
-    - Index: 100,000 items, 64-dim, PQ (1-byte).
+    - Index: 100,000 items, 64 PQ codes per item at 1 byte/code, mmap-backed.
+    - LDP telemetry: randomized response for a binary success/failure counter with probability p=0.75 of reporting the truthful bit.
 
     **Calculations:**
     - Model Memory: 10M params @ 1 byte = 10 MB.
-    - Index Storage (Disk): 100,000 * 64 * 1 = 6.4 MB (mmap'd, zero RAM).
-    - Active RAM: 10 MB (model) + 2 MB (activations) + 1 MB (centroids) = 13 MB.
-    - Latency: Embedding (~4ms) + AMX Dot Product (<0.1ms) = ~4.1ms.
+    - Index Storage: 100,000 * 64 * 1 byte = 6.4 MB on disk; only active pages and lookup tables count against RAM.
+    - Active RAM: 10 MB model + 2 MB activations + 1 MB PQ lookup tables/centroids + 8 MB page/cache budget = 21 MB.
+    - Latency: embedding 4ms + PQ lookup/scan 3ms + top-k rerank 2ms = 9ms.
+    - Randomized response privacy strength for binary telemetry: epsilon = ln(p / (1 - p)) = ln(0.75 / 0.25) = 1.10.
 
     **Conclusion & Interpretation:**
-    - **Result: 13 MB RAM and ~4.1ms latency satisfy constraints (Compute-Bound).**
+    - **Result: about 21 MB RAM, 9ms query latency, and epsilon about 1.10 for locally privatized binary telemetry.** The vector content remains on-device; only coarse, locally randomized telemetry may leave the device.
 status: published
 provenance: imported
 requires_explanation: true

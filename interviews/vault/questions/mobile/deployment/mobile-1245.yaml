@@ -1,18 +1,18 @@
 schema_version: '1.0'
 id: mobile-1245
 track: mobile
-level: L5
+level: L4
 zone: design
 topic: model-format-conversion
 competency_area: deployment
 bloom_level: evaluate
 phase: inference
-title: 'On-Device Multimodal Model Conversion for Hexagon NPU'
-scenario: 'You are tasked with deploying a new 2-billion parameter vision-language model to flagship Android devices powered by a modern NPU. The model uses complex custom attention operators that are currently unsupported by the standard NPU delegates. You need to design a model conversion and runtime execution strategy that maximizes INT8 throughput while efficiently handling fallback execution for unsupported operators without creating bottlenecks across the shared 16 GB LPDDR5X memory.'
-question: 'How should a deployment handle unsupported custom attention operators without CPU fallback bottlenecks?'
+title: Android NPU Custom Attention Fallback Strategy
+scenario: You are tasked with deploying a new 2-billion parameter vision-language model to flagship Android devices powered by a modern NPU. The model uses complex custom attention operators that are currently unsupported by the standard NPU delegates. You need to design a model conversion and runtime execution strategy that maximizes INT8 throughput while efficiently handling fallback execution for unsupported operators without creating bottlenecks across the shared 16 GB LPDDR5X memory.
+question: How should a deployment handle unsupported custom attention operators without CPU fallback bottlenecks?
 details:
   realistic_solution: |
-    Implement a hybrid execution graph: supported subgraphs map to the NPU via the QNN delegate in INT8, while custom attention operators are explicitly delegated to the GPU. Because the GPU and NPU share the same LPDDR5X memory pool, this zero-copy execution completely bypasses the catastrophic serialization overhead of CPU fallback.
+    Implement an explicit execution plan instead of allowing automatic CPU fallback. First try to rewrite or fuse the custom attention into delegate-supported INT8 operators; if that is not possible, provide a custom accelerator kernel or route the unsupported subgraph to a profiled non-CPU delegate such as GPU or DSP. Keep tensor layouts and quantization boundaries stable across partitions, and measure synchronization cost at each partition boundary before accepting the conversion.
   common_mistake: |
     **The Pitfall:** Permitting unsupported NPU operators to automatically fall back to the CPU.
     **The Rationale:** Relying on default framework fallback behavior (e.g., TFLite/ONNX Runtime) without profiling cross-domain memory sync costs.
@@ -20,14 +20,15 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 1024 tokens, 2048 hidden dim, 2 bytes (FP16).
-    - 10 layer boundaries, 30 FPS.
+    - Each unsupported partition boundary may require materializing an activation tensor.
 
     **Calculations:**
-    - Transfer size per boundary = 1024 * 2048 * 2 = 4.19 MB.
-    - Total traffic = 4.19 MB * 10 * 30 = 1.26 GB/s.
+    - Activation size per boundary = 1024 * 2048 * 2 = 4,194,304 bytes, about 4.0 MiB.
+    - If fallback happens at N boundaries, synchronization traffic is about 4.0 MiB * N per inference, plus layout conversion and cache flush overhead.
+    - CPU fallback also serializes accelerator execution, so the bottleneck is both data movement and lost overlap.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound**. CPU fallback incurs a 1.26 GB/s continuous sync penalty; GPU delegation utilizes zero-copy shared memory.
+    - **Result: Memory-Bound**. Avoid default CPU fallback by adding supported fused ops, custom kernels, or a measured non-CPU fallback path; do not assume GPU zero-copy is available without runtime proof.
 status: published
 provenance: imported
 requires_explanation: true

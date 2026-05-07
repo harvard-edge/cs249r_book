@@ -8,10 +8,11 @@ competency_area: parallelism
 bloom_level: create
 phase: training
 title: The Expert Parallelism Communication
-scenario: 'You are training a Mixture-of-Experts model with 64 experts, placing one expert per GPU across 64 GPUs connected via 400 Gbps InfiniBand. Each token is routed to 2 experts. During training, you notice the all-to-all communication takes longer than the expert computation itself.'
-question: 'At what point does the network become the bottleneck in this MoE training setup, and how do you fix it?'
+scenario: You are training a Mixture-of-Experts model with 64 experts, placing one expert per GPU across 64 GPUs connected via 400 Gbps InfiniBand. Each token is routed to 2 experts. During training, you notice the all-to-all communication takes longer than the expert computation itself.
+question: At what point does the network become the bottleneck in this MoE training setup, and how do you fix it?
 details:
-  realistic_solution: 'In expert parallelism, every GPU must send a fraction of its tokens to every other GPU (all-to-all). This requires full bisection bandwidth and cannot be optimized into rings or trees. To fix this, confine expert-parallel groups to 8 GPUs within high-bandwidth NVLink domains, and use data parallelism across nodes.'
+  realistic_solution: |
+    The network becomes the bottleneck when the top-2 routed token copies that must leave a GPU take longer to exchange than the local expert FFN takes to run. With 4096 tokens per GPU, 2 expert copies per token, and one expert per GPU, almost all copies are remote, so the all-to-all takes several milliseconds on oversubscribed 400 Gbps InfiniBand versus about 0.5 ms of expert compute. Fix it by keeping expert-parallel groups inside high-bandwidth NVLink domains, adding expert/data parallel hierarchy across nodes, reducing cross-node routing with locality-aware routing, or increasing expert compute per communicated byte.
   common_mistake: |
     **The Pitfall:** Assuming all-to-all communication scales identically to all-reduce.
     **The Rationale:** Engineers familiar with data parallelism treat all collectives equally, missing that all-to-all requires full bisection bandwidth and cannot be optimized into rings or trees.
@@ -23,13 +24,16 @@ details:
     - Token Size: Hidden dim=4096 in FP16 (8192 bytes = 8 KiB).
 
     **Calculations:**
-    - Tokens Sent: 4096 * 2 * (63/64) ≈ 8064 tokens.
-    - Data Volume: 8064 tokens * 8 KiB = 63 MiB per GPU.
-    - Network Time: At 400 Gbps, ideal time = 63 MiB / 50 GB/s = 1.26 ms. With a 2:1 oversubscribed fat-tree, effective bandwidth is 25 GB/s, taking 2.52 ms.
+    - Token copies generated per GPU: 4096 tokens * 2 experts/token = 8192 routed copies.
+    - Expected remote fraction with one local expert out of 64: 63/64.
+    - Remote token copies sent: 8192 * (63/64) = 8064 copies.
+    - Data volume: 8064 copies * 8 KiB = 63 MiB per GPU.
+    - Network time: at ideal 400 Gbps, 63 MiB / 50 GB/s = 1.26 ms. With a 2:1 oversubscribed fat-tree, effective bandwidth is 25 GB/s, taking 2.52 ms.
     - Compute Time: One FFN layer compute takes ≈ 0.5 ms.
+    - Bottleneck threshold at 25 GB/s and 0.5 ms compute: 25 GB/s * 0.5 ms = 12.5 MB, or about 12.5 MB / 8 KiB ≈ 1526 remote copies. With top-2 routing and a 63/64 remote fraction, that is only about 775 original tokens per GPU.
 
     **Conclusion & Interpretation:**
-    - **Result: Network-Bound**. Communication (2.52 ms) is over 5x slower than the actual expert compute (0.5 ms).
+    - **Result: Network-Bound.** The current 4096 tokens/GPU is far above the ~775-token threshold, so communication (2.52 ms) is about 5x slower than expert compute (0.5 ms).
 status: published
 provenance: imported
 requires_explanation: true

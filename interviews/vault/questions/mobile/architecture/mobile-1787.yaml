@@ -7,28 +7,30 @@ topic: pruning-sparsity
 competency_area: architecture
 bloom_level: analyze
 phase: training
-title: Layer-wise Relevance Propagation for Pruning Sensitivity on Snapdragon 8 Gen 3
+title: Unstructured Pruning Latency on Snapdragon 8 Gen 3
 scenario: A MobileViT-XS model (2.3M params, 0.7 GFLOPS) on Snapdragon 8 Gen 3 (45 TOPS) runs at 8ms. The team applies magnitude-based unstructured pruning to 50% of weights to target 4ms latency, but they observe only a 15% latency reduction.
 question: Why does 50% unstructured pruning on MobileViT-XS yield only a 15% latency reduction on Snapdragon 8 Gen 3?
 details:
-  realistic_solution: 'Unstructured pruning creates 50% sparse weight matrices. Standard Qualcomm HTP (Hexagon Tensor Processor) processes dense INT8 matrix operations — 50% zeros in dense format provide no speedup because the hardware still loads and multiplies all values (zero × anything = zero, but the multiply still occurs). Only 15% speedup likely came from reduced memory footprint (fewer cache misses, not compute reduction). To achieve 50% speedup: use structured pruning (remove entire channels/filters) → dense smaller matrices → full hardware acceleration. Alternative: use Qualcomm QNN SDK''s sparse acceleration if available on HTP v73.'
+  realistic_solution: Unstructured pruning creates 50% sparse weight matrices, but on a dense Qualcomm HTP/QNN execution path those zeros are still stored in dense tensors and processed by dense INT8 kernels. The original model takes 8ms for only 0.7 GFLOPS, so a 15% latency cut is consistent with smaller weight storage and better cache behavior, not with removing half of the NPU arithmetic. To target a true 4ms result, use structured pruning that removes channels or filters and exports smaller dense operators, or use an explicitly supported sparse runtime path if the deployment stack proves one exists.
   common_mistake: |
     **The Pitfall:** Expecting proportional speedups from unstructured sparsity on standard hardware.
     **The Rationale:** Candidates often believe unstructured pruning reduces FLOPs in a way the hardware can natively accelerate.
-    **The Consequence:** Standard NPUs process dense matrix operations, meaning the hardware still performs computations on zeros, resulting in no compute speedup and only minor memory-related gains.
+    **The Consequence:** On the dense HTP/QNN path, the hardware still performs dense work on tensors containing zeros, so latency improves only through memory and cache effects rather than a proportional compute reduction.
   napkin_math: |
     **Assumptions & Constraints:**
     - MobileViT-XS (2.3M params).
-    - Snapdragon 8 Gen 3 (45 TOPS) processes dense matrices.
+    - Snapdragon 8 Gen 3 HTP/QNN deployment uses dense INT8 kernels for this model.
     - Unstructured pruning yields 50% sparsity.
+    - Baseline latency is 8 ms for 0.7 GFLOPS.
 
     **Calculations:**
-    - Unstructured 50% sparsity: hardware still processes dense matrices -> 0% FLOP reduction.
-    - Memory footprint reduction: 50% smaller model yields fewer cache misses -> observed ~15% speedup.
+    - Dense execution still schedules the same 0.7 GFLOPS of work; the sparse weights do not automatically become a 0.35 GFLOPS kernel.
+    - Observed latency after pruning: 8 ms * (1 - 0.15) = 6.8 ms, not the 4 ms target.
+    - The 1.2 ms improvement is plausibly from reduced weight traffic and cache misses, not guaranteed sparse compute acceleration.
     - Structured pruning (50% channels): removes entire filters -> 50% true FLOP reduction.
 
     **Conclusion & Interpretation:**
-    - **Result: 50% true reduction (Compute-Bound)**. Structured pruning must be used to create smaller dense matrices the NPU can accelerate.
+    - **Result: no automatic dense-kernel compute reduction.** The observed ~15% latency gain is a memory/cache effect on this dense deployment path, not a universal law for all sparse runtimes; structured pruning is needed to create smaller dense matrices the NPU can reliably accelerate.
 status: published
 provenance: imported
 requires_explanation: false

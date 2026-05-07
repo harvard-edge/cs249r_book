@@ -7,11 +7,12 @@ topic: compute-cost-estimation
 competency_area: compute
 bloom_level: analyze
 phase: both
-title: 'Optimizing Cost-Performance on Google TPU v5e for LLM Inference'
-scenario: 'Your team is deploying a large language model (LLM) for real-time inference, and you''ve been tasked with evaluating the cost-performance trade-offs on Google TPU v5e. Each TPU v5e device has 16 GB HBM with 1.6 TB/s bandwidth and delivers 197 TFLOPS (BF16). You need to serve a model with 70 billion parameters, where each parameter is stored in BF16 format. The target is to achieve a P99 latency of 200 ms and a throughput of 1000 requests per second.'
-question: 'How would you estimate TPU v5e device count, device-hours, and cost to serve a 70B BF16 model at 200 ms P99 and 1000 QPS?'
+title: Optimizing Cost-Performance on Google TPU v5e for LLM Inference
+scenario: Your team is deploying a large language model (LLM) for real-time inference, and you've been tasked with evaluating the cost-performance trade-offs on Google TPU v5e. Each TPU v5e device has 16 GB HBM with 1.6 TB/s bandwidth and delivers 197 TFLOPS (BF16). You need to serve a 70B parameter BF16 model at 1000 QPS and 200 ms P99, assuming 1000 total prefill/decode tokens per request.
+question: How would you estimate TPU v5e device count, device-hours, and cost to serve a 70B BF16 model at 200 ms P99 and 1000 QPS?
 details:
-  realistic_solution: 'A realistic solution would involve: \n1. **Memory Capacity Check:** Calculate total model size (70B params * 2 bytes/param = 140 GB). Since each TPU v5e has 16 GB HBM, the model must be sharded across at least ceil(140/16) = 9 devices. \n2. **Bandwidth Consideration:** Evaluate if the 1.6 TB/s HBM bandwidth per device is sufficient for loading model weights during inference, considering activation sizes and KV cache. The total required bandwidth will increase with model parallelism. \n3. **FLOPs Estimation:** Estimate FLOPs per inference request (e.g., 2 * num_tokens * num_params for transformer-based LLMs). Factor in the 197 TFLOPS (BF16) per device. \n4. **Batching Strategy:** Determine an optimal batch size that maximizes TPU utilization without violating latency constraints. \n5. **Device Count & Cost:** Combine memory, bandwidth, and FLOPs requirements to determine the minimum number of devices. Multiply device count by expected runtime to get GPU-hours, then by the TPU v5e hourly cost (research current Google Cloud pricing for TPU v5e). Account for overheads and potential underutilization.'
+  realistic_solution: |
+    A realistic solution would involve: 1. Memory capacity check: 70B params * 2 bytes/param = 140 GB, so each replica needs at least 9 TPU v5e devices for weights and more like 10-12 shards after KV cache, runtime buffers, and collective overhead. 2. Latency check: 1000 QPS at 200 ms implies about 200 in-flight requests, so prefill/decode batching must be bounded by the P99 budget rather than assuming an unbounded compute batch. 3. FLOPs estimate: use 2 * parameters * total tokens per request = 140 TFLOPs/request under the stated 1000-token assumption, then discount peak TFLOPS to sustained serving utilization. 4. Bandwidth check: decode is often weight/KV bandwidth-bound, so estimate per-replica tokens/sec from measured prefill and decode batches instead of trusting peak FLOPs. 5. Cost: multiply the required replica/shard count by service hours and the chosen TPU v5e device-hour rate, with redundancy and utilization overhead included. The compute-only lower bound is about 2,030 devices at 35% sustained peak, but a practical serving estimate should be reported as a range such as roughly 2,000-3,000+ devices before redundancy, depending on batching, decode mix, shard efficiency, KV-cache bandwidth, and communication overhead.
   common_mistake: |
     **The Pitfall:** Considering only FLOPs and ignoring memory capacity and bandwidth.
     **The Rationale:** Candidates focus entirely on the 197 TFLOPS compute metric, completely forgetting that large models are bottlenecked by HBM limits and model sharding requirements.
@@ -19,15 +20,22 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Memory Capacity: 70B params * 2 bytes = 140 GB. TPU v5e has 16 GB HBM.
-    - FLOPs per Request: 2 * 70B * 1000 tokens = 140 TFLOPs.
-    - Required Throughput: 140 TFLOPs * 1000 QPS = 140,000 TFLOPS.
+    - Average request: 1000 total prefill/decode tokens.
+    - Sustained throughput planning factor: 35% of 197 TFLOPS = ~69 TFLOPS/device for an optimistic compute-only lower bound.
+    - Required latency: 200 ms P99 at 1000 QPS.
+    - Use cost rate R dollars per TPU v5e device-hour.
 
     **Calculations:**
-    - Min Devices (Memory): 140 GB / 16 GB = 8.75 -> 9 devices.
-    - Min Devices (Compute): 140,000 / 197 TFLOPS/device = ~711 devices.
+    - Min Devices per Replica (Memory): 140 GB / 16 GB = 8.75 -> 9 shards; practical replicas should use at least 10-12 shards for KV cache, runtime buffers, and collective overhead.
+    - In-flight requests from Little's Law: 1000 QPS * 0.2 s = 200 concurrent requests.
+    - FLOPs per request: 2 * 70B * 1000 = 140,000,000,000,000 FLOPs = 140 TFLOPs.
+    - Sustained fleet compute lower bound: 140 TFLOPs/request * 1000 QPS = 140,000 TFLOPs/s, averaged over the workload rather than concentrated inside one 200 ms window.
+    - Compute-only device floor: 140,000 / 69 ≈ 2,030 TPU v5e devices before redundancy.
+    - Serving adjustment: pipeline/tensor-parallel efficiency, decode KV bandwidth, all-reduce/all-gather overhead, and bounded P99 batches commonly add 20-50% or more, so plan roughly 2,000-3,000+ devices before redundancy unless measurements prove higher utilization.
+    - Device-hours per service hour: device count * 1 hour; hourly cost is about device_count * R, plus reserve capacity.
 
     **Conclusion & Interpretation:**
-    - **Result: ~711 devices (Compute-Bound)**. Compute requirements dictate the cluster size, far exceeding the memory capacity minimum.
+    - **Result: about 2,030 TPU v5e devices is only an optimistic compute floor; a realistic pre-redundancy plan is a measured range around 2,000-3,000+ devices.** The 200 ms SLA constrains batch size and requires roughly 200 concurrent in-flight requests; memory capacity sets the minimum shard size per replica, while sustained compute, KV-cache bandwidth, and collectives set the fleet size and cost.
 status: published
 provenance: imported
 requires_explanation: false

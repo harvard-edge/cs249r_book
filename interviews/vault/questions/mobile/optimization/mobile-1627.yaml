@@ -11,16 +11,25 @@ title: Pruning for On-Device LLM Inference on Samsung Exynos 2400 NPU
 scenario: A 10B parameter model must be pruned to run on a Samsung Exynos 2400 NPU (34.7 TOPS, 12 GB RAM). Original weights are FP16.
 question: How do structured vs unstructured pruning methods align with the NPU's processing capabilities and memory bandwidth?
 details:
-  realistic_solution: A realistic solution would involve a hybrid approach. Start with structured pruning (e.g., channel pruning, block sparsity like 2:4 or 4:8) where possible, as these patterns are typically hardware-friendly for NPUs like the Exynos 2400. Profile the NPU's performance with different structured sparsity levels to identify the sweet spot where compute reduction directly translates to latency improvement without significant accuracy drop. For remaining model components or when finer-grained sparsity is absolutely necessary for accuracy recovery, consider using unstructured pruning followed by a sparsity-aware quantization scheme and a specialized runtime that can exploit irregular sparsity without incurring excessive overhead. Leveraging the 12GB LPDDR5X memory, also consider the memory access patterns of different pruning strategies and their impact on memory bandwidth utilization.
+  realistic_solution: A realistic solution would involve a hybrid approach. Start with structured pruning (e.g., channel pruning, block sparsity like 2:4 or 4:8) where possible, as these patterns are typically hardware-friendly for NPUs like the Exynos 2400. Profile the NPU's performance with different structured sparsity levels to identify the sweet spot where compute reduction translates to latency improvement without significant accuracy drop. For remaining model components or when finer-grained sparsity is needed for accuracy recovery, use unstructured pruning only if the hardware/runtime explicitly supports irregular sparsity efficiently; otherwise it mainly reduces stored nonzeros and can add indexing overhead. Also budget activations, KV cache, and runtime buffers within the 12 GB LPDDR5X limit.
   common_mistake: |
     **The Pitfall:** Aggressively applying unstructured pruning for maximum parameter reduction.
     **The Rationale:** Candidates assume that simply reducing non-zero values mathematically equates to faster inference.
-    **The Consequence:** Irregular sparse matrices cause cache misses and dynamic indexing overhead, completely nullifying the NPU's matrix-multiply acceleration.
+    **The Consequence:** On typical mobile NPU kernels, irregular sparse matrices can cause cache misses and dynamic indexing overhead, so parameter sparsity may not become latency speedup unless the runtime and hardware support it.
   napkin_math: |
-    - **Unpruned Model:** 10B * 2 bytes = 20 GB (Exceeds 12 GB RAM).
-    - **Unstructured 50%:** Fits in 10 GB, but unstructured memory loads remain highly inefficient on rigid NPU architectures.
-    - **Structured 50% (e.g., 2:4 block):** Physically removes contiguous data, dropping memory to 10 GB while allowing linear, perfectly cache-aligned reads.
-    - **Final Result:** **Structured pruning cuts both memory and effective compute by exactly 50%, translating directly into sustained TOPS performance.**
+    **Assumptions & Constraints:**
+    Original weights are FP16, 10B parameters, Exynos 2400 NPU (34.7 TOPS, 12 GB RAM). Reserve about 2 GB for OS/runtime and at least 1 GB for activations/KV/cache buffers.
+
+    **Calculations:**
+    - Unpruned Model: 10B * 2 bytes = 20 GB (Exceeds 12 GB RAM).
+    - 50% stored-parameter reduction: 20 GB * 0.5 = 10 GB for weights before sparse metadata.
+    - Total memory with 10 GB weights + 1 GB activations/KV + 2 GB OS/runtime ≈ 13 GB, still above a 12 GB device budget.
+    - INT8 plus 50% structured pruning: 10B * 1 byte * 0.5 = 5 GB weights, leaving realistic room for buffers.
+    - Structured pruning can reduce dense tensor dimensions and mapped MACs, but sustained speedup may be less than 50% because non-pruned layers, memory bandwidth, and kernel efficiency remain.
+    - Unstructured pruning may reduce stored nonzeros, but usually needs sparse metadata and specialized kernels to avoid indexing overhead.
+
+    **Conclusion & Interpretation:**
+    - **Result: Pruning Alone Is Insufficient.** A 50% FP16-pruned 10B model is still not safely deployable once runtime memory is included. Structured pruning plus quantization is the practical path, and latency gains must be measured rather than assumed to equal sparsity.
 status: published
 provenance: imported
 requires_explanation: false

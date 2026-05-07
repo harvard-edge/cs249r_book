@@ -9,26 +9,30 @@ bloom_level: create
 phase: inference
 title: 'Queueing Theory Mastery: SLA-Driven Capacity Planning for H100 Fleet'
 scenario: You must design a globally distributed H100 inference fleet with requirements of p99 < 200ms, p999 < 1s, and a peak global load of 50,000 req/s. The mean service time is 8ms, but it has a high variance (CV=2.0), meaning standard M/M/1 assumptions break down.
-question: What G/G/c capacity plan would meet p99 < 200ms and p999 < 1s for 50,000 req/s with a service-time CV=2.0?
+question: What initial G/G/c capacity plan would you test for p99 < 200ms and p999 < 1s at 50,000 req/s with service-time CV=2.0?
 details:
-  realistic_solution: 'For G/G/c (Kingman''s approximation): Wq ≈ (C_a²+C_s²)/2 * M/M/c_wait. With C_a=1 (Poisson), C_s=2 (high variance), multiplier=(1+4)/2=2.5x versus M/M/c. Target utilization ρ=0.6 for p999<1s given CV=2. Load per region: 50000/3 regions ≈ 16667/s. Per-region servers: c = ceil(λ/(μ*ρ)) = ceil(16667/(125*0.6)) = 223 H100s per region. p999 estimate: 5-6x mean system time = 5*(8+Wq_adjusted)ms. With Kingman correction, Wq≈2.5xM/M/c_Wq. Set c=250/region for safety.'
+  realistic_solution: 'Use three active regions and size each for one-third of peak load: 50,000/3 ≈ 16,667 req/s. Mean service time is 8ms, so each server handles µ=125 req/s. A 250-H100 region has capacity 31,250 req/s and utilization ρ=16,667/31,250=0.53, leaving meaningful headroom for high variance. For a G/G/c sizing pass, inflate mean queueing delay by (C_a²+C_s²)/2=(1+4)/2=2.5 and treat any tail values as estimates, not proof. If service times are modeled as lognormal with mean 8ms and CV=2, service p99 is about 69ms and service p999 about 181ms before queueing. The defensible plan is to start with 250 H100s per region, 750 total, then verify p99/p999 with trace-driven simulation and load tests, adding admission control, autoscaling, or more headroom if measured queueing consumes the remaining SLA budget.'
   common_mistake: |
     **The Pitfall:** Using standard M/M/1 or M/M/c queuing formulas for high-variance workloads.
     **The Rationale:** Candidates forget that high service-time coefficient of variation (CV > 1) dramatically inflates tail latency.
     **The Consequence:** Under-provisioning the cluster and severely violating the p999 latency SLA.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Peak global load: 50,000 req/s across 3 regions (16,667 req/s per region).
-       - Mean service time (1/μ): 8ms (μ = 125 req/s).
-       - Service-time coefficient of variation (CV): 2.0 (high variance).
-       - Target utilization (ρ): 0.6 for safety.
-    2. **Calculations:**
-       - Servers per region (c) = ceil(λ / (μ * ρ)) = ceil(16,667 / (125 * 0.6)) = 223 servers.
-       - Kingman Adjustment multiplier = (C_a² + C_s²) / 2 = (1² + 2.0²) / 2 = 2.5x.
-       - M/M/c wait time (Wq) at c=223, ρ=0.6 is ≈ 1ms. Adjusted Wq = 1ms * 2.5 = 2.5ms.
-       - Total mean system time = Wq + service_time = 2.5ms + 8ms = 10.5ms.
-       - Estimated p999 ≈ 6 * mean system time = 6 * 10.5ms = 63ms.
-    3. **Conclusion & Interpretation:** **p999 ≈ 63ms, which is well under the 1s SLA, ensuring latency targets are met even with high variance.**
+    **Assumptions & Constraints:**
+    - Peak global load: 50,000 req/s across 3 active regions, or 16,667 req/s per region.
+    - Mean service time: 8ms, so μ = 125 req/s per H100.
+    - Arrival CV C_a=1 and service CV C_s=2.
+    - Use a lognormal service-time tail matching mean 8ms and CV=2 only as an illustrative tail model; mean/CV alone do not determine p99 or p999.
+
+    **Calculations:**
+    - Choose c=250 H100s per region: capacity = 250 * 125 = 31,250 req/s.
+    - Utilization per region: ρ = 16,667 / 31,250 = 0.53.
+    - Variability multiplier: (C_a^2 + C_s^2) / 2 = (1 + 4) / 2 = 2.5.
+    - Lognormal service tail from mean 8ms and CV=2 gives illustrative service p99 ≈ 69ms and service p999 ≈ 181ms.
+    - The SLA budget left for queueing is about 131ms at p99 and 819ms at p999.
+    - Kingman/Allen-Cunneen-style approximations support keeping utilization near 0.5, but they do not rigorously determine those queueing percentiles for G/G/c tails.
+
+    **Conclusion & Interpretation:**
+    - **Result: 250 H100s per region, 750 total as an initial test plan.** This keeps utilization low enough for high variance, but the p99/p999 claim must be confirmed with the real service-time distribution, arrival bursts, and load tests.
 status: published
 provenance: imported
 requires_explanation: true

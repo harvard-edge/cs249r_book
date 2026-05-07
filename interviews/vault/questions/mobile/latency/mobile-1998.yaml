@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: mobile-1998
 track: mobile
-level: L6+
+level: L4
 zone: design
 topic: queueing-theory
 competency_area: latency
@@ -9,45 +9,52 @@ bloom_level: create
 phase: both
 title: Mobile Neural Processing Unit Adaptive Batching Queues
 scenario: A mobile live-translation app queues incoming audio chunks of 200ms to the NPU for feature extraction.
-question: 'Model the processing pipeline as an M/D/1 queue and formulate an adaptive batching strategy to keep 99th percentile latency under 500ms when user speech rate unexpectedly doubles.'
+question: Model the processing pipeline as an M/D/1 queue and formulate an adaptive batching strategy to keep 99th percentile latency under 500ms when user speech rate unexpectedly doubles?
 details:
-  realistic_solution: Use Little's Law with M/D/1 constraints since NPU service time is highly deterministic. Formulate an adaptive batcher that aggregates chunks up to a batch size of 4 when the queue length exceeds a threshold, trading a slightly longer per-batch NPU execution time for higher global throughput to drain the queue.
+  realistic_solution: |
+    Model doubled speech as 10 chunks/sec because each chunk covers 200 ms. Approximate a full 4-chunk batch as deterministic service with 40 ms per batch, equivalent to 10 ms/chunk or 100 chunks/sec, so utilization is 0.10. The M/D/1 mean queueing delay Wq = rho / (2 * mu * (1 - rho)) is about 0.56 ms, but mean delay alone does not prove a P99 target. Use two triggers: dispatch immediately when 4 chunks are queued, or dispatch earlier when the oldest chunk has waited about 300 ms. For the tail budget, reserve two full batch-service times for rare server backlog, plus jitter; 300 ms batching wait + 40 ms service + 80 ms P99 backlog allowance + 50 ms jitter = 470 ms, under the 500 ms target.
   common_mistake: |
     **The Pitfall:** Assuming exponential service times (M/M/1 queue model).
     **The Rationale:** Candidates default to generic queuing theory without realizing that fixed-size audio chunks passing through an NPU yield highly deterministic execution times.
     **The Consequence:** Grossly inaccurate latency modeling and deploying overly conservative adaptive batching logic that harms baseline responsiveness.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Input Chunk Size: 200ms.
-    - Target Max P99 Latency: 500ms.
-    - Batch Size Limit: 4 chunks.
-    - Batch Processing Time: 40ms total.
+    - Input chunk size: 200 ms, so normal speech produces about 5 chunks/sec.
+    - Doubled speech rate: 10 chunks/sec.
+    - Target P99 latency: < 500 ms.
+    - Batch size limit: 4 chunks.
+    - Batch processing time: 40 ms total.
+    - Adaptive timeout for oldest chunk: 300 ms.
 
     **Calculations:**
-    - Max Stable Arrival Rate (λ) = Batch Size / Service Time.
-    - λ = 4 chunks / 0.04s.
-    - λ = 100 requests / sec.
+    - Full-batch service capacity = 4 chunks / 0.04 sec = 100 chunks/sec.
+    - At doubled speech rate, chunk-level utilization = 10 / 100 = 0.10.
+    - M/D/1 mean queueing delay Wq = rho / (2 * mu * (1 - rho)) = 0.10 / (2 * 100 * 0.90) = 0.00056 sec, or about 0.56 ms.
+    - Full-batch fill time at 10 chunks/sec is at most 3 interarrival gaps = 300 ms for the oldest chunk.
+    - The timeout also caps oldest-chunk batching wait at 300 ms when arrivals are irregular.
+    - For an approximate P99 tail budget, reserve two full deterministic batch times for server backlog: 2 * 40 ms = 80 ms.
+    - Conservative P99 oldest-chunk latency budget = batching wait 300 ms + service 40 ms + backlog allowance 80 ms + jitter allowance about 50 ms = about 470 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 100 req/sec (Queue-Bound)**. By utilizing an M/D/1 queuing model and allowing batching up to size 4, the pipeline maintains stability against arrival rates up to 100 requests/sec, easily absorbing 2x speech bursts.
+    - **Result: adaptive batch-4 with a 300 ms oldest-chunk timeout (Queue-Bound)**. The M/D/1 approximation shows average server queueing is tiny at rho = 0.10, and the explicit P99 budget with two queued batches plus jitter is about 470 ms, leaving margin under the 500 ms target.
 status: published
 provenance: llm-draft
-expected_time_minutes: 15
 requires_explanation: true
+expected_time_minutes: 15
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-analyze-L6+
+  - gemini-generated
+  - target-analyze-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

@@ -11,23 +11,27 @@ title: N-Gram Draft for Zero-Overhead Edge Speculation
 scenario: On Jetson Orin running a 3B INT8 model, you cannot afford a neural draft model's memory footprint. You must implement a prompt-lookup (n-gram) draft strategy for a 4096-token prompt.
 question: How would you implement K=8 prompt-lookup drafting for a 4096-token prompt on Orin, and what acceptance rates and memory cost should you expect?
 details:
-  realistic_solution: 'Build a trigram hash table of the 4096-token prompt (key: 3 tokens, value: position index). At decode time, use the last 3 generated tokens to query the hash table in O(1) time. If found, propose the subsequent K=8 tokens as a speculative draft. Verify them in a single batched forward pass through the main model. For highly repetitive structural data (JSON, code), n-gram matching achieves high acceptance rates with practically zero memory footprint compared to maintaining a secondary neural draft model.'
+  realistic_solution: 'Build a prompt-lookup index over the 4096-token prompt, for example using a 3-token key mapped to one or more prompt positions. At decode time, use the last generated tokens as the lookup key; when a match is found, copy the next K=8 prompt tokens after that matched position as the speculative draft. The main 3B model verifies those 8 draft tokens in one batched pass and accepts only the prefix that matches its own predictions, so chaining beyond the matched context is workload-dependent. For repetitive structural prompts such as code, logs, or JSON, acceptance can be useful, but it is not a universal property of code. Expect roughly 35% to 65% per-token acceptance depending on prompt repetition and generation drift. Memory is small compared with a neural draft model, but not zero: a compact index may be around 64 KB, while a practical hash table with load-factor, collision, and duplicate-position overhead is often closer to 128-256 KB.'
   common_mistake: |
     **The Pitfall:** Dismissing n-gram lookup as too simplistic for modern LLMs.
     **The Rationale:** Assuming speculation requires continuous neural probability generation, ignoring the highly repetitive nature of structural prompts.
     **The Consequence:** Suffering high latency on edge devices by either foregoing speculative decoding entirely or thrashing memory with a secondary neural draft model.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Prompt: 4096 tokens. Hash table entry: 12 bytes.
-    - Decode Time: 29ms/token. Alpha (acceptance): 0.55 (Code).
+    - Prompt: 4096 tokens.
+    - K=8 prompt-lookup draft verified by one target-model pass.
+    - Decode baseline: 29 ms/token.
+    - Workload-dependent per-token acceptance range: alpha=0.35 to 0.65.
 
     **Calculations:**
-    - Memory Cost: 4096 * 12 bytes = ~48 KB.
-    - Expected Draft Length (E): (1 - 0.55^9) / (1 - 0.55) = ~2.21 tokens per step.
-    - Effective Latency: 29 ms / 2.21 = 13.1 ms/token.
+    - Minimum compact storage: about 4094 n-gram entries * 16 bytes = ~64 KB for packed keys and positions.
+    - Practical hash-table storage with load-factor, collision, and duplicate-match overhead: roughly 128-256 KB.
+    - Expected emitted tokens: E = 1 + alpha + ... + alpha^8 = (1 - alpha^9) / (1 - alpha).
+    - At alpha=0.35, E = 1.54 tokens and effective latency is 29 / 1.54 = 18.8 ms/token.
+    - At alpha=0.65, E = 2.82 tokens and effective latency is 29 / 2.82 = 10.3 ms/token.
 
     **Conclusion & Interpretation:**
-    - **Result: 13.1 ms/token (Memory-Bandwidth Bound)**. The 48KB hash table delivers a 2.21x speedup by bypassing sequential memory loads.
+    - **Result: ~10-19 ms/token depending on acceptance (Memory-Bandwidth Bound)**. Prompt lookup is attractive because the index is only hundreds of KB, not because it has zero memory cost or a fixed acceptance rate.
 status: published
 provenance: imported
 requires_explanation: false

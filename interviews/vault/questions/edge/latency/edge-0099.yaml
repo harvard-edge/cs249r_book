@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: edge-0099
 track: edge
-level: L6+
+level: L4
 zone: mastery
 topic: latency-decomposition
 competency_area: latency
@@ -12,21 +12,25 @@ scenario: 'Your medical device runs a diagnostic neural network on an NXP i.MX 8
 question: What is causing the 2.7ms timing variation on identical inputs?
 details:
   realistic_solution: |
-    The bimodal distribution reveals system-level interference, not NPU non-determinism. The 5% slow cases correlate with DRAM refresh cycles (LPDDR4 requires periodic full refreshes) and Linux kernel timer interrupts preempting the NPU driver's DMA completion handler. The fix requires running the NPU in standalone mode with dedicated SRAM to eliminate DRAM dependency, and utilizing a tickless kernel (CONFIG_NO_HZ_FULL).
-  common_mistake: Assuming the NPU hardware is inherently non-deterministic or blaming the model architecture, rather than diagnosing OS scheduling jitter and memory subsystem refresh collisions.
+    The bimodal distribution reveals system-level interference, not NPU non-determinism. The 5% slow cases are consistent with occasional memory-service stalls and Linux kernel timer/driver interrupt activity delaying the NPU driver's DMA completion path. The 2.7 ms number comes directly from the observed modes: 6.8 ms - 4.1 ms. The fix is to reduce external DRAM and OS scheduling exposure, for example by keeping critical weights/activations in dedicated SRAM where possible, pinning the NPU path, and using a tickless or real-time kernel configuration.
+  common_mistake: |
+    **The Pitfall:** Assuming the NPU hardware is inherently non-deterministic or blaming the model architecture.
+    **The Rationale:** Engineers focus on the hardware or model instead of the whole system.
+    **The Consequence:** Failing to diagnose OS scheduling jitter and memory subsystem refresh collisions.
   napkin_math: |
     **Assumptions & Constraints:**
-    - LPDDR4 refresh every 64ms (full bank ~400 µs)
-    - Kernel tick interrupt every 4ms (~100-500 µs jitter)
+    - LPDDR4 requires periodic refresh; the visible stall depends on controller policy, bank state, and concurrent traffic.
+    - Kernel tick and driver interrupts can add scheduling jitter on the order of hundreds of microseconds to a few milliseconds.
     - ~5,000 DRAM accesses per inference
 
     **Calculations:**
-    - DRAM full bank refresh blocks access for ~400 µs
-    - Kernel interrupt preemption delays DMA handler by ~1-2 ms
-    - Total system interference = ~2.7 ms latency spike
+    - Fast mode latency: 4.1 ms.
+    - Slow mode latency: 6.8 ms.
+    - Observed gap between modes: 6.8 ms - 4.1 ms = 2.7 ms.
+    - The refresh/interrupt mechanisms explain why a second mode can appear; they do not uniquely derive the exact 2.7 ms without tracing.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.7 ms Variation (Memory-Bandwidth-Bound)**. Migrating weights/activations to dedicated SRAM and using a tickless kernel guarantees deterministic latency by eliminating DRAM and OS jitter.
+    - **Result: 2.7 ms observed variation (system-interference-bound)**. Moving the critical path away from shared DRAM and general-purpose kernel scheduling reduces or removes the slow mode.
 status: published
 provenance: imported
 requires_explanation: false
@@ -36,7 +40,7 @@ validation_status: OK
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- The 'reasoning_competency', 'knowledge_area', and 'reasoning_mode' fields are not populated, which could make the question harder to categorize.
+  - The 'reasoning_competency', 'knowledge_area', and 'reasoning_mode' fields are not populated, which could make the question harder to categorize.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

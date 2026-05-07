@@ -7,28 +7,29 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: evaluate
 phase: training
-title: Evaluating Framework Execution Overhead
-scenario: 'You are evaluating execution frameworks for a real-time anomaly detection pipeline on GPUs. The deep MLP model with 200 narrow layers processes batch size 1 to meet a strict 2ms latency SLA. The forward pass takes 4.5ms in PyTorch eager mode. Profiling reveals the GPU is only active for 0.5ms per pass, with massive gaps between kernel executions.'
-question: 'Should you build a custom monolithic CUDA kernel or use a JIT graph compiler to meet the SLA, and why?'
+title: Choosing JIT Graph Compilation over Custom CUDA for 2ms GPU Latency
+scenario: You are evaluating execution frameworks for a real-time anomaly detection pipeline on GPUs. The deep MLP model with 200 narrow layers processes batch size 1 to meet a strict 2ms latency SLA. The forward pass takes 4.5ms in PyTorch eager mode. Profiling reveals the GPU is only active for 0.5ms per pass, with massive gaps between kernel executions.
+question: Should you build a custom monolithic CUDA kernel or use a JIT graph compiler to meet the SLA, and why?
 details:
-  realistic_solution: 'Identify that the CPU interpreter overhead is dominating execution. While a custom CUDA kernel eliminates dispatch tax entirely, it requires massive engineering effort to maintain. A JIT compiler (like torch.compile or torch.jit) automatically fuses operations into larger sub-graphs, drastically reducing kernel launches and CPU dispatch overhead with minimal code changes, comfortably hitting the SLA.'
+  realistic_solution: Identify that CPU launch and interpreter overhead is dominating execution, not GPU math. Use a JIT graph compiler first because it can fuse the 200 tiny layer launches into a much smaller captured graph with minimal code change and likely enough headroom for the 2ms SLA. A custom monolithic CUDA kernel is justified only if the graph compiler cannot fuse the dynamic pieces, leaves too many launches, or profiling after compilation still misses the SLA.
   common_mistake: |
     **The Pitfall:** Misdiagnosing the latency as a GPU memory bandwidth issue.
     **The Rationale:** Because large MLPs are typically memory-bound, candidates assume the GPU is struggling to fetch weights fast enough.
     **The Consequence:** They might suggest increasing the batch size (which violates the strict SLA) instead of recognizing the actual bottleneck is the CPU-bound Python dispatch tax.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Eager Execution: 4.5ms total. GPU active time: 0.5ms.
-    - 200 individual operations.
+    - Eager execution: 4.5ms total. GPU active time: 0.5ms.
+    - Approximate eager launch count: 200 tiny layer kernels.
 
     **Calculations:**
-    - CPU Dispatch Tax: 4.5ms - 0.5ms = 4.0ms.
-    - Dispatch per op: 4.0ms / 200 ≈ 20µs dispatch overhead per op.
-    - JIT Compiler fusing to 10 kernels: 10 * 20µs = 0.2ms dispatch.
-    - Total JIT latency: 0.2ms + 0.5ms = 0.7ms.
+    - Exposed CPU dispatch/launch tax: 4.5ms - 0.5ms = 4.0ms.
+    - Approximate launch overhead: 4.0ms / 200 launches = 20µs per launch.
+    - If JIT fusion/capture reduces execution to about 10 launches, residual launch overhead is about 10 * 20µs = 0.2ms.
+    - Lower-bound compiled latency, assuming GPU active time is not made worse by fusion: 0.5ms + 0.2ms = 0.7ms.
+    - SLA headroom for fusion overhead or imperfect scheduling: 2.0ms - 0.7ms = 1.3ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.7ms total latency (CPU-Dispatch-Bound)**. CPU-Bound by Python dispatch. A JIT compiler achieves ~0.7ms total latency, comfortably beating the 2.0ms SLA without writing custom C++.
+    - **Result: JIT-first recommendation.** The 0.7ms figure is a lower-bound estimate, not a guarantee; it shows that reducing launch count is the highest-leverage fix and should be attempted before committing to custom CUDA.
 status: published
 provenance: imported
 requires_explanation: true

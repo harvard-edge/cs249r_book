@@ -11,19 +11,30 @@ title: Storage Format for Streaming Inference Logs
 scenario: 'Your LLM inference service generates 500K inference logs per second, each containing: prompt (variable length, ~2KB avg), response (variable length, ~4KB avg), latency metrics (fixed, 200 bytes), and token probabilities (variable, ~1KB avg). Total throughput: 3.5 GB/s. These logs must be stored for model monitoring, fine-tuning, and compliance.'
 question: How would you design a low-cost storage pipeline for 500K LLM inference logs per second at 3.5 GB/s?
 details:
-  realistic_solution: 'Architecture: (1) Kafka topics partitioned by inference server (50 partitions for 50 servers). Each partition handles 10K records/s. (2) Kafka consumers batch records and write to S3 as Parquet files every 60 seconds. Parquet is ideal here: prompts and responses compress 3-5x with dictionary + Zstd encoding. Fixed-width metrics columns get excellent compression. (3) Partition S3 by date/hour. (4) For real-time monitoring, maintain a sliding window in Redis. For fine-tuning data selection: query Parquet files with Athena/Presto.'
+  realistic_solution: 'Use Kafka or a managed streaming service for ingest, with partition count sized from measured per-partition byte and record throughput rather than hard-coded to server count. Batch consumers should write large hourly/date-partitioned objects to S3 in Parquet with Zstd compression: text columns compress well, fixed metrics remain columnar and queryable, and Parquet supports Athena/Presto fine-tuning-data selection without scanning raw JSON. Keep a short hot window for monitoring in Redis or a streaming analytics store, retain recent Parquet files in S3 Standard, and lifecycle older retained data to a lower-cost tier. This directly trades a small batch latency for fewer PUTs, better compression, cheaper scans, and tiered storage cost.'
   common_mistake: |
     **The Pitfall:** Writing individual log records directly to a database or object store.
     **The Rationale:** Candidates default to standard web-app logging patterns without realizing that 500K writes/s exceeds most DB throughput limits and S3 PUT rate limits (3,500 PUT/s per prefix).
     **The Consequence:** Pipeline bottlenecks, massive S3 API PUT charges, and dropped logs.
   napkin_math: |
-    - **Raw throughput:** $3.5\text{ GB/s} \times 86,400\text{ s/day} = 302\text{ TB/day}$.
-    - **With Parquet + Zstd (3x compression):** $101\text{ TB/day}$.
-    - **S3 Standard Cost:** $101\text{ TB} \times 30\text{ days} \times \$0.023/\text{GB} = \$69.7\text{K/month}$.
-    - **S3 Intelligent Tiering (7 days hot, 23 days archive):**
-      - 7 days hot: $101 \times 7 = 707\text{ TB} \times \$0.023 = \$16.3\text{K}$.
-      - 23 days archive: $101 \times 23 = 2.3\text{ PB} \times \$0.004 = \$9.3\text{K}$.
-    - **Total Infrastructure:** ~$30K/month (including $3.6K for Kafka brokers). **Savings vs all-hot S3: 63%.**
+    **Assumptions & Constraints:**
+    - Raw ingest is 3.5 GB/s.
+    - Parquet + Zstd compression ratio is 3:1.
+    - Use 1 TB = 1,000 GB for cost estimates.
+    - S3 Standard is about $0.023/GB-month; archive tier estimate is about $0.004/GB-month.
+    - Retention is modeled as a steady-state 30-day window: after the pipeline fills, the stored compressed volume is 30 days of logs.
+
+    **Calculations:**
+    - Raw daily volume = 3.5 GB/s * 86,400 s/day = 302,400 GB/day = 302.4 TB/day.
+    - Compressed daily volume = 302.4 TB/day / 3 = 100.8 TB/day.
+    - 30-day compressed volume = 100.8 TB/day * 30 = 3,024 TB = 3,024,000 GB.
+    - All-hot S3 Standard = 3,024,000 GB * $0.023/GB-month = about $69.6K/month.
+    - Seven hot days = 100.8 TB/day * 7 = 705.6 TB = 705,600 GB; cost = about $16.2K/month.
+    - Twenty-three archive days = 100.8 TB/day * 23 = 2,318.4 TB = 2,318,400 GB; cost = about $9.3K/month.
+    - Tiered storage subtotal = $16.2K + $9.3K = $25.5K/month, before query, monitoring, Kafka, and request costs.
+
+    **Conclusion & Interpretation:**
+    - **Result: about $25.5K/month for tiered steady-state storage before query and pipeline costs.** Keeping all 30 retained days in S3 Standard would be about $69.6K/month, so storage tiering cuts the storage bill by about 63%.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,24 +11,29 @@ title: 'LoRA Target Module Selection: Q/K/V/O vs All Linear Layers'
 scenario: A team fine-tuning Mistral 7B for classification debates whether to apply LoRA to only Q and V projections (standard practice) versus all linear layers including MLP.
 question: For Mistral 7B classification, how many LoRA parameters do Q+V-only versus all-linear targeting add, and what are the performance implications?
 details:
-  realistic_solution: 'LoRA module selection for Mistral 7B: standard (Q+V only): W_q and W_v matrices \times 32 layers. All-linear (Q,K,V,O,gate,up,down): 7 matrices \times 32 layers. Memory scaling: ~6\times more params for all-linear. For classification tasks, the final MLP layers are most task-critical, so adding LoRA to MLP is more valuable than for generation tasks. Research finding: for classification and extraction tasks, Q+V+down_proj covers 90%+ of performance of all-linear at ~50% the parameter count. For generation/instruction-following: Q+V+up_proj captures attention-MLP interaction. Ablation test: start with Q+V, measure validation performance, add MLP matrices, check if improvement exceeds 0.5% practical significance threshold.'
+  realistic_solution: 'For Mistral 7B at rank r=8, Q+V-only targets W_q and W_v in each of 32 layers and adds about 4.2M LoRA parameters. All-linear targets W_q, W_k, W_v, W_o, gate_proj, up_proj, and down_proj in each layer and adds about 22.5M parameters, or 5.4x more. The implication is mostly adapter memory, optimizer state, checkpoint size, and communication overhead; total training compute does not rise 5.4x because the frozen base model still dominates forward/backward cost. For classification, all-linear or Q+V+MLP can improve quality if the task depends on feed-forward features, but the right decision is an ablation: start with Q+V, add MLP targets only if validation lift justifies the extra adapter state.'
   common_mistake: |
     **The Pitfall:** Assuming that applying LoRA to all layers universally improves performance.
     **The Rationale:** Engineers fall into a 'more parameters equals better accuracy' trap, forgetting that attention mechanisms alone often capture sufficient task-relevant transformations.
-    **The Consequence:** They unnecessarily inflate the training memory footprint and gradient compute times by 6x without achieving any proportional lift in model quality.
+    **The Consequence:** They unnecessarily inflate adapter memory, optimizer state, checkpoint size, and communication without a proportional lift in model quality.
   napkin_math: |
     **Assumptions & Constraints:**
+    - Mistral 7B: 32 layers, hidden size 4096, MLP intermediate size 14336.
+    - LoRA rank r=8.
     - Q+V Only: W_q and W_v across 32 layers.
-    - All-Linear: Adds W_k, W_o, W_{gate}, W_{up}, W_{down}.
+    - All-Linear: W_q, W_k, W_v, W_o, gate_proj, up_proj, and down_proj.
 
     **Calculations:**
-    - Q+V Only: 106,496 params/layer * 32 = 3.41M.
-    - All-Linear Attention: + 212,992/layer = + 6.82M.
-    - All-Linear MLP: + 147,456 * 3 * 32 = + 14.15M.
-    - Total All-Linear: 6.82M + 14.15M = 20.97M params.
+    - LoRA params for one matrix with shape out x in: r * (in + out).
+    - One 4096 x 4096 projection: 8 * (4096 + 4096) = 65,536 params.
+    - Q+V-only: 2 * 65,536 * 32 = 4.19M params (~8.4MB BF16 weights).
+    - All attention projections: 4 * 65,536 * 32 = 8.39M params.
+    - One MLP projection with 4096 and 14336 dims: 8 * (4096 + 14336) = 147,456 params.
+    - All MLP projections: 3 * 147,456 * 32 = 14.16M params.
+    - Total all-linear: 8.39M + 14.16M = 22.55M params (~45.1MB BF16 weights).
 
     **Conclusion & Interpretation:**
-    - **Result: All-linear requires ~6.1x more parameters**. Yielding trivial memory difference but 6.1x longer gradient compute times.
+    - **Result: All-linear requires ~5.4x more LoRA parameters.** This materially increases adapter state and optimizer memory, but it should be described as a parameter-memory tradeoff rather than a 5.4x increase in total training compute.
 status: published
 provenance: imported
 requires_explanation: true

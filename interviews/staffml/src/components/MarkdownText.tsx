@@ -49,10 +49,16 @@ export default function MarkdownText({ text, className }: { text: string; classN
 }
 
 function HighlightNumbers({ text }: { text: string }) {
-  // Highlight numbers with units (e.g., "5 ms", "3.35 TB/s", "989 TFLOPS")
-  // Using a slightly more robust regex to avoid false positives with math operators
+  // Highlight numbers with units (e.g., "5 ms", "3.35 TB/s", "989 TFLOPS",
+  // "120e12 FLOPs", "1.2×10^14 bytes"). The number group accepts:
+  //   - plain integers/decimals with optional thousands commas: 1,000.5
+  //   - scientific shorthand: 989e12, 1.5e-3
+  //   - explicit ×10^N notation: 1.2×10^14
+  // The unit group covers throughput, bandwidth, memory, latency, power,
+  // energy, and ML-specific tokens; the optional /(s|byte|cycle|inf|J|W)
+  // suffix handles compound rates like TFLOP/s, FLOPs/byte, FLOP/cycle.
   const parts = text.split(
-    /([\d,]+(?:\.\d+)?(?:×\d+(?:\^\d+)?)?)\s*((?:TFLOPS|TOPS|GFLOPS|TFLOP\/s|GFLOP\/s|TB\/s|GB\/s|MB\/s|GB|MB|KB|ms|μs|ns|s|%|FLOPs\/byte|FLOPs|bytes?|FLOP|inf\/J)(?:\/s)?)/gi
+    /([\d,]+(?:\.\d+)?(?:e-?\d+|×10\^-?\d+)?)\s*((?:TFLOPS|TOPS|GFLOPS|TFLOP|GFLOP|TB|GB|MB|KB|kB|Hz|MHz|GHz|ms|μs|ns|s|W|mW|μW|mJ|μJ|J|%|FLOPs|FLOP|Ops|bytes?|tokens?|MACs?|cycles?|frames?|samples?)(?:\/(?:s|byte|cycle|inf|J|W))?\b)/gi
   );
 
   if (parts.length === 1) return <>{text}</>;

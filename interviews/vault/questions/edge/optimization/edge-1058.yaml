@@ -9,26 +9,28 @@ bloom_level: evaluate
 phase: inference
 title: 'Kernel Fusion: Evaluate Depthwise Convolution Fusion Strategies on Jetson Orin'
 scenario: 'For MobileNetV2 on Jetson Orin (32GB LPDDR5, 275 TOPS INT8, 60W), compare three fusion strategies: (A) no fusion, (B) DWConv+BN+ReLU6 fusion only, (C) full inverted residual block fusion (PW expand + DWConv + BN + ReLU6 + PW project). Evaluate memory bandwidth and latency for the inverted residual block with input 56x56x32, expansion 6.'
-question: 'For the 56x56x32 MobileNetV2 inverted residual block, which fusion strategy is viable and what memory and latency savings should you expect?'
+question: For the 56x56x32 MobileNetV2 inverted residual block, which fusion strategy is viable and what memory and latency savings should you expect?
 details:
-  realistic_solution: 'Strategy C (full block fusion) saves intermediate tensor writes but must buffer the input for the residual add. At 56x56x32 * 1B int8 = 100KB input, this fits in L2 cache — viable.'
+  realistic_solution: Strategy C is viable only when the compiler can tile the expanded 192-channel activations on chip and preserve the residual input until the final add. The residual tensor is 56 * 56 * 32 = 100,352 bytes (about 98 KiB), which is small enough to be a plausible cached residual, but it does not by itself prove full-block fusion will map. Expect large reductions in external activation traffic when full fusion maps, but treat bandwidth-only latency as a lower bound rather than a measured end-to-end speedup.
   common_mistake: |
     **The Pitfall:** Ignoring the inverted residual connection when attempting full block fusion.
     **The Rationale:** Candidates assume all intermediate activations can be discarded, forgetting that the original block input must be kept in SRAM for the final element-wise addition.
     **The Consequence:** The compiler fails to fuse the operators, or the system crashes because the required input tensor was overwritten.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Inverted residual block input: 56x56x32 * 1B = ~100 KB.
-    - Intermediate expansion: 56x56x192 * 1B = ~602 KB.
-    - Memory Bandwidth: 68 GB/s.
+    - Input/residual tensor: 56 * 56 * 32 * 1B = 100,352 bytes = 98 KiB.
+    - Expanded tensor: 56 * 56 * 192 * 1B = 602,112 bytes = 588 KiB.
+    - Count only external activation traffic; weights and cache effects are excluded.
+    - Use 200 GB/s-class LPDDR5 bandwidth for a bandwidth-only lower bound.
 
     **Calculations:**
-    - (A) No fusion: Write 602 + 602 + 602 + 100 + 100 = 2006 KB. Total traffic (read+write) = 4012 KB (~4 MB). At 68 GB/s: ~0.059ms.
-    - (B) DWConv+BN+ReLU6: Saves 2 intermediate writes/reads. Traffic = ~2.8 MB. Time = 0.041ms.
-    - (C) Full fusion: Keeps 100 KB input in L2. Reads weights (~14 KB) and input. Writes 100 KB output. Traffic = ~220 KB. At 68 GB/s: ~0.003ms.
+    - (A) No fusion traffic model: read block input once (100,352 B), materialize three expanded intermediates between PW expand, DWConv, and activation/project boundaries (3 * write+read * 602,112 B), and write output once (100,352 B). Total = 100,352 + 3 * (2 * 602,112) + 100,352 = 3,813,376 bytes = 3.64 MiB. Bandwidth lower bound: 3,813,376 B / 200 GB/s = about 0.019ms.
+    - (B) DWConv+BN+ReLU6 fusion traffic model: read block input once, materialize two expanded intermediates around the fused depthwise group, and write output once. Total = 100,352 + 2 * (2 * 602,112) + 100,352 = 2,609,152 bytes = 2.49 MiB. Lower bound: about 0.013ms.
+    - (C) Full block fusion traffic model: read input once, keep residual and expanded tiles on chip, and write output once. Total = 100,352 + 100,352 = 200,704 bytes = 196 KiB external activation traffic. Lower bound: about 0.001ms.
+    - Traffic reduction from A to C = 3,813,376 / 200,704 = 19.0x for this activation-traffic model.
 
     **Conclusion & Interpretation:**
-    - **Result: ~19.7x Speedup (Memory Bandwidth-Bound)**. Full block fusion is highly viable as the 100 KB input easily fits in L2 cache, yielding a theoretical ~19.7x speedup over no fusion.
+    - **Result: Full fusion can save up to about 19x external activation traffic if the compiler can tile the expanded tensor on chip (Memory Bandwidth-Bound lower bound)**. Actual latency savings will be smaller because compute, scheduling, weights, cache tiling, and compiler limits are not captured by the bandwidth-only model.
 status: published
 provenance: imported
 requires_explanation: false

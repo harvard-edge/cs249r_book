@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: edge-2089
 track: edge
-level: L2
+level: L1
 zone: analyze
 topic: storage-format-selection
 competency_area: data
@@ -11,7 +11,7 @@ title: 'Hailo-8 Edge Data Pipeline: Optimizing Storage for Efficient Inference'
 scenario: A new object detection model is deployed on a Hailo-8 accelerator for real-time processing of video streams at the edge. The input frames arrive at 500 MB/s and are pre-processed into a dataset of image patches and associated metadata. This data needs to be temporarily stored on local flash storage before being fed to the Hailo-8 for inference.
 question: Which storage format and compression traits would you choose for 500 MB/s patch ingestion on the Hailo-8, and why?
 details:
-  realistic_solution: For this scenario, a columnar storage format like Parquet, combined with efficient compression (e.g., Snappy, Zstd), would be a strong choice. Parquet allows for selective column reads, meaning only necessary features (e.g., image patch data vs. metadata) are loaded into memory, reducing I/O bandwidth and host CPU processing. Its columnar nature also lends itself well to high compression ratios for homogeneous data types within columns (e.g., all bounding box coordinates), further minimizing storage footprint and read times. For highly structured data directly consumed by TensorFlow, a well-structured TFRecord (e.g., using `tf.Example` for efficient serialization) could also be viable, ensuring data is ready for direct feeding to the model with minimal parsing overhead.
+  realistic_solution: Use large sequential RecordIO/TFRecord-style binary shards for the image patches, with fixed-size records or length-prefixed records, a compact sidecar index for offsets and metadata, and lightweight block compression such as LZ4 or Snappy only where benchmarks show the host can keep up. This workload is temporary 500 MB/s edge ingestion for a Hailo-8 pipeline, so append throughput, sequential reads, low parse overhead, bounded flash write amplification, and predictable prefetch matter more than cloud analytics features. Store metadata in the sidecar or a small columnar file for later analysis, but do not put the hot patch stream in Parquet unless measured access is columnar and offline.
   common_mistake: |
     **The Pitfall:** Defaulting to general-purpose, row-oriented formats like CSV or JSON.
     **The Rationale:** Developers rely on cloud-native habits and ignore the massive CPU overhead required to deserialize row-oriented text formats for thousands of small metadata points.
@@ -19,15 +19,16 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Raw ingestion rate: 500 MB/s.
-    - Format: Columnar (Parquet) with Snappy compression.
-    - Compression ratio: 5:1.
+    - Format: sequential binary patch shards with sidecar metadata.
+    - Compression ratio depends on image-patch entropy and metadata structure; assume an illustrative 2:1 ratio for planning, not a guarantee.
 
     **Calculations:**
-    - Effective data transfer rate: 500 MB/s / 5 = 100 MB/s.
-    - Total I/O reduction: 400 MB/s.
+    - Illustrative compressed write rate = 500 MB/s / 2 = 250 MB/s if LZ4/Snappy achieves 2:1 on representative patches.
+    - If patches are already compressed or high entropy, write rate remains near 500 MB/s, so the format still needs sequential append and prefetch.
+    - Metadata is small enough to keep in a sidecar index; avoid per-record text or nested column parsing on the hot path.
 
     **Conclusion & Interpretation:**
-    - **Result: I/O Bound Mitigated**. Dropping the flash read requirements from 500 MB/s to 100 MB/s prevents host CPU saturation and ensures the Hailo-8 is fed data fast enough to sustain high-throughput inference.
+    - **Result: choose shardable binary records for the hot path.** Compression may reduce I/O pressure, but the primary requirement is sequential flash access and low CPU parsing so the Hailo-8 stays fed.
 status: published
 provenance: imported
 requires_explanation: false

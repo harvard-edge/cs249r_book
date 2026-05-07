@@ -11,7 +11,7 @@ title: Optimizing Large Language Model Inference on AMD MI300X
 scenario: You are tasked with deploying a 100B parameter LLM (FP16) for real-time inference at batch size 1. Your target hardware is the AMD MI300X (192 GB HBM3, 1,300 TFLOPS FP16 dense, 5.3 TB/s memory bandwidth).
 question: How would you serve a 100B FP16 LLM on MI300X versus a custom ASIC or CPUs, and optimize data flow despite the 192 GB HBM limit?
 details:
-  realistic_solution: 'A realistic solution would first acknowledge the memory constraint: a 100B parameter FP16 model (200GB) will not fit entirely in the MI300X''s 192GB HBM3. This necessitates strategies like aggressive 8-bit (or even 4-bit) quantization, or implementing a multi-accelerator system with tensor parallelism or CPU offloading for parts of the model. For maximizing performance on MI300X, the design should focus on optimizing memory access patterns, kernel fusion, and leveraging its high bandwidth. Exploiting sparse model inference by effectively pruning the LLM to utilize the 2,600 TFLOPS FP16 sparse capabilities would be crucial. The comparison should highlight MI300X''s programmability advantage and established ecosystem over custom ASICs, while acknowledging the ASIC''s potential raw performance ceiling. CPUs would typically be considered for their flexibility and control plane operations but fall short on raw compute for large LLMs.'
+  realistic_solution: 'A realistic solution would first acknowledge the memory constraint: a 100B parameter FP16 model (200GB) will not fit entirely in the MI300X''s 192GB HBM3. For FP16 quality, use at least 2-way tensor parallelism across MI300X devices and keep weights resident in HBM; for a single accelerator, use validated INT8/INT4 weight quantization with enough headroom for KV cache and runtime buffers. Optimize data flow with fused attention/MLP kernels, contiguous KV-cache layout, paged attention, and batching that reuses weights without breaking latency. A custom ASIC could win if the workload is fixed, high volume, and worth non-recurring engineering cost, because it can specialize SRAM, interconnect, and decode scheduling; MI300X is the pragmatic programmable choice for changing models and ROCm-based deployment. CPUs are appropriate for routing, tokenization, and fallback, but not for the primary batch-1 hot path.'
   common_mistake: |
     **The Pitfall:** Focusing solely on peak TFLOPS without checking if the model even fits in memory.
     **The Rationale:** A 100B parameter FP16 model (200GB) exceeds the MI300X's 192GB capacity. Furthermore, batch-1 inference is extremely memory-bandwidth bound, making TFLOPS largely irrelevant.
@@ -23,9 +23,11 @@ details:
        - Inference profile: Batch size 1.
     2. **Calculations:**
        - 200 GB model > 192 GB VRAM (Cannot fit without quantization/sharding).
-       - Assume 8-bit quantization fits in 100 GB.
-       - Max generation rate = 5.3 TB/s bandwidth / 100 GB memory read = 53 tokens/s.
-    3. **Conclusion & Interpretation:** **Model OOMs in FP16. Even quantized, batch-1 limits to 53 tokens/s. Memory-Bandwidth-Bound.**
+       - 2-way FP16 sharding stores about 100 GB of weights per MI300X, leaving HBM for KV cache and overhead on each device.
+       - Batch-1 decode lower-bound weight traffic is about 200 GB/token for unsharded FP16, or about 100 GB/token per device with 2-way tensor parallelism.
+       - Bandwidth lower bound per shard: 100 GB / 5300 GB/s = ~18.9 ms/token before KV-cache traffic, collectives, and nonideal kernels.
+       - Compute lower bound per token is about 2 * 100B = 200 GFLOPs; split across two 1,300 TFLOPS devices this is far below the bandwidth lower bound at batch 1.
+    3. **Conclusion & Interpretation:** **Model OOMs on one MI300X in FP16. A practical design uses quantization or multi-MI300X sharding, and batch-1 latency is usually bandwidth and communication sensitive rather than peak-TFLOPS limited.**
 status: published
 provenance: imported
 requires_explanation: true

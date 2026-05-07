@@ -7,11 +7,11 @@ topic: compound-ai-systems
 competency_area: deployment
 bloom_level: evaluate
 phase: both
-title: 'End-to-End Latency SLA for Multi-Hop Agent Chains on A100'
+title: End-to-End Latency SLA for Multi-Hop Agent Chains on A100
 scenario: 'A 4-hop agent chain on A100 (80GB HBM2e) executes: hop1=tool call (30ms) + LLM decision (150ms), hop2=retrieval (60ms) + LLM synthesis (200ms), hop3=validation LLM (100ms), hop4=final generation (300ms). Serial execution takes 840ms. You must meet a 500ms P95 SLA.'
-question: 'Which hops in the 4-hop agent chain can be parallelized, and what P95 latency is achievable after restructuring toward the 500 ms SLA?'
+question: Which hops in the 4-hop agent chain can be parallelized, and what P95 latency is achievable after restructuring toward the 500 ms SLA?
 details:
-  realistic_solution: 'Analyze dependencies: hop1 tool call (30ms) can start while hop2 retrieval (60ms) runs in parallel if the tool call is independent. Hop3 validation can speculatively start with a draft from hop2 while hop4 begins optimistically. Restructured: parallel(hop1_tool+hop2_retrieval)=60ms, then parallel(hop1_LLM+hop2_LLM)=200ms, then parallel(hop3+hop4_speculative)=300ms. Total: 60+200+300=560ms. Further: overlap hop1 LLM decode with hop2 retrieval: 60+200+300=560ms. With streaming and pipeline parallelism: 480ms achievable.'
+  realistic_solution: 'Analyze the dependencies before claiming the SLA. If hop1 tool call and hop2 retrieval are independent, run them together: max(30, 60)=60ms. After both inputs are available, run hop1 LLM decision and hop2 LLM synthesis together only if the chain semantics allow independent decisions: max(150, 200)=200ms. Hop4 final generation depends on the synthesis output, while hop3 validation can run in parallel with final generation only as speculative validation of the same draft; otherwise it remains serial. Under the stated speculative restructuring, the defensible total is 60+200+max(100,300)=560ms. That improves on 840ms but does not meet a 500ms P95 SLA without an additional measured optimization such as shorter generation, streaming early-exit, or model latency reduction.'
   common_mistake: |
     **The Pitfall:** Assuming all hops are strictly serial because they involve LLM calls.
     **The Rationale:** Candidates fail to realize that hop3 validation can run concurrently with hop4 generation using speculative execution, and hop1 tool calls can overlap with prior LLM decoding.
@@ -19,16 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Strictly Serial: 30 + 150 + 60 + 200 + 100 + 300 = 840 ms.
+    - The 560 ms restructure assumes hop3 validation can run speculatively against the same draft that hop4 final generation is producing; without that semantic allowance, validation remains serial.
+    - Treat the listed hop latencies as P95 component estimates with no extra jitter margin.
 
     **Calculations:**
     - Parallel 1 (Retrieval+Tool): max(30, 60) = 60 ms.
     - Parallel 2 (LLM Decisions): max(150, 200) = 200 ms.
     - Parallel 3 (Validation+Speculative Gen): max(100, 300) = 300 ms.
     - Restructured Total: 60 + 200 + 300 = 560 ms.
-    - Streaming Pipeline Overlap (15%): 560 ms * 0.85 = 476 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 500ms P95 (Latency-Bound)**. With a 10% jitter margin, P95 is 476 * 1.05 = 500ms, exactly hitting the SLA.
+    - **Result: 560ms Restructured P95 Estimate (Latency-Bound)**. Dependency-correct parallelism reduces the chain from 840ms to about 560ms under the speculative validation assumption. The 500ms P95 SLA is still missed unless a separately measured optimization removes at least 60ms plus any additional jitter margin.
 status: published
 provenance: imported
 requires_explanation: true

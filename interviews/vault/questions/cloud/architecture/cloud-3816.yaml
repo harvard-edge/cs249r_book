@@ -9,24 +9,25 @@ bloom_level: evaluate
 phase: both
 title: 'MoE Gradient Computation: The Router Gradient Challenge'
 scenario: 'In MoE with top-k routing, the argmax (top-k selection) is non-differentiable. The standard solution uses the straight-through estimator: forward pass uses hard top-k, backward pass pretends the top-k selection was soft.'
-question: "What gradient bias does the straight-through top-k estimator introduce, and what alternative routing-gradient approaches exist?"
+question: What gradient bias does the straight-through top-k estimator introduce, and what alternative routing-gradient approaches exist?
 details:
-  realistic_solution: 'The bias means the gradient for non-selected experts receives full feedback despite having zero forward contribution. Alternatives include Gumbel-Softmax (accurate but numerically unstable), REINFORCE policy gradients (unbiased but high variance), Hash routing (deterministic but no learning), or Expert choice routing.'
+  realistic_solution: The straight-through top-k estimator is biased because the forward pass uses a hard discrete expert set, while the backward pass uses a surrogate gradient through a soft or partially soft router. Gradients therefore optimize a proxy objective rather than the exact hard-routing objective; the magnitude and direction of the bias depend on the surrogate, router distribution, and loss landscape, so it is not captured by a fixed percentage. Alternatives include Gumbel-Softmax or soft routing relaxations, REINFORCE-style policy gradients, auxiliary router losses, hash routing, and Expert Choice routing, each trading bias, variance, stability, and systems cost.
   common_mistake: |
     **The Pitfall:** Treating MoE top-k routing as perfectly differentiable.
     **The Rationale:** The straight-through estimator hides the non-differentiable `argmax` operation under the hood.
     **The Consequence:** Ignoring the significant gradient bias introduced for non-selected experts during training.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Router linear layer parameters: 8192 x 8 = 65K.
-    - Top-2/8 routing.
+    - Top-k routing uses a non-differentiable selection in the forward pass.
+    - Straight-through training replaces the true derivative of the hard selection with a surrogate gradient.
 
     **Calculations:**
-    - Gradient bias magnitude ≈ (1 - top_k/E) × avg_gradient_norm.
-    - Bias ≈ (1 - 2/8) = 75%.
+    - The true gradient of the hard top-k selection is zero or undefined at selection boundaries.
+    - The straight-through estimator backpropagates through a different continuous proxy, so the estimated gradient is generally biased.
+    - Bias magnitude cannot be inferred from top_k/E alone; it depends on router probabilities, the surrogate estimator, and downstream losses.
 
     **Conclusion & Interpretation:**
-    - **Result: 75% counterfactual gradient bias (Algorithmic)**. The network receives noisy feedback for experts it never actually evaluated.
+    - **Result: Qualitative estimator bias.** Straight-through top-k gives useful training signal but does not provide an unbiased gradient of the hard-routing objective.
 status: published
 provenance: imported
 requires_explanation: true

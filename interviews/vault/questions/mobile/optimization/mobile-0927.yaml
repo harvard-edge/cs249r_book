@@ -8,20 +8,27 @@ competency_area: optimization
 bloom_level: evaluate
 phase: inference
 title: 'Kernel Fusion: Evaluate Core ML vs ONNX Runtime Fusion for iPhone LLM'
-scenario: Compare Core ML (A17 Pro Neural Engine, 35 TOPS) vs ONNX Runtime (iOS, CPU/GPU) for running a 1B INT4 quantized LLM.
-question: How would you evaluate kernel fusion depth, tokenization throughput, first-token latency, and subsequent-token latency?
+scenario: Compare Core ML on iPhone against ONNX Runtime on iOS CPU/GPU execution providers for running a 1B INT4 quantized LLM.
+question: How would you evaluate Core ML vs ONNX Runtime on kernel fusion depth, tokenizer throughput, first-token latency, and subsequent-token latency?
 details:
-  realistic_solution: 'Core ML: deep hardware integration, Neural Engine optimized, automatic fusion, but limited operator support for cutting-edge quantization schemes. ONNX Runtime: more flexible operator support, good for INT4 via specific EPs, may run on CPU or GPU. For latest quantization, may need custom Metal shaders.'
+  realistic_solution: Build one benchmark harness around the same quantized weights, tokenizer, prompts, sampling settings, and KV-cache length, then compare compiled runtime behavior rather than vendor claims. For each runtime, record the post-compile graph partitions, fused-op groups, CPU fallback ops, tokenizer tokens/sec, first-token latency (tokenizer + prefill + first decode), and warm subsequent-token p50/p95 latency. Use Instruments or runtime traces to verify whether Core ML keeps INT4 matmuls and attention on ANE/GPU without fallback, and whether ONNX Runtime keeps the same ops on Metal/GPU. Choose Core ML only if it has deeper fusion and lower measured first/subsequent-token latency with no costly fallbacks; choose ONNX Runtime or custom Metal kernels if it preserves the INT4 graph better.
   common_mistake: |
     **The Pitfall:** Assuming Core ML always wins on Apple hardware simply because it is first-party.
     **The Rationale:** Candidates fail to realize that while Core ML excels at Neural Engine integration, it often lacks support for cutting-edge, non-standard quantization schemes (like certain 4-bit variants).
     **The Consequence:** Developers might force a model through Core ML, inadvertently triggering massive CPU fallbacks that run slower than a pure Metal/GPU implementation via ONNX Runtime.
   napkin_math: |
-    1. **Prefill (Compute Bound):** 1B INT4 model. Batch 1, 512 tokens. Compute = 512 × 1B × 2 = 1.024T FLOPs. ANE (35 TOPS) = 29.3ms. Metal GPU (16 TFLOPS) = 64ms.
-    2. **Decode (Memory Bound):** 1 token. Weight reads = 0.5 GB. Bandwidth = 68 GB/s. Memory latency = 0.5 GB / 68 GB/s = 7.35ms/token (~136 tok/sec).
-    3. **Decode Compute:** 1B × 2 FLOPs / 35T = 0.057ms.
-    4. **CPU Fallback:** A17 Pro CPU (12 GFLOPS INT8) prefill = 1.024T / 12G = 85.3 seconds.
-    **Result:** Core ML on the ANE is fastest for prefill (**~29ms**) if operators are supported. If unsupported, falling back to ONNX Runtime on the Metal GPU (**64ms**) prevents the catastrophic **85s CPU penalty**.
+    **Assumptions & Constraints:**
+    - 1B INT4 model, batch 1.
+    - Compare the same prompt set and generation settings across both runtimes.
+    - Measure rather than infer hardware latency from peak TOPS.
+    **Calculations:**
+    - Kernel fusion depth: count runtime graph partitions and unfused fallback ops after compilation.
+    - Tokenizer throughput: tokens/second on CPU preprocessing, measured separately from model prefill.
+    - First-token latency: tokenizer time + graph setup + prompt prefill + first decode step.
+    - Subsequent-token latency: median and p95 decode time per generated token after KV cache is warm.
+    - Fallback check: if Core ML inserts CPU fallbacks for unsupported INT4 ops, compare against an ONNX Runtime path that keeps those ops on Metal/GPU rather than relying on peak ANE claims.
+    **Conclusion & Interpretation:**
+    - **Result:** Core ML is preferred only if the INT4 graph compiles with deep fusion and no costly fallbacks. ONNX Runtime may win when it preserves more of the quantized graph on GPU/Metal. The release decision should be based on measured first-token and subsequent-token latency, not unsupported peak-compute arithmetic.
 status: published
 provenance: imported
 requires_explanation: false

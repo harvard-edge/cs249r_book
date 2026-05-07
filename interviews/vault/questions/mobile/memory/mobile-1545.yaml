@@ -12,7 +12,7 @@ scenario: You are deploying a 7B parameter LLM for on-device inference. Your LLM
 question: How should a mobile LLM manage KV cache for 2048-token context to avoid latency spikes and OOMs?
 details:
   realistic_solution: |
-    Implement PagedAttention to manage the KV-cache efficiently, allowing non-contiguous memory allocation and eliminating fragmentation. Apply INT8 quantization to the KV-cache to halve its footprint. Utilize hardware-aware attention mechanisms (like FlashAttention-2 adapted for edge) to tile computation and minimize SRAM-to-DRAM memory movement during the autoregressive phase.
+    Treat the KV cache as a first-class memory budget item. Cap context length for the mobile tier, use sliding-window or chunked attention when full 2048-token history is not required, and apply INT8 or lower-bit KV-cache quantization after measuring quality. If memory pressure remains, selectively cache fewer layers or heads, or offload cold cache blocks only when the transfer cost is acceptable. Paged allocation can reduce allocator fragmentation and avoid over-reserving cache blocks, but it does not remove the KV-cache capacity requirement. FlashAttention-style kernels can reduce attention scratch memory and bandwidth, but they should not be presented as the main fix for KV-cache size.
   common_mistake: |
     **The Pitfall:** Underestimating the KV-cache's memory footprint for long contexts.
     **The Rationale:** Developers used to cloud deployments often ignore KV-cache size until it causes an OOM on mobile devices.
@@ -21,14 +21,15 @@ details:
     **Assumptions & Constraints:**
     - 30 layers, 32 heads, 128 dim
     - Context: 2048 tokens
-    - Data type: FP16 (2 bytes)
+    - Data type: FP16 (2 bytes/element)
+    - Standard KV cache stores both K and V separately.
 
     **Calculations:**
-    - KV Cache per token: 30 layers * 32 heads * 128 dim * 2 (K&V) * 2 bytes = 491,520 bytes (~0.47 MB)
-    - Total KV Cache: 0.47 MB * 2048 tokens = 962.6 MB
+    - KV Cache per token = 30 layers * 32 heads * 128 dim * 2 (K,V) * 2 bytes = 491,520 bytes (~0.469 MiB).
+    - Total KV Cache = 491,520 bytes/token * 2048 tokens = 1,006,632,960 bytes = ~960 MiB.
 
     **Conclusion & Interpretation:**
-    - **Result: 962.6 MB (Memory Capacity-Bound)**. The KV cache consumes nearly 1GB of unified memory, causing pressure.
+    - **Result: ~960 MiB (Memory Capacity-Bound)**. The KV cache is large enough to cause mobile memory pressure, so context caps, paging, and KV-cache quantization remain important.
 status: published
 provenance: imported
 requires_explanation: false

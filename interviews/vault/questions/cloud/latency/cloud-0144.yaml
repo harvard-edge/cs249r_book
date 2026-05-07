@@ -11,25 +11,26 @@ title: The ROI of Heterogeneity
 scenario: 'Your company runs many LLM services on H100s with a bimodal workload: 95% of requests are short (100 prompt/100 completion tokens), but 5% are long-context ''power user'' requests (4k prompt/4k completion). All services use static batching, causing inefficient partitioning of the expensive H100 fleet. A platform team proposes a 3-month project to build a central continuous batching service. You must calculate the potential throughput gain to build a business case for the project.'
 question: How much throughput could continuous batching recover over static batching for a workload with 95% short and 5% 4k/4k long requests?
 details:
-  realistic_solution: The business case is extremely strong. Static batching is pathologically bad for heterogeneous workloads. When a single long-context (8k total tokens) request enters a batch, all other short-context requests (200 tokens) in that batch are padded to the 8k length. This creates massive memory and compute waste. The KV cache allocation is based on the 8k length for all requests, meaning a batch with just one power user can fit almost no one else. In practice, this leads to de-facto batch size 1 for all power users, leaving the GPU idle most of the time.
+  realistic_solution: Under the stated mix, continuous batching could recover up to roughly 13x more useful token throughput from padding waste in a representative mixed batch. A batch of 20 requests contains about one 4k/4k long request and nineteen 100/100 short requests, or 8,000 and 200 total tokens respectively. Static batching pads every sequence to 8,000 tokens, doing 160,000 token-steps of work for only 11,800 useful token-steps. Continuous batching lets the short requests leave after 200 tokens and fills the freed slots with new work, so much of the padding waste can be reclaimed. The exact production gain depends on arrival patterns, queueing policy, scheduler overhead, KV-cache limits, and preemption, so the business case should present this as an illustrative upper bound, not a guaranteed system-level speedup.
   common_mistake: |
     **The Pitfall:** Averaging the workload to estimate throughput.
     **The Rationale:** Calculating the average sequence length and assuming the system behaves according to the average.
     **The Consequence:** Completely misses that static batching performance is dictated by the maximum length in a batch, masking severe compute waste.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Workload: 95% short (200 total tokens), 5% long (8,000 total tokens).
+    - Workload: 95% short (100 prompt + 100 completion = 200 total tokens), 5% long (4,000 prompt + 4,000 completion = 8,000 total tokens).
     - Static batching pads all requests in a batch to the maximum sequence length.
-    - H100 Time Per Output Token (TPOT): 10 ms.
+    - Representative batch size: 20 requests, matching the 95/5 traffic mix.
 
     **Calculations:**
-    - One 8k request paired with seven 200-token requests forces padding.
-    - Padding per short request: 8,000 - 200 = 7,800 tokens.
-    - Total wasted tokens: 7 × 7,800 = 54,600 wasted generations.
-    - Time wasted: 54,600 tokens × 10 ms = 546 seconds (compute stall).
+    - Expected composition: 19 short requests and 1 long request.
+    - Useful token-steps: (19 × 200) + (1 × 8,000) = 11,800.
+    - Static padded token-steps: 20 × 8,000 = 160,000.
+    - Static efficiency: 11,800 / 160,000 = 7.4%.
+    - Illustrative upper bound from removing padding waste: 160,000 / 11,800 = 13.6x.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute-Bound (Waste)**. Static batching causes immense arithmetic waste due to padding; continuous batching evicts finished requests and reclaims 99% of this compute.
+    - **Result: up to ~13.6x useful-throughput recovery from padding waste in this representative batch.** Real throughput recovery will be lower if arrivals are not this mixed, KV cache is tight, or scheduler/preemption overheads dominate.
 status: published
 provenance: imported
 requires_explanation: false

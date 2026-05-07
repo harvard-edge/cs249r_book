@@ -9,26 +9,28 @@ bloom_level: evaluate
 phase: inference
 title: 'Kernel Fusion: Optimize Int8 Fusion Pipeline for Hailo-8 NPU'
 scenario: You are deploying an object detection model on Hailo-8 (26 TOPS INT8, 2.5W). The Hailo-8 dataflow architecture requires all fused ops to be specified at compile time. Your YOLOv5s model runs at 8ms per frame (125 FPS).
-question: 'How would you reduce YOLOv5s latency from 8ms to 5ms on Hailo-8 by exploiting compile-time dataflow fusion?'
+question: How would you reduce YOLOv5s latency from 8ms to 5ms on Hailo-8 by exploiting compile-time dataflow fusion?
 details:
-  realistic_solution: 'Hailo-8 executes a pre-compiled dataflow graph. All ops between HBM reads are fused by the compiler. The key is to eliminate unnecessary HBM reads by keeping activations on-chip between ops. Reduce model layers to minimize HBM round trips. Switching to YOLOv5n (1.9M params) drastically reduces layer count and HBM round trips.'
+  realistic_solution: |
+    Keep YOLOv5s and make the graph more compiler-friendly for Hailo-8's static dataflow execution. Fold Conv+BN+activation, remove or rewrite unsupported graph patterns that force materialization, keep tensor shapes aligned with Hailo tiling constraints, use calibrated INT8 quantization, and compile with tiling/fusion choices that keep producer-consumer activations in on-chip SRAM instead of spilling to external memory. The quantified target is to cut the non-compute portion of the current 8ms path by about 3ms so the same YOLOv5s graph reaches roughly 5ms; switching to YOLOv5n would be a model change, not an optimization of YOLOv5s.
   common_mistake: |
     **The Pitfall:** Trying to apply dynamic fusion at runtime on a dataflow processor.
     **The Rationale:** Candidates apply GPU-centric runtime optimizations, not understanding Hailo's unique static dataflow execution model where all fusion is compile-time only.
     **The Consequence:** Optimization efforts yield zero runtime improvement since the hardware cannot dynamically alter its spatial pipeline.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Hailo-8: 26 TOPS, 2.5W, 10 MB on-chip SRAM.
-    - YOLOv5s: 16.5B FLOPs, 80x80x256 activations = 1.6 MB/layer.
-    - YOLOv5n: 4.5B FLOPs.
+    - Hailo-8: 26 TOPS INT8 peak, static dataflow execution, on-chip SRAM plus external memory.
+    - YOLOv5s: about 16.5B operations per frame under the counting convention used by the model profile.
+    - Current latency: 8ms. Target latency: 5ms.
 
     **Calculations:**
-    - Theoretical compute YOLOv5s = 16.5 GOPS / 26 TOPS = 0.635 ms. Actual = 8 ms (Efficiency 7.9%, highly HBM-bound).
-    - Fusing 6 layers fits in 10 MB SRAM (6 * 1.6 = 9.6 MB), reducing HBM reads by 6x.
-    - Theoretical compute YOLOv5n = 4.5 GOPS / 26 TOPS = 0.17 ms + HBM latency = ~3 ms.
+    - Peak compute lower bound = 16.5e9 / 26e12 = 0.000635s = 0.635ms.
+    - Current non-compute/data-movement/scheduling portion is approximately 8.0 - 0.635 = 7.365ms.
+    - To reach 5ms without changing the model, the remaining non-compute portion must be about 5.0 - 0.635 = 4.365ms.
+    - Required reduction in non-compute overhead = (7.365 - 4.365) / 7.365 = 41%.
 
     **Conclusion & Interpretation:**
-    - **Result: ~3 ms latency with YOLOv5n (HBM-Bound)**. Optimized via static compile-time dataflow fusion.
+    - **Result: Need about a 40% reduction in off-chip materialization and graph overhead for YOLOv5s (Dataflow/Memory-Bound)**. The fix is compile-time graph restructuring, quantization, tiling, and fusion for the same model, not replacing it with YOLOv5n.
 status: published
 provenance: imported
 requires_explanation: false

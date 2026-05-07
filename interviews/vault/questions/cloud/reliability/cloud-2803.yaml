@@ -7,11 +7,12 @@ topic: fault-tolerance-checkpointing
 competency_area: reliability
 bloom_level: create
 phase: training
-title: Cloud New 0019
-scenario: 'You are designing a resilient gradient synchronization architecture for a Ring All-Reduce setup training a 50B model over unreliable 400Gbps IB links, where link flaps are causing frequent stalling and cluster timeouts.'
+title: Fault-Tolerant Ring All-Reduce over Flaky 400Gbps InfiniBand
+scenario: You are designing a resilient gradient synchronization architecture for a Ring All-Reduce setup training a 50B model over unreliable 400Gbps IB links, where link flaps are causing frequent stalling and cluster timeouts.
 question: How would you make Ring All-Reduce gradient synchronization resilient to flaky 400Gbps IB links for a 50B model?
 details:
-  realistic_solution: 'Architect a dynamic topology-aware All-Reduce mechanism using a software-defined networking overlay. Instead of a strict static ring, implement a tree-based or multi-ring All-Reduce that actively monitors link health. If an IB link flaps, the control plane immediately recalculates the logical graph and re-routes the synchronization packets via intermediate healthy nodes. Implement micro-chunking of gradients to allow rapid retries of small packets rather than failing a massive 50B sync.'
+  realistic_solution: |
+    Keep the collective semantics explicit: every gradient bucket is reduced over the same live rank set, and a bucket is committed only after all ranks acknowledge the same sequence number. Build two logical rings over disjoint IB paths when the fabric permits it, stripe small buckets across them, and retry a failed bucket on the alternate ring after a short timeout. If a link remains unhealthy, pause at a bucket boundary, re-form the process group with the same membership but a new ring order that avoids the bad link, then resume from the last committed bucket. For repeated failures, checkpoint the step and either drain the bad node or restart with a smaller rank set; do not pretend arbitrary SDN packet rerouting preserves NCCL collective correctness.
   common_mistake: |
     **The Pitfall:** Hardcoding the Ring All-Reduce topology.
     **The Rationale:** Assuming a single intermittent link forces all 100GB of gradients to be discarded and triggers a full epoch restart.
@@ -20,13 +21,14 @@ details:
     **Assumptions & Constraints:**
     - Model: 50B parameters (100GB gradients).
     - Network: 400Gbps (50GB/s).
-    
+
     **Calculations:**
-    - Ideal sync time: 100GB / 50GB/s = 2 seconds.
-    - Micro-chunking: 100MB blocks take 100MB / 50GB/s = 2ms per block.
-    
+    - Ideal single-link lower bound: 100 GB / 50 GB/s = 2.0 seconds.
+    - Micro-bucket transfer time: 100 MB / 50 GB/s = 0.002 seconds = 2 ms, ignoring collective protocol overhead.
+    - A 10 ms link flap can interrupt about 10 ms / 2 ms = 5 such buckets on that path. With per-bucket sequence numbers and a redundant ring, only uncommitted buckets on the failed path need retrying; committed buckets are not replayed.
+
     **Conclusion & Interpretation:**
-    - **Result: 2ms Block Isolation (Network-Reliability Bound)**. Micro-chunking isolates the impact of a 10ms link flap to a single 2ms block, preventing a full 2-second synchronization restart.
+    - **Result: Bucket-Level Retry, Not Magic Rerouting (Network-Reliability Bound).** Micro-chunking limits recovery to the buckets affected during the flap, while membership changes occur only at safe collective boundaries.
 status: published
 provenance: imported
 requires_explanation: true

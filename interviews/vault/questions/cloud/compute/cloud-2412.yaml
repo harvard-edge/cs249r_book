@@ -11,18 +11,25 @@ title: Batch Size vs Quantization Pareto Shift
 scenario: A cloud inference service migrates from a batch size of 1 to dynamic continuous batching (up to batch size 128) for an 8B model on A100. At batch size 1, the W4A16 quantized model was 3x faster than the FP16 model. However, at batch size 128, the W4A16 model is unexpectedly 20% SLOWER than the FP16 model in total throughput (QPS).
 question: What causes this inversion in the performance Pareto curve?
 details:
-  realistic_solution: The cause is the fundamental shift from a memory-bandwidth bound regime to a compute-bound regime as batch size increases. At batch size 1, the arithmetic intensity is very low; the bottleneck is strictly loading the weights from HBM, so INT4 (which reduces weight bytes by 4x) yields massive speedups. At batch size 128, the arithmetic intensity increases by 128x. The bottleneck is now the math (compute FLOPs). Because A100 Tensor Cores natively support FP16 but do not natively support INT4 * FP16 mixed operations, the W4A16 model must spend ALU cycles dequantizing INT4 to FP16 before feeding it to the Tensor Cores. This dequantization compute overhead starves the Tensor Cores, making W4A16 slower than pure FP16 (which feeds directly into the Tensor Cores). The solution for high batch sizes is to switch to FP8 (which has native Tensor Core support) or W8A8, or revert to FP16.
+  realistic_solution: The inversion comes from a roofline shift plus kernel implementation details. At batch size 1, inference is dominated by streaming weights from HBM, so W4A16 wins because it moves far fewer weight bytes. At batch size 128, each loaded weight is reused across many tokens, raising arithmetic intensity and moving the bottleneck toward Tensor Core math and kernel overhead. In that regime, a W4A16 path can lose its advantage if it dequantizes INT4 weights through separate or poorly fused kernels, adds extra memory traffic for scales or temporary FP16 values, or fails to feed A100 Tensor Cores as efficiently as the mature FP16 path. The mitigation is to use a fused, A100-optimized W4A16 kernel and benchmark against FP16 at the target batch size; if the quantized kernel remains slower, FP16 may be the better high-batch serving format on A100.
   common_mistake: |
     **The Pitfall:** Assuming the KV cache memory size exceeded VRAM capacity at batch size 128, causing spilling to CPU memory.
     **The Rationale:** Engineers mistakenly attribute all batch-related slowdowns to memory capacity limits, ignoring compute bottlenecks.
     **The Consequence:** The team wastes time optimizing memory allocators when the actual problem is the lack of native INT4 hardware support on A100 Tensor Cores.
   napkin_math: |
+    **Assumptions & Constraints:**
     - Arithmetic Intensity (AI) = FLOPs / Bytes.
-    - For weights W, Batch B: FLOPs = 2*B*W. Bytes = W. AI = 2*B.
-    - At B=1, AI = 2.
-    - At B=128, AI = 256.
+    - Simplified layer model: weight bytes dominate at B=1, but activation/KV and scale/metadata traffic become more relevant as B grows.
+    - For FP16 weights W and batch B: FLOPs ≈ 2*B*W. Weight bytes ≈ 2W, plus activation and output traffic.
+
+    **Calculations:**
+    - Ignoring smaller activation terms, FP16 AI ≈ (2*B*W) / (2W) = B FLOPs/Byte.
+    - At B=1, AI ≈ 1 FLOP/Byte, far below the A100 machine balance.
+    - At B=128, AI ≈ 128 FLOPs/Byte before activation and kernel overheads.
     - A100 FP16 Compute/Bandwidth ratio = 312 TFLOPs / 2 TB/s = 156 FLOPs/Byte.
-    - **Since AI (256) > Machine Balance (156), the operation is strictly compute bound, so INT4->FP16 conversion overhead degrades performance.**
+
+    **Conclusion & Interpretation:**
+    - The high-batch case is near the compute-bound transition rather than purely bandwidth-bound. Once weight bandwidth is amortized, W4A16 only wins if dequantization, scale loads, and kernel fusion overhead stay below the FP16 compute-path advantage.
 status: published
 provenance: imported
 requires_explanation: false
@@ -41,6 +48,6 @@ human_reviewed:
   date: null
   notes: null
 tags:
-- batching
-- throughput
-- compute-bound
+  - batching
+  - throughput
+  - compute-bound

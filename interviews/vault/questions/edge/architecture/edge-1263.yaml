@@ -7,29 +7,34 @@ topic: encoder-decoder-tradeoffs
 competency_area: architecture
 bloom_level: evaluate
 phase: both
-title: 'Architecting Sequence Models for Hailo-8 Dataflow'
-scenario: 'Your team is deploying a real-time sequence prediction model on an edge sensor powered by a dataflow accelerator. The accelerator possesses no local DRAM, meaning all model weights and KV caches must stream from the host processor''s memory over PCIe.'
-question: 'Which sequence model architecture—encoder-only, decoder-only, or hybrid—best fits a host-streamed accelerator providing 26 TOPS of INT8 compute at 2.5W, and why?'
+title: Architecting Sequence Models for Hailo-8 Dataflow
+scenario: Your team is deploying a real-time sequence classification or embedding model on an edge sensor powered by a dataflow accelerator. The accelerator possesses no local DRAM, meaning all model weights and any KV caches must stream from the host processor's memory over PCIe.
+question: Which sequence architecture, encoder-only, decoder-only, or hybrid, best fits a host-streamed 26 TOPS INT8 accelerator at 2.5W?
 details:
-  realistic_solution: 'The optimal design leverages an extremely heavy encoder coupled with either a non-autoregressive head or a very lightweight decoder. An encoder-only or heavy-encoder system processes the entire input sequence in a single pass, meaning the model weights are streamed from the host exactly once. This maximizes the dataflow accelerator''s utilization and minimizes the severe latency penalty of streaming parameters over the host bus.'
+  realistic_solution: For classification or embedding-style sequence prediction, choose an encoder-only model. It processes the input sequence in one pass, so weights and intermediate state are streamed once and there is no autoregressive KV-cache growth. A decoder-only architecture is a poor fit because it repeats weight and KV traffic for each generated token, which makes the host interface dominate despite the 26 TOPS INT8 compute rating. A hybrid is only appropriate when the product truly needs generated tokens, and then the decoder must be very small so per-token streaming remains bounded.
   common_mistake: |
     **The Pitfall:** Proposing a standard decoder-only architecture like a small LLM.
     **The Rationale:** Candidates focus entirely on the 26 TOPS compute metric and fail to recognize that autoregressive decoding on a chip with no local DRAM requires streaming the entire model's weights from the host for every single generated token.
     **The Consequence:** The dataflow accelerator is completely bottlenecked by PCIe transfers, resulting in severe latency and abysmal throughput.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model size: 100M parameters in INT8 = 100MB.
-    - Hardware: 26 TOPS compute, no local DRAM.
-    - Link limit: PCIe bandwidth (e.g., 33.3 GB/s).
+        - Encoder-only classifier/embedding model: 100M INT8 parameters = 100 MB streamed once per input window.
+        - Decoder-only generator of the same size: 100 MB streamed per generated token.
+        - Hybrid generator: 90 MB encoder streamed once, 10 MB decoder streamed per generated token.
+        - Example generated output length for decoder/hybrid comparison: 50 tokens.
+        - Average KV-cache traffic: 5 MB per token for decoder-only, 0.5 MB per token for the lightweight hybrid decoder.
+    - Host-interface bandwidth: 33.3 GB/s.
 
     **Calculations:**
-    - PCIe streaming time: 100MB / 33.3 GB/s = 3ms.
-    - Compute time: 20 GOPS / 26 TOPS = ~0.76ms (Compute is hidden behind memory transfers).
-    - Decoder-only (50 tokens): Streams the 100MB model 50 times. 50 * 3ms = 150ms total latency.
-    - Asymmetric Hybrid (90M encoder, 10M decoder): Streams encoder once (2.7ms) and decoder 50 times (50 * 0.3ms = 15ms).
+        - Encoder-only traffic for classification/embedding: 100 MB once, or 100 MB / 33,300 MB/s = 3.0 ms of ideal host streaming.
+        - Decoder-only traffic for generation: 50 * (100 MB weights + 5 MB KV) = 5,250 MB.
+    - Decoder-only streaming time: 5,250 MB / 33,300 MB/s = 158 ms.
+    - Hybrid traffic: 90 MB encoder + 50 * (10 MB decoder + 0.5 MB KV) = 615 MB.
+    - Hybrid streaming time: 615 MB / 33,300 MB/s = 18.5 ms.
+    - Compute is not the deciding term unless the per-token GOP count is large enough to exceed these transfer times.
 
     **Conclusion & Interpretation:**
-    - **Result: 17.7ms (IO-Bound / Bandwidth-Limited)**. The hybrid model reduces total latency from 150ms to 17.7ms.
+        - **Result: Encoder-only is best for classification/embedding; hybrid is the bounded fallback for generation.** The encoder-only path avoids repeated host streaming, while the example hybrid cuts generated-token traffic to about 18.5 ms versus 158 ms for decoder-only.
 status: published
 provenance: imported
 requires_explanation: true

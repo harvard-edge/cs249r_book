@@ -11,24 +11,26 @@ title: Diagnosing Edge TPU Compiler Graph Partitioning
 scenario: Your team is deploying a custom CNN to an edge accelerator to leverage its highly efficient INT8 compute. During ahead-of-time compilation, you notice the compiler partitions the graph into three subgraphs, with the middle subgraph falling back to the host CPU. This causes severe latency spikes and high host CPU utilization.
 question: How do you identify the root cause of this compilation failure, and what constraints of the hardware architecture typically lead to this symptom?
 details:
-  realistic_solution: Utilize the compiler's diagnostic logs to isolate the exact node triggering the subgraph partition. This is universally caused by an operator that is unsupported in hardware (e.g., custom activations) or a forced dequantization boundary. The fix requires operator lowering—rewriting the network to map unsupported nodes to mathematically equivalent, natively supported INT8 operations like ReLU6.
+  realistic_solution: |
+    Use the compiler's diagnostic logs and generated graph visualization to identify the first node that forces a partition boundary. The usual root causes are an unsupported operator, tensor shape/layout constraint, unsupported activation, or a quantize/dequantize boundary that breaks the fully INT8 subgraph. The fix is operator lowering or model surgery: replace the unsupported node with a supported INT8 equivalent, fold it into adjacent layers, or retrain with a compiler-friendly activation such as ReLU6 when it is mathematically acceptable.
   common_mistake: |
     **The Pitfall:** Assuming INT8 post-training quantization guarantees successful hardware compilation.
     **The Rationale:** Candidates believe correct bit-precision is the only requirement, ignoring the extremely rigid operator whitelists of specialized edge silicon.
     **The Consequence:** Silent CPU fallbacks that completely negate the accelerator's throughput and power efficiency advantages due to massive PCIe bus transfers.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Target Compute: ~1 GOPS natively
-    - PCIe Gen2 x1 Bandwidth: ~500 MB/s
-    - Fallback Tensor Size: 2 MB
+        - AOT edge compilers usually require a contiguous subgraph of supported INT8 operators.
+        - A single unsupported middle node splits the graph into accelerator subgraph -> CPU fallback -> accelerator subgraph.
+        - Diagnosis uses compiler logs, unsupported-op reports, quantization reports, and graph partition visualizations.
 
     **Calculations:**
-    - Accelerator execution time = ~0.25 ms
-    - Partition transfer cost (device->host->device) = (2 MB * 2) / 500 MB/s = 8 ms
-    - Total execution = 0.25 ms + 8 ms = 8.25 ms
+        - Check whether the partition starts at an unsupported op, unsupported tensor rank/layout, custom activation, dynamic shape, or dequantized tensor.
+        - If the middle node requires FP32 or CPU-only execution, the compiler must emit separate accelerator partitions around it.
+        - Lowering the node to a supported INT8 op, folding it into a neighboring op, or retraining with a supported activation removes the partition.
+        - Runtime transfer estimates can explain latency after partitioning, but they are secondary to the compile-time root cause.
 
     **Conclusion & Interpretation:**
-    - **Result: 8.25 ms (I/O-Bound)**. The graph partition creates an 8ms data-transfer bottleneck that dwarfs the sub-millisecond compute time.
+        - **Result: unsupported-op or quantization-boundary diagnosis.** The actionable answer is to find the partition-causing node in compiler diagnostics and rewrite the model so the graph remains one supported INT8 accelerator subgraph.
 status: published
 provenance: imported
 requires_explanation: false

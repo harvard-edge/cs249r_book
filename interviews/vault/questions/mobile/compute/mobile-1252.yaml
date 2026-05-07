@@ -1,17 +1,17 @@
 schema_version: '1.0'
 id: mobile-1252
 track: mobile
-level: L5
+level: L3
 zone: design
 topic: roofline-analysis
 competency_area: compute
 bloom_level: evaluate
 phase: inference
-title: Architecting an AR Segmentation Pipeline on Snapdragon 8 Gen 3
+title: Architecting a 4K Super-Resolution Pipeline on an NPU
 scenario: You are designing a real-time on-device 4K super-resolution pipeline targeting an NPU with a shared memory pool.
 question: How should a 4K super-resolution pipeline use roofline analysis to guarantee it stays compute-bound?
 details:
-  realistic_solution: Architect a tiled dataflow that strictly confines intermediate activations to the NPU's SRAM, fusing layers to maximize operational intensity above the ridge point.
+  realistic_solution: Use roofline analysis to set an explicit operational-intensity gate for every fused tile. With 45 TOPS peak and 15 GB/s available bandwidth, the ridge point is 3000 ops/byte, so the pipeline must reuse each byte enough to exceed that threshold. Fuse adjacent convolution, activation, and upsampling stages, tile 4K frames so intermediate activations stay in SRAM, and reject schedules whose measured DRAM traffic pushes intensity below 3000 ops/byte.
   common_mistake: |
     **The Pitfall:** Assuming peak TOPS are always achievable regardless of memory design.
     **The Rationale:** Candidates design un-fused pipelines with massive intermediate activations, failing to account for the shared nature of the memory bus.
@@ -24,11 +24,13 @@ details:
 
     **Calculations:**
     - Hardware Ridge Point: 45e12 Ops / 15e9 Bytes = 3000 Ops/Byte.
-    - Max memory traffic to stay compute-bound: 30e12 Ops / 3000 Ops/Byte = 10 GB/s.
-    - Max memory per frame: 10 GB/s / 30 FPS = ~333 MB/frame.
+    - To be compute-bound at the full 45 TOPS peak, operational intensity must be greater than 3000 Ops/Byte.
+    - The workload needs 30 TOPS sustained, so its average DRAM traffic must stay below 30e12 Ops/s / 3000 Ops/Byte = 10 GB/s.
+    - At 30 FPS, that is at most 10 GB/s / 30 FPS = ~333 MB of DRAM traffic per frame.
+    - Any unfused schedule spilling more than ~333 MB/frame falls below the required intensity and becomes bandwidth-bound under the contended 15 GB/s memory budget.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound Without Fusion**. The pipeline must aggressively fuse layers to keep activations under 333 MB/frame and stay compute-bound.
+    - **Result: Compute-Bound Design Rule**. Keep measured DRAM traffic below ~333 MB/frame, or equivalently keep operational intensity above 3000 ops/byte, by using fused SRAM-resident tiles.
 status: published
 provenance: imported
 requires_explanation: true

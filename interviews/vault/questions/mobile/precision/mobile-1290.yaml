@@ -8,10 +8,10 @@ competency_area: precision
 bloom_level: evaluate
 phase: training
 title: Evaluating Mixed-Precision ViT on Snapdragon 8 Gen 3
-scenario: Your team is deploying a 1B parameter Vision Transformer for real-time video processing. You must choose between pure FP16, pure INT8, and a mixed-precision approach (INT8 for linear layers, FP16 for softmax and layer normalization) to achieve 30 FPS.
-question: Which precision strategy ensures a 1B parameter ViT achieves 30 FPS on a Snapdragon 8 Gen 3 Hexagon NPU?
+scenario: Your team is deploying a 1B parameter Vision Transformer for real-time video processing. You must choose between pure FP16, pure INT8, and a mixed-precision approach (INT8 for linear layers, FP16 for softmax and layer normalization) to achieve 30 FPS on a mobile SoC where compiler support may place some transformer operators on the GPU or CPU instead of the NPU.
+question: Which precision strategy is most defensible for a 1B ViT targeting 30 FPS on Snapdragon 8 Gen 3?
 details:
-  realistic_solution: The mixed-precision approach is optimal. Heavy matrix multiplications (QKV projections, FFNs) must be quantized to INT8 to leverage the NPU tensor capacity and halve memory bandwidth pressure. However, precision-sensitive operations like Softmax, LayerNorm, and attention scores must strictly remain in FP16 to prevent catastrophic accuracy degradation. This perfectly leverages the heterogeneous SoC architecture without bottlenecking the system bus.
+  realistic_solution: Mixed precision is the most defensible starting point, but it does not by itself ensure 30 FPS for a 1B ViT. Quantize the dominant linear layers and FFNs to INT8 to reduce weight and activation traffic, while keeping numerically sensitive softmax, attention-score, and normalization paths in FP16 only if the delegate keeps those operations off slow CPU/GPU fallbacks. If profiling shows fallback overhead or memory traffic still dominates, the target requires compression, pruning, smaller resolution, fewer frames, or architectural changes rather than a precision switch alone.
   common_mistake: |
     **The Pitfall:** Choosing pure INT8 quantization to maximize raw TOPS compute utilization.
     **The Rationale:** Engineers aggressively quantize all tensors to hit strict real-time frame rates without evaluating layer-specific numerical sensitivity.
@@ -19,17 +19,20 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Target framerate: 30 FPS.
-    - Model size: 1B parameters (~1 TOPS per frame compute demand).
-    - Total Compute requirement: 30 TOPS.
-    - Hardware limits: LPDDR5X bandwidth ~64 GB/s, NPU INT8 capacity 45 TOPS, FP16 capacity 22.5 TFLOPS.
+    - Model weights: 1B parameters = 2.0 GB in FP16 or 1.0 GB in INT8.
+    - Transformer inference roughly costs 2 MACs per parameter per frame for linear layers when each weight is used once.
+    - About 90% of MACs are linear projections/MLPs; about 10% are precision-sensitive softmax, attention scaling, and normalization.
+    - Hardware limits are effective budgets after delegate fallbacks, not guaranteed peak specs: INT8 tensor capacity ~45 TOPS, FP16 capacity ~22.5 TOPS-equivalent, LPDDR5X bandwidth ~64 GB/s.
 
     **Calculations:**
-    - Pure FP16: 1B params = 2 GB. 30 FPS * 2 GB = 60 GB/s (saturates bandwidth). Compute capacity 22.5 TFLOPS < 30 TOPS (fails).
-    - Pure INT8: Compute 45 TOPS > 30 TOPS (passes). Bandwidth 30 GB/s (passes). However, Softmax/LayerNorm mathematically fail in INT8.
-    - Mixed Precision: INT8 linear layers preserve 30 GB/s bandwidth and hit compute targets, while FP16 nonlinearities preserve accuracy.
+    - Linear-layer MACs per frame: 1B parameters * 2 MACs/parameter * 90% = ~1.8 GMAC/frame.
+    - At 30 FPS, linear layers require ~54 GMAC/s, or ~0.108 TOPS if 1 MAC is counted as 2 ops.
+    - FP16 weight footprint is ~2.0 GB and INT8 weight footprint is ~1.0 GB; actual bandwidth depends on cache tiling and reuse, so weight size is a residency and traffic-pressure estimate rather than GB/frame streaming.
+    - Mixed Precision keeps the large linear tensors in INT8, while leaving the smaller but numerically sensitive softmax, attention score, and normalization path in FP16.
+    - Pure INT8 may meet compute and footprint targets but risks accuracy loss in sensitive operators; pure FP16 doubles the dominant weight footprint and activation traffic without improving those operators enough to justify the cost.
 
     **Conclusion & Interpretation:**
-    - **Result: Compute and Memory-Bound**. Mixed precision is the only architecture that satisfies the strict 30 FPS deadline while preserving acceptable numerical fidelity and staying within system memory bus limits.
+    - **Result: mixed precision is a candidate, not a guarantee.** The rough model does not prove 30 FPS; it shows why INT8 linear layers plus FP16 sensitive operations is the first profileable choice, with feasibility depending on compression, operator delegation, and measured memory traffic.
 status: published
 provenance: imported
 requires_explanation: false

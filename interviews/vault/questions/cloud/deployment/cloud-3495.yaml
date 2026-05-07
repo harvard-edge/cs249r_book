@@ -11,29 +11,26 @@ title: Optimizing LLM Training on Kubernetes with AMD MI300X
 scenario: Your team is deploying a large language model (LLM) training job on a Kubernetes cluster. The cluster nodes are equipped with AMD MI300X accelerators. After initial deployment, you observe that the training job's throughput is significantly lower than anticipated, with GPU utilization consistently below 50%. The current Kubernetes setup uses standard GPU device plugins, and pods are scheduled without specific node affinity rules. The LLM model has over 70 billion parameters and requires frequent data transfers between GPUs for distributed training.
 question: Why is the MI300X LLM training job below 50% GPU utilization, and what concrete Kubernetes and data-pipeline fixes would you apply?
 details:
-  realistic_solution: "To diagnose and fix the bottleneck:
-1. Monitor & Profile: Use `rocm-smi` (or similar AMD ROCm tools) within the pod and integrate cluster-wide GPU metric collection (utilization, HBM3 bandwidth, compute unit activity) via Prometheus/Grafana. This will pinpoint if the bottleneck is compute-bound, memory-bound, or communication-bound.
-2. Custom GPU Device Plugin (if necessary): Ensure the Kubernetes GPU device plugin is correctly configured for AMD MI300X, possibly requiring an AMD-specific plugin to expose HBM3 memory as a schedulable resource or to facilitate topology-aware scheduling.
-3. Kubernetes Resource Specification: Explicitly define resource requests for AMD GPUs and HBM3 memory in pod specifications (e.g., `resources.limits.amd.com/gpu: 1`, `resources.limits.amd.com/hbm3: 192Gi`).
-4. Node Affinity for Co-location: Implement `nodeSelector` or `affinity`/`anti-affinity` rules to: - Co-locate all pods of a distributed training job onto nodes with sufficient AMD MI300X GPUs and optimal interconnect topology. - Prevent unrelated workloads from sharing nodes with critical training jobs.
-5. Optimize Data Loading & Batching: - Adjust the global batch size to fully utilize the 192 GB HBM3 per MI300X, minimizing frequent data transfers to host memory. - Employ asynchronous data loading techniques (e.g., PyTorch `DataLoader` with `num_workers > 0` and `pin_memory=True`) to overlap data preparation with GPU computation. - Leverage `torch.compile` or similar optimizations to maximize FP16 sparse throughput."
+  realistic_solution: 'To diagnose and fix the bottleneck: 1. Monitor & Profile: Use `rocm-smi` or ROCm SMI tooling inside the pod and integrate cluster-wide GPU metrics such as utilization, HBM bandwidth, XGMI traffic, PCIe traffic, and compute activity into Prometheus/Grafana. This separates compute, memory, communication, and input-pipeline bottlenecks. 2. Device Plugin and Runtime: Install the AMD GPU device plugin and ROCm-compatible container runtime so pods request the vendor GPU resource exposed by the cluster; do not invent separate HBM3 pod limits unless the platform actually supports them. 3. Kubernetes Placement: Use node labels, `nodeSelector` or `nodeAffinity`, taints/tolerations, and topology-aware scheduling or gang scheduling so distributed workers land on MI300X nodes with the intended GPU count and interconnect locality. 4. Isolation: Prevent unrelated workloads from sharing training nodes when they would interfere with CPU, network, storage, or accelerator communication.
+    5. Data and Communication Optimization: Increase or rebalance global batch size only after checking memory headroom, use asynchronous and prefetched data loading, stage data close to the workers, tune distributed training collectives for ROCm/RCCL, and use graph/compiler optimizations such as `torch.compile` when they improve kernel fusion and launch overhead.'
   common_mistake: |
     **The Pitfall:** Treating high-performance GPUs like MI300X as generic compute resources.
     **The Rationale:** Engineers fail to optimize the Kubernetes scheduler, device plugins, and application-level data pipelines for specific hardware characteristics.
     **The Consequence:** This leads to incorrect resource requests, lack of node affinity, and suboptimal data pipelining, ultimately wasting expensive hardware.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Transfer size: 150 GB.
-    - MI300X HBM3 Bandwidth: 5300 GB/s.
-    - Observed transfer: 0.1s/step.
+    - A training step spends 400 ms total.
+    - GPU kernels are active for 180 ms and idle or waiting for input/collectives for 220 ms.
+    - Target utilization is at least 70%.
 
     **Calculations:**
-    - Theoretical Transfer Time: 150 GB / 5300 GB/s ≈ 0.028s.
-    - Time Savings: 0.1s - 0.03s = 0.07s/step.
-    - Total Savings (1M steps): 0.07s * 1M = 70,000s ≈ 19.4 hours.
+    - Observed utilization estimate = 180 ms / 400 ms = 45%.
+    - To reach 70% with the same useful GPU work, total step time must be 180 ms / 0.70 = 257 ms.
+    - Required reduction in non-compute wait time = 400 ms - 257 ms = 143 ms per step.
+    - Kubernetes placement fixes target communication wait; data prefetching and local staging target input wait.
 
     **Conclusion & Interpretation:**
-    - **Result: 19.4 hours (Data-Pipeline Bound)**. Correct node affinity and async loading saves ~19.4 hours of training time.
+    - **Result: Wait-time-bound utilization.** The release-quality fix is to measure and reduce input or collective stalls, not to schedule HBM3 as a fake Kubernetes resource.
 status: published
 provenance: imported
 requires_explanation: false

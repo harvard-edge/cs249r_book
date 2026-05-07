@@ -1,47 +1,51 @@
 schema_version: '1.0'
-id: 'cloud-0163'
-track: 'cloud'
-level: 'L5'
-zone: 'diagnosis'
-topic: 'latency-decomposition'
-competency_area: 'latency'
-bloom_level: 'evaluate'
-phase: 'both'
-title: 'The Black Friday Collapse'
-scenario: 'Our GPU serving cluster handles 1,000 QPS at 50ms latency. On Black Friday, traffic spiked 10x to 10,000 QPS. The system didn''t just slow down 10x; it completely collapsed, with latencies hitting 10 seconds and GPUs throwing Out Of Memory errors despite appearing to have free VRAM.'
-question: 'Why did the system fail non-linearly, and how does continuous batching on GPUs shift this queueing knee point differently than traditional CPU-based web serving?'
+id: cloud-0163
+track: cloud
+level: L5
+zone: diagnosis
+topic: latency-decomposition
+competency_area: latency
+bloom_level: evaluate
+phase: both
+title: The Black Friday Collapse
+scenario: Our GPU serving cluster handles 1,000 QPS at 50ms latency. On Black Friday, traffic spiked 10x to 10,000 QPS. The system didn't just slow down 10x; it completely collapsed, with latencies hitting 10 seconds and GPUs throwing Out Of Memory errors despite appearing to have free VRAM.
+question: Why did the system fail non-linearly, and how does continuous batching on GPUs shift this queueing knee point differently than traditional CPU-based web serving?
 details:
-  realistic_solution: 'The collapse is caused by the interaction of queueing theory and GPU memory fragmentation. In a CPU web server, as utilization ($\rho$) passes the "Knee" at ~70%, request queue lengths grow exponentially (per Little''s Law). But in an LLM serving cluster, a traffic spike causes the batch scheduler to accept more concurrent requests. Without PagedAttention, each new request statically allocates maximum potential KV-cache in HBM. The VRAM rapidly fragments. The non-linear collapse happens because the GPU spends cycles swapping KV-cache blocks to CPU RAM or simply OOMs, rather than just queueing. Continuous batching shifts this knee point significantly higher (to $\rho \approx 0.85$) because it dynamically slots new requests into the batch at the token level, absorbing the burst into the GPU''s compute capacity without requiring new static memory reservations.'
+  realistic_solution: |
+    The collapse is caused by two knees interacting. In a traditional CPU-style queue, waiting time grows non-linearly as utilization approaches 1; Little's Law relates average concurrency, throughput, and latency, but it is not the reason queues grow "exponentially" at 70%. In an LLM serving cluster, the scheduler also has a GPU-memory knee: each admitted sequence consumes KV cache, and naive static reservation or fragmented allocation can exhaust usable HBM before raw compute looks saturated. Continuous batching shifts the behavior because it schedules at token granularity and can retire finished sequences quickly, but it does not make bursts free. With paged KV-cache allocation, memory pressure is closer to actual live tokens rather than maximum context reservations, so the system degrades later and more smoothly; without it, a traffic spike can trigger OOM or KV-cache swapping while utilization dashboards still look moderate.
   common_mistake: |
     **The Pitfall:** Assuming linear degradation ("10x traffic means 10x latency").
     **The Rationale:** Engineers often apply simple linear scaling mental models to complex queueing systems and ignore GPU memory fragmentation.
     **The Consequence:** The system experiences non-linear collapse (OOM) before hitting compute limits.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Wait Time Equation: $L = \rho/(1-\rho)$.
-    - Memory Wall: H100 (80GB VRAM), continuous batching allocates 16MB blocks dynamically via PagedAttention.
-    
+    - Queueing knee: for an M/M/1-style approximation, average number in system is L = ρ / (1 - ρ).
+    - Memory wall: H100 has 80GB VRAM available for weights, activations, and KV cache.
+    - Naive allocator reserves 8GB per active request for a worst-case context window.
+    - Paged KV-cache allocation grows with actual live tokens instead of reserving the maximum upfront.
+
     **Calculations:**
-    - At $\rho = 0.5$, average requests in system $\approx 1$.
-    - At $\rho = 0.9$, average requests $\approx 9$.
-    - 9 concurrent requests statically reserving 8GB for a max 8K context window consume 72GB.
-    
+    - At ρ = 0.5, L = 0.5 / 0.5 = 1 request in system on average.
+    - At ρ = 0.9, L = 0.9 / 0.1 = 9 requests in system on average.
+    - Static KV reservation for 9 active requests: 9 × 8GB = 72GB, leaving little room for fragmentation, activations, or additional bursts.
+    - A 10x traffic spike can push concurrency far beyond this average, causing memory failure before compute reaches a clean saturation point.
+
     **Conclusion & Interpretation:**
-    - **Result: 72GB (Memory-Bound)**. Continuous batching shifts the knee point higher by keeping memory utilization proportional to actual tokens generated.
-status: 'published'
-provenance: 'imported'
+    - **Result: Queueing and KV-Cache Memory Knees Interact.** Continuous batching with paged KV allocation can shift the collapse point higher, but only because it reduces wasted memory and retires finished sequences promptly; it still needs admission control when live-token memory approaches HBM limits.
+status: published
+provenance: imported
 requires_explanation: false
 expected_time_minutes: 14
 validated: true
-validation_status: 'OK'
+validation_status: OK
 validation_date: '2026-04-01'
-validation_model: 'gemini-2.5-flash'
+validation_model: gemini-2.5-flash
 math_verified: true
-math_status: 'CORRECT'
+math_status: CORRECT
 math_date: '2026-04-03'
-math_model: 'gemini-3.1-pro-preview'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
-  status: 'not-reviewed'
+  status: not-reviewed
   by: null
   date: null
   notes: null

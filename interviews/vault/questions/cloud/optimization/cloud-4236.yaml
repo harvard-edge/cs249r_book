@@ -11,7 +11,7 @@ title: Estimating activation memory for backward pass on H100 with large batch
 scenario: You are training a 7B parameter transformer on an 80GB GPU with batch size 32 and sequence length 2048. The model uses mixed precision (BF16) and has 32 layers, 32 heads, and a 4096 hidden dimension. Activation checkpointing is not enabled.
 question: Do the batch-32, seq-2048 activations for a 7B BF16 transformer fit in 80 GB HBM without checkpointing?
 details:
-  realistic_solution: 'Estimate per-layer activation cost: for each transformer block, store Q/K/V projections, attention scores, MLP intermediates. For 7B model: residual stream is ~206GB. Add attention matrices: ~275GB. Total exceeds 80GB. Enable activation checkpointing to trade recompute for memory.'
+  realistic_solution: 'The activations do not fit in 80 GB without checkpointing. One hidden-state tensor has batch × sequence × hidden × bytes = 32 × 2048 × 4096 × 2 ≈ 0.54 GB. Training stores multiple tensors per layer for backward: residuals, Q/K/V or projection outputs, MLP intermediates, and often attention probabilities. Even a conservative 6 hidden-size tensors per layer is about 0.54 GB × 6 × 32 ≈ 103 GB before attention matrices. Attention probabilities add 32 layers × 32 heads × 32 batch × 2048² × 2 bytes ≈ 275 GB if retained. Fused attention can reduce that term, but the non-checkpointed activation footprint still exceeds 80 GB. Enable activation checkpointing, flash attention, smaller microbatches, or sequence parallelism.'
   common_mistake: |
     **The Pitfall:** Counting only parameter memory.
     **The Rationale:** Candidates check if 7B x 2 bytes = 14GB fits into 80GB and immediately say yes, forgetting that the forward pass stores all intermediate activations for autograd.
@@ -20,14 +20,17 @@ details:
     **Assumptions & Constraints:**
     - 32 layers, 32 heads, seq=2048, batch=32, dim=4096.
     - Element size: 2 bytes (BF16).
+    - No activation checkpointing.
 
     **Calculations:**
-    - Residual stream: 32 x 12 x 2048 x 4096 x 32 x 2 = ~206 GB.
-    - Attention matrices: 32 x 32 x (2048^2) x 32 x 2 = ~275 GB.
-    - Total Activation Memory: 206 + 275 = 481 GB.
+    - One hidden-state tensor = 32 * 2048 * 4096 * 2 bytes = 536,870,912 bytes ≈ 0.54 GB.
+    - Conservative saved tensors per layer: residual/input, Q, K, V, attention output, and MLP intermediate ≈ 6 hidden-size tensors.
+    - Hidden-size activation storage = 0.54 GB * 6 * 32 layers ≈ 103 GB.
+    - If attention probabilities are retained: 32 layers * 32 heads * 32 batch * 2048^2 * 2 bytes ≈ 275 GB.
+    - Total without fused/recomputed attention can exceed 103 GB + 275 GB = 378 GB; even the conservative hidden-tensor term alone exceeds 80 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: 481 GB (Memory-Capacity-Bound)**. 481 GB severely exceeds the 80 GB HBM limit. Activation checkpointing is strictly required.
+    - **Result: >80 GB (Memory-Capacity-Bound)**. The batch-32 activations do not fit without checkpointing or memory-saving attention/microbatching.
 status: published
 provenance: imported
 requires_explanation: false

@@ -9,9 +9,9 @@ bloom_level: create
 phase: inference
 title: Global Scale Real-Time Two-Tower Recommendation
 scenario: We are re-architecting a recommendation retrieval system to support 50 billion candidates globally, served from 12+ datacenters. We want to use a massive 500B parameter two-tower model to improve relevance.
-question: "How would you design the embedding table distribution and serving infrastructure on TPU v5e pods to ensure sub-50ms p99 latency while maximizing TPU High-Bandwidth Memory (HBM) utilization?"
+question: How would you decouple item embeddings from the TPU serving path while meeting sub-50ms p99 latency for a 50B-candidate two-tower recommender?
 details:
-  realistic_solution: Completely decouple the user and item towers for inference. The item tower's embeddings for the 50B candidates must be pre-computed strictly offline via batch jobs and loaded into a globally distributed, sharded in-memory vector database (e.g., ScaNN / Vertex Vector Search). The TPUs are reserved exclusively for executing the user tower in real-time, utilizing Tensor Parallelism to fit the user weights across multiple chips and broadcasting the resulting query vector to the fast ANN retrieval tier.
+  realistic_solution: Completely decouple the user and item towers for inference. Precompute item embeddings outside the online TPU path and serve them from a separate sharded ANN/retrieval tier; refresh cadence can be batch, streaming, or hybrid depending on item churn. The TPUs execute only the user tower in real time, using tensor parallelism as needed to fit the user weights across chips, then send the resulting query vector to the retrieval service. The latency budget is split between TPU user-tower inference, RPC/fanout, and ANN top-K lookup rather than trying to place 50B item vectors in TPU HBM.
   common_mistake: |
     **The Pitfall:** Attempting to serve both towers dynamically in real-time.
     **The Rationale:** Candidates treat retrieval models like generative LLMs, assuming all 500B parameters must be loaded into device HBM and executed simultaneously per request.
@@ -20,14 +20,16 @@ details:
     1. **Assumptions & Constraints:**
        - Model: 500B params. User tower: ~100B params.
        - Items: 50B. Dimensions: 256.
-       - TPU v5e: 16 GB HBM per chip. SLA: <50ms.
+       - TPU v5e: 16 GB HBM per chip. Keep no more than ~12 GB/chip for weights so activations, buffers, and runtime overhead fit.
+       - SLA: <50ms p99; the TPU path must leave budget for ANN lookup and cross-service RPC.
     2. **Calculations:**
        - User tower weights (INT8): 100B * 1 byte = 100 GB.
-       - TPUs needed for weights: ceil(100 GB / 16 GB) = 7. (Use 8-way TP).
-       - Item vector DB footprint: 50B * 256 * 4 bytes (FP32) = 51.2 TB RAM required (sharded offline).
-       - Latency budget: 15ms (TPU User Embedding) + 5ms (Network) + 10ms (ScaNN Top-K) = 30ms.
+       - Minimum chips by usable HBM: ceil(100 GB / 12 GB) = 9 chips, so a practical user-tower slice needs at least 9 v5e chips plus topology and runtime headroom.
+       - Full-precision item vectors: 50 billion * 256 dimensions * 4 bytes = 51.2e12 bytes, or 51.2 decimal TB, before ANN index structures, replication, metadata, and caching.
+       - With INT8/PQ-style compression, raw vector payload can be closer to 50 billion * 256 * 1 byte = 12.8e12 bytes, or 12.8 decimal TB, but the ANN service still lives in a sharded retrieval tier, not TPU HBM.
+       - Feasible p99 budget target: reserve roughly 20-25ms for TPU user-tower execution, 5-10ms for RPC/fanout, and 10-15ms for ANN top-K, leaving a small tail-latency margin under 50ms.
     3. **Conclusion & Interpretation:**
-       - **Result: 30ms latency, Offline Item Compute.** The system is **Memory-Capacity-Bound**; attempting to store 51.2TB of item vectors in TPU HBM is physically impossible and must be offloaded to RAM.
+       - **Result: Offline item compute plus a sharded ANN tier.** The user tower needs multi-chip TP with HBM headroom, while the 12.8-51.2 TB item-vector footprint is a retrieval-system memory problem, not a TPU-HBM placement problem.
 status: published
 provenance: imported
 requires_explanation: true

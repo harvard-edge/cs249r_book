@@ -8,25 +8,27 @@ competency_area: compute
 bloom_level: evaluate
 phase: both
 title: Architecting a Streaming Pipeline for Hailo-8
-scenario: 'You are architecting an edge perception system that relies on a Hailo-8 dataflow accelerator connected to a low-power host SoC over PCIe Gen3 x2. Since the Hailo-8 has no local DRAM, all input streams and intermediate activations must stream directly from host memory.'
-question: 'How do you use the roofline model to evaluate the tradeoffs of which operations execute on the Hailo-8 versus the host, and how does the lack of local DRAM constrain your design?'
+scenario: You are architecting an edge perception system that relies on a Hailo-8 dataflow accelerator connected to a low-power host SoC over PCIe Gen3 x2. The accelerator uses an on-chip dataflow memory hierarchy, so intermediate activations should stay inside the compiled graph rather than being materialized through host memory.
+question: How do you use the roofline model to evaluate the tradeoffs of which operations execute on the Hailo-8 versus the host, and how does the lack of local DRAM constrain your design?
 details:
-  realistic_solution: 'The design must account for the strict host-interface memory roofline by keeping the operational intensity high. The candidate should propose compiling the model such that the entire core feature extraction and dense compute blocks reside entirely within the Hailo-8''s internal SRAM dataflow architecture. They should evaluate the tradeoff of keeping high-arithmetic-intensity operations (like deep convolutions) on the accelerator while moving high-bandwidth, low-intensity tasks (like NMS or certain element-wise operations) to the host only if they don''t break the on-chip dataflow pipeline.'
+  realistic_solution: The roofline analysis should separate accelerator compute from host-link traffic. Dense convolutions and other high-operational-intensity kernels should stay on Hailo-8, where the compiler can keep activations in the internal SRAM/dataflow fabric. Low-intensity postprocessing or bookkeeping can run on the host only when it consumes compact outputs and does not force large intermediate feature maps over PCIe. With no local DRAM for arbitrary tensor staging, the design must fuse or schedule intermediate activations on chip; otherwise the host link becomes the effective roofline long before the 26 TOPS peak matters.
   common_mistake: |
     **The Pitfall:** Assuming the 26 TOPS peak compute is achievable without deep analysis of the host connection.
     **The Rationale:** Candidates often design a system that frequently swaps large intermediate feature maps back and forth to the host, ignoring the devastating impact this has on the system's operational intensity.
     **The Consequence:** The design falls onto the memory-bound slope of the roofline, drastically reducing utilization and overall system throughput.
   napkin_math: |
     **Assumptions & Constraints:**
-    - PCIe Gen3 x2 Bandwidth: ~1.97 GB/s.
-    - Hailo-8 Peak Compute: 26 TOPS.
+    - PCIe Gen3 x2 effective host bandwidth: ~1.97 GB/s.
+    - Hailo-8 peak INT8 compute: 26 TOPS = 26,000 GOPS.
+    - Decimal units are used for this ridge-point estimate.
 
     **Calculations:**
-    - Roofline ridge point: 26,000 GOPS / 1.97 GB/s = 13,198 Ops/Byte.
-    - Ops needed to hide 2 MB tensor transfer: 2 MB * 13,198 Ops/Byte = 26.4 Giga-operations.
+    - Host-link ridge point = 26,000 GOPS / 1.97 GB/s = ~13,200 operations/byte.
+    - Moving a 2 MB intermediate across the host link costs 2 MB / 1.97 GB/s = ~1.0 ms each direction before software overhead.
+    - To amortize a 2 MB one-way transfer at the compute peak, the operation would need about 2,000,000 bytes * 13,200 ops/byte = 26.4 GOPS of useful work.
 
     **Conclusion & Interpretation:**
-    - **Result: The model requires >13,198 Ops/Byte to avoid the PCIe bottleneck (I/O-Bandwidth-Bound)**.
+    - **Result: host transfers require extremely high operational intensity to amortize.** Keep high-intensity kernels and intermediates inside the Hailo-8 dataflow graph; move only compact, low-intensity outputs to the host.
 status: published
 provenance: imported
 requires_explanation: true

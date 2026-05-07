@@ -8,25 +8,26 @@ competency_area: latency
 bloom_level: analyze
 phase: both
 title: Explainability Latency Bottleneck on T4 GPUs
-scenario: Your team deployed a visual inspection model (ResNet-50) on an NVIDIA T4 GPU instance. Base
-  inference latency (forward pass only) at batch size 32 is 25ms. To meet a new regulatory requirement,
-  you enable Saliency Maps (computing gradients with respect to the input image). Expected latency was
-  ~75ms (25ms forward + ~50ms backward). However, p99 latency spikes to 280ms, and GPU utilization drops
-  from 85% to 40%. Diagnose the architectural bottleneck causing this latency spike.
-question: "Why does enabling Saliency Maps spike p99 latency to 280ms and drop GPU utilization despite the expected 75ms compute cost?"
+scenario: Your team deployed a visual inspection model (ResNet-50) on an NVIDIA T4 GPU instance. Base inference latency (forward pass only) at batch size 32 is 25ms. To meet a new regulatory requirement, you enable Saliency Maps (computing gradients with respect to the input image). Expected latency was ~75ms (25ms forward + ~50ms backward). However, p99 latency spikes to 280ms, and GPU utilization drops from 85% to 40%. Diagnose the architectural bottleneck causing this latency spike.
+question: Why does enabling Saliency Maps spike p99 latency to 280ms and drop GPU utilization despite the expected 75ms compute cost?
 details:
-  realistic_solution: The bottleneck is memory allocation and host-bound overhead. Standard inference
-    discards activations. Saliency maps require storing the full computational graph (~3GB for BS=32).
-    This triggers dynamic memory allocation overhead and prevents standard inference optimizations. To
-    resolve this, pre-allocate the memory workspace using CUDA Graphs covering both the forward and input-gradient
-    backward passes.
-  common_mistake: Candidates often misdiagnose this as a compute bottleneck (assuming the backward pass
-    has exponentially more FLOPs) or suggest complex explainability methods like SHAP instead of diagnosing
-    the memory subsystem overhead.
-  napkin_math: ResNet-50 stores ~100MB of activations per image for backprop. BS=32 requires 3.2GB. T4
-    has 320GB/s bandwidth. Writing and reading 3.2GB takes ~20ms in pure bandwidth, but dynamic CUDA malloc/free
-    for 3.2GB across hundreds of layer tensors per request adds 100-200ms of CPU-bound scheduling overhead,
-    explaining the GPU utilization drop to 40%.
+  realistic_solution: The bottleneck is host-side autograd and graph-execution overhead, with memory management as a contributor. Standard inference can use optimized static execution and discard activations, while saliency maps require building a backward graph, retaining activations, synchronizing for input gradients, and running less-fused backward kernels. To resolve this, capture a stable forward-plus-input-gradient path with CUDA Graphs where possible and pre-allocate the workspace.
+  common_mistake: |
+    **The Pitfall:** Misdiagnosing the latency spike as a compute bottleneck.
+    **The Rationale:** Candidates assume the backward pass has exponentially more FLOPs rather than identifying the memory subsystem overhead.
+    **The Consequence:** Suggesting complex explainability methods like SHAP instead of pre-allocating the memory workspace.
+  napkin_math: |
+    **Assumptions & Constraints:**
+    - ResNet-50 saliency requires retaining intermediate activations and running backward to the input.
+    - Batch size 32 can require hundreds of MB to low single-digit GB of activation/workspace memory depending on precision and implementation.
+    - T4 has 320GB/s bandwidth.
+
+    **Calculations:**
+    - Moving 1GB of activation/workspace data at 320GB/s has a bandwidth lower bound of about 3ms, so memory bandwidth alone does not explain a 205ms gap from expected 75ms to observed 280ms.
+    - The extra time is more consistent with host-side autograd bookkeeping, graph construction/launch overhead, synchronization points, allocator churn, and non-fused backward execution that leaves the GPU underfed.
+
+    **Conclusion & Interpretation:**
+    - **Result: host/autograd overhead and inefficient backward execution dominate the tail.** Static graph capture and workspace pre-allocation reduce launch, synchronization, and allocation variance.
 status: published
 provenance: imported
 requires_explanation: false

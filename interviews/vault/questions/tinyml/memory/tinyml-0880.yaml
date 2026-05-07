@@ -11,20 +11,28 @@ title: 'Model Size Estimation: Design Minimum-Memory Architecture for MCU Keywor
 scenario: Design a keyword spotting model architecture for a Cortex-M4 that achieves >90% accuracy on Google Speech Commands with minimum SRAM footprint.
 question: How would you derive layer types, filter counts, activation memory profile per layer, and verify the SRAM constraint?
 details:
-  realistic_solution: 'Use DS-CNN-S (Depthwise Separable CNN, small variant). Architecture: Input 49x10 (MFCC). Conv1 64-ch 10x4: activation 49x10x64=31,360B=30.6KB. DW-Conv2 64-ch 3x3: 49x10x64=30.6KB. PW-Conv2 64-ch: same. Pool 1: 24x5x64=7.5KB. DW-Conv3 64-ch: 7.5KB. PW-Conv3 64-ch: 7.5KB. Pool 2: 12x2x64=1.5KB. FC 128: 0.13KB. Softmax 35: 0.14KB. Peak activation arena: 30.6KB + 30.6KB (double-buffer) = 61.2KB. TFLM SRAM: 61.2KB + 30KB runtime/stack = 91.2KB << 256KB. Flash: DS-CNN-S params ~100K INT8 = 100KB. Application: 64KB. Total Flash: 164KB + 20KB TFLM = 184KB < 512KB. Accuracy: DS-CNN-S achieves ~94% on 35-class Google Speech Commands.'
+  realistic_solution: 'Derive the design from the SRAM limit by choosing depthwise separable blocks and reducing time/frequency resolution early. Assume INT8 activations, input MFCC 49x10x1, SAME padding, and strides shown. Candidate: Conv2D 3x3, 32 filters, stride 1 -> 49x10x32 (15.3KB); depthwise 3x3 stride 2x2 -> 25x5x32 (4.0KB); pointwise 1x1 32->64 -> 25x5x64 (8.0KB); depthwise 3x3 stride 2x1 -> 13x5x64 (4.2KB); pointwise 1x1 64->96 -> 13x5x96 (6.1KB); depthwise 3x3 stride 2x1 -> 7x5x96 (3.4KB); pointwise 1x1 96->128 -> 7x5x128 (4.5KB); global average pool -> 128B; FC to 35 classes -> 35B. A conservative arena estimate is largest live input+output pair plus scratch: about 15.3KB + 4.0KB for the first stride block, or about 19.3KB, plus 16KB scratch = 35.3KB. Adding 30KB TFLM runtime and 8KB stack gives about 73.3KB SRAM, well below 256KB. Weights are dominated by pointwise convs and FC: roughly 24KB INT8, so Flash also fits with app and TFLM code. Accuracy must be verified by training,
+    but this is the memory-derived shape of a compact KWS architecture.'
   common_mistake: |
     **The Pitfall:** Designing a standard CNN without calculating intermediate activation sizes.
     **The Rationale:** Candidates focus solely on parameter count (Flash) and ignore the peak working memory required to hold intermediate tensors between layers.
     **The Consequence:** Discovering post-hoc that the activations don't fit in the 256KB SRAM, causing runtime crashes.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Cortex-M4 with 256KB SRAM, 512KB Flash. DS-CNN-S model (~100KB Flash). Conv1 49x10x64.
+    - Cortex-M4 with 256KB SRAM, 512KB Flash.
+    - Input: 49x10x1 INT8 MFCC.
+    - SAME padding; stride reductions: 1, then 2x2, 2x1, 2x1.
+    - Arena estimate: largest live input+output pair plus 16KB scratch.
 
     **Calculations:**
-    - Flash usage = 100KB (weights) + 64KB (App) + 20KB (TFLM) = 184KB < 512KB. Peak activation (Conv1) = 49 * 10 * 64 = 31.36KB. Double-buffered peak = 62.72KB. SRAM usage = 62.72KB + 30KB (TFLM runtime) + 8KB (Stack) = 100.72KB < 256KB.
+    - Conv1 activation: 49 * 10 * 32 = 15,680B = 15.3KB.
+    - Largest transition: 49x10x32 input (15.3KB) plus 25x5x32 output (4.0KB) = 19.3KB.
+    - Arena estimate: 19.3KB + 16KB scratch = 35.3KB.
+    - SRAM usage: 35.3KB arena + 30KB TFLM runtime + 8KB stack = 73.3KB < 256KB.
+    - Approximate weights: Conv/DW/PW/FC total about 24KB INT8; Flash with 64KB app and 20KB TFLM code is about 108KB < 512KB.
 
     **Conclusion & Interpretation:**
-    - **Result: 100.72KB peak SRAM usage fits safely in 256KB (SRAM-Capacity-Bound Architecture)**.
+    - **Result: about 73KB peak SRAM budget**. The derived depthwise-separable architecture fits comfortably; the final filter counts can be increased until validation accuracy and the SRAM arena limit trade off cleanly.
 status: published
 provenance: imported
 requires_explanation: true

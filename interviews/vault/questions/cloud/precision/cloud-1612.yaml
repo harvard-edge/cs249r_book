@@ -8,11 +8,11 @@ competency_area: precision
 bloom_level: evaluate
 phase: both
 title: LLM Quantization Trade-offs on A100
-scenario: 'You are evaluating the deployment architecture for a 70B parameter LLM for a chatbot service. In FP16, the model weights consume ~140GB, requiring a 2-GPU tensor parallel setup. An alternative proposal is to apply INT4 weight-only quantization to reduce the weight footprint to 35GB, allowing the model and KV cache to fit on a single GPU.'
+scenario: You are evaluating the deployment architecture for a 70B parameter LLM for a chatbot service. In FP16, the model weights consume ~140GB, requiring a 2-GPU tensor parallel setup. An alternative proposal is to apply INT4 weight-only quantization to reduce the weight footprint to 35GB, allowing the model and KV cache to fit on a single GPU.
 question: Would you deploy the 70B LLM as FP16 across 2 GPUs or INT4 on 1 GPU, and why for decoding throughput and cost?
 details:
   realistic_solution: |
-    The optimal choice for throughput per dollar is the INT4 single-GPU setup. Because LLM generation is memory-bandwidth bound, reading fewer bytes from HBM increases generation speed. INT4 reduces the memory read per parameter by 4x, overcoming the de-quantization compute overhead, removing inter-GPU communication latency, and cutting hardware costs in half.
+    The optimal choice for throughput per dollar is usually the INT4 single-GPU setup, assuming quality validation passes. Because LLM generation is memory-bandwidth bound, reading fewer weight bytes from HBM increases generation speed. INT4 reduces total model weight bytes by 4x versus FP16, and against a 2-way FP16 tensor-parallel deployment it roughly halves the per-step wall-clock HBM lower bound while also removing inter-GPU communication and cutting hardware count in half.
   common_mistake: |
     **The Pitfall:** Assuming INT4 quantization slows down inference due to de-quantization overhead.
     **The Rationale:** Candidates treat LLM inference as compute-bound, ignoring that the auto-regressive decoding phase is heavily memory-bandwidth bound.
@@ -22,13 +22,17 @@ details:
     - 70B parameter LLM model.
     - FP16 weights: 140GB. INT4 weights: 35GB.
     - HBM bandwidth: 2000 GB/s.
+    - Decode is approximated as weight-streaming limited for one generated-token step.
 
     **Calculations:**
-    - FP16 (2 GPUs): 140GB weights / (2 * 2000 GB/s HBM bandwidth) = 35 ms/token memory read time.
-    - INT4 (1 GPU): 35GB weights / (2000 GB/s HBM bandwidth) = 17.5 ms/token memory read time.
+    - FP16 model bytes per generated-token step across the 2-GPU tensor-parallel deployment are about 140GB total, split as 70GB per GPU.
+    - Because the two GPUs stream shards concurrently, the per-step HBM lower bound is set by the slower shard read: 70GB / 2000 GB/s = 35 ms, plus tensor-parallel communication.
+    - INT4 single-GPU setup streams about 35GB of quantized weights, so the HBM lower bound is 35GB / 2000 GB/s = 17.5 ms, plus dequantization overhead but no cross-GPU communication.
+    - INT4 is 4x fewer total model bytes than FP16 (140GB to 35GB), and about 2x lower wall-clock shard-read time than this 2-way FP16 TP setup (70GB to 35GB).
+    - These are bandwidth lower bounds, not full end-to-end latency predictions; batching, KV-cache traffic, and kernel efficiency can change realized tokens/sec.
 
     **Conclusion & Interpretation:**
-    - **Result: 17.5 ms/token (Memory-Bound)**. INT4 yields ~2x the token generation speed while requiring half the hardware.
+    - **Result: INT4 single-GPU likely wins throughput per dollar (Memory-Bound)**. It cuts total weight bytes by 4x versus FP16 and the per-step HBM lower bound by about 2x versus this 2-GPU sharded deployment, while using half the hardware and avoiding tensor-parallel communication.
 status: published
 provenance: imported
 requires_explanation: true

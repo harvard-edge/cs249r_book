@@ -11,7 +11,7 @@ title: 'Model Size Estimation: Realize FP8 vs. FP16 Memory Comparison for 70B on
 scenario: You are comparing the memory layout of a 70B LLaMA model in FP16 versus FP8 (E4M3) on an 80GB H100 GPU cluster.
 question: How much H100 memory does a 70B LLaMA model need in FP16 vs FP8, and what KV-cache budget remains on 1, 2, and 4 H100s?
 details:
-  realistic_solution: 'FP16 requires 140GB, requiring at least 2 H100s. FP8 requires 70GB plus ~1% scaling factor overhead (70.7GB), barely fitting on a single H100. KV-cache is typically kept in FP16.'
+  realistic_solution: FP16 weights require 140GB, so they do not fit on 1x80GB H100; with even tensor-parallel sharding they leave about 20GB total KV budget on 2 H100s and 180GB total on 4 H100s. FP8 weights require about 70.7GB including scaling overhead, so weights alone fit on 1 H100, but only about 9.3GB remains before runtime overhead and FP16 KV-cache. With the same even sharding assumption, FP8 leaves about 89.3GB total KV budget on 2 H100s and 249.3GB total on 4 H100s. These KV budgets assume roughly 800KB/token and should be treated as upper bounds before allocator, activation, and runtime reserve.
   common_mistake: |
     **The Pitfall:** Assuming FP8 activation quantization is exactly half the memory of FP16 without overhead.
     **The Rationale:** Candidates forget that FP8 requires scaling factors (adding overhead) and that KV-cache is usually kept in FP16 for numerical stability.
@@ -22,13 +22,16 @@ details:
        - Model: 70B parameters.
        - FP16 layout: 2 bytes per parameter (140GB).
        - FP8 layout: 1 byte per parameter + ~1% scaling factor overhead (70.7GB).
-       - KV Cache: FP16 (800KB/token).
+       - KV Cache: FP16, assumed 800KB/token total across the tensor-parallel group.
+       - Memory basis: weights are evenly sharded across the listed H100s; KV budget is the remaining aggregate memory after weights.
     2. **Calculations:**
-       - FP16 on 2 H100s: 70GB/GPU. KV Budget = (80-70) * 2 = 20GB. Tokens = 20GB / 800KB = 25,000 tokens.
-       - FP16 on 4 H100s: 35GB/GPU. KV Budget = 45GB/GPU. Total = 180GB = 225,000 tokens.
-       - FP8 on 1 H100: 70.7GB < 80GB (barely fits). KV Budget = 9.3GB = ~11,625 tokens.
-       - FP8 on 2 H100s: 35.35GB/GPU. KV Budget = 44.65GB/GPU. Total = 89.3GB = ~111,000 tokens.
-    3. **Conclusion & Interpretation:** **FP8 barely fits on 1 H100 with a tiny 11K token budget. Shifting to 4 H100s in FP16 unlocks a massive 225K context window.**
+       - FP16 on 1 H100: 140GB > 80GB, so weights do not fit.
+       - FP16 on 2 H100s: 70GB/GPU. KV budget = (80 - 70) * 2 = 20GB, or about 25,000 tokens.
+       - FP16 on 4 H100s: 35GB/GPU. KV budget = (80 - 35) * 4 = 180GB, or about 225,000 tokens.
+       - FP8 on 1 H100: 70.7GB < 80GB. KV budget = 9.3GB, or about 11,600 tokens before runtime reserve.
+       - FP8 on 2 H100s: 35.35GB/GPU. KV budget = (80 - 35.35) * 2 = 89.3GB, or about 111,600 tokens.
+       - FP8 on 4 H100s: 17.675GB/GPU. KV budget = (80 - 17.675) * 4 = 249.3GB, or about 311,600 tokens.
+    3. **Conclusion & Interpretation:** **FP8 weights fit on 1 H100 only with a small upper-bound KV budget; meaningful serving headroom improves on 2 or 4 H100s because the FP16 KV-cache must fit alongside the weights and runtime reserve.**
 status: published
 provenance: imported
 requires_explanation: false

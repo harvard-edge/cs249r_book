@@ -7,12 +7,12 @@ topic: quantization-fundamentals
 competency_area: precision
 bloom_level: evaluate
 phase: both
-title: 'Designing a Hybrid Quantization Strategy for Jetson Orin'
+title: Designing a Hybrid Quantization Strategy for Jetson Orin
 scenario: Your team is deploying a multi-modal perception pipeline (e.g., a 7B parameter transformer with a CNN backbone) on an NVIDIA Jetson Orin platform. To hit a strict 30 FPS target, you must leverage the 275 TOPS INT8 capability across both the Ampere GPU and the DLA accelerators.
 question: How would you choose PTQ vs QAT, calibration granularity, and GPU/DLA mapping for a 7B multimodal pipeline on Jetson Orin?
 details:
   realistic_solution: |
-    A strong candidate evaluates the tradeoffs and proposes a heterogeneous strategy: applying INT8 PTQ with per-tensor quantization for the standard CNN backbone mapped to the highly efficient DLA. For the sensitive transformer layers, they recommend QAT with per-channel quantization targeting the Ampere GPU. They will architect a pipeline that explicitly minimizes data movement across the 32 GB shared memory pool, balancing the 60W thermal budget.
+    A strong candidate evaluates the tradeoffs and proposes a heterogeneous strategy: apply INT8 PTQ first to DLA-supported CNN or image-preprocessing subgraphs, using representative calibration data and per-channel weight quantization where the toolchain supports it. For transformer and multimodal fusion blocks, keep execution on the GPU unless the operators are explicitly supported on DLA, and use QAT or selective FP16/INT8 fallback for layers that lose accuracy under PTQ. The memory check shows INT8 residency is feasible, so the design decision should be driven by operator support, accuracy loss, and avoiding large GPU-DLA boundary tensors.
   common_mistake: |
     **The Pitfall:** Proposing uniform INT8 PTQ across the entire heterogeneous pipeline.
     **The Rationale:** Standard tutorials apply a single quantization method globally.
@@ -22,13 +22,17 @@ details:
     - Model Size: 7B parameters.
     - Latency Budget: 30 FPS = 33.3 ms per frame.
     - Memory Bandwidth: ~200 GB/s (LPDDR5).
+    - INT8 weights remain resident in unified memory during steady-state inference.
+    - Candidate GPU/DLA boundary tensor: 128 MiB if the graph is split at a large multimodal activation.
 
     **Calculations:**
-    - INT8 Model Size: 7B parameters * 1 byte = 7 GB.
-    - INT8 Weight Read Time: 7 GB / 200 GB/s = 35 ms.
+    - INT8 resident weight footprint: 7B parameters * 1 byte = 7 GB.
+    - Rough memory capacity check: 32 GB - 7 GB weights - 6 GB OS/runtime reserve = 19 GB for activations, KV/cache, and vision buffers, so INT8 residency is feasible but not sufficient to prove latency.
+    - Avoidable boundary traffic at 30 FPS: 128 MiB * 30 = 3.75 GiB/s per crossing.
+    - Two unnecessary crossings would consume about 7.5 GiB/s plus synchronization overhead without improving operator support.
 
     **Conclusion & Interpretation:**
-    - **Result: Memory-Bound (Bandwidth Limit)**. Reading INT8 weights takes 35 ms, missing the 33.3 ms SLA. The system requires INT4 weights or severe pruning to achieve 30 FPS.
+    - **Result: memory-feasible, partitioning-and-accuracy bound.** INT8 PTQ is appropriate for supported CNN/DLA blocks, while transformer blocks should use GPU execution with QAT or selective higher precision where PTQ accuracy fails; avoid GPU-DLA splits that create large boundary tensors.
 status: published
 provenance: imported
 requires_explanation: true

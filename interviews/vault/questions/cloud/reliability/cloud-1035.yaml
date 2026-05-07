@@ -11,7 +11,7 @@ title: Evaluating Grey-Market GPU Fleet Reliability
 scenario: Your ML team is scaling to 8,192 GPUs. Due to OEM lead times, you sourced 1,024 baseboards from an unauthorized broker. During NCCL burn-in, 15% of the new nodes exhibit persistent uncorrectable ECC memory errors causing them to crash on average every 10 hours, and thermal throttle at 350W, despite passing vendor ID checks.
 question: Should you integrate the unauthorized baseboards or delay 6 months for verified hardware, given 15% ECC errors and throttling?
 details:
-  realistic_solution: 'Quarantine the unauthorized batch entirely. The symptoms strongly indicate counterfeit or re-marked degraded hardware (e.g., ex-cryptomining boards). In synchronous large-scale training, global progress is dictated by the weakest node. The continuous distributed checkpoint restarts will result in near-zero goodput, making a 6-month delay financially superior.'
+  realistic_solution: Quarantine the unauthorized batch entirely until the hardware is verified. The ECC crashes and throttling strongly indicate degraded, re-marked, or otherwise nonconforming hardware. In synchronous large-scale training, even a faulty minority can dominate restart frequency; with about 154 unstable nodes each failing every 10 hours on average, the expected job-level interruption rate is much higher than checkpoint recovery can comfortably absorb. Delaying or sourcing verified hardware is operationally safer than integrating the batch.
   common_mistake: |
     **The Pitfall:** Treating catastrophic hardware degradation as a simple firmware or "infant mortality" bug.
     **The Rationale:** Sunk cost fallacy leads engineers to attempt underclocking or isolating "bad" GPUs to salvage the expensive unauthorized batch.
@@ -19,16 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Total cluster: 8,192 GPUs.
-    - Faulty batch: 15% of 1,024 new nodes = 153 faulty nodes.
+    - Faulty batch: 15% of 1,024 new nodes = 153.6, about 154 faulty nodes.
     - Faulty node MTBF: 10 hours.
     - Global checkpoint recovery time: ~5 minutes.
+    - Approximate independent exponential failures across faulty nodes.
 
     **Calculations:**
-    - Aggregate MTBF of faulty batch = 10 hours / 153 = ~3.9 minutes.
-    - 3.9 minutes (MTBF) < 5 minutes (Recovery Time).
+    - Faulty-batch failure rate = 154 / 10 hours = 15.4 failures/hour.
+    - Expected time between faulty-node crashes while integrated = 1 / 15.4 hours = 0.065 hours ≈ 3.9 minutes.
+    - Recovery overhead alone = 15.4 failures/hour * 5 minutes = 77 minutes/hour, before counting lost work since the last checkpoint.
 
     **Conclusion & Interpretation:**
-    - **Result: 0% Goodput (Reliability-Bound)**. The cluster MTBF is mathematically shorter than the recovery time, bringing synchronous training to a complete halt.
+    - **Result: Negative operational margin (Reliability-Bound)**. Expected recovery demand exceeds wall-clock time, so integrating the faulty batch would drive goodput toward zero for synchronous training.
 status: published
 provenance: imported
 requires_explanation: false

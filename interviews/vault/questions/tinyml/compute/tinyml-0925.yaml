@@ -7,31 +7,32 @@ topic: transformer-systems-cost
 competency_area: compute
 bloom_level: create
 phase: inference
-title: 'Design Speculative Decoding for Cortex-M4 Transformer'
-scenario: 'You are designing a speculative decoding system for a draft model on a Cortex-M4 paired with a target model on an Ethos-U55. The draft model generates 4 candidate tokens per step at 8ms each. The target model verifies all 4 simultaneously at 12ms. Token acceptance rate is α=0.75.'
-question: 'How would you design the speculation window size and fallback strategy to maximize tokens/second?'
+title: Design Speculative Decoding for Cortex-M4 Transformer
+scenario: You are designing a speculative decoding system for a draft model on a Cortex-M4 paired with a target model on an Ethos-U55. The draft model generates 4 candidate tokens per step at 8ms each. The target model verifies all 4 simultaneously at 12ms. Token acceptance rate is α=0.75.
+question: How would you design the speculation window size and fallback strategy to maximize tokens/second?
 details:
-  realistic_solution: 'Expected tokens per cycle: E[tokens] = (1-0.75^5)/0.25 ≈ 3.05. Time per cycle: 4×8ms + 12ms = 44ms. Throughput: 3.05/44ms ≈ 69.3 tok/s vs baseline 1/12ms = 83.3 tok/s... speculative decoding hurts here. Reduce draft steps to k=2: E=2.31 tokens, time=2×8+12=28ms, throughput=82.5 tok/s. Still worse. Only beneficial if draft model is much faster.'
+  realistic_solution: 'Do not enable speculation with the stated draft speed unless the target verifier also produces an extra bonus token, which the prompt does not state. With prefix acceptance rate α=0.75 and a fallback/correction token from the target on first rejection, a window of k draft tokens commits E = 1 + α + ... + α^(k-1) tokens on average: if all k draft tokens are accepted, only those k tokens are committed. For k=4, E = 2.73 tokens and cycle time is 4*8 + 12 = 44 ms, so throughput is 62.1 tok/s, worse than the target-only baseline of 83.3 tok/s. For k=2, E = 1.75 tokens and time is 28 ms, or 62.5 tok/s. For k=1, E = 1.0 token and time is 20 ms, or 50 tok/s. The best strategy is target-only decoding, or adaptive speculation only if the implementation verifies an additional target token per step or the draft model becomes much faster. Fallback should emit the target-corrected token on first rejection and discard later draft tokens.'
   common_mistake: |
     **The Pitfall:** Assuming that speculative decoding and a larger speculation window size always lead to higher token throughput.
     **The Rationale:** Candidates apply LLM datacenter scaling intuition without mathematically verifying if the weak/slow CPU draft model actually outpaces the NPU target model.
     **The Consequence:** The speculative architecture actively harms system performance, reducing overall tokens/second compared to just running the target model sequentially.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Speculation window k=4.
+    - Candidate speculation windows: k=1, k=2, and k=4.
     - Draft time = 8 ms/token.
     - Target verify time = 12 ms.
     - Acceptance rate α = 0.75.
     - Target-only baseline time = 12 ms/token (83.3 tok/s).
 
     **Calculations:**
-    - Expected tokens per cycle (k=4): E[tokens] = (1 - 0.75^5) / (1 - 0.75) ≈ 3.05 tokens.
-    - Cycle Time (k=4) = (4 * 8ms) + 12ms = 44 ms.
-    - Throughput (k=4) = 3.05 tokens / 44 ms ≈ 69.3 tok/s.
-    - For k=2: E=2.31 tokens, time = (2*8)+12 = 28ms, throughput = 82.5 tok/s.
+    - Expected committed tokens with fallback and no bonus target token: E(k) = 1 + α + ... + α^(k-1).
+    - For k=4: E = 1 + 0.75 + 0.75^2 + 0.75^3 = 2.734 tokens; time = 4 * 8ms + 12ms = 44ms; throughput = 2.734 / 0.044 = 62.1 tok/s.
+    - For k=2: E = 1 + 0.75 = 1.75 tokens; time = 2 * 8ms + 12ms = 28ms; throughput = 1.75 / 0.028 = 62.5 tok/s.
+    - For k=1: E = 1.0 token; time = 8ms + 12ms = 20ms; throughput = 1.0 / 0.020 = 50 tok/s.
+    - Target-only baseline: 1 token / 12ms = 83.3 tok/s, which is faster than all stated speculation windows.
 
     **Conclusion & Interpretation:**
-    - **Result: 69.3 tok/s vs 83.3 tok/s (Compute-Bound)**. Both k=4 (69.3 tok/s) and k=2 (82.5 tok/s) are slower than the non-speculative baseline (83.3 tok/s). The draft model must be optimized to generate tokens in <4 ms for speculative decoding to yield any latency benefit.
+    - **Result: disable speculation for the stated implementation (Compute-Bound).** The 8ms/token draft model is too slow without an extra verified bonus token; target-only decoding remains the throughput-maximizing choice.
 status: published
 provenance: imported
 requires_explanation: true

@@ -17,18 +17,22 @@ details:
     **The Rationale:** Candidates overlook that AllReduce moves twice the bytes of AllGather across the same ring, and fail to identify the 18x slower PCIe link as the true bottleneck.
     **The Consequence:** Selecting row-parallelism doubles the data transferred over the heavily constrained PCIe link, doubling the communication latency.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Dense block: [8192, 8192] on 4 GPUs.
-       - PCIe Gen4 bottleneck: 25 GB/s.
-       - Batch size: 2048, Precision: BF16 (2 bytes).
-    2. **Calculations:**
-       - Per-shard weights: 8192 * 2048 = 16.78M params = 33.55 MB.
-       - Column-parallel AllGather traffic: 3 * 2048 * 4096 = 25.16 MB.
-       - Time over 25 GB/s PCIe (Column): 25.16 MB / 25 GB/s = ~1.0 ms.
-       - Row-parallel AllReduce traffic: 1.5 * 2048 * 16384 = 50.33 MB.
-       - Time over 25 GB/s PCIe (Row): 50.33 MB / 25 GB/s = ~2.0 ms.
-    3. **Conclusion & Interpretation:**
-       - **Result: Network-Bound.** Column-parallel + AllGather wins by ~2x because AllGather moves half the bytes of AllReduce over the binding PCIe link.
+    **Assumptions & Constraints:**
+    - Dense block: [8192, 8192] on 4 GPUs.
+    - PCIe Gen4 bottleneck: 25 GB/s.
+    - Batch size: 2048, Precision: BF16 (2 bytes).
+    - Cross-rank collective traffic must traverse the PCIe-connected ranks, so PCIe is the binding edge.
+
+    **Calculations:**
+    - Column output shard per rank: 2048 batch * 2048 hidden shard * 2 bytes = 8.39 MB.
+    - Column AllGather per-GPU traffic: (4 - 1) * 8.39 MB = 25.17 MB over the ring, with the PCIe leg limiting time.
+    - Time over 25 GB/s PCIe (Column): 25.17 MB / 25 GB/s ≈ 1.0 ms.
+    - Row output tensor: 2048 batch * 8192 hidden * 2 bytes = 33.55 MB.
+    - Row AllReduce per-GPU traffic: 2 * (3 / 4) * 33.55 MB = 50.33 MB over the ring, again limited by PCIe.
+    - Time over 25 GB/s PCIe (Row): 50.33 MB / 25 GB/s ≈ 2.0 ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Bound.** Column-parallel + AllGather wins by ~2x because it moves about half as many bytes as row-parallel AllReduce over the binding PCIe link.
 status: published
 provenance: imported
 requires_explanation: false

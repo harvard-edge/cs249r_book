@@ -7,11 +7,11 @@ topic: mcu-compute-constraints
 competency_area: precision
 bloom_level: analyze
 phase: inference
-title: The Factory Floor Failure
-scenario: 'You developed a keyword spotting model on a Cortex-M4 with 256KB SRAM. The model is quantized to full INT8 using a clean calibration dataset of 1,000 samples. In the lab, it hits 99% accuracy, but it fails consistently on the factory floor.'
-question: 'What quantization failure explains the factory-floor accuracy collapse, and what mixed-precision fix fits the SRAM budget?'
+title: INT8 Clipping from Factory Calibration Mismatch
+scenario: You developed a keyword spotting model on a Cortex-M4 with 256KB SRAM. The model is quantized to full INT8 using a clean calibration dataset of 1,000 samples. In the lab, it hits 99% accuracy, but it fails consistently on the factory floor.
+question: What quantization failure explains the factory-floor accuracy collapse, and what mixed-precision fix fits the SRAM budget?
 details:
-  realistic_solution: 'The root cause is a catastrophic mismatch between the calibration data dynamic range and the factory noisy environment. The static quantization process maps FP32 activations to [-128, 127] based on clean audio. Loud, unpredictable background noise causes the input audio signal amplitude to far exceed the calibration maximum, clipping the signal.'
+  realistic_solution: The root cause is activation saturation from a calibration-range mismatch. Static INT8 quantization mapped the first audio activations to [-128, 127] using clean samples, so factory noise that exceeds the calibration maximum clips before later layers can recover. A concrete mixed-precision fix is to keep most weights and activations INT8, but promote the input preprocessing output and first sensitive activation tensor to INT16 or FP16, then requantize back to INT8 for the rest of the network. The added 6.25 KiB for a 6,400-element activation tensor fits easily in 256 KiB SRAM.
   common_mistake: |
     **The Pitfall:** Blaming the model architecture or training data without identifying activation overflow.
     **The Rationale:** Engineers assume the model lacks robustness or needs more data, missing the mechanical failure in the quantization scale.
@@ -21,16 +21,19 @@ details:
     - INT8 quantization scale: S = max_abs / 127.
     - Clean calib max_abs = 5.0.
     - Factory noise true activation = 15.0.
+    - Sensitive activation tensor: 6,400 elements.
     - INT16 memory footprint: 2 bytes per element.
 
     **Calculations:**
     - Clean S = 5.0 / 127 = 0.039.
-    - Factory noise clipped activation = 127 * 0.039 = 4.96.
-    - INT16 memory: 6,400 elements * 2B = 12.8 KB (vs 6.4 KB INT8).
-    - SRAM overhead is +6.4 KB (2.5% of 256 KB).
+    - Factory activation 15.0 maps to 15.0 / 0.039 = 385 INT8 counts, which saturates at 127.
+    - Dequantized clipped value = 127 * 0.039 = 4.96, losing the amplitude information.
+    - INT8 memory: 6,400 elements * 1 byte = 6,400 bytes = 6.25 KiB.
+    - INT16 memory: 6,400 elements * 2 bytes = 12,800 bytes = 12.5 KiB.
+    - SRAM overhead: 12,800 - 6,400 = 6,400 bytes = 6.25 KiB, about 2.4% of 256 KiB.
 
     **Conclusion & Interpretation:**
-    - **Result: +6.4 KB overhead ([Memory-Bound])**. INT16 handles the full dynamic range without clipping, safely fitting in SRAM.
+    - **Result: INT8 clipping with +6.25 KiB mixed-precision rescue (Memory-Bound)**. Promote the input/first sensitive activation path to INT16 or FP16 and requantize after the high-dynamic-range stage; this avoids the factory-noise saturation while staying within the SRAM budget.
 status: published
 provenance: imported
 requires_explanation: false

@@ -1,17 +1,17 @@
 schema_version: '1.0'
 id: cloud-4254
 track: cloud
-level: L5
+level: L3
 zone: design
 topic: autograd-computational-graphs
 competency_area: optimization
 bloom_level: apply
 phase: training
-title: Autograd graph capture for CUDA graphs on A100 for inference acceleration
+title: CUDA graphs for GPT-2 XL batch-1 decoding
 scenario: You are deploying a GPT-2 XL inference service. At batch=1, the model achieves only 40% GPU utilization because kernel launch overhead dominates. CUDA graphs can replay a pre-captured sequence of kernels without Python overhead.
 question: How would you capture CUDA graphs for GPT-2 XL batch-1 autoregressive decoding with a growing KV cache?
 details:
-  realistic_solution: 'Pre-allocate a fixed-size KV cache tensor and use in-place writes via slice assignment. This keeps tensor addresses static. Capture the single-step decode function using torch.cuda.graph.capture(). Validate with torch.cuda.check_error() after warmup.'
+  realistic_solution: Warm up the model, preallocate static input, output, and max-length KV-cache buffers, then capture only the fixed-shape single-token decode step with `torch.cuda.CUDAGraph()`. Copy the next token and position metadata into static buffers, replay the graph, and update the preallocated KV cache in-place at the current offset. Do not capture the full autoregressive loop as one growing graph; static shapes and memory addresses are required, so sequence growth must be represented by fixed buffers and per-step replay.
   common_mistake: |
     **The Pitfall:** Attempting to capture CUDA graphs for the full autoregressive loop, including the KV cache update.
     **The Rationale:** Candidates know CUDA graphs capture operations but forget they require static tensor shapes and memory addresses.
@@ -20,12 +20,16 @@ details:
     **Assumptions & Constraints:**
     - Single-token decode (w/o graphs): ~15ms.
     - Single-token decode (w/ graphs): ~3ms.
-    - Max seq len 2048, 48 layers, 25 heads, 64 dim.
+    - GPT-2 XL uses 48 layers, hidden size 1600, and 25 attention heads with head dimension 64.
+    - Max sequence length: 2048.
+    - KV cache dtype: FP16/BF16, 2 bytes.
 
     **Calculations:**
     - Speedup: 15ms / 3ms = 5x speedup.
-    - KV Cache Size: 2048 * 48 * 25 * 64 * 2 * 2 bytes = ~600 MB.
+    - Per-token KV elements per layer: 25 heads × 64 dim × 2 (K,V) = 3,200 elements.
+    - KV cache size: 2048 × 48 × 3,200 × 2 bytes = 629,145,600 bytes = about 600MiB.
 
     **Conclusion & Interpretation:**
-    - **Result: 5x speedup (Overhead-Bound)**. Static allocation of 600 MB is trivial, resolving kernel overhead.
+    - **Result: 5x single-step replay speedup.** A fixed ~600MiB KV buffer is feasible; CUDA graphs remove Python launch overhead only for the static per-step decode replay, not for a single captured growing autoregressive loop.
 status: published
+provenance: imported

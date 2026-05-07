@@ -8,10 +8,10 @@ competency_area: deployment
 bloom_level: apply
 phase: inference
 title: KV-Cache Transfer Compression to Reduce Network Bottleneck
-scenario: 'In a disaggregated serving cluster, KV-cache transfer from prefill to decode GPUs uses 400 Gbps InfiniBand. A 70B model with 512-token prompt has KV cache that takes 3.2ms to transfer, adding 16% to TTFT.'
-question: "What KV-cache compression scheme would reduce the 3.2 ms prefill-to-decode transfer over 400 Gbps InfiniBand and lower TTFT overhead?"
+scenario: In a disaggregated serving cluster, KV-cache transfer from prefill to decode GPUs uses 400 Gbps InfiniBand. A 70B model with 512-token prompt has KV cache that takes 3.2ms to transfer, adding 16% to TTFT.
+question: What KV-cache compression scheme would reduce the 3.2 ms prefill-to-decode transfer over 400 Gbps InfiniBand and lower TTFT overhead?
 details:
-  realistic_solution: 'KV cache compression strategies: (1) Quantization: KV caches can be quantized to INT8 without significant quality loss (attention scores are softmax-normalized, less sensitive to quantization). INT8 KV = 2× compression, halves transfer size. (2) Cross-layer sharing (CLA): many adjacent layers have nearly identical KV patterns. Share KV cache across every 2 layers: 2× reduction in cache size at cost of minor quality degradation. (3) Head pruning: not all attention heads carry equal information across layers. Drop bottom 20% of heads by attention entropy variance: 20% reduction with <0.5% quality impact. Combined: INT8 (2×) + 20% head pruning (1.25×) = 2.5× compression. Transfer time: 3.2ms / 2.5 = 1.28ms. TTFT overhead drops from 16% to 6.4%. (4) Speculative KV: decode GPU speculatively starts generation with a partial KV cache (first 8 layers), receives remaining layers asynchronously — hides transfer behind compute.'
+  realistic_solution: 'KV cache compression strategies: (1) Quantization: KV caches can be quantized from FP16/BF16 to INT8 without significant quality loss, giving 2x compression. (2) Head pruning: Dropping the bottom 20% of KV heads leaves 80% of heads, giving 1 / 0.8 = 1.25x compression. Combined ratio: 2 * 1.25 = 2.5x. Transfer time: 3.2ms / 2.5 = 1.28ms. Report the absolute savings as about 1.92ms unless the baseline TTFT denominator is specified.'
   common_mistake: |
     **The Pitfall:** Applying general-purpose compression algorithms like LZ4 or Zstd to KV cache tensors.
     **The Rationale:** Treating floating-point tensors like standard textual or binary data.
@@ -19,16 +19,18 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 70B model: 80 layers, 64 heads, 128 head_dim.
-    - 512 tokens, 2 bytes/param (FP16).
+    - 512 tokens, 2 bytes/element (FP16/BF16).
     - Transfer time: 3.2ms.
-    - 2x compression (INT8).
-
+    - Compression scheme: INT8 KV quantization plus 20% KV-head pruning.
     **Calculations:**
-    - KV cache size = 2 * 80 * 64 * 128 * 512 * 2 bytes = 1,342,177,280 bytes = 1.25 GiB.
-    - New transfer time (INT8) = 3.2ms / 2 = 1.6ms.
-
+    - KV elements count both K and V: 2 * 80 layers * 64 heads * 128 head_dim * 512 tokens = 671,088,640 elements.
+    - FP16/BF16 KV size = 671,088,640 * 2 bytes = 1,342,177,280 bytes = 1.25 GiB.
+    - INT8 changes 2 bytes/element to 1 byte/element: 2x compression.
+    - Keeping 80% of KV heads gives 1 / 0.8 = 1.25x compression.
+    - Combined compression = 2 * 1.25 = 2.5x.
+    - New transfer time = 3.2ms / 2.5 = 1.28ms; absolute savings = 3.2ms - 1.28ms = 1.92ms.
     **Conclusion & Interpretation:**
-    - **Result: 1.6ms transfer time with INT8 (Network-Bandwidth-Bound).**
+    - **Result: 1.28ms transfer time with INT8 and pruning (Network-Bandwidth-Bound).** This is a 1.92ms transfer reduction; TTFT percent overhead needs a stated baseline TTFT.
 status: published
 provenance: imported
 requires_explanation: false
@@ -42,7 +44,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- 2*80*64*128*512*2B is 1.34GB, not 1.68GB
+  - 2*80*64*128*512*2B is 1.34GB, not 1.68GB
 human_reviewed:
   status: not-reviewed
   by: null

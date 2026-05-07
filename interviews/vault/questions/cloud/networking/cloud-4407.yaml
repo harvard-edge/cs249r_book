@@ -11,7 +11,8 @@ title: RDMA Queue Pair Limits and Scalability in Large H100 Pods
 scenario: You are scaling a distributed training cluster from 128 to 1,024 nodes, each with one 400 Gbps InfiniBand HCA. Each NCCL AllReduce creates one RDMA Queue Pair (QP) per participating GPU pair. Your HCA supports a maximum of 32,768 QPs. After scaling to 512 nodes, training initialization hangs for 10 minutes.
 question: At 512-1,024 nodes, why does NCCL initialization hang from RDMA QP exhaustion, and what scaling limits and architectural fixes would you propose?
 details:
-  realistic_solution: 'NCCL default: for N GPUs in a single communicator, each GPU opens QPs to all other GPUs it communicates with in the ring or tree. In ring-AllReduce, each rank connects to 2 neighbors = 2N QPs total across the ring. But NCCL also creates point-to-point QPs for send/recv operations: O(N) per GPU, O(N²) total. At 512 nodes × 8 GPUs = 4,096 GPUs: QPs per GPU = min(N-1, max_peers) ≈ 4,095. Total QPs per HCA: 4,096 (for all rank communications). But with multiple communicators (data parallel + tensor parallel + pipeline parallel), multiply by communicator count. At 4,096 GPUs × 3D parallelism = 3 communicators, per-GPU QPs = 3 × (DP_size - 1 + TP_size - 1) + PP_size - 1. Fix: enable NCCL_IB_QPS_PER_CONNECTION=1 (already default), use SHARP for reduction offload, or use hierarchical AllReduce to limit QP fan-out per node.'
+  realistic_solution: |
+    Use one QP model consistently: if a communicator creates one RDMA QP for every local-to-remote participating GPU pair, each local GPU needs a QP to every remote GPU in that communicator. Same-node GPU pairs do not consume QPs on the node's InfiniBand HCA. With 8 local GPUs sharing one HCA, per-node HCA pressure is 8 * (total_ranks - local_ranks), multiplied by the number of simultaneous communicators. A 512-node, 8-GPU/node job has 4,096 ranks, so one full-width communicator consumes 32,704 QPs on each node's HCA, leaving only 64 QPs under a 32,768-QP limit. At 1,024 nodes it needs 65,472 QPs per HCA and cannot initialize. The fix is architectural: reduce communicator fan-out with hierarchical or node-aware AllReduce, shard large jobs into smaller data-parallel groups, avoid unnecessary concurrent communicators, reuse communicators instead of recreating them, and use reduction offload such as SHARP when available.
   common_mistake: |
     **The Pitfall:** Assuming NCCL's QP count scales linearly with N nodes.
     **The Rationale:** Engineers overlook that NCCL creates a QP for each participating rank-to-rank pair, leading to O(N²) scaling for fully-connected collectives.
@@ -20,14 +21,18 @@ details:
     **Assumptions & Constraints:**
     - HCA limit = 32,768 QPs.
     - 1 HCA/node, 8 GPUs/node.
+    - One full-width communicator creates one RDMA QP per local-to-remote participating GPU pair.
 
     **Calculations:**
     - 512 nodes * 8 GPUs = 4,096 GPUs.
-    - QPs per GPU = 4,095. Total QPs per HCA = 4,095 * 8 = 32,760 QPs.
-    - At 1,024 nodes = 8,192 GPUs. Total QPs per HCA = 8,191 * 8 = 65,528 QPs.
+    - Remote GPU peers per local GPU = 4,096 - 8 = 4,088.
+    - QPs owned by one node's HCA = 8 local GPUs * 4,088 = 32,704 QPs.
+    - 1,024 nodes * 8 GPUs = 8,192 GPUs.
+    - QPs per HCA at 1,024 nodes = 8 * (8,192 - 8) = 65,472 QPs.
+    - Two concurrent full-width communicators at 512 nodes would require 65,408 QPs per HCA.
 
     **Conclusion & Interpretation:**
-    - **Result: 1,024 nodes require ~65K QPs, exceeding the 32K limit by 2x (RDMA QP Exhaustion)**. Bottleneck: RDMA QP Exhaustion.
+    - **Result: 512 nodes is operationally at the HCA limit for one full-width communicator, and 1,024 nodes exceeds it by about 2x (RDMA QP Exhaustion)**. Hierarchical collectives and smaller communicator groups reduce the per-HCA endpoint count.
 status: published
 provenance: imported
 requires_explanation: false
@@ -41,7 +46,7 @@ math_status: WARN
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- Text is truncated at the end
+  - Text is truncated at the end
 human_reviewed:
   status: not-reviewed
   by: null

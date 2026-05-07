@@ -11,22 +11,25 @@ title: 'Real-time Anomaly Detection with AMD MI300X: Streaming Data Pipeline Ana
 scenario: You are designing a real-time anomaly detection system for a fleet of autonomous vehicles. Each vehicle generates telemetry data at a rate of 10GB/s. Your target latency from sensor observation to anomaly alert is under 50ms. The inference workload will run on hardware accelerators.
 question: How would you architect the stream-processing pipeline to meet a 50ms anomaly-alert SLA and avoid ingestion or feature bottlenecks?
 details:
-  realistic_solution: A robust solution would involve a highly scalable distributed stream processing framework (e.g., Apache Flink, Kafka Streams) for initial ingestion, filtering, and aggregation on CPU-based nodes. This would be coupled with efficient data transfer mechanisms (e.g., RDMA-enabled network cards, CXL/PCIe Gen5 connections, GPUDirect Storage) to move preprocessed data to the MI300X quickly. The deep learning model itself would be optimized for FP16 precision and designed with sparsity in mind where appropriate, leveraging kernel fusion and memory-aware optimizations to maximize MI300X utilization. Load balancing and failover across a cluster of MI300X instances would ensure high availability and scalability, along with meticulous profiling to identify and resolve bottlenecks across the entire pipeline.
+  realistic_solution: |
+    Build the pipeline around bounded-latency stages, not just accelerator inference. Terminate telemetry on horizontally sharded, RDMA-capable ingress nodes; decode, filter, and aggregate features in memory with Flink or a custom low-latency stream processor; then send compact feature tensors to accelerator inference workers over pinned-memory DMA. Keep per-vehicle streams partitioned so one 10GB/s stream is spread across many CPU/NIC queues, use backpressure and admission control to prevent queue growth, and colocate the feature cache with inference workers for sub-millisecond lookups. Avoid GPUDirect Storage as the primary claim here: the hard path is network telemetry ingress and CPU feature generation, not storage-to-GPU loading. The true bottleneck is usually parsing, windowed feature generation, and queueing before inference, so those stages need explicit latency budgets and continuous profiling.
   common_mistake: |
     **The Pitfall:** Under-prioritizing data ingestion networks while fixating on accelerator speeds.
     **The Rationale:** Engineers assume that if the GPU can process it fast enough, the latency target will easily be met.
     **The Consequence:** Completely ignoring the massive 10GB/s data funnel, which chokes CPU prep logic and network bandwidth long before a single byte reaches the accelerator.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 50ms total latency SLA.
-    - Accelerator inference = 10ms.
-    - Data transfer to GPU = 5ms.
+    - 50ms total sensor-to-alert SLA.
+    - Example budget: network ingress 8ms, decode/filter 8ms, feature windows 12ms, queueing 5ms, host-to-accelerator transfer 4ms, inference 10ms, alert publish 3ms.
+    - Per-vehicle telemetry is 10GB/s, so one vehicle emits about 500MB during a 50ms window.
 
     **Calculations:**
-    - Remaining budget = 50ms - (10ms + 5ms) = 35ms.
+    - Total budget used = 8 + 8 + 12 + 5 + 4 + 10 + 3 = 50ms.
+    - A 10GB/s stream cannot be serialized through one CPU parser queue; it must be sharded across NIC queues and feature workers.
+    - The accelerator sees compact feature tensors, not the full 500MB raw telemetry window.
 
     **Conclusion & Interpretation:**
-    - **Result: Exactly 35ms remains for the entire CPU ingestion pipeline (CPU Ingestion Network)**. Bottleneck: CPU Ingestion Network.
+    - **Result: The bottleneck is ingress plus CPU feature generation, not accelerator compute alone.** The architecture meets the SLA only if raw telemetry is reduced before inference and every stage has a bounded queue.
 status: published
 provenance: imported
 requires_explanation: false

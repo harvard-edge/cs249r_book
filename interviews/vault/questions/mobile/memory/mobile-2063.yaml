@@ -1,7 +1,7 @@
 schema_version: '1.0'
 id: mobile-2063
 track: mobile
-level: L6+
+level: L3
 zone: optimization
 topic: memory-hierarchy-design
 competency_area: memory
@@ -11,43 +11,46 @@ title: Design Strict Memory Bound LoRA Fine-Tuning
 scenario: You must implement on-device LoRA fine-tuning for a 2B parameter model (4GB weights). The app's peak mutable RAM footprint must not exceed 100MB.
 question: What memory flow architecture permits gradient calculation for LoRA adapters without loading 4GB base weights into mutable app memory?
 details:
-  realistic_solution: 'The 4GB frozen base weights must be completely memory-mapped (mmap) as read-only, allowing the OS to stream them from storage to the Neural Engine via page cache without counting against app RAM limits. Forward pass activations are discarded immediately, except for the input tensors specifically feeding the low-rank adapters (rank=8). Gradients are explicitly computed only for these <10MB LoRA weights, fitting safely in 100MB.'
+  realistic_solution: Keep the 4GB frozen base weights in read-only memory-mapped files or runtime-managed model storage so they are not copied into mutable app buffers. The runtime will still have a working set, page faults, and execution buffers, so the architecture must budget those separately. Disable full-model autograd, checkpoint or recompute base activations, retain only the adapter inputs needed for LoRA backpropagation, and compute gradients only for the small adapter tensors.
   common_mistake: |
     **The Pitfall:** Allocating standard RAM for base weights or full activation trees.
     **The Rationale:** Porting cloud PyTorch code directly to mobile without realizing autograd defaults to saving all activations for backprop.
     **The Consequence:** Instant Out-Of-Memory (OOM) crashes on mobile devices due to blowing past the strict 100MB mutable memory budget.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Base Weights: 2B parameters (4 GB), memory-mapped (mmap) as read-only.
+    - Base Weights: 2B parameters (4 GB), read-only mapped/runtime-managed storage.
     - LoRA Adapter Weights (rank=8): < 10 MB.
+    - Adapter gradients/optimizer state: ~20 MB with a lightweight optimizer.
+    - Saved adapter inputs and small runtime buffers: ~40 MB.
     - RAM Limit: 100 MB mutable peak.
 
     **Calculations:**
-    - Base model mutable RAM: 0 MB (read-only mmap).
-    - LoRA weights RAM: ~10 MB.
-    - Forward Activations RAM: Discarded immediately except adapter inputs (~20 MB).
-    - Peak mutable memory: 0 MB + 10 MB + 20 MB = ~30 MB.
+    - Base model mutable training buffers: ~0 MB for weights because they are frozen and read-only, excluding runtime working set.
+    - LoRA trainable weights: ~10 MB.
+    - Gradients/optimizer state: ~20 MB.
+    - Retained adapter inputs and scratch buffers: ~40 MB.
+    - Peak mutable training memory: 10 MB + 20 MB + 40 MB = ~70 MB.
 
     **Conclusion & Interpretation:**
-    - **Result: ~30 MB (Memory-Bound)**. Peak mutable memory remains < 100 MB by utilizing mmap for base weights and selective autograd.
+    - **Result: ~70 MB mutable training state.** The design can fit under 100 MB only if frozen weights are not copied into mutable RAM and full activation storage is avoided; read-only weights still consume storage bandwidth and runtime working-set memory.
 status: published
 provenance: llm-draft
-expected_time_minutes: 15
 requires_explanation: true
+expected_time_minutes: 15
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-optimization-L6+
+  - gemini-generated
+  - target-optimization-L6+
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

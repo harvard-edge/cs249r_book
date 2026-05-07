@@ -9,25 +9,28 @@ bloom_level: create
 phase: both
 title: Feature Serving Latency Budget for Two-Tower Models
 scenario: 'You serve a two-tower retrieval model on GPUs with an end-to-end SLO of 50ms p99. The latency budget breaks down as: feature retrieval from store (target: 5ms p99), embedding lookup (target: 10ms), ANN search over 100M items (target: 25ms), ranking (target: 5ms), and response serialization (target: 5ms). Your feature store is currently at p99=18ms.'
-question: 'How would you redesign feature retrieval to bring p99 latency from 18ms under the 5ms budget for the 50ms two-tower SLO?'
+question: How would you redesign feature retrieval to bring p99 latency from 18ms under the 5ms budget for the 50ms two-tower SLO?
 details:
-  realistic_solution: 'Implement a feature fan-out architecture: issue all feature store reads in parallel using async I/O (e.g., asyncio in Python, or gRPC streaming). Colocate the most-accessed item features in the same Redis cluster as user features to avoid cross-store fetches. Cache the top-10K item features in process memory (LRU cache, ~100 MB for 10K items × 10KB each). This drops p99 from 18ms to under 4ms.'
+  realistic_solution: 'Implement a feature fan-out architecture: issue all feature store reads in parallel using async I/O (e.g., asyncio in Python, or gRPC streaming). Colocate the most-accessed item features in the same Redis cluster as user features to avoid cross-store fetches. Cache the top-10K item feature payloads in process memory: 10K × 10KB = about 100 MB of raw feature data, plus allocator/index overhead. This drops p99 from 18ms to roughly 4-5ms if the miss path also stays under the budget.'
   common_mistake: |
     **The Pitfall:** Fetching all features in a sequential waterfall pattern.
     **The Rationale:** Candidates request user features, wait for the response, then request item features, accumulating sequential round-trip times.
     **The Consequence:** Three sequential fetches easily add 10-15ms of baseline latency, guaranteeing an SLO violation.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Target feature retrieval latency: 5ms p99.
-    - Sequential fetching base: User (2ms) + Item (3ms) + Context (2ms) + RTTs (3ms) = 10ms.
+    - Target feature retrieval latency: <5ms p99.
+    - Current feature retrieval latency: 18ms p99.
+    - Reads can be split into user, item, and context fetches.
 
     **Calculations:**
-    - Parallel fan-out async I/O: max(2, 3, 2) = 3ms base + 1ms RTT = 4ms p50.
-    - In-process L3 cache for top 10K items: 0.05ms fetch time.
-    - Blended P99 latency (80% hit rate): (0.80 * 0.05ms) + (0.20 * 10ms) = 2.04 ms.
+    - Sequential fetches add tail latency because p99 roughly follows the sum of dependent calls.
+    - Parallel fan-out changes the critical path to max(user_read, item_read, context_read) + client/network overhead.
+    - If the slowest p99 read after colocating hot data is ~3.5ms and async overhead is ~0.5ms, fan-out p99 is about 4.0ms.
+    - An in-process cache for top item features removes many item-store misses, but it does not make p99 a hit-rate-weighted average; the p99 still depends on whether the 99th percentile request is a cache hit or miss.
+    - To meet the SLO, measure miss-path p99 and keep it under 5ms with colocated Redis shards, request hedging, and timeouts.
 
     **Conclusion & Interpretation:**
-    - **Result: Parallel fan-out drops retrieval P99 to 2.04 ms (Latency-Bound)**.
+    - **Result: target ~4-5ms p99 retrieval (Latency-Bound)**. The valid tail model is max parallel read latency plus overhead, not an average of hit and miss paths.
 status: published
 provenance: imported
 requires_explanation: true

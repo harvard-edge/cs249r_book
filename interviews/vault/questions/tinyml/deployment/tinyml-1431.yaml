@@ -7,25 +7,30 @@ topic: model-format-conversion
 competency_area: deployment
 bloom_level: analyze
 phase: inference
-title: 'Optimizing ML Model Deployment on Nordic nRF5340 for Edge Inference'
-scenario: 'You are tasked with deploying a small convolutional neural network (CNN) for real-time anomaly detection on sensor data using a Nordic nRF5340 microcontroller. The model was developed in TensorFlow and has approximately 100,000 parameters. You''ve converted it to TensorFlow Lite, but during conversion to TFLite Micro C array, you encounter unsupported operations and a model binary size of 700 KB, with peak activation memory estimated at 150 KB. The nRF5340 has 256 KB SRAM and 1 MB flash memory, running at 128 MHz.'
-question: 'How do you approach the conversion, operator handling, and memory optimization to successfully deploy this model within the nRF5340''s constraints?'
+title: Optimizing ML Model Deployment on Nordic nRF5340 for Edge Inference
+scenario: You are tasked with deploying a small convolutional neural network (CNN) for real-time anomaly detection on sensor data using a Nordic nRF5340 microcontroller. The model was developed in TensorFlow and has approximately 100,000 parameters. You've converted it to TensorFlow Lite, but during conversion to TFLite Micro C array, you encounter unsupported operations and a model binary size of 700 KB, with peak activation memory estimated at 150 KB. The nRF5340 has 256 KB SRAM and 1 MB flash memory, running at 128 MHz.
+question: How do you approach the conversion, operator handling, and memory optimization to successfully deploy this model within the nRF5340's constraints?
 details:
-  realistic_solution: 'First, identify the unsupported operations and explore quantization strategies (e.g., post-training integer quantization to int8) to reduce model size and potentially enable support for more operations via TFLite Micro''s optimized kernels. For truly unsupported operators, investigate custom operator implementation or architectural modifications (e.g., replacing complex ops with simpler, compatible ones). Utilize memory profiling tools to understand activation memory usage and optimize model topology or input batching. Evaluate the trade-off between model accuracy and memory/latency. Consider memory mapping models from flash if parts of the model can be read on demand, but prioritize fitting critical path elements into SRAM.'
-  common_mistake: 'Attempting direct conversion without pre-analyzing operator compatibility and memory footprint. Assuming floating-point precision is feasible for inference, or neglecting the impact of intermediate activations and buffer requirements on SRAM usage.'
+  realistic_solution: First, identify the unsupported operations and use int8 quantization to reduce model size and enable TFLite Micro optimized kernels where available. For truly unsupported operators, implement a bounded custom kernel or rewrite the model with simpler compatible ops. Store the generated const model array and weights in flash, then profile the TFLM tensor arena to manage SRAM pressure from activations, scratch buffers, runtime state, stack, and custom-op temporaries. Minimize peak activation size through topology changes, input sizing, and arena planning, and verify that the 700 KB flash image still leaves room for firmware and metadata. Deployment succeeds only when operator compatibility, flash capacity, SRAM arena size, accuracy, and latency are all measured on the nRF5340.
+  common_mistake: |
+    **The Pitfall:** Attempting direct conversion without pre-analyzing operator compatibility and memory footprint.
+    **The Rationale:** Neglecting the impact of intermediate activations and buffer requirements on SRAM usage.
+    **The Consequence:** Incorrectly assuming floating-point precision is feasible for inference, failing deployment on constrained memory.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: 100,000 parameters (int8 quantized = 1 byte/param)
-    - Hardware: 256 KB SRAM
-    - Peak activation memory: 150 KB
+    - Converted model binary: 700 KB stored in flash.
+    - Hardware: 1 MB flash, 256 KB SRAM.
+    - Peak activation memory estimate: 150 KB SRAM.
+    - Runtime, stack, and operator scratch reserve: 60 KB SRAM.
 
     **Calculations:**
-    - Model parameters size = 100,000 bytes = 100 KB
-    - Total SRAM needed = 100 KB (model) + 150 KB (activations) = 250 KB
-    - Remaining SRAM = 256 KB - 250 KB = 6 KB
+    - Flash remaining after model binary: 1,024 KB - 700 KB = 324 KB for firmware, metadata, and other assets.
+    - SRAM estimate: 150 KB activations + 60 KB runtime/scratch = 210 KB.
+    - SRAM margin: 256 KB - 210 KB = 46 KB.
+    - Operator feasibility is a separate gate: every op must map to a TFLite Micro kernel, a custom kernel, or a model rewrite before the flash/SRAM budget matters.
 
     **Conclusion & Interpretation:**
-    - **Result: 6 KB free SRAM (Memory-Bound)**. This demonstrates the tight constraints and highlights the need for meticulous memory management.
+    - **Result: The model is feasible only if unsupported ops are resolved, the 700 KB flash image leaves enough room for firmware, and the measured SRAM working set stays near 210 KB or less.** Weights belong in flash; SRAM pressure comes from activations, scratch buffers, runtime state, and custom-op scratch needs.
 status: published
 provenance: imported
 requires_explanation: false

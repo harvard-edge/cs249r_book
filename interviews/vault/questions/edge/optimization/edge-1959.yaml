@@ -7,27 +7,30 @@ topic: pruning-sparsity
 competency_area: optimization
 bloom_level: analyze
 phase: training
-title: 'Optimizing LLM Deployment on Hailo-8 via Structured Pruning'
-scenario: 'You are tasked with deploying a pre-trained Large Language Model (LLM) on an edge device powered by the Hailo-8 AI processor. The Hailo-8 offers 26 TOPS (Trillions of Operations Per Second) for INT8 inference and has a typical power consumption of 2.5W. Your goal is to achieve an inference latency of less than 20ms per token while maintaining an accuracy drop of no more than 1% relative to the unpruned FP16 model. The original FP16 model has 7B parameters and requires 14GB of memory. Design a strategy leveraging structured pruning techniques, considering the Hailo-8''s dataflow architecture and INT8 capabilities, to meet these constraints.'
-question: 'How would you choose pruning granularity and sparsity patterns to maximize accelerator utilization and minimize energy consumption?'
+title: Optimizing LLM Deployment on Hailo-8 via Structured Pruning
+scenario: You are tasked with deploying a pre-trained Large Language Model (LLM) on an edge device powered by the Hailo-8 AI processor. The Hailo-8 offers 26 TOPS (Trillions of Operations Per Second) for INT8 inference and has a typical power consumption of 2.5W. Your goal is to achieve an inference latency of less than 20ms per token while maintaining an accuracy drop of no more than 1% relative to the unpruned FP16 model. The original FP16 model has 7B parameters and requires 14GB of memory. Design a strategy leveraging structured pruning techniques, considering the Hailo-8's dataflow architecture and INT8 capabilities, to meet these constraints.
+question: How would you choose pruning granularity and sparsity patterns to maximize accelerator utilization and minimize energy consumption?
 details:
-  realistic_solution: 'A realistic solution involves using channel-wise or block-wise structured pruning combined with quantization-aware training. 1. Structured Pruning: Apply techniques that remove entire channels or blocks of weights (e.g., magnitude-based pruning on convolution/linear layer channels) to ensure contiguous memory access and efficient tensor operations on the Hailo-8. This maintains regular tensor shapes, which are critical for dataflow accelerators. 2. Sparsity Pattern Alignment: Design or select pruning patterns that align with the Hailo-8''s internal processing units. For example, if the Hailo-8 has specific vectorization units or tile sizes, ensure the pruned model''s tensor dimensions are multiples of these units to avoid padding overheads. 3. INT8 Quantization-Aware Pruning: Integrate pruning with INT8 quantization-aware training (QAT). Prune the model *while* fine-tuning for INT8, allowing the model to recover accuracy from both pruning and quantization errors simultaneously. This ensures the pruned model is directly deployable on the INT8-native Hailo-8. 4. Iterative Pruning & Fine-tuning: Employ an iterative pruning and fine-tuning schedule, gradually increasing sparsity while monitoring accuracy and re-training. 5. Benchmarking: Profile different pruning ratios and patterns on the Hailo-8 to identify the sweet spot for accuracy-speedup tradeoff, ensuring the 20ms latency target is met.'
-  common_mistake: 'A common mistake is applying unstructured pruning without considering the accelerator''s architecture. While unstructured pruning can achieve high sparsity, it often leads to irregular memory access patterns and sparse matrix multiplication operations that are inefficient on hardware optimized for dense or structured computations, like the Hailo-8''s dataflow engine. This can result in actual speedups far below theoretical FLOPs reduction, or even slowdowns, due to memory-bound operations and inefficient hardware utilization.'
+  realistic_solution: A realistic solution must first acknowledge that a 7B LLM is not a natural Hailo-8 deployment target; pruning alone is unlikely to turn the full model into a 20ms/token on-chip dataflow graph. Use structured pruning only as part of a reduction plan that produces a much smaller distilled student or a host-plus-accelerator partition that the Hailo compiler can actually place. Prefer whole-channel, head, MLP-neuron, or block pruning that preserves dense tile-aligned tensor shapes, then run INT8 QAT and fine-tune against the 1% accuracy budget. For each pruning point, compile the graph and record measured utilization, p99 token latency, joules/token, host fallback time, and DRAM traffic; choose the smallest model that meets the latency and energy target without violating accuracy. If no compiled candidate meets the target, the correct decision is to reduce the student architecture or reject Hailo-8 for this LLM rather than keep increasing sparsity.
+  common_mistake: |
+    **The Pitfall:** Applying unstructured pruning without considering the accelerator's architecture.
+    **The Rationale:** While unstructured pruning achieves high sparsity, it leads to irregular memory access patterns and operations inefficient on hardware optimized for dense computations like the Hailo-8's dataflow engine.
+    **The Consequence:** This can result in actual speedups far below theoretical FLOPs reduction, or even slowdowns, due to memory-bound operations and inefficient hardware utilization.
   napkin_math: |
     **Assumptions & Constraints:**
     - Original model: 7B parameters (FP16), 14GB memory.
     - Hailo-8 capacity: 26 TOPS (INT8).
     - Target latency: < 20ms per token (requires 50 tokens/s).
-    - Unpruned INT8 compute cost: ~5000 GOPS/token.
+    - Structured pruning only helps latency when the remaining tensor shapes map efficiently to the dataflow compiler.
 
     **Calculations:**
-    - Memory constraint (target ~700MB): 7GB (INT8) / 0.7GB = 10x reduction (~90% sparsity).
-    - Compute required for 50 tokens/s: 5000 GOPS/token * 50 tokens/s = 250,000 GOPS (250 TOPS).
-    - Necessary compute reduction: 250 TOPS / 26 TOPS = ~9.6x.
-    - Pruned computational cost: 1 / 9.6 = ~10.4% of original (~90% sparsity).
+    - INT8 quantization alone reduces 14GB FP16 weights to about 7GB before activation and KV-cache overhead.
+    - That footprint is far beyond what a Hailo-8 dataflow deployment would normally keep on-chip, so pruning must produce a much smaller student or partitioned graph rather than just a sparse 7B-weight tensor.
+    - For each channel/block/head pruning ratio, measure compiled utilization, p99 token latency, joules/token, and host fallback time; a nominal sparsity percentage is not a linear predictor of TOPS, latency, or energy.
+    - The <20ms/token threshold must be verified from compiled model profiling because CPU fallback, tiling, and memory movement can dominate peak INT8 compute.
 
     **Conclusion & Interpretation:**
-    - **Result: ~90% structured sparsity required (Compute & Memory Bound)**. Channel-wise or block-wise pruning aligned with INT8 quantization-aware training is needed to match the Hailo-8 dataflow constraints.
+    - **Result: pruning alone is insufficient unless it yields a much smaller compiled model.** Use tile-aligned structured pruning with INT8 QAT, but release only a profiled student or partition whose latency, utilization, and joules/token meet the target.
 status: published
 provenance: imported
 requires_explanation: true

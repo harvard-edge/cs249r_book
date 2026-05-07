@@ -12,7 +12,7 @@ scenario: You are running a 3B LLM (32 layers, 4 KV heads, head_dim=64) on a dev
 question: How would you compare FP16 vs INT8 vs INT4 KV-cache strategies for maximum concurrent conversations?
 details:
   realistic_solution: |
-    KV per token per layer (FP16): 2 × 4 × 64 × 2B = 1,024 B. Per token (32 layers): 32 KB. Budget after weights + overhead: 4 GB - 1.5 GB - 0.5 GB = 2 GB for KV-cache. (1) FP16 KV (32 KB/token): 2K context = 64 MB per conversation. Max conversations: 31. (2) INT8 KV (16 KB/token): 2K context = 32 MB per conversation. Max: 62. Quality: <0.5% perplexity degradation. (3) INT4 KV (8 KB/token): 2K context = 16 MB per conversation. Max: 125. Quality: 2-5% perplexity degradation. Recommendation: INT8 for keys + INT4 for values (asymmetric quantization). Keys are more sensitive because they directly multiply with queries. This 'K8V4' scheme: 12 KB/token → 24 MB per conversation → 83 concurrent conversations.
+    KV per token per layer in FP16: 2 (K+V) × 4 KV heads × 64 head_dim × 2 bytes = 1,024 B. Across 32 layers, that is 32 KB/token. Budget after weights + runtime overhead: 4 GB - 1.5 GB - 0.5 GB = 2 GB for KV-cache. For a 2K context, FP16 uses 64 MB per conversation, so it supports about 31 concurrent conversations. INT8 halves the KV bytes to 16 KB/token, 32 MB per conversation, or about 62 conversations. INT4 quarters the FP16 KV bytes to 8 KB/token, 16 MB per conversation, or about 125 conversations. If the only objective is maximum concurrency, INT4 wins; if quality is also weighted, INT8 may be the safer production choice.
   common_mistake: |
     **The Pitfall:** Assuming KV-cache quantization below INT8 is always acceptable without analyzing quality loss.
     **The Rationale:** Developers often linearly extrapolate quantization benefits without understanding that keys are more sensitive than values.
@@ -21,15 +21,16 @@ details:
     **Assumptions & Constraints:**
     - KV Budget: 4 GB (app) - 1.5 GB (weights) - 0.5 GB (overhead) = 2 GB.
     - 2K context window.
+    - Model: 32 layers, 4 KV heads, head_dim=64.
 
     **Calculations:**
-    - FP16: 32 KB/tok → 64 MB/conv → Max conversations: 2 GB / 64 MB = 31.
-    - INT8: 16 KB/tok → 32 MB/conv → Max conversations: 2 GB / 32 MB = 62.
-    - INT4: 8 KB/tok → 16 MB/conv → Max conversations: 2 GB / 16 MB = 125.
-    - K8V4 (Asymmetric): 12 KB/tok → 24 MB/conv → Max conversations: 2 GB / 24 MB = 83.
+    - FP16 per token: 2 (K+V) x 4 x 64 x 2 bytes x 32 layers = 32 KB/token.
+    - FP16 per conversation: 32 KB/token x 2048 tokens = 64 MB. Max: 2 GB / 64 MB = 31.
+    - INT8 per conversation: 16 KB/token x 2048 tokens = 32 MB. Max: 2 GB / 32 MB = 62.
+    - INT4 per conversation: 8 KB/token x 2048 tokens = 16 MB. Max: 2 GB / 16 MB = 125.
 
     **Conclusion & Interpretation:**
-    - **Result: 83 conversations (Memory-Capacity-Bound)**. K8V4 maximizes concurrency with acceptable quality.
+    - **Result: 125 conversations with INT4 KV (Memory-Capacity-Bound)**. INT4 maximizes concurrency among the listed strategies; INT8 trades half that concurrency for lower quality risk.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,11 +7,11 @@ topic: streaming-ingestion
 competency_area: data
 bloom_level: analyze
 phase: both
-title: Real-Time Anomaly Detection on Edge AI Device
-scenario: 'A real-time anomaly detection system for critical machinery is deployed at the edge. It receives high-frequency data from 1,000 sensors at 100 Hz. The edge unit features 32 GB LPDDR4x memory, 400 TOPS INT8 performance, and a 75W power envelope. The system must process streams, run ML inference, alert within a 50ms end-to-end latency, and handle intermittent cloud connectivity.'
+title: 50ms Edge Anomaly Detection for 100 Hz Sensor Streams
+scenario: A real-time anomaly detection system for critical machinery is deployed at the edge. It receives high-frequency data from 1,000 sensors at 100 Hz. The edge unit features 32 GB LPDDR4x memory, 400 TOPS INT8 performance, and a 75W power envelope. The system must process streams, run ML inference, alert within a 50ms end-to-end latency, and handle intermittent cloud connectivity.
 question: How would you architect a 50ms edge anomaly detection pipeline for hundreds of 100 Hz sensors with intermittent cloud connectivity?
 details:
-  realistic_solution: "A robust solution involves: 1. Lightweight message queue for ingestion. 2. Stream processing framework for feature extraction. 3. INT8 quantized ML model to leverage the 400 TOPS. 4. Local persistent buffer (e.g., SQLite, RocksDB) to queue alerts during network outages. 5. Explicitly optimizing data transfer to maximize LPDDR4x bandwidth."
+  realistic_solution: 'Use a staged streaming pipeline with bounded queues and backpressure: ingest sensor packets into a lock-free or lightweight message buffer, normalize and validate them immediately, compute rolling-window features per machine or sensor group, run INT8 inference on microbatches/windows rather than every raw sample, and emit local alerts before cloud upload. Allocate the 50ms budget explicitly, for example 5ms ingestion/validation, 15ms windowed feature extraction, 20ms inference, and 10ms alert persistence/transmission. Keep raw history in a ring buffer and store alerts/features in a local durable queue such as RocksDB or SQLite for intermittent connectivity. The key design is reducing 100,000 raw samples/sec into bounded feature windows so the accelerator sees actionable inference units, not one inference per sensor sample.'
   common_mistake: |
     **The Pitfall:** Focusing solely on the ML model architecture and ignoring the end-to-end data pipeline.
     **The Rationale:** Candidates often over-index on model optimization while neglecting data ingestion, real-time feature extraction, memory bandwidth, and power constraints.
@@ -26,10 +26,13 @@ details:
     **Calculations:**
     - Ingestion = 1,000 * 100 * 8 = 800 KB/s.
     - Naive compute = 100,000 inf/sec * 10 GOPs = 1,000 TOPS (exceeds 400 TOPS).
-    - Latency breakdown = 15ms (ingest) + 20ms (infer) + 15ms (alert).
+    - Example latency partition, not hardware-derived: 5ms ingest/validate + 15ms feature windows + 20ms inference + 10ms local alerting = 50ms.
+    - If each inference window aggregates one 100-sample slice per sensor group, and the 1,000 sensors are organized into 10 groups, inference rate is 10 groups * 100 windows/sec = 1,000 inf/sec.
+    - Windowed compute = 1,000 inf/sec * 10 GOPs = 10 TOPS, leaving accelerator headroom for batching and jitter.
+    - Local buffering for a 10-minute cloud outage at raw-sample rate is 800 KB/s * 600s = 480 MB, which fits in 32 GB; durable queues should still apply backpressure if uploads lag.
 
     **Conclusion & Interpretation:**
-    - **Result: Naive inference exceeds 400 TOPS capacity (Compute-Bound)**. Sliding windows and batched streams are mandatory.
+    - **Result: naive per-sample inference exceeds 400 TOPS, while explicit grouped-window inference can fit the 50ms budget.** The architecture must reduce stream volume before inference and use local buffering/backpressure during cloud outages.
 status: published
 provenance: imported
 requires_explanation: true

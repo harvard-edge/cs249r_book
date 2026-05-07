@@ -9,20 +9,26 @@ bloom_level: create
 phase: inference
 title: KV Cache Eviction Under Memory Pressure
 scenario: Your vLLM serving instance on a single GPU has 35 GB available for KV-cache after loading model weights. At peak traffic, 80 concurrent requests each need up to 8K context (2.56 GB KV-cache each). Total maximum demand is 204 GB, far exceeding the 35 GB budget.
-question: "What eviction and admission policy should you use to handle 80 requests requiring up to 204 GB of KV-cache with only a 35 GB budget?"
+question: What eviction and admission policy should you use to handle 80 requests requiring up to 204 GB of KV-cache with only a 35 GB budget?
 details:
-  realistic_solution: 'Design a multi-level policy: (1) Admission control: limit concurrent requests to what fits in memory. At 35 GB / 2.56 GB max = 13 full-length requests. Accept up to 13 requests; queue the rest. (2) Preemption policy (when memory is exhausted mid-generation): Use ''swap'' — move preempted request''s KV blocks to CPU memory (host has >>35 GB). When GPU memory frees up, swap back without recomputing. Swap bandwidth: PCIe Gen5 at 64 GB/s, a 2.56 GB cache swaps in 40ms. (3) Preemption priority: preempt the request with the most remaining tokens to generate (longest remaining latency), preserving requests close to completion. This minimizes wasted compute. (4) For prefix-shared requests: never evict shared prefix blocks — they serve multiple requests. (5) Overcommit strategy: admit up to 40 requests assuming average context is 2K (not 8K max). Average KV = 640 MB × 40 = 25.6 GB (fits). Handle the 5% of requests that reach 8K by swapping. This achieves 3× higher throughput than conservative admission control.'
+  realistic_solution: 'Use a budgeted admission policy rather than random KV eviction. Reserve headroom and admit requests while the estimated active GPU KV working set stays below about 30 GB of the 35 GB budget. In a worst-case 8K-only workload, that means at most floor(35 / 2.56) = 13 requests and the rest must queue. If production telemetry shows an average 2K working set, cap admission around 40 requests: 40 x 640 MB = 25.6 GB, leaving headroom for growth and allocator overhead. When memory is exhausted mid-generation, preempt whole requests by swapping their KV blocks to CPU memory, not by evicting arbitrary blocks. Prefer preempting requests with the most remaining work and protect shared prefix blocks because they benefit multiple requests. A full 8K KV swap has a raw transfer floor of 2.56 GB / 64 GB/s = 40 ms, plus scheduler and paging overhead, so it should be an exception path rather than the normal operating mode.'
   common_mistake: |
     **The Pitfall:** Using simple LRU eviction on individual KV blocks.
     **The Rationale:** Candidates treat the KV-cache like a standard web cache, not realizing that evicting random blocks of an active request corrupts its state.
     **The Consequence:** The system preempts a nearly-complete long request to admit a new short request, permanently wasting all the compute already invested.
   napkin_math: |
+    **Assumptions & Constraints:**
     - Hard budget: 35 GB.
     - Max KV per request (8K tokens): 8,192 * 320 KB ≈ 2.56 GB.
-    - Conservative Admission (Max Context): 35 GB / 2.56 GB = 13 concurrent requests.
-    - Overcommit Admission (Avg 2K Context): Average KV is 640 MB. 35 GB / 640 MB ≈ 54 concurrent requests.
-    - Swap penalty for the 5% hitting max: 2.56 GB / 64 GB/s (PCIe Gen5) ≈ 40ms.
-    - **Result: Overcommitting based on average context increases capacity by 4x, relying on fast PCIe swapping to handle tail outliers.**
+    - Average 2K working set, when telemetry supports it: 2,048 * 320 KB = 640 MB.
+    - Target working-set budget for overcommit: ~30 GB, leaving ~5 GB headroom.
+    **Calculations:**
+    - Guaranteed worst-case admission: 35 GB / 2.56 GB = 13 concurrent full-length requests.
+    - Telemetry-based overcommit cap: 40 requests * 640 MB = 25.6 GB, below the 30 GB working-set target.
+    - Theoretical average-context ceiling: 35 GB / 640 MB ≈ 54 requests, but this leaves no headroom.
+    - Raw full-request swap transfer floor: 2.56 GB / 64 GB/s ≈ 40 ms, before software overhead.
+    **Conclusion & Interpretation:**
+    - **Result: Budgeted overcommit with whole-request preemption.** Admit 13 in the worst case, or about 40 under a measured 2K working-set assumption, and use swapping only to handle growth beyond the GPU KV budget.
 status: published
 provenance: imported
 requires_explanation: true

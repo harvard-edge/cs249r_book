@@ -7,11 +7,11 @@ topic: adversarial-robustness
 competency_area: reliability
 bloom_level: analyze
 phase: inference
-title: Optimizing Adversarial Defense on Exynos NPU
+title: Optimizing Monte Carlo Dropout on Mobile NPU
 scenario: You are securing a real-time face authentication model running on an NPU. Running 5 unbatched Monte Carlo dropout passes saturates the memory bus and misses the 30ms latency target.
 question: How do you diagnose the 5-pass Monte Carlo bottleneck on a shared-memory NPU, and how can it be optimized below 30ms?
 details:
-  realistic_solution: 'The optimal strategy is to analyze the memory traffic and fuse the Monte Carlo passes into a single batched NPU execution to maximize data reuse of the model weights in the NPU''s SRAM. By batching the inputs, the weights are loaded from the shared LPDDR5X only once instead of five times. This shifts the workload from being memory-bandwidth bound to utilizing the massive 34.7 TOPS compute capacity of the dual-core NPU.'
+  realistic_solution: Diagnose the bottleneck by profiling per-pass NPU time, DMA transfers, weight-load counters, driver launch overhead, and LPDDR bandwidth while comparing one pass, five unbatched passes, and a batched batch=5 run. If the five passes repeatedly reload the same weights, fuse them into a single batched NPU execution so weights are loaded once into on-chip SRAM/cache and reused across dropout masks. Keep dropout randomness in activation masks, preallocate input/output buffers, and verify that the batched graph stays below the 30 ms target under shared-memory contention.
   common_mistake: |
     **The Pitfall:** Misdiagnosing the bottleneck as purely NPU compute limitation.
     **The Rationale:** Candidates ignore the shared 12 GB LPDDR5X contention and suggest aggressive model pruning instead of analyzing memory traffic.
@@ -20,14 +20,18 @@ details:
     **Assumptions & Constraints:**
     - Model Weights (INT8): 5M params = 5 MB.
     - Compute per pass: 1 GOP.
-    - Bandwidth: 10 GB/s. NPU Peak: 34.7 TOPS.
+    - Effective bandwidth during contention: 10 GB/s.
+    - NPU Peak: 34.7 TOPS.
+    - Driver overhead: about 2 ms per NPU launch.
 
     **Calculations:**
-    - Unbatched (5 passes): Transfer 25 MB. Transfer time = 25 MB / 10 GB/s = 2.5 ms. Total latency > 10 ms (due to driver overheads).
+    - Unbatched (5 passes): Transfer 25 MB. Transfer time = 25 MB / 10 GB/s = 2.5 ms.
+    - Unbatched launch overhead: 5 launches * 2 ms = 10 ms, before compute and contention stalls.
     - Batched (1 pass with batch=5): Transfer 5 MB. Transfer time = 5 MB / 10 GB/s = 0.5 ms. Compute = 5 GOPs / 34.7 TOPS = 0.14 ms.
+    - Batched estimated latency with one launch: 0.5 ms + 0.14 ms + 2 ms = ~2.64 ms before framework overhead.
 
     **Conclusion & Interpretation:**
-    - **Result: <1 ms latency (Memory-Bound)**. Batching eliminates redundant weight loads, maximizing SRAM reuse and dropping latency to <1 ms.
+    - **Result: ~2.6 ms modeled core latency, with room under 30 ms for framework overhead (Memory/Launch-Overhead-Bound).** The optimization is justified by measured redundant weight transfers and launch overhead, not by compute peak alone.
 status: published
 provenance: imported
 requires_explanation: false

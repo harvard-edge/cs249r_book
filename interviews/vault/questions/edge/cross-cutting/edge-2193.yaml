@@ -7,27 +7,28 @@ topic: differential-privacy
 competency_area: cross-cutting
 bloom_level: evaluate
 phase: both
-title: Differential Privacy for Federated Edge Learning
+title: Device-Level DP Noise Calibration for Edge Federated Learning
 scenario: You're deploying federated learning across 1,000 Jetson Orin edge devices for a visual inspection model. Each device has 500 private images. The central server aggregates gradients with DP noise.
-question: What clipping norm and noise multiplier do you choose to achieve (ε=5, δ=1e-5) over 100 aggregation rounds, given that each round samples 100 devices?
+question: How would you choose clipping norm and noise multiplier for device-level DP over 100 rounds with 100 of 1000 devices sampled?
 details:
-  realistic_solution: 'Federated DP works at the device level: each device computes a model update (gradient sum over local data), clips it to norm C, and the server adds Gaussian noise calibrated to C. With subsampling: each round samples q = 100/1000 = 0.1 of devices. Using the moments accountant (RDP): for 100 rounds with subsampling rate 0.1, to achieve ε=5, δ=1e-5, the required noise multiplier is σ ≈ 2.3 (noise scale = σ × C). Clipping norm C: too small clips informative updates, too large dilutes the noise''s privacy effect. Empirically, C should be set at the median of unclipped update norms. For a ResNet-18 (11M params): typical update norms are 10-50. Set C = 20. Noise per coordinate: σ × C / num_sampled_devices = 2.3 × 20 / 100 = 0.46 per parameter. This is manageable for a model with 11M parameters — the noise averages out over dimensions.'
+  realistic_solution: |
+    Federated DP works at the device level: each sampled device computes one model update, clips that update to norm C, and the server adds Gaussian noise calibrated to C before aggregation. The clipping norm is not determined by ε, δ, or the number of parameters; choose it from a private or non-sensitive calibration run, commonly near the median or 75th percentile of unclipped device update norms, then validate utility. The noise multiplier must come from a DP accountant for sampled Gaussian mechanisms using q = 100/1000 = 0.1, 100 rounds, and target δ = 1e-5; start with the accountant's σ that gives ε near 5, then increase σ or reduce rounds/sample rate if the accounting result is too high. State noise as standard deviation σ * C on the clipped aggregate/update, not as per-coordinate noise divided by the number of devices.
   common_mistake: |
     **The Pitfall:** Applying DP-SGD noise at the gradient level on each device instead of at the device update level.
     **The Rationale:** Candidates confuse local sample-level differential privacy with federated device-level differential privacy.
     **The Consequence:** Miscalibrating noise, resulting in models that either provide no privacy guarantees or are completely destroyed by excessive noise.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Devices: 1000. Rounds: 100. Sampled per round: 100 (q = 0.1).
+    **Assumptions & Constraints:**
+       - Devices: 1000. Rounds: 100. Sampled per round: 100, so q = 0.1.
        - Target privacy: ε = 5, δ = 1e-5.
-       - ResNet-18 (11M params) median update norm C = 20.
-    2. **Calculations:**
-       - RDP to DP conversion at α=10: ε = RDP(α) + ln(1/δ)/(α-1) -> 5 = RDP(10) + 1.28 -> RDP ≈ 3.72.
-       - Total RDP = 100 * (2 * α * q²) / σ² = 100 * (20 * 0.01) / σ² = 20 / σ².
-       - Setting 20 / σ² = 3.72 gives σ² ≈ 5.37 -> σ ≈ 2.3.
-       - Noise per coordinate = σ * C / num_sampled_devices = 2.3 * 20 / 100 = 0.46.
-    3. **Conclusion & Interpretation:**
-       - **Result: σ ≈ 2.3, C = 20, adding 0.46 noise per parameter.** This configuration meets the privacy budget without introducing overwhelmingly destructive variance.
+       - Device-level Gaussian mechanism clips each device update to norm C and adds noise with standard deviation σ * C.
+    **Calculations:**
+       - Sampling rate q = 100 / 1000 = 0.1.
+       - C affects utility and noise scale, but does not by itself set ε; doubling C doubles the added noise standard deviation when σ is fixed.
+       - σ must be found by running an RDP, PLD, or moments accountant for the sampled Gaussian mechanism across 100 rounds and checking that the resulting ε is at or below 5 for δ = 1e-5.
+       - If the accountant reports ε > 5, increase σ, lower q, or reduce the number of aggregation rounds.
+    **Conclusion & Interpretation:**
+       - **Result: choose C from observed device update norms and choose σ from a real DP accountant.** The prompt does not uniquely determine a numeric C, and privacy noise is calibrated at the clipped device-update level.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,7 +11,7 @@ title: Model Parallelism Partitioning for XCD Locality
 scenario: You are deploying a 70B parameter model on a single MI300X containing 8 independent XCD dies (192 GB total).
 question: How would you partition the 70B model across the 8 XCDs to maximize local memory access?
 details:
-  realistic_solution: 'Partition by layer groups: assign consecutive transformer layers (e.g., layers 0-9) to XCDs 0-1, layers 10-19 to XCDs 2-3, etc. Within each layer group, keep both weight matrices and activation buffers on the same XCD pair. Use pipeline parallelism between XCD groups rather than FSDP/ZeRO-3 across all 8. Cross-XCD traffic is then only activation tensors at pipeline stage boundaries (much smaller than weights).'
+  realistic_solution: Partition by contiguous transformer layer groups and place each group's weights, KV/cache state, and hot activation buffers on the XCD or XCD pair that executes that group. Prefer pipeline or tensor partitioning that preserves locality over round-robin all-to-all sharding across all 8 XCDs. Exact stage boundaries should be chosen from per-layer weight size, activation size, KV-cache footprint, and runtime overhead so no XCD exceeds its usable memory budget.
   common_mistake: |
     **The Pitfall:** Round-robin distributing weight shards across all XCDs (e.g., using FSDP indiscriminately).
     **The Rationale:** Maximizing memory capacity utilization without considering the severe penalty of cross-XCD fabric bandwidth.
@@ -19,15 +19,17 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - 70B params FP16: 140 GB.
-    - Hardware: 8 XCD dies (24 GB each, 192 GB total).
+    - Hardware: 8 XCD dies, 192 GB total HBM.
+    - Exact layer count, activation sizes, KV-cache size, and runtime overhead are not specified.
 
     **Calculations:**
-    - Per XCD requirement: 140 GB / 8 = 17.5 GB.
-    - FSDP traffic per layer: Gather the remaining 122.5 GB across the internal fabric.
-    - Pipeline traffic: Only the activation tensor (~2 GB) at pipeline boundaries.
+    - Average FP16 weight budget if balanced across 8 XCDs = 140 GB / 8 = 17.5 GB per XCD.
+    - Total non-weight headroom before optimizer/KV/activation/runtime overhead = 192 GB - 140 GB = 52 GB.
+    - Average remaining headroom = 52 GB / 8 = 6.5 GB per XCD-equivalent, so stage sizing must account for more than weights.
+    - All-to-all parameter sharding would require frequent remote gathers of layer weights or activations; contiguous layer placement limits cross-XCD traffic mainly to stage-boundary activations and any tensor-parallel collectives.
 
     **Conclusion & Interpretation:**
-    - **Result: Fabric-Bandwidth Bound.** FSDP bottlenecks the chiplet fabric; pipeline parallelism isolates weights locally and cuts cross-die traffic by orders of magnitude.
+    - **Result: use locality-aware contiguous layer stages, then size stages from measured per-layer memory.** The simple 17.5 GB average shows weights can fit only with careful overhead budgeting; it does not justify arbitrary layer splits or an invalid per-layer FSDP traffic number.
 status: published
 provenance: imported
 requires_explanation: true

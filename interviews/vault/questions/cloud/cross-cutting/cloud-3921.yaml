@@ -11,7 +11,7 @@ title: Driver Version Compatibility Hell in Multi-GPU Cloud Deployments
 scenario: Your containerized inference service works on local dev (CUDA 12.1, driver 535) but crashes on production cloud VMs with 'CUDA driver version is insufficient for CUDA runtime version'. The cloud VMs have driver 525 (CUDA 12.0 compatible).
 question: Why does the container crash with driver 525 and CUDA runtime 12.1, and how should you fix it?
 details:
-  realistic_solution: 'The CUDA runtime 12.1 in your container requires driver >= 530. The cloud VM has driver 525 (max runtime 12.0). Three fixes: (1) Pin your container to CUDA runtime 12.0 (match the lowest production driver). (2) Request cloud provider to update to driver 535+. (3) Use NVIDIA''s CUDA compat library (libcuda_compat.so), available since CUDA 11.7, which allows a newer CUDA runtime to work with an older driver on select GPU architectures. Best practice: lock the CUDA runtime version in your Dockerfile and document the minimum driver requirement.'
+  realistic_solution: 'The CUDA runtime 12.1 in your container requires driver >= 530. The cloud VM has driver 525, which is compatible only up to CUDA 12.0 in this scenario, so the container fails when the runtime tries to use driver features that are not available. The reliable fixes are to upgrade the production host driver to a version that supports CUDA 12.1, such as 535+, or downgrade/pin the container to a CUDA 12.0 runtime that matches the lowest production driver. CUDA compatibility packages are limited, architecture- and version-dependent, and should not be treated as a universal remedy for running newer runtimes on older host drivers. Best practice: lock the CUDA runtime version in your Dockerfile and document the minimum driver requirement.'
   common_mistake: |
     **The Pitfall:** Assuming any CUDA 12.x driver supports any CUDA 12.x runtime.
     **The Rationale:** Candidates confuse forward compatibility (newer driver runs older runtime, which works) with backward compatibility (older driver runs newer runtime, which fails).
@@ -22,10 +22,12 @@ details:
     - Cloud VM Driver: 525 (Max supported runtime <= 12.0).
 
     **Calculations:**
-    - Driver Gap: 535 (Required) - 525 (Available) = 10-version driver gap.
+    - Minimum required driver: 530.
+    - Available production driver: 525.
+    - Compatibility check: 525 < 530, so the installed driver is below the minimum required by the CUDA 12.1 runtime.
 
     **Conclusion & Interpretation:**
-    - **Result: Crash (Software Compatibility Failure).** The 10-version driver gap spans two minor CUDA versions, breaking backward compatibility and causing the crash.
+    - **Result: Crash (Software Compatibility Failure).** The CUDA runtime cannot load because production is below the minimum supported driver version.
 status: published
 provenance: imported
 requires_explanation: false

@@ -11,7 +11,7 @@ title: 'Kernel Fusion: Specification — Define Fusion Requirements for Custom C
 scenario: You are specifying requirements for a custom CUDA kernel to fuse RMSNorm + QKV Projection for a 70B model on an H100 GPU. The unfused version takes 3.2ms.
 question: What correctness, performance, precision, and validation requirements would you set for the fused RMSNorm + QKV CUDA kernel?
 details:
-  realistic_solution: 'Correctness: max absolute error < 1e-3 vs float32 reference (for bf16). Performance: must exceed 1.5x speedup vs unfused. Memory: must not allocate any intermediate HBM buffers. Backward: must support gradient computation.'
+  realistic_solution: 'Correctness: forward RMSNorm and QKV outputs must match a float32-accumulation reference within BF16-appropriate tolerances, with separate tolerances for activations and gradients. Performance: minimum 1.2x speedup versus the 3.2ms unfused baseline from removing the normalized-activation intermediate, with 1.5x as a stretch target only if QKV tiling and launch overhead also improve. Precision: accumulate RMS variance in FP32, use deterministic scale/epsilon behavior, and avoid extra rounding between RMSNorm and projection. Validation: compare forward and backward against PyTorch/reference kernels, run shape and alignment stress tests, test extreme activation ranges, verify no intermediate HBM allocation, and include end-to-end perplexity or training-loss parity.'
   common_mistake: |
     **The Pitfall:** Failing to specify numerical tolerance bounds and backward pass requirements.
     **The Rationale:** Engineers focus purely on latency speedups, ignoring the strict numerical precision constraints required for LLM convergence.
@@ -20,17 +20,21 @@ details:
     **Assumptions & Constraints:**
     - Unfused latency: 3.2 ms.
     - Batch: 16, Seq: 4096, Hidden: 8192.
-    - H100 Memory Bandwidth: 3.35 TB/s.
+    - H100 memory bandwidth: 3.35 TB/s.
+    - Ignore QKV weight reads because fusion does not eliminate them.
 
     **Calculations:**
-    - Tensor size: 16 * 4096 * 8192 * 2 bytes (BF16) = 1.07 GB.
-    - Fusion eliminates 1 write and 1 read: 2 * 1.07 GB = 2.14 GB saved per forward pass.
+    - Input tensor X: 16 * 4096 * 8192 * 2 bytes = 1.07 GB.
+    - QKV output tensors: 3 * 1.07 GB = 3.22 GB.
+    - Unfused activation traffic: read X 1.07 GB + write RMSNorm(X) 1.07 GB + read RMSNorm(X) for QKV 1.07 GB + write QKV 3.22 GB = 6.43 GB.
+    - Fused activation traffic: read X 1.07 GB + write QKV 3.22 GB = 4.29 GB.
+    - Fusion eliminates the normalized activation write and reread: 2 * 1.07 GB = 2.14 GB saved.
     - Time saved at 3.35 TB/s: 2.14 GB / 3350 GB/s = 0.64 ms.
     - Expected Fused Latency: 3.2 ms - 0.64 ms = 2.56 ms.
     - Speedup: 3.2 / 2.56 = 1.25x.
 
     **Conclusion & Interpretation:**
-    - **Result: 2.56 ms Latency (Memory-Bound)**. Fusing the kernel eliminates intermediate HBM read/writes, reliably accelerating the memory-bound RMSNorm operation by ~25%.
+    - **Result: ~2.56 ms expected latency and ~1.25x speedup from activation-traffic savings alone.** A 1.5x requirement needs additional evidence from kernel implementation, not just the RMSNorm intermediate removal.
 status: published
 provenance: imported
 requires_explanation: true

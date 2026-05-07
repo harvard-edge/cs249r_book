@@ -9,22 +9,24 @@ bloom_level: analyze
 phase: both
 title: The Prefill vs. Decode Dilemma
 scenario: You are optimizing an LLM serving system for a code completion assistant. The user experience is sensitive to both TTFT (time to first suggestion) and TPOT (throughput of the generated code block). Your profiler shows that prompt processing (prefill) is compute-bound, while token generation (decode) is memory-bound. A team member suggests doubling the batch size.
-question: "Why might doubling batch size improve aggregate TPOT but harm TTFT and user experience for the code completion assistant?"
+question: Why might doubling batch size improve aggregate TPOT but harm TTFT and user experience for the code completion assistant?
 details:
-  realistic_solution: 'The suggestion conflates aggregate throughput with latency. Doubling the batch size increases queueing and the O(N^2) compute time required for prefill. While decoding throughput (tokens/sec) may improve for the batched group, the individual time to first token (TTFT) scales exponentially, drastically degrading the interactive user experience.'
+  realistic_solution: Doubling batch size can improve aggregate decode throughput because the GPU reuses model weights across more active sequences, improving TPOT for the batch as a whole. It can still harm TTFT because requests wait longer to form the larger batch and because larger prefills consume longer scheduler quanta before the first token is available. The latency increase is not exponential by default; it is a queueing and prefill-scheduling trade-off that can be roughly linear or worse depending on batching timeout, prompt lengths, attention implementation, and admission control.
   common_mistake: |
     **The Pitfall:** Conflating throughput (tokens/sec) with latency (ms/token).
     **The Rationale:** Engineers assume that techniques to improve aggregate throughput, like larger batches, will improve per-user perceived latency.
-    **The Consequence:** A larger batch significantly increases queueing and prefill time, hurting TTFT without speeding up memory-bound token generation for the user.
+    **The Consequence:** A larger batch may raise aggregate tokens/sec while increasing queueing delay and time to first token, making an interactive code completion feel slower even if fleet throughput improves.
   napkin_math: |
     1. **Assumptions & Constraints:**
-       - 70B model (140 GB in FP16), running on a GPU with 989 TFLOPS and 3.35 TB/s bandwidth.
-       - Prefill sequence length: 1000 tokens.
+       - Prefill is compute-heavy and must finish before the first decoded token is returned.
+       - Decode is often memory-bandwidth limited at small effective batch sizes.
+       - Larger batches increase effective weight reuse but require more requests to wait together.
     2. **Calculations:**
-       - Prefill compute: 2 * 70B * 1000 = 140 TFLOPs. Time = 140 TFLOPs / 989 TFLOPS = 141 ms.
-       - Decode memory: 140 GB read per token. Time = 140 GB / 3.35 TB/s = 41.8 ms/token.
-       - Doubling batch size doubles prefill time to 282 ms, delaying TTFT.
-    3. **Conclusion & Interpretation:** **Raising batch size improves decode throughput but exponentially delays prefill. Result: Compute-Bound for Prefill, Memory-Bound for Decode.**
+       - TTFT ≈ batching wait + queue wait + prefill time + first decode step.
+       - Doubling the target batch can add up to one batching-timeout window before service starts.
+       - It also increases the amount of prefill work admitted into one scheduling quantum, so short interactive requests may wait behind longer prompts.
+       - Decode TPOT can improve because each decode step amortizes weight movement across more active sequences.
+    3. **Conclusion & Interpretation:** **Result: TPOT can improve while TTFT worsens.** Larger batches help aggregate throughput, but interactive systems need bounded batching time, chunked prefill, or priority scheduling to protect first-token latency.
 status: published
 provenance: imported
 requires_explanation: false

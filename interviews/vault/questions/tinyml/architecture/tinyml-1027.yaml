@@ -7,11 +7,12 @@ topic: neural-architecture-search
 competency_area: architecture
 bloom_level: evaluate
 phase: training
-title: 'Hardware-Aware NAS Tradeoffs on ESP32-S3'
-scenario: 'You are deploying a wake-word model on an ESP32-S3 (240 MHz Xtensa). Hardware-Aware NAS outputs two candidate architectures. Model A (450 KB peak memory, 15 MFLOPs) uses scalar operations. Model B (600 KB peak memory, 25 MFLOPs) perfectly utilizes 4-way INT8 vector instructions, but its size forces 88 KB of data into slower external PSRAM.'
-question: 'Which architecture do you choose for deployment, and how do you justify the tradeoff between PSRAM latency and vectorization speedup?'
+title: Hardware-Aware NAS Tradeoffs on ESP32-S3
+scenario: You are deploying a wake-word model on an ESP32-S3 (240 MHz Xtensa). Hardware-Aware NAS outputs two candidate architectures. Model A (450 KB peak memory, 15 MFLOPs) uses scalar operations. Model B (600 KB peak memory, 25 MFLOPs) perfectly utilizes 4-way INT8 vector instructions, but its size forces 88 KB of data into slower external PSRAM.
+question: Which architecture do you choose for deployment, and how do you justify the tradeoff between PSRAM latency and vectorization speedup?
 details:
-  realistic_solution: 'An L5 engineer will quantify the PSRAM access penalty against the vectorization speedup. Because the ESP32-S3 has a data cache for PSRAM, if the memory access pattern is predictable, the cache miss penalty is manageable. The engineer should calculate that the compute cycles saved by INT8 vector extensions massively outweigh the PSRAM fetch stalls for the extra 88 KB, making Model B the optimal choice.'
+  realistic_solution: |
+    Choose Model B if profiling confirms the 88 KB PSRAM spill is mostly sequential or cache-friendly, because its 4-way INT8 vectorization more than offsets the added memory stalls under the stated assumptions. Model A stays entirely within internal memory but uses scalar operations, so its 15 MFLOPs translate to a much larger CPU cycle count. The justification must compare both models in the same units: convert MFLOPs to MAC-like work consistently, estimate scalar versus vector cycles, then add the PSRAM miss penalty for Model B. If the spill causes random cache misses or repeated rereads, Model A may win, but the provided numbers favor Model B.
   common_mistake: |
     **The Pitfall:** Reflexively rejecting Model B because it spills into PSRAM, assuming external memory latency will completely destroy performance.
     **The Rationale:** Candidates treat SRAM limits as an absolute hardware cliff without quantifying the cache miss penalty against the vectorization speedup.
@@ -19,8 +20,9 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - CPU = 240 MHz.
-    - Model A = 7.5 MMACs scalar (1 MAC/cycle).
-    - Model B = 12.5 MMACs vectorized (4 MAC/cycle).
+    - Treat 2 FLOPs as roughly 1 MAC for this CNN comparison.
+    - Model A = 15 MFLOPs ≈ 7.5 MMACs scalar (1 MAC/cycle).
+    - Model B = 25 MFLOPs ≈ 12.5 MMACs vectorized (4 MAC/cycle).
     - PSRAM spill = 88 KB.
     - Cache line = 32 bytes.
     - Cache miss penalty ≈ 40 cycles.
@@ -34,7 +36,7 @@ details:
     - Model B Time = 3.235M / 240 MHz = 13.48 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 13.48 ms (Compute-Bound)**. The computational savings from 4-way vectorization (saving ~4.3M cycles) vastly outpaces the PSRAM cache miss penalty (costing ~110k cycles).
+    - **Result: choose Model B under the cache-friendly PSRAM assumption: ~13.5 ms versus Model A's ~31.3 ms.** The 4-way vector speedup saves about 4.375M compute cycles relative to Model A, while the estimated PSRAM spill adds only ~0.11M stall cycles. **Bottleneck: Compute with a Bounded PSRAM Penalty.**
 status: published
 provenance: imported
 requires_explanation: false

@@ -12,23 +12,28 @@ scenario: You are leading the deployment of a 2B parameter LLM on the Google Ten
 question: How would you design a memory-mapped inference architecture to achieve zero-copy weight sharing across processes?
 details:
   realistic_solution: |
-    Implement a centralized ML service daemon that maps the model weights into memory using a read-only mmap backed by hardware-friendly buffers (like dmabuf). Client applications communicate with this daemon via IPC. The daemon locks the memory (mlock) to prevent paging, allowing the TPU to perform zero-copy DMA reads straight from the LPDDR5X RAM.
+    Package the quantized weights as an aligned, immutable, file-backed model image and map it read-only with mmap in every client or in a shared inference service. The OS page cache then backs all processes with the same physical pages, while each process keeps only lightweight private state such as tokenizer buffers, KV cache, and session metadata. A service daemon can centralize scheduling and accelerator access, but the key zero-copy property is shared read-only page mappings, not per-process weight loads. Use page-aligned tensors, versioned model files, warmup/prefetch when allowed, and avoid claims that hardware DMA directly supports every mapped buffer unless the target driver explicitly exposes that path.
   common_mistake: |
     **The Pitfall:** Suggesting standard per-process weight loading or failing to align mmap buffers.
     **The Rationale:** Treating the mobile OS like a standard server environment without zero-copy DMA considerations.
     **The Consequence:** Exhausting RAM (multiple 1GB copies) and incurring massive 250ms+ cold start latencies from UFS reads.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 2B INT4 Model: ~1 GB.
-    - 3 concurrent apps: 3 GB (without sharing).
+    - 2B INT4 weights: 2B * 0.5 bytes = 1.0 GB before scales and alignment.
+    - Packed model image with metadata/alignment: about 1.1 GB.
+    - 3 concurrent apps, each with 50 MB of private session state.
+    - Warm page-cache bandwidth: 50 GB/s effective memory read bandwidth for a lower-bound weight scan.
 
     **Calculations:**
-    - Savings with mmap: 2 GB.
-    - Memory read (1 GB at 50 GB/s): ~20 ms.
-    - Compute (4 GOPs at 7.5 TOPS): ~0.53 ms.
+    - Without sharing: 3 apps * 1.1 GB = 3.3 GB of weight memory, plus private state.
+    - With shared mmap: 1.1 GB shared weights + 3 * 50 MB private state = 1.25 GB resident.
+    - Memory saved = 3.3 GB - 1.1 GB = 2.2 GB of duplicated weights.
+    - Warm first-token weight scan lower bound = 1.1 GB / 50 GB/s = 22 ms.
+    - First-token compute and accelerator scheduling are separate from the zero-copy memory-sharing estimate and must be profiled on the deployed graph.
+    - Cold start from storage is much slower than the warm-cache lower bound and depends on UFS and page-fault behavior, so it must be hidden with install-time or idle prefetch.
 
     **Conclusion & Interpretation:**
-    - **Result: 20 ms (Memory-Bandwidth-Bound)**. Eliminating CPU-RAM copies guarantees sub-50ms Time-To-First-Token.
+    - **Result: about 2.2 GB saved across three apps, with a 22 ms warm-cache memory lower bound.** Shared mmap avoids duplicate weight pages and reduces warm TTFT, but it does not by itself guarantee sub-50 ms TTFT under cold-cache or contended accelerator conditions.
 status: published
 provenance: imported
 requires_explanation: true

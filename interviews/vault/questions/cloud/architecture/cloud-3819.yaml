@@ -11,22 +11,25 @@ title: MoE Expert Pruning for Inference Optimization
 scenario: After training your 16-expert MoE model, you analyze routing statistics and find that 4 specific experts receive less than 2% of tokens each (totaling 7% of all routing assignments). These 4 experts account for 25% of the expert parameters.
 question: Can you prune the 4 low-traffic experts for inference, and what memory savings and quality impact should you expect?
 details:
-  realistic_solution: 'Yes, expert pruning is highly effective. Since they handle only 7% of assignments (mostly as secondary experts), pruning them affects a tiny fraction of the computation. Affected tokens simply fall back to remaining experts. Reroute tokens by assigning each pruned expert''s tokens to the most similar remaining expert or by fine-tuning the router. This structured pruning drops VRAM requirements significantly with <1% quality degradation on benchmarks.'
+  realistic_solution: Yes, expert pruning can be effective, but the safe expectation is parameter-memory savings, not guaranteed speed or quality gains. These 4 experts account for 25% of expert parameters, so pruning them removes 25% of expert-weight VRAM. Because they receive 7% of routing assignments, quality impact depends on how specialized those assignments are and whether you reroute or fine-tune. Validate with held-out traffic before assuming the degradation is small.
   common_mistake: |
     **The Pitfall:** Simply deleting the experts and redistributing their routing probability uniformly.
     **The Rationale:** Engineers assume that since the traffic is low, random reassignment of the remaining 7% won't matter.
     **The Consequence:** Randomly reassigning tokens destroys the semantic routing space, degrading generation quality far more than careful cosine-similarity remapping or router fine-tuning.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 16 experts to 12 experts (25% weight reduction).
+    - 16 experts to 12 experts.
+    - The removed experts account for 25% of expert parameters.
     - Pruned experts handle <7% of token assignments.
 
     **Calculations:**
-    - VRAM saved = 25% of MLP weights (e.g., 160GB -> 120GB, saving 40GB).
-    - Throughput scales proportionally to HBM reads at large batch sizes (~33% speedup).
+    - Expert-weight VRAM saved = 4 / 16 = 25% of the expert-parameter memory.
+    - Remaining expert-weight VRAM = 75% of the original expert-weight memory.
+    - Throughput change is workload-dependent: pruning reduces resident expert weights, but token routing, batching, non-expert layers, and HBM reuse determine realized latency.
+    - Quality impact is validation-dependent: 7% of assignments need rerouting or router fine-tuning, and rare-specialized experts can matter more than their traffic share.
 
     **Conclusion & Interpretation:**
-    - **Result: Saves 40 GB VRAM (Memory-Bound)**. Careful expert pruning vastly reduces hardware requirements with minimal (<1%) quality drop.
+    - **Result: 25% expert-weight memory savings**. Careful pruning can lower VRAM requirements, but speedup and quality loss should be reported from workload benchmarks after rerouting or fine-tuning.
 status: published
 provenance: imported
 requires_explanation: true

@@ -18,17 +18,21 @@ details:
     **The Consequence:** Suboptimal performance and power consumption, as operations are mapped to the wrong compute units or retain higher precision than mathematically necessary.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Model: 7B params (32 layers, hidden size 4096). FP16 precision.
-    - KV Cache Memory: 2 bytes per element. Context size affects cache.
-    - Speculative decoding draft model: 0.5B (250MB).
+    - Model: 7B decoder-only LLM, 32 layers, hidden size 4096, 32 KV heads.
+    - KV cache dtype: FP16, so each K or V element is 2 bytes.
+    - Weight storage after mixed precision: most linear weights INT4 with sensitive layers kept at INT8/FP16, about 4.0 GB total.
+    - Target device budget for this process: about 6 GB of usable RAM after OS, app, and allocator overhead.
 
     **Calculations:**
-    - KV per layer: 2 * 2048 (seq_len) * 4096 * 2 bytes = 33.6 MB. Total for 32 layers = 1,075 MB.
-    - Memory at 4K context: 2.15 GB KV cache. Total RAM (INT4 weights 3.5GB + 2.15GB KV) = 5.65 GB (triggers OOM jetsam limit on iPhone).
-    - Speculative Throughput: 8 tokens in 4ms, verified in 25ms = 29ms total.
+    - KV cache per token per layer = 2 tensors (K,V) * 4096 elements * 2 bytes = 16 KB.
+    - KV cache per token for 32 layers = 16 KB * 32 = 512 KB/token.
+    - KV cache at 2048 tokens = 512 KB * 2048 = 1.0 GB.
+    - KV cache at 4096 tokens = 512 KB * 4096 = 2.0 GB.
+    - Approximate peak at 4096 tokens = 4.0 GB weights + 2.0 GB KV + 0.4 GB activations/runtime = 6.4 GB.
+    - Reducing context to 2048 tokens or quantizing KV to INT8 saves about 1.0 GB, bringing peak memory near 5.4 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: 193 tokens/s (Memory-Capacity Bound)**. Effective throughput becomes 5.6 accepted tokens / 29ms, solving the limitation via draft models and aggressive profiling.
+    - **Result: Memory-capacity bound.** The mixed-precision plan must account for both weights and KV cache; otherwise a 4K context can exceed a realistic mobile RAM budget even when the INT4 weight file alone appears to fit.
 status: published
 provenance: imported
 requires_explanation: true

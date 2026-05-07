@@ -7,11 +7,11 @@ topic: graph-compilation
 competency_area: optimization
 bloom_level: analyze
 phase: inference
-title: Optimizing a Large Language Model for Qualcomm Cloud AI 100 via Graph Compilation
-scenario: You are tasked with deploying a pre-trained, 7-billion parameter quantized Large Language Model (LLM) on the Qualcomm Cloud AI 100 accelerator. The framework's default compiler struggles to fully utilize INT8 capabilities and resorts to slower FP16 operations for certain layers, leading to performance degradation and memory overruns.
+title: Optimizing a 7B INT8 LLM for Qualcomm Cloud AI 100
+scenario: You are tasked with deploying a pre-trained, 7-billion parameter quantized Large Language Model (LLM) on a Qualcomm Cloud AI 100 accelerator in a compact edge-server appliance. The target SKU has enough accelerator memory for the INT8 weights but limited bandwidth and power headroom. The framework's default compiler struggles to fully utilize INT8 capabilities and resorts to slower FP16 operations for certain layers, leading to performance degradation and memory pressure.
 question: How would you compile and optimize the 7B quantized LLM across operator lowering, constant folding, memory, and power?
 details:
-  realistic_solution: 'Implement custom INT8 kernel operator lowering for unsupported ops rather than relying on FP16 fallbacks. Design compiler passes for aggressive constant folding of static sub-graphs. Enforce strict activation recomputation to fit the 32GB LPDDR4x constraints, and profile using nsys-equivalent tools to ensure optimal scheduling within the 75W envelope.'
+  realistic_solution: Implement custom INT8 kernel operator lowering for unsupported ops rather than relying on FP16 fallbacks. Design compiler passes for aggressive constant folding of static sub-graphs. Use memory planning, activation recomputation, and KV-cache limits to stay within the target Cloud AI 100 memory budget. Profile per-layer latency, off-chip traffic, and board power so the final schedule fits the appliance's thermal envelope instead of assuming peak TOPS is attainable.
   common_mistake: |
     **The Pitfall:** Blindly trusting the framework's default AOT compiler.
     **The Rationale:** Engineers assume standard compilers map complex LLM ops optimally to edge hardware.
@@ -20,15 +20,15 @@ details:
     1. **Assumptions & Constraints:**
        - 7B parameters.
        - INT8 quantization (1 byte/param).
-       - Available Memory: 32 GB LPDDR4x.
-       - Compute: 400 TOPS INT8.
+       - Target accelerator memory budget for model state: about 16 GB.
+       - KV cache and activations must share the remaining memory.
     2. **Calculations:**
        - INT8 Weights size = 7 * 10^9 * 1 byte = 7 GB.
-       - Memory for activations/KV = 32 GB - 7 GB = 25 GB.
-       - Compute required per token = 7B * 2 (MAC) = 14 GFLOPs.
-       - Theoretical max throughput = 400 TOPS / 14 GOPS = ~28,571 tokens/second (unbounded by memory).
+       - If compiler fallbacks duplicate 20% of weights or stage FP16 copies, extra memory can be 7 GB * 0.20 * 2 = 2.8 GB.
+       - Weight plus fallback staging would be about 9.8 GB before activations and KV cache.
+       - With a 16 GB model-state budget, only about 6.2 GB remains, so long-context KV cache and large activation peaks must be capped or recomputed.
     3. **Conclusion & Interpretation:**
-       - **Result: Memory-Bandwidth Bound**. While the weights easily fit (7GB), the theoretical 28K tokens/sec throughput is impossible; execution will be entirely bottlenecked by LPDDR4x memory bandwidth and compiler overhead, not compute.
+       - **Result: Memory-Planning Bound**. The INT8 weights fit, but FP16 fallbacks and activation/KV peaks can consume the remaining budget quickly; the defensible optimization target is eliminating fallbacks and reducing memory traffic, not predicting token/s from peak TOPS.
 status: published
 provenance: imported
 requires_explanation: true

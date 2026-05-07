@@ -11,22 +11,23 @@ title: Quantization Error Localization for Accuracy Drop on Coral Edge TPU
 scenario: A MobileNetV2 model quantized to INT8 for Coral Edge TPU shows 89% top-1 accuracy (vs 91.5% FP32 baseline). The 2.5% accuracy drop is above the acceptable 1% threshold. Using per-layer sensitivity analysis, the team finds that layers 12-15 (inverted residual blocks at 14x14 spatial resolution) show the highest quantization error.
 question: How would you fix the 2.5% INT8 accuracy drop when layers 12-15 are the most quantization-sensitive on Coral Edge TPU?
 details:
-  realistic_solution: 'Sensitivity analysis shows layers 12-15 are problematic. Root cause options: (1) Activation distributions at 14×14 resolution have outliers from batch normalization folding. (2) Short residual path creates quantization error accumulation. (3) Depthwise conv layers have per-channel weight variance exceeding INT8 range. Fix strategy: re-quantize with per-channel weight quantization for layers 12-15 (vs per-tensor). Coral Edge TPU supports per-channel INT8 quantization for depthwise convs. Expected accuracy recovery: 1-1.5% → total loss ~1-1.5%. If insufficient: use bias correction or QAT (quantization-aware training) for just layers 12-15. QAT on 4 layers: ~2 hours fine-tuning vs full QAT (24 hours).'
+  realistic_solution: Sensitivity analysis shows layers 12-15 are problematic, but Coral Edge TPU deployment is constrained to fully supported INT8 subgraphs rather than arbitrary per-layer precision changes. First verify full-model INT8 post-training quantization with a representative calibration set that covers the 14x14 activation distributions, then inspect the compiler report for unsupported or CPU-fallback ops around layers 12-15. If those layers remain sensitive, rewrite or fuse the offending blocks so they quantize cleanly, correct batch-norm folding and activation ranges, and recalibrate. If the loss is still above the 1% threshold, use full-model QAT or a small architecture change and recompile for the Edge TPU; only move a problematic op to CPU if latency and power budgets can tolerate the fallback.
   common_mistake: |
-    **The Pitfall:** Re-quantizing the entire model with higher bit-width (FP16).
-    **The Rationale:** Candidates instinctively throw more precision at accuracy problems, forgetting that the Coral Edge TPU strictly supports only INT8.
-    **The Consequence:** The model is entirely delegated to the slow host CPU, blowing past latency and power budgets, instead of using targeted, native INT8 mixed-precision strategies.
+    **The Pitfall:** Treating the Coral Edge TPU like a GPU that can run selective FP16 or mixed-precision fallback layers.
+    **The Rationale:** Candidates instinctively throw more precision at accuracy problems, forgetting that Edge TPU acceleration requires compiler-supported INT8 operators.
+    **The Consequence:** Sensitive layers may fall back to the host CPU or fail compilation, so accuracy improves only by sacrificing the latency and power properties that motivated the Edge TPU deployment.
   napkin_math: |
     **Assumptions & Constraints:**
        - Accuracy gap: 2.5% below FP32 baseline.
-       - Target recovery: > 1.5% to reach the acceptable < 1% loss threshold.
+       - Target recovery: at least 1.5 percentage points to reach the acceptable <= 1% loss threshold.
        - Problematic layers: 12-15 (inverted residual blocks).
     **Calculations:**
-       - Per-channel quantization runtime overhead: 0 ms (native Coral hardware support).
-       - Estimated recovery from per-channel quantization on layers 12-15: 1.0% - 1.5%.
-       - Estimated additional recovery from targeted QAT (fallback): 0.5% - 1.0% (requires ~2 hours).
+       - Current loss vs FP32: 91.5% - 89.0% = 2.5 percentage points.
+       - Maximum acceptable loss: 1.0 percentage point.
+       - Required recovery: 2.5 - 1.0 = 1.5 percentage points.
+       - Calibration, op rewrites, and full-model QAT must be evaluated against this measured recovery target; do not assume a per-layer quantization switch is available on Edge TPU.
     **Conclusion & Interpretation:**
-       - **Result: Per-Channel Quantization Meets Threshold**. It directly addresses weight variance with zero runtime overhead, recovering up to 1.5% accuracy to hit the required threshold.
+       - **Result: Need >=1.5 Point Measured Recovery**. Use representative calibration and Edge TPU-supported INT8 graph changes first, then QAT or architecture changes if measured accuracy remains below the threshold.
 status: published
 provenance: imported
 requires_explanation: false

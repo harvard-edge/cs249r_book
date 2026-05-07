@@ -7,31 +7,33 @@ topic: systolic-dataflow
 competency_area: compute
 bloom_level: evaluate
 phase: both
-title: Optimizing ViT Attention Dataflow on Jetson Orin DLA
-scenario: You are deploying a Vision Transformer (ViT) model on an NVIDIA Jetson AGX Orin. The model's latency is severely bottlenecked during the self-attention phase when running on the Deep Learning Accelerator (DLA), which uses a fixed systolic array architecture.
-question: Should QxK^T use weight-stationary or output-stationary dataflow, and how would you tile it to minimize memory access on Orin?
+title: Optimizing ViT Attention Dataflow on Systolic Edge NPU
+scenario: You are deploying a Vision Transformer (ViT) model on an edge NPU with a fixed systolic array, 275 TOPS INT8 peak compute, 204 GB/s external memory bandwidth, and limited local SRAM. The model's latency is severely bottlenecked during the self-attention QxK^T phase.
+question: Should QxK^T use weight-stationary or output-stationary dataflow, and how would you tile it to minimize memory access on a systolic edge NPU?
 details:
-  realistic_solution: For the QxK^T operation, an output-stationary dataflow is optimal to accumulate the partial sums of the attention scores locally within the systolic array's accumulators, minimizing expensive write-backs to memory. Tiling the sequence length dimension ensures the active blocks of Q, K, and the partial output fit entirely within the DLA's local SRAM buffer. Utilizing INT8 precision allows leveraging the full compute capability and significantly reduces the SRAM footprint.
+  realistic_solution: For QxK^T, prefer output-stationary tiling because each attention-score tile is a reduction over the head dimension and should accumulate locally until complete. Tile M and N over sequence blocks and tile D over the reduction dimension so a Q tile, K tile, and int32 partial-score tile fit in SRAM. Only write the completed score tile once, then feed it into the softmax/value stage or the next fused kernel. Weight-stationary is a poor fit as a default because both Q and K are activations; the useful reuse comes from holding the output partial sums and reusing Q/K tiles across sequence blocks, not from pinning static weights.
   common_mistake: |
     **The Pitfall:** Blindly applying weight-stationary dataflows, assuming one of the operands can always be pinned to the systolic array.
     **The Rationale:** Candidates forget that in self-attention (QxK^T), both operands are dynamically generated activations, not static weights.
-    **The Consequence:** A purely weight-stationary approach leads to massive systolic array thrashing, skyrocketing memory accesses, and completely blowing the power budget.
+    **The Consequence:** A purely weight-stationary approach can spill partial attention scores or reload activation tiles unnecessarily, increasing memory traffic and latency.
   napkin_math: |
     **Assumptions & Constraints:**
     - Sequence (N) = 1024, Dim (D) = 768.
     - Compute capability: 275 TOPS.
     - Memory bandwidth: 204 GB/s.
-    - Precision: INT8 (1 byte).
+    - Q and K precision: INT8 (1 byte).
+    - Attention-score partial sums: int32 during accumulation, stored as FP16/INT16-sized completed scores.
 
     **Calculations:**
-    - QxK^T MACs: 1024 * 1024 * 768 = 805M MACs (~1.61 GOPS).
+    - QxK^T MACs: 1024 * 1024 * 768 = 805M MACs = 1.61 GOP if counting multiply and add separately.
     - Q and K size: 2 * 1024 * 768 bytes = ~1.5 MB (fits in SRAM).
-    - Output size: 1024 * 1024 = 1 MB.
-    - Compute time: 1.61 GOPS / 275,000 GOPS = ~5.8 µs.
-    - Memory fetch time (1.5 MB): 1.5 MB / 204 GB/s = ~7.3 µs.
+    - Completed attention score size: 1024 * 1024 * 2 bytes = 2.1 MB.
+    - Minimum external traffic for Q, K, and completed scores: 1.5 MB + 2.1 MB = 3.6 MB, or ~17.6 µs at 204 GB/s.
+    - Compute time lower bound: 1.61 GOP / 275,000 GOP/s = ~5.9 µs.
+    - If 12 D-tiles spill int32 partial scores, spill traffic is roughly 12 * 2 * 1024 * 1024 * 4 bytes = ~101 MB, or ~0.50 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: ~7.3 µs (Memory-Bound)**. Output-stationary dataflow prevents writing the 1 MB partial sums back to memory, saving ~5 µs of memory latency per head and drastically reducing power consumption.
+    - **Result: Output-Stationary Tiling**. The compute lower bound is only ~5.9 µs, but careless partial-score spills can add hundreds of microseconds. Keep each score tile stationary through the D reduction and write it once to minimize memory traffic.
 status: published
 provenance: imported
 requires_explanation: false

@@ -7,11 +7,11 @@ topic: transformer-systems-cost
 competency_area: architecture
 bloom_level: analyze
 phase: inference
-title: 'The Snapdragon 8 Elite NPU Scheduling'
-scenario: 'You''re running a real-time object detection model on a Snapdragon 8 Elite phone. During inference, the CPU is simultaneously decoding a 4K H.265 video stream for the camera preview.'
-question: 'Why do Snapdragon 8 Elite NPU latencies spike from 5ms to 18ms while the CPU decodes 4K H.265 video, considering the shared 6 MB system-level cache (SLC)?'
+title: Snapdragon SLC Eviction and NPU Latency Spikes
+scenario: You're running a real-time object detection model on a Snapdragon 8 Elite phone. During inference, the CPU is simultaneously decoding a 4K H.265 video stream for the camera preview.
+question: Why do Snapdragon 8 Elite NPU latencies spike from 5ms to 18ms while the CPU decodes 4K H.265 video, considering the shared 6 MB system-level cache (SLC)?
 details:
-  realistic_solution: 'The CPU''s H.265 decoder is evicting the NPU''s weight tiles from the shared 6 MB SLC. The Hexagon NPU stages model weights into the SLC to avoid round-trips to LPDDR5 DRAM. When the CPU decoder flushes the SLC with video reference frames (each I-frame decode touches ~12 MB of reference data, cycling through the 6 MB SLC twice), the NPU''s next layer must re-fetch weights from DRAM. Crucially, it must do so while the CPU is simultaneously hammering DRAM for video decoding, plunging the NPU''s effective DRAM bandwidth to a fraction of the 51 GB/s peak. This bandwidth starvation, not just the cache misses themselves, creates the massive latency spike.'
+  realistic_solution: The latency spike is best explained by shared-cache contention plus DRAM bandwidth contention. The NPU relies on the shared 6 MB SLC to keep frequently reused weight tiles and activations close to the accelerator. During 4K H.265 decode, the CPU/video pipeline streams large reference-frame data through the same cache and memory system, evicting those hot NPU tiles. The NPU then has to refill them from LPDDR while video decode is also consuming memory bandwidth, so the effective bandwidth seen by the NPU falls sharply. The issue is not a Snapdragon-specific magic threshold; it is a placement and scheduling conflict over a small shared cache and a shared DRAM channel.
   common_mistake: |
     **The Pitfall:** Attributing the latency spikes to thermal throttling from the CPU video decode.
     **The Rationale:** Candidates misunderstand the timeframe of thermal effects, which take tens of seconds to onset, not hundreds of milliseconds.
@@ -25,10 +25,12 @@ details:
     - DRAM miss penalty (ideal): 1.5 MB / 51 GB/s = ~29 μs.
     - Contended DRAM bandwidth (CPU saturating LPDDR5): Drops to < 5 GB/s.
     - Contended read time: 1.5 MB / 5 GB/s = 300 μs per layer.
-    - Total spike: 40 layers * 300 μs = 12 ms spike.
+    - Ideal cached/SLC service time is already part of the normal 5ms baseline, so the incremental penalty is approximately the extra contended DRAM refill time.
+    - Total incremental penalty: 40 layers * 300 μs = 12 ms, plus about 1 ms of arbitration/layout overhead = 13 ms.
+    - Total latency during decode: 5 ms baseline + 13 ms contention penalty = 18 ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 12 ms Spike (Memory-Bound).** After SLC partitioning, NPU weights stay in cache, restoring a stable 5ms latency.
+    - **Result: 18 ms total latency (Memory-Bound).** The CPU video decode evicts NPU tiles from the shared SLC and contends for DRAM, adding about 13ms to the normal 5ms inference path. SLC partitioning or scheduling isolation can restore the 5ms baseline only if it prevents those weight-tile evictions and DRAM contention.
 status: published
 provenance: imported
 requires_explanation: false

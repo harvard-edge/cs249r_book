@@ -11,7 +11,7 @@ title: 'KV-Cache: Recall — What is a KV Cache and Why Does It Matter for Mobil
 scenario: You are deploying a 1B parameter LLM on a mobile device and configuring the generation pipeline.
 question: What is a KV cache, why does mobile LLM decoding need it, and how does generation compute scale without it?
 details:
-  realistic_solution: 'The KV cache stores the Key and Value tensors for all previously generated tokens. This avoids recomputing K and V for historical tokens at each new generation step. Without a KV cache, generating the nth token requires O(n) computation, meaning total generation of N tokens scales quadratically at O(N^2). With a KV cache, each step requires O(1) new computation, scaling the total generation linearly at O(N).'
+  realistic_solution: The KV cache stores the Key and Value tensors for all previously generated tokens. This avoids recomputing K and V for historical tokens at each new generation step. Without a KV cache, generating the nth token requires O(n) computation, meaning total generation of N tokens scales quadratically at O(N^2). With a KV cache, each step requires O(1) new computation, scaling the total generation linearly at O(N).
   common_mistake: |
     **The Pitfall:** Confusing the KV cache with general model weights caching in RAM.
     **The Rationale:** Candidates dont understand that without a KV cache, the attention mechanism must be fully recomputed over the entire sequence history for every single new token.
@@ -20,14 +20,16 @@ details:
     **Assumptions & Constraints:**
     - Model: 1B parameters.
     - Sequence length: 512 tokens.
-    - NPU Compute: 35 TOPS.
+    - Compare algorithmic scaling, not exact mobile latency.
 
     **Calculations:**
-    - Without cache compute: sum(1..512) ≈ 131,328 token-equivalent comps. 131,328 * 1B * 6 FLOPs ≈ 788T FLOPs (22.5s at peak).
-    - With cache compute per step: 1 token = 1B * 6 FLOPs = 6B FLOPs (0.17ms at peak).
+    - Without a KV cache, step t recomputes K/V and attention state for the full prefix, so the repeated prefix work scales like 1 + 2 + ... + 512 = 131,328 token-equivalent passes.
+    - With a KV cache, historical K/V tensors are reused; only the new token's K/V is produced, so the same 512-token generation requires about 512 token-equivalent passes plus attention reads over cached history.
+    - Algorithmic reduction in repeated transformer work: 131,328 / 512 ≈ 256x for this 512-token example.
+    - Exact latency still depends on layer shape, memory bandwidth, kernels, and cache layout, so TOPS alone should not be converted into a precise per-token time.
 
     **Conclusion & Interpretation:**
-    - **Result: 0.17ms vs 22.5s (Compute-Bound)**. The KV cache provides a massive algorithmic speedup, shifting the bottleneck from O(N^2) compute to O(N) memory bandwidth.
+    - **Result: Avoid Repeated Prefix Recompute**. KV caching changes generation from repeatedly reprocessing the whole prefix to reusing historical K/V state, removing the dominant quadratic recomputation term and making mobile decode practical.
 status: published
 provenance: imported
 requires_explanation: false

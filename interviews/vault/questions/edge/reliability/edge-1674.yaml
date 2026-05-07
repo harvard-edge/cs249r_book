@@ -8,11 +8,11 @@ competency_area: reliability
 bloom_level: create
 phase: inference
 title: Architecting ISO-26262 Compliant Vision on Coral Edge TPU
-scenario: >-
-  You are designing an ASIL-B certified pedestrian detection system for an industrial autonomous forklift using a Google Coral Edge TPU. The system must guarantee a maximum reaction latency of 50ms and cannot fail silently. Given the Coral's limitations and lack of built-in hardware lockstep capabilities, you need to design a safe architecture.
+scenario: You are designing an ASIL-B certified pedestrian detection system for an industrial autonomous forklift using a Google Coral Edge TPU. The system must guarantee a maximum reaction latency of 50ms and cannot fail silently. Given the Coral's limitations and lack of built-in hardware lockstep capabilities, you need to design a safe architecture.
 question: How would you design an architecture that provides deterministic execution, continuous self-testing, and fail-safe handling without violating the 50ms ASIL-B latency?
 details:
-  realistic_solution: The optimal architecture uses a primary INT8 quantized MobileNetV3 model on the Edge TPU. To achieve ASIL-B without hardware lockstep, we implement software-based temporal redundancy by processing the same frame twice or processing offset frames and comparing bounding boxes on the host CPU. A dedicated hardware watchdog timer monitors a heartbeat signal over PCIe. For self-testing, we interleave a deterministic golden input tensor into the TPU queue every 10 frames and verify the output.
+  realistic_solution: |
+    Use the Edge TPU as the primary pedestrian detector, but make the safety decision outside the accelerator in a deterministic supervisor. Run a fixed-rate, preallocated INT8 graph with bounded input preprocessing, timestamp every frame, and compare the detector result against a lightweight independent safety channel such as a conservative lidar/zone occupancy check or a simple CPU vision guard. If inference misses its deadline, outputs invalid data, or disagrees with the safety channel, the supervisor commands the forklift safe state: speed limit, controlled stop, and brake inhibit until health is restored. Continuous self-test should use startup/power-on built-in tests, periodic known-answer tests during idle slots, heartbeat monitoring, CRC/version checks on model artifacts, and watchdog coverage for host, TPU driver, and sensor input paths.
   common_mistake: |
     **The Pitfall:** Proposing a secondary model on the host CPU for redundancy.
     **The Rationale:** Candidates default to heterogeneous redundancy without calculating the latency and power cost of running a heavy CNN on a low-power host CPU.
@@ -22,15 +22,17 @@ details:
     - Hardware: Google Coral Edge TPU (4 TOPS INT8, 2W) via PCIe.
     - Deadline: 50ms max reaction latency.
     - Compute: MobileNetV3-SSD (1.5 GOPS per frame).
+    - Measured Edge TPU inference target after compilation: 8ms per frame, including accelerator execution but excluding preprocessing.
 
     **Calculations:**
-    - Throughput limit: PCIe caps max FPS to ~100 FPS (10ms per inference).
-    - Temporal redundancy: 2 sequential inferences = 2 * 10ms = 20ms.
-    - Host comparison overhead: 5ms.
-    - Total processing: 20ms + 5ms = 25ms.
+    - Compute lower bound from peak TOPS: 1.5e9 / 4e12 = 0.375ms, so practical latency is dominated by model scheduling, driver, and preprocessing rather than PCIe peak.
+    - Deterministic detection path budget: 6ms preprocessing + 8ms TPU inference + 4ms postprocess/NMS = 18ms.
+    - Independent safety-channel comparison and plausibility checks: 5ms.
+    - Watchdog decision and safe-state command budget: 7ms.
+    - Total reaction path: 18ms + 5ms + 7ms = 30ms.
 
     **Conclusion & Interpretation:**
-    - **Result: 25ms Buffer (Latency-Bound).** The 25ms processing time leaves a 25ms safety buffer for the hardware watchdog, safely meeting the strict 50ms ASIL-B deadline.
+    - **Result: 30ms reaction path (Latency-Bound).** The architecture leaves about 20ms of margin under the 50ms deadline and defines a fail-safe stop path for missed deadlines or failed self-tests.
 status: published
 provenance: imported
 requires_explanation: true

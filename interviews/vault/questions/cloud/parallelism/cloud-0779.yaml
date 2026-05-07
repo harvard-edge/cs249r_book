@@ -7,11 +7,11 @@ topic: 3d-parallelism
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: Scaling Foundation Models on Trillions of Tokens
+title: 3D Parallelism for MFU and DDP Communication
 scenario: We are training a massive dense Transformer model (100B+ parameters) on a multimodal dataset of 5 trillion tokens. Training is taking too long on our 10,000 GPU cluster.
-question: "How would you architect the distributed training strategy (3D parallelism) and specifically optimize the DDP communication overhead to maximize Model Flops Utilization (MFU)?"
+question: How would you architect the distributed training strategy (3D parallelism) and specifically optimize the DDP communication overhead to maximize Model Flops Utilization (MFU)?
 details:
-  realistic_solution: Implement aggressive 3D Parallelism. Use Tensor Parallelism (TP) within a single 8-GPU node to maximize the high-bandwidth NVLink and avoid cross-node communication bottlenecks. Use Pipeline Parallelism (PP) with micro-batching (e.g., 1F1B schedule) across nodes within the same rack. Finally, use Fully Sharded Data Parallelism (FSDP / ZeRO-3) across the remaining nodes. To maximize MFU, explicitly overlap computation and communication—such as pre-fetching weights for the forward pass while the previous layer computes, and overlapping the all-reduce communication of gradients with the backward pass. Use selective activation checkpointing to trade minor compute overhead for significant memory savings.
+  realistic_solution: 'Implement aggressive 3D Parallelism. Use Tensor Parallelism (TP) within a single 8-GPU node to maximize the high-bandwidth NVLink and avoid cross-node communication bottlenecks. Use Pipeline Parallelism (PP) with micro-batching (e.g., 1F1B schedule) across nodes within the same rack. Finally, use Fully Sharded Data Parallelism (FSDP / ZeRO-3) across the remaining nodes. To maximize MFU, explicitly overlap computation and communication: prefetch weights for the forward pass while the previous layer computes, overlap reduce-scatter/all-gather or gradient all-reduce with backward compute, tune gradient bucket sizes so buckets become ready early, use topology-aware placement for TP/PP/DP groups, and consider low-risk compression only where it does not harm convergence. Use selective activation checkpointing to trade minor compute overhead for significant memory savings.'
   common_mistake: |
     **The Pitfall:** Relying purely on standard DDP or using naive Pipeline Parallelism.
     **The Rationale:** Candidates often underestimate the massive memory footprint required for optimizer states and gradients, failing to realize it cannot fit on a single GPU. Additionally, they propose naive PP without micro-batching.
@@ -19,19 +19,21 @@ details:
   napkin_math: |
     1. **Assumptions & Constraints:**
        - Model: 100B parameters.
-       - Precision: FP16/BF16 weights (2 bytes), FP32 optimizer (12 bytes).
-       - Hardware: 10,000 GPUs, 300 TFLOPS peak, 50% MFU.
+       - Precision: FP16/BF16 weights and gradients (2 bytes each), FP32 Adam moments plus FP32 master weights (12 optimizer bytes/param).
+       - Hardware: 10,000 GPUs, 300 TFLOPS peak, target 50% MFU.
        - Workload: 5T tokens.
+       - Training FLOPs rule of thumb: ~6 * parameters * tokens for dense decoder-only Transformers, counting forward and backward passes.
+       - Candidate 3D layout: TP=8 inside each node, PP=16 across nearby nodes, DP/FSDP=floor(10,000/(8*16))=78 full model-parallel replicas, using 9,984 GPUs and leaving 16 for spares or imbalance.
     2. **Calculations:**
-       - Weights (FP16): 100B * 2 bytes = 200 GB.
-       - Gradients (FP16): 200 GB.
-       - Optimizer (Adam FP32): 100B * 12 bytes = 1.2 TB.
-       - Total State: ~1.6 TB per replica.
-       - Compute required: 5T tokens * 100B params * 6 FLOPs/token = 3e24 FLOPs.
+       - Training FLOPs: 6 * 100e9 params * 5e12 tokens = 3e24 FLOPs.
+       - Per unsharded replica state: weights 100e9 * 2 bytes = 200 GB; gradients = 200 GB; Adam moments + master weights = 100e9 * 12 bytes = 1.2 TB; total ≈ 1.6 TB.
+       - With TP*PP=128 model-parallel shards per replica, persistent model state is ~1.6 TB / 128 = ~12.5 GB/GPU before activations and communication buffers.
+       - DP gradient communication per replica is roughly one model-gradient payload per step: ~200 GB across the 128-GPU model-parallel group, or ~1.6 GB/GPU before bucketing/overlap.
+       - To protect MFU, keep TP traffic on NVLink, keep PP stages rack-local, bucket gradients so communication starts before the end of backward, and overlap FSDP reduce-scatter/all-gather with backward/forward compute.
        - Throughput: 10,000 * 300e12 * 0.50 = 1.5e18 FLOPs/sec.
        - Time: 3e24 / 1.5e18 = 2,000,000 seconds (~23 days).
     3. **Conclusion & Interpretation:**
-       - **Result: ~23 Days Compute-Bound globally.** The model state is severely **Memory-Capacity-Bound** per replica, mandating sharding across at least 20 GPUs to avoid OOM.
+       - **Result: ~23 Days at 50% MFU with a communication-aware 3D layout.** The design is not "DDP on 10,000 GPUs"; it uses TP/PP to make memory feasible and FSDP-style DP with overlapped collectives so gradient communication does not dominate MFU.
 status: published
 provenance: imported
 requires_explanation: false

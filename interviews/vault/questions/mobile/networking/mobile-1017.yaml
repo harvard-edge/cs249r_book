@@ -11,7 +11,7 @@ title: Realize Peak Bandwidth Utilization During On-Device LLM Response
 scenario: Concretely compute peak and average LPDDR5X bandwidth utilization during a 50-token on-device response from a 3B INT4 LLM on Snapdragon 8 Gen 3. The response takes 975ms.
 question: What peak and average LPDDR5X bandwidth does a 50-token 3B INT4 LLM response require on Snapdragon 8 Gen 3?
 details:
-  realistic_solution: 'Peak BW demands include weight reads and KV cache operations. Peak BW: 1.5GB/19.5ms = 76.9GB/s. Including system processes (3GB/s) pushes total demand to 80.5GB/s, exceeding hardware limits. Effective TPOT slows to 22ms at mid-response due to stalls.'
+  realistic_solution: The 975ms response over 50 tokens implies 19.5ms/token. For a conservative bandwidth-bound decode model, assume each token streams the 1.5GB INT4 weight footprint from LPDDR; this is a worst-case traffic model, not a universal property of every implementation. Weight bandwidth is then 1.5GB/0.0195s = 76.9 GB/s while decoding. A more plausible KV entry for a 3B grouped-query model is about 128KB per token, using 32 layers, 8 KV heads, 128 head dimension, FP16 K/V, and both K and V. At token 50, KV traffic adds about (49 + 1) × 128KB / 19.5ms = 0.33GB/s. Peak demand is about 76.9 + 0.33 + 3.0 = 80.2GB/s including background, above the 77GB/s limit. Average over the response is (50×1.5GB + 1,275×128KB) / 0.975s + 3.0GB/s = about 80.1GB/s. Under this conservative model, the claimed 975ms response needs either lower effective weight traffic, less background load, or more bandwidth than the device can provide.
   common_mistake: |
     **The Pitfall:** Computing only static weight bandwidth.
     **The Rationale:** Candidates frequently fail to include dynamic KV-cache reads (which scale linearly with context) and writes (new KV entries).
@@ -19,17 +19,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model: 3B INT4 (1.5GB weights).
-    - Hardware Target TPOT: 19.5ms.
-    - KV entry size: 524KB per token.
+    - Response: 50 tokens in 975ms, so TPOT = 975ms / 50 = 19.5ms.
+    - KV entry size: 32 layers * 8 KV heads * 128 head_dim * 2 bytes * 2 (K/V) = 128KB per token.
     - Background System BW: 3 GB/s.
+    - Conservative decode assumption: each token streams the full 1.5GB INT4 weight footprint from LPDDR.
 
     **Calculations:**
     - Weight BW per token: 1.5 GB / 19.5ms = 76.9 GB/s.
-    - KV BW at mid-response (token 25): (25 * 524KB) / 19.5ms = 0.67 GB/s.
-    - Peak BW demand: 76.9 + 0.67 + 3.0 = 80.57 GB/s.
+    - Peak KV traffic at token 50: (49 * 128KB read + 128KB write) / 19.5ms = 6.4MB / 0.0195s = 0.33 GB/s.
+    - Peak BW demand: 76.9 + 0.33 + 3.0 = 80.23 GB/s.
+    - Total weight traffic over response: 50 * 1.5GB = 75.0GB.
+    - Total KV traffic over response: (0 + ... + 49 + 50) * 128KB = 1,275 * 128KB = 0.163GB.
+    - Average BW over response: (75.0 + 0.163)GB / 0.975s + 3.0 = 80.09 GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: 80.57 GB/s (Memory-Bandwidth-Bound)**. 80.57 GB/s clearly exceeds the hardware's 77 GB/s physical limit. The system is entirely saturated, forcing the NPU to stall and pushing effective TPOT to ~22ms.
+    - **Result: Peak 80.23 GB/s; average 80.09 GB/s.** Both exceed the 77 GB/s physical limit under the conservative full-weight-stream model, so the target 975ms response requires lower effective weight traffic, reduced background load, or a different performance assumption.
 status: published
 provenance: imported
 requires_explanation: false

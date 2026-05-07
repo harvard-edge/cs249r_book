@@ -8,13 +8,12 @@ competency_area: latency
 bloom_level: analyze
 phase: inference
 title: Acoustic Pipeline Scheduling on Dual-Core MCU
-scenario: >
-  An always-on acoustic anomaly detection system uses the Nordic nRF5340 dual-core MCU.
-  The system must process audio frames, run inference, and transmit BLE 5.3 alerts within a strict 50ms latency budget.
+scenario: |
+  An always-on acoustic anomaly detection system uses the Nordic nRF5340 dual-core MCU. The system must process audio frames, run inference, and transmit BLE 5.3 alerts within a strict 50ms latency budget.
 question: Given the 128 MHz app core and 64 MHz net core, how do you partition the pipeline to guarantee this deadline while respecting a ~5mA current limit?
 details:
   realistic_solution: |
-    The architecture must partition the workload to decouple deterministic inference from non-deterministic radio events. The 128 MHz application core executes the ML inference to minimize active compute time, then returns to sleep. Upon detecting an anomaly, it sends a minimal alert payload via IPC to the 64 MHz network core. The network core independently manages the BLE 5.3 stack and queues the transmission, ensuring the radio schedule does not block the application core's deadlines.
+    The architecture must partition the workload to decouple deterministic inference from non-deterministic radio events. The 128 MHz application core executes the ML inference to minimize active compute time, then returns to sleep. Upon detecting an anomaly, it sends a minimal alert payload via IPC to the 64 MHz network core. The network core independently manages the BLE 5.3 stack and queues the transmission, so radio scheduling does not block the application core's deadline. To respect the ~5 mA limit, the design should treat it as an average-current budget, use the shortest practical app-core active window, keep BLE payloads small, and configure BLE connection parameters so the next scheduled event normally falls inside the remaining latency budget.
   common_mistake: |
     **The Pitfall:** Scheduling the entire pipeline sequentially on the application core or failing to account for asynchronous BLE stacks.
     **The Rationale:** Candidates overlook the inter-core synchronization latency between the 128 MHz app core and the 64 MHz net core.
@@ -22,17 +21,21 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - App core: 128 MHz. Net core: 64 MHz.
-    - Deadline: 50 ms.
+    - Deadline: 50 ms. Current limit: ~5 mA average over the frame.
     - App core compute: 2.5M ops.
+    - Example currents for a non-overlapped frame budget: app-core active 8 mA, net/radio active 4.8 mA for a small alert event, low-power baseline 0.3 mA.
 
     **Calculations:**
     - Compute time: 2.5M ops / 128e6 Hz = 19.5 ms.
     - IPC latency: ~0.5 ms.
     - Remaining radio budget: 50 ms - 19.5 ms - 0.5 ms = 30 ms.
-    - A BLE connection interval of 15ms guarantees transmission within the 30ms window.
+    - With a 15 ms BLE connection interval and a queued alert before the next event, assume worst-case wait of one interval plus a 7.5 ms radio event: 15 ms + 7.5 ms = 22.5 ms, which fits the 30 ms radio budget.
+    - For current accounting, assume app-core compute and the 7.5 ms radio event are sequential in the 50 ms frame; if they overlap, sum concurrent currents over the overlap instead.
+    - Low-power time in the 50 ms frame: 50 ms - 19.5 ms app active - 7.5 ms radio active = 23 ms.
+    - Average current estimate: (8 mA * 19.5 ms + 4.8 mA * 7.5 ms + 0.3 mA * 23 ms) / 50 ms = 198.9 mA*ms / 50 ms = 3.98 mA.
 
     **Conclusion & Interpretation:**
-    - **Result: Latency-Feasible (30ms margin)**. Partitioning guarantees the radio transmits within the window.
+    - **Result: Latency-feasible with configured BLE scheduling and ~4.0 mA average current.** Partitioning gives the radio a 30 ms budget without blocking inference, but the transmission guarantee requires validated BLE connection parameters and worst-case stack timing.
 status: published
 provenance: imported
 requires_explanation: true

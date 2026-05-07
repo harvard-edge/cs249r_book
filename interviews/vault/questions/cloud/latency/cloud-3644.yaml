@@ -9,24 +9,28 @@ bloom_level: evaluate
 phase: inference
 title: Tail Latency SLO Decomposition Across Microservices
 scenario: 'A multi-stage ML pipeline has 5 sequential microservices: preprocessing (P99=5ms), embedding (P99=12ms), retrieval (P99=8ms), reranking (P99=15ms), generation (P99=40ms). End-to-end P99 SLA is 100ms. The current end-to-end P99 is 160ms.'
-question: 'How would you set per-stage latency SLOs so the 5-stage pipeline meets a true 100ms end-to-end P99?'
+question: How would you set per-stage latency SLOs so the 5-stage pipeline meets a true 100ms end-to-end P99?
 details:
-  realistic_solution: 'Model each stage as independent with its own latency distribution. Use correlated sampling to find the true end-to-end percentile. For 5 independent stages, P(end-to-end > T) = 1 - Product(P(stage_i <= T_i)). To hit P99 end-to-end, each stage must achieve approximately P99.8 (since 0.998^5 ≈ 0.99). Tighten reranking and generation SLOs to P99.8.'
+  realistic_solution: |
+    Allocate the 100ms end-to-end budget across the five sequential stages, then validate the sum of sampled stage latencies rather than summing published P99s. A reasonable starting budget is proportional to the current stage P99s: preprocessing 6ms, embedding 15ms, retrieval 10ms, reranking 19ms, and generation 50ms. Then replay correlated traces or simulate from measured distributions and tighten the stages that push the sampled end-to-end P99 above 100ms. The current 160ms end-to-end P99 proves that the existing component P99s do not describe the joint tail well enough.
   common_mistake: |
     **The Pitfall:** Assuming end-to-end P99 equals the linear sum of individual P99s.
     **The Rationale:** Treating tail percentiles identically to median averages without realizing that probability compounds.
     **The Consequence:** The actual end-to-end P99 is vastly worse because multiple independent tail events compound, guaranteeing persistent SLO violations.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - 5 independent sequential stages.
-       - Current component P99s: 5, 12, 8, 15, 40ms (Sum = 80ms).
-       - Target E2E SLA: 100ms P99.
-    2. **Calculations:**
-       - Current Compounding Probability: 0.99^5 = 0.951 (The current E2E is P95.1, not P99).
-       - Target Component SLO: To achieve true E2E P99, each stage needs P(1 - 0.01/5) = P99.8.
-       - Verification: 0.998^5 ≈ 0.99004.
-    3. **Conclusion & Interpretation:**
-       - **Result: Tail-Latency-Bound. The component SLOs must be tightened to P99.8 to mathematically achieve a true P99 end-to-end SLA across 5 stages.**
+    **Assumptions & Constraints:**
+    - 5 sequential stages with current component P99s of 5, 12, 8, 15, and 40ms.
+    - Target end-to-end P99 is 100ms.
+    - Current measured end-to-end P99 is 160ms, so joint tails or unmeasured queues are already visible.
+
+    **Calculations:**
+    - Current component P99 sum: 5 + 12 + 8 + 15 + 40 = 80ms, which does not match the observed 160ms E2E P99.
+    - Starting proportional budget: multiply each component P99 by 100 / 80 = 1.25.
+    - Candidate stage budgets: 6.25ms, 15ms, 10ms, 18.75ms, and 50ms; rounded to 6, 15, 10, 19, and 50ms, these sum to 100ms.
+    - Validation method: compute the P99 of L_total = L_pre + L_embed + L_retrieval + L_rerank + L_gen from correlated traces or from a distribution simulation; adjust budgets until P99(L_total) <= 100ms.
+
+    **Conclusion & Interpretation:**
+    - **Result: Budget-and-validate decomposition.** Per-stage SLOs are latency budgets whose summed sampled distribution must meet 100ms P99; a P99.8-per-stage rule alone does not allocate the 100ms latency budget.
 status: published
 provenance: imported
 requires_explanation: true

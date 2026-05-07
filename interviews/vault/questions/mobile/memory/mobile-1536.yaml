@@ -1,17 +1,18 @@
 schema_version: '1.0'
 id: mobile-1536
 track: mobile
-level: L5
+level: L3
 zone: specification
 topic: vram-budgeting
 competency_area: memory
 bloom_level: analyze
 phase: inference
-title: VRAM Budgeting for a Mobile ML Model on Samsung Exynos 2400 NPU
+title: Mobile LLM Memory Budgeting for 12 GB Devices
 scenario: You are tasked with deploying a large language model (LLM) for on-device inference on a smartphone powered by an NPU with 12 GB of LPDDR5X memory. The LLM has 7 billion parameters (FP16).
-question: 'How would you budget mobile model memory across weights, activations, and training state to fit within 12 GB?'
+question: How would you budget mobile model memory across weights, activations, and training state to fit within 12 GB?
 details:
-  realistic_solution: 'A realistic solution involves a detailed breakdown: 1. **Weights:** Calculate based on precision (FP16 or INT8/INT4 quantization). 2. **Optimizer State:** If fine-tuning, consider Adam (12 bytes/param for FP16). 3. **Activations:** Estimate peak memory usage by analyzing the model''s architecture (e.g., largest layer output, batch size). 4. **KV-Cache:** Calculate based on hidden dimension, number of layers, heads, and maximum sequence length. Employ techniques like dynamic KV-cache sizing, quantization-aware training (QAT), weight-only quantization, and efficient inference frameworks optimized for mobile NPUs to reduce footprint. Profiling tools specific to the NPU would be critical for accurate measurement.'
+  realistic_solution: |
+    Start by rejecting the unmodified plan: 7B FP16 weights alone need about 14 GB, so they cannot fit in a 12 GB mobile memory budget before activations, KV cache, runtime buffers, or OS headroom. For inference, budget weights first, then reserve memory for the KV cache at the target context length, peak activations/scratch buffers, and safety headroom. A practical deployment would require weight quantization, such as INT8 or INT4, context-length limits, KV-cache quantization if needed, and profiling on the target NPU. If the question includes training state, full on-device training is out of scope for this budget: Adam-style optimizer state and gradients would add many bytes per parameter, so only adapter-style or off-device fine-tuning is plausible.
   common_mistake: |
     **The Pitfall:** Only accounting for static model weights while ignoring activations and KV-cache.
     **The Rationale:** Engineers focus purely on parameter size and forget that dynamic memory requirements scale linearly with sequence length.
@@ -19,18 +20,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Model Size: 7 Billion parameters.
-    - Precision: FP16 (2 bytes/param) vs INT8 (1 byte/param).
-    - KV-Cache Dimensions: 512 tokens, 4096 hidden dim, 32 layers.
+    - Precision: FP16 weights use 2 bytes/param; INT8 weights use 1 byte/param.
+    - KV-cache example: batch 1, 512 tokens, 32 layers, 32 attention heads, head_dim 128, FP16 cache.
     - Total RAM Budget: 12 GB.
 
     **Calculations:**
-    - FP16 Weights: 7 * 10^9 * 2 = 14 GB (FAILS instantly).
-    - INT8 Weights: 7 * 10^9 * 1 = 7 GB (Leaves ~5 GB free).
-    - KV-Cache (512 tokens, FP16): 2 (K+V) * 512 * 4096 * 32 * 2 bytes = ~256 MB.
-    - KV-Cache (8192 tokens, FP16): ~4 GB.
+    - FP16 weights: 7e9 params * 2 bytes = 14 GB, which exceeds the 12 GB device budget before runtime memory.
+    - INT8 weights: 7e9 params * 1 byte = 7 GB, leaving about 5 GB for OS headroom, activations, KV cache, and runtime buffers.
+    - KV cache: 2 (K+V) * 1 batch * 512 tokens * 32 layers * 32 heads * 128 head_dim * 2 bytes = 268,435,456 bytes, about 256 MiB.
+    - Example inference reserve after INT8 weights: about 1 GB OS/app headroom + 0.25 GB KV cache + 0.5-1.0 GB peak activations/scratch + compiler/runtime buffers, leaving limited safety margin.
+    - Training state with Adam-like optimization would be far larger than inference: gradients plus optimizer moments add many bytes per parameter, so even INT8 inference weights do not make full training fit.
 
     **Conclusion & Interpretation:**
-    - **Result: 4 GB cache (Memory-Bound)**. Even with INT8 quantization, long-context inference will consume 4GB of the remaining budget purely on KV-cache.
+    - **Result: FP16 does not fit; quantized inference may fit, full training does not.** The budget must start with quantized weights, then reserve KV-cache, activation, runtime, and OS headroom explicitly.
 status: published
 provenance: imported
 requires_explanation: true

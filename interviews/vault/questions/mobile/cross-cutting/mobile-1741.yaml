@@ -11,25 +11,27 @@ title: 'Federated LLM Personalization on Google Tensor G3: Scaling and Non-IID C
 scenario: You are designing a system to continuously fine-tune a 500M parameter LLM for personalized text suggestions on millions of mobile devices. The devices feature a Google Tensor G3 chip (7.5 TOPS, 12 GB LPDDR5X RAM). Due to strict privacy concerns and highly non-IID user data, federated learning using federated averaging is mandated.
 question: How would you 'size' the overall system to handle the expected scale and data characteristics?
 details:
-  realistic_solution: 'Implement communication-efficient federated learning techniques such as sparse model updates (e.g., top-k gradient selection), quantization of gradients (e.g., 8-bit or 4-bit), and periodic averaging rather than per-round synchronization to reduce uplink traffic. To mitigate non-IID challenges, consider personalized federated learning strategies (e.g., FedProx, MOCHA) or a tiered approach where a global model is learned and then personalized on-device with a smaller, user-specific head. On the Google Tensor G3, leverage the on-device TPU for accelerated local training, ensuring model updates are computed efficiently. The 12GB LPDDR5X RAM can comfortably hold the 1GB FP16 model, allowing for in-memory processing of gradients. System sizing would involve estimating the average update size, aggregation frequency, and server-side processing power required to handle concurrent client connections and aggregations, potentially using hierarchical aggregation for massive scale.'
+  realistic_solution: Size the system from round participation, payload size, and server aggregation throughput rather than from model size alone. A 500M-parameter FP16 model is about 1 GB for weights, but local fine-tuning also needs activations, gradients, optimizer state, runtime buffers, and thermal headroom, so on-device training should be limited to lightweight adapters or a small personalization head. Use FedProx or personalization layers to handle non-IID data, compress and sparsify adapter updates, and select clients only when charging, idle, and on Wi-Fi. For the backend, estimate clients per round, bytes per client update, secure-aggregation fan-in, storage for round artifacts, and ingress/egress capacity; use hierarchical aggregation when the per-round cohort reaches hundreds of thousands of devices.
   common_mistake: |
     **The Pitfall:** Overlooking the cumulative communication bandwidth required for full model updates and non-IID divergence.
     **The Rationale:** Candidates treat FL as standard distributed training, ignoring the massive uplink costs and data heterogeneity of cross-device settings.
     **The Consequence:** The server is overwhelmed by network congestion, and the global model diverges due to non-IID data.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 10M active clients, 100,000 clients per round.
-    - 10MB update per client.
-    - 500M param FP16 model requires ~50 GFLOPs per step.
-    - Tensor G3 throughput: ~3.75 TFLOPs for FP16 (from 7.5 TOPS INT8).
+    - Active population: 10M devices.
+    - Round cohort: 100,000 selected clients.
+    - Trainable payload: 10 MB compressed adapter update per participating client.
+    - Rounds per day: 10.
+    - 500M FP16 base weights: 500M x 2 bytes ≈ 1 GB before training buffers.
 
     **Calculations:**
-    - Server uplink: 10M active clients x 10MB update = 100 TB per day.
-    - Round aggregation: 100,000 clients/round x 10MB = 1TB ingested per round.
-    - Training step time: 50e9 / 3.75e12 = 13.3 milliseconds.
+    - Per-round ingress: 100,000 x 10 MB = 1,000,000 MB ≈ 1 TB.
+    - Daily ingress: 1 TB/round x 10 rounds/day = 10 TB/day.
+    - If the server round window is 30 minutes, sustained ingress is 1 TB / 1800 sec ≈ 556 MB/s before protocol and secure-aggregation overhead.
+    - On-device memory must reserve more than the 1 GB weight footprint, so adapter-only training is the practical sizing assumption.
 
     **Conclusion & Interpretation:**
-    - **Result: 100 TB/day (Network Bandwidth-Bound)**. Local computation is trivial (~13.3ms), making communication bandwidth the true system bottleneck.
+    - **Result: Round-ingress and on-device memory bound.** The backend must handle roughly 1 TB per large round, while clients should train small adapters because full 500M-parameter fine-tuning is not a comfortable fit on mobile memory or thermal budgets.
 status: published
 provenance: imported
 requires_explanation: false

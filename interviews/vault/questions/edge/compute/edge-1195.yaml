@@ -11,22 +11,26 @@ title: Design Speculative Decoding for Edge LLM on Jetson Orin
 scenario: You are designing a speculative decoding system for a 7B target model. The target model takes 54.7ms/token (memory-bandwidth-bound decode). You have a 1B draft model that takes 8ms/token. The target acceptance rate is α=0.80.
 question: What speculation window k should you choose for the 7B target and 1B draft at α=0.80, and what speedup results?
 details:
-  realistic_solution: Speculative Decoding isolates the memory-bound auto-regressive penalty by utilizing a highly lightweight draft model to hypothesize sequential tokens, verified collectively in a single parallel target pass. By explicitly calculating the expected token yield per speculative cycle versus the linear cost of extending the draft path, an optimal chunk limit is mathematically derived to maximize effective throughput.
+  realistic_solution: |
+    With acceptance rate alpha=0.80, use the standard speculative-decoding expectation that includes the target model's bonus token when all k draft tokens are accepted: E(k) = (1 - alpha^(k+1)) / (1 - alpha). The cycle cost is k draft steps plus one target verification pass: 8k + 54.7 ms. Searching k shows the best throughput at k=5, where E=3.69 tokens, cycle latency is 94.7 ms, and speedup versus the 54.7ms/token baseline is about 2.13x. Larger windows add draft latency faster than they add expected emitted tokens.
   common_mistake: |
     **The Pitfall:** Setting the speculation window `k` too large.
     **The Rationale:** Candidates often assume that generating more draft tokens is always better if the draft model is fast.
-    **The Consequence:** For memory-bandwidth-bound systems, the target model verification cost grows linearly with `k`, leading to diminishing returns and eventually slowing down the system.
+    **The Consequence:** The draft latency grows linearly with `k` while expected accepted tokens saturate, leading to diminishing returns and eventually slowing down the system.
   napkin_math: |
     **Assumptions & Constraints:**
        - Target decode: 54.7 ms/token
        - Draft decode: 8 ms/token
        - Acceptance rate (α): 0.80
     **Calculations:**
-       - Expected accepted tokens E[k=5, α=0.8] = (1 - 0.8^6) / (1 - 0.8) ≈ 3.69 tokens
-       - Cycle latency (k=5): (5 * 8 ms) + 54.7 ms = 94.7 ms
-       - Speedup: (3.69 tokens / 94.7 ms) / (1 token / 54.7 ms) = 2.13x
+       - Expected emitted tokens, including the all-accepted bonus token from the target pass: E(k) = (1 - α^(k+1)) / (1 - α)
+       - Cycle latency: T(k) = 8k + 54.7 ms
+       - k=4: E=3.36 tokens, T=86.7 ms, speedup=(3.36/86.7)/(1/54.7)=2.12x
+       - k=5: E=3.69 tokens, T=94.7 ms, speedup=(3.69/94.7)/(1/54.7)=2.13x
+       - k=6: E=3.95 tokens, T=102.7 ms, speedup=(3.95/102.7)/(1/54.7)=2.10x
+       - k=7: E=4.16 tokens, T=110.7 ms, speedup=(4.16/110.7)/(1/54.7)=2.06x
     **Conclusion & Interpretation:**
-       - **Result: Memory-Bound Optimization.** Speculative decoding with k=5 drastically reduces memory traffic per output token, providing a 2.13x speedup.
+       - **Result: choose k=5 for about 2.13x speedup.** This is the throughput maximum under the stated acceptance model and latencies.
 status: published
 provenance: imported
 requires_explanation: true

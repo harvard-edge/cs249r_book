@@ -11,7 +11,7 @@ title: LoRA Inference Optimization on A17 Pro Neural Engine
 scenario: You are deploying a fine-tuned LLM with LoRA adapters on an A17 Pro device. The Core ML compiler rejects the dynamic LoRA application implementation as a non-statically-shapeable graph.
 question: Why does Core ML reject dynamic LoRA on A17 Pro, and how should the adapters be compiled?
 details:
-  realistic_solution: 'Merge the LoRA adapters permanently into the base weights prior to Core ML compilation. The Neural Engine strictly demands static execution graphs. By fusing the adapters offline, the weights become static, allowing Core ML to completely optimize the math for the ANE. For a multi-adapter system, export entirely separate Core ML model bundles per adapter.'
+  realistic_solution: Merge the LoRA adapters permanently into the base weights prior to Core ML compilation. The Neural Engine strictly demands static execution graphs. By fusing the adapters offline, the weights become static, allowing Core ML to completely optimize the math for the ANE. For a multi-adapter system, export entirely separate Core ML model bundles per adapter.
   common_mistake: |
     **The Pitfall:** Attempting to pass the low-rank adapter matrices as dynamic input tensors to the Core ML graph at runtime.
     **The Rationale:** Erroneously treating Apple's Core ML compilation like dynamic PyTorch graph execution.
@@ -19,17 +19,19 @@ details:
   napkin_math: |
     **Assumptions & Constraints:**
     - Base model: 1B parameters INT4 (0.5 GB).
-    - LoRA Adapter: Rank-4, 2048 hidden dim, 24 layers, FP16.
+    - LoRA Adapter: Rank-4 on Wq and Wv, hidden dim 2048, 24 layers, FP16.
     - Number of unique variants required: 10.
     - Device RAM: 8 GB.
 
     **Calculations:**
-    - Adapter size: 2 (Wq, Wv matrices) * 2 (A, B factors) * 4 (rank) * 2048 (dim) * 24 (layers) * 2 bytes (FP16) ≈ 1.6 MB.
-    - Static compiled model footprint: 0.5 GB base + 1.6 MB adapter ≈ 0.5016 GB.
-    - Total footprint for 10 distinct models: 10 * 0.5016 GB ≈ 5.02 GB.
+    - Parameters per adapted matrix: rank * input_dim + output_dim * rank = 4 * 2048 + 2048 * 4 = 16,384 params.
+    - Parameters per layer for Wq and Wv: 2 * 16,384 = 32,768 params.
+    - Adapter size: 32,768 * 24 layers * 2 bytes = 1,572,864 bytes ≈ 1.5 MB.
+    - Static compiled model footprint: 0.5 GB base + ~1.5 MB adapter ≈ 0.502 GB.
+    - Total stored footprint for 10 compiled variants: 10 * 0.502 GB ≈ 5.02 GB.
 
     **Conclusion & Interpretation:**
-    - **Result: 5.02 GB (Memory-Bound)**. Statically fusing 10 separate variants before compilation costs only ~5 GB of RAM—easily fitting the 8 GB limit—while guaranteeing execution on the 35 TOPS ANE.
+    - **Result: ~5.0 GB Stored Variants.** Offline fusion gives Core ML static weights and static shapes for compilation. The memory estimate supports feasibility for storing 10 variants, but ANE placement still depends on Core ML operator support and compiler decisions.
 status: published
 provenance: imported
 requires_explanation: false

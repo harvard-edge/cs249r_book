@@ -18,19 +18,19 @@ details:
     **The Consequence:** Designing an architecture that instantly blows past the real-time latency budget due to immense matrix operations.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 1080p image (2MP), 16x16 patches.
+    - 1080p image (1920x1080), 16x16 patches with padding in height.
     - Jetson Orin bandwidth = 204 GB/s.
     - Budget = 33ms.
 
     **Calculations:**
-    - Sequence N = (1920*1080)/256 = 8100.
-    - Attention matrix = 8100^2 = 65.6M elements (65.6 MB at INT8).
-    - Read time = 65.6 MB / 204 GB/s = 0.32 ms.
-    - 12 heads * 12 layers = 144 reads.
-    - 144 * 0.32 ms = 46.1 ms.
+    - Patch grid = ceil(1920/16) * ceil(1080/16) = 120 * 68 = 8160 tokens per camera.
+    - For 8 cameras, naive full fusion would expose up to 65,280 tokens before any downsampling.
+    - Full attention scales as N^2, so even per-camera attention is 8160^2 = 66.6M score entries per layer before value projection and MLP compute.
+    - The dominant issue is not reading a stored attention matrix; efficient kernels usually stream or tile attention. The cost pressure comes from quadratic score/value work plus repeated Q/K/V, activation, and weight traffic across layers.
+    - A CNN stem that reduces each camera to a compact feature grid before cross-camera attention can cut token count by 16x or more, reducing the quadratic attention term by roughly 16^2 = 256x.
 
     **Conclusion & Interpretation:**
-    - **Result: 46.1 ms just for attention weights (Memory-Bandwidth-Bound)**. Pure ViT immediately violates the 33ms budget purely on memory reads.
+    - **Result: Quadratic attention pressure dominates naive pure ViT scaling.** The defensible edge design is a hybrid: use CNN or windowed local encoders to reduce spatial tokens, then apply limited global attention only on compact features.
 status: published
 provenance: imported
 requires_explanation: true

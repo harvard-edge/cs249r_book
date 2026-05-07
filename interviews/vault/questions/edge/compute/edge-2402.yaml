@@ -9,44 +9,46 @@ bloom_level: understand
 phase: both
 title: Orin Thermal Throttle Floor for SLA
 scenario: A roadside Jetson AGX Orin enclosure (passive heatsink, no fan, IP67 housing) runs a 20 TOPS INT8 traffic-monitoring model that must hold 30 FPS. In a controlled 25 C bench the unit holds 60W mode (275 TOPS peak) and meets the SLA. In summer field conditions the enclosure internal temperature rises to 75 C and the SoC dynamic frequency scaler clamps the GPU clock by 32% sustained, dropping the platform to a 30W envelope (~140 GB/s LPDDR5, ~165 TOPS effective peak). The model needs 18 GB/s of bandwidth.
-question: Determine whether the thermally-throttled 30W envelope meets the 30 FPS SLA, and recommend whether thermal mitigation or model trimming is the cheaper fix.
+question: Determine whether the thermally-throttled 30W envelope meets the 30 FPS SLA, and recommend whether thermal mitigation or model trimming is the cheaper fix?
 details:
-  realistic_solution: 'Worst-case compute: 165 TOPS (30W ceiling) * (1 - 0.32) = 112 TOPS effective. The 20 TOPS demand is still 18% utilisation - compute is fine. Worst-case bandwidth: 140 GB/s peak * 0.65 efficiency = 91 GB/s effective; the throttled clock scales LPDDR5 controller throughput too, so apply the 32% haircut: 91 * 0.68 = 62 GB/s usable. The model needs 18 GB/s sustained, plus the camera ISP/VIC pipeline typically reserves ~10 GB/s, leaving 62 - 28 = 34 GB/s headroom - SLA still passes, but timing-jitter margin is thin and any cosmic-ray-class spike (refresh, periodic GC) threatens the 30 FPS deadline. Cheaper fix: add a small heatpipe to the housing - dropping internal temperature ~10 C eliminates the 32% throttle entirely and restores full 30W envelope at $5-10 BOM, vs. retraining and redeploying a smaller model across the fleet at $50k+ engineering cost.'
+  realistic_solution: |
+    Treat the throttled 30W figures as aggregate sustained ceilings, not as an end-to-end latency proof. A 30 FPS SLA gives 33.3ms per frame. If the model's stated 20 TOPS demand is sustained work at 30 FPS, that is about 0.67 TOP per frame; at 165 TOPS effective peak the ideal compute floor is roughly 4ms. The 18 GB/s bandwidth demand maps to about 0.6 GB per frame; at 140 GB/s LPDDR5 peak the ideal memory floor is about 4.3ms. These lower bounds show that compute and memory capacity are not obviously over the throttled envelope, but they do not prove the SLA passes because real latency depends on utilization efficiency, kernel launch gaps, CPU preprocessing, camera ingest, postprocessing, contention, and thermal variance. The correct decision is to profile the 30W field envelope. Use thermal mitigation when it restores the known-good 60W path more cheaply than revalidating a trimmed model; trim the model only if profiling shows the throttled critical path or sustained utilization cannot stay below 33.3ms.
   common_mistake: |
     **The Pitfall:** Overlooking LPDDR5 clock throttling.
     **The Rationale:** Engineers treat thermal throttling as an additive percentage on compute power only, forgetting memory controllers live on the same scaled SoC buses.
     **The Consequence:** They miss that memory bandwidth degrades in lockstep with compute, threatening the SLA immediately since vision models are bandwidth-hungry.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - Orin peak: 140 GB/s LPDDR5, 165 TOPS, 30W envelope under throttle.
-       - Thermal scaling haircut: 32% sustained.
-       - Efficiency factor: 0.65.
-       - Model bandwidth demand: 18 GB/s. ISP reserve: 10 GB/s.
-    2. **Calculations:**
-       - Compute Floor = 165 TOPS * (1 - 0.32) = 112 TOPS (20 TOPS demand is safe).
-       - Bandwidth Floor = 140 GB/s * 0.65 * (1 - 0.32) = 61.88 GB/s.
-       - System Demand = 18 GB/s (model) + 10 GB/s (ISP) = 28 GB/s.
-       - Headroom = 61.88 GB/s - 28 GB/s = ~34 GB/s.
-    3. **Conclusion & Interpretation:**
-       - **Result: Bandwidth Marginal**. The throttled LPDDR5 clock passes the SLA but leaves tight jitter margin. Adding a $10 heatpipe entirely removes the 32% throttle, rendering it vastly cheaper than retraining the model.
+    **Assumptions & Constraints:**
+       - 30 FPS frame budget: 1 / 30 = 33.3ms.
+       - Throttled 30W envelope from the prompt: 140 GB/s LPDDR5 and 165 TOPS effective peak.
+       - Model demand: 20 TOPS sustained at 30 FPS and 18 GB/s bandwidth.
+    **Calculations:**
+       - Per-frame compute work = 20 TOP/s / 30 FPS = 0.667 TOP/frame.
+       - Ideal compute lower bound at the throttled peak = 0.667 TOP / 165 TOP/s = 0.0040s = 4.0ms.
+       - Per-frame memory traffic = 18 GB/s / 30 FPS = 0.6 GB/frame.
+       - Ideal memory lower bound at 140 GB/s = 0.6 GB / 140 GB/s = 0.0043s = 4.3ms.
+       - These are independent lower bounds from aggregate ceilings, not additive proof of end-to-end response time.
+       - Required profiling check: measured critical-path latency at the 30W thermal state must stay below 33.3ms with enough tail margin for ingest, preprocessing, postprocessing, launch overhead, and contention.
+    **Conclusion & Interpretation:**
+       - **Result: the SLA outcome cannot be proven from aggregate TOPS and GB/s alone.** The numbers rule out an obvious capacity shortfall, but the deployment needs a measured 30W critical-path latency. Prefer thermal mitigation if it restores the already-validated operating point; choose model trimming only when profiling shows the throttled path is the bottleneck.
 status: published
 provenance: llm-draft
-expected_time_minutes: 5
 requires_explanation: true
+expected_time_minutes: 5
 validated: true
+validation_status: passed
+validation_date: '2026-04-25'
+validation_model: pydantic-1.0
 math_verified: true
+math_status: CORRECT
+math_date: '2026-04-25'
+math_model: gemini-3.1-pro-preview
 human_reviewed:
   status: not-reviewed
   by: null
   date: null
   notes: null
 tags:
-- gemini-generated
-- target-design-L2
+  - gemini-generated
+  - target-design-L2
 created_at: '2026-04-25'
-math_status: CORRECT
-math_model: gemini-3.1-pro-preview
-validation_status: passed
-validation_model: pydantic-1.0
-math_date: '2026-04-25'
-validation_date: '2026-04-25'

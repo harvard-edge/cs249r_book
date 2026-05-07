@@ -11,7 +11,7 @@ title: Batch vs Streaming Ingestion for CTR Models
 scenario: Your team is architecting the data ingestion pipeline for an Ads CTR model training on an 8x GPU cluster. The frontend generates 50,000 events per second (2.5 KB per event, ~10.8 TB/day). The training loop consumes data at 2.5 GB/s.
 question: Should the Ads CTR pipeline use continuous Kafka streaming or a scheduled 15-minute 1GB Parquet batch ingestion system, and why?
 details:
-  realistic_solution: 'Implement the batch ingestion system. Aggregating 2.5KB events into large 1GB Parquet files enables high-throughput sequential reads that can easily sustain the 2.5 GB/s required by the GPU training loop. This prevents expensive GPUs from idling on I/O while drastically reducing S3 PUT/GET API costs from billions of small-object requests to thousands of large-object reads. The 15-minute freshness lag is a mathematically worthwhile trade-off for system throughput.'
+  realistic_solution: Implement the batch ingestion system, but partition each 15-minute window into many large Parquet shards that the training workers read in parallel or pre-materialize into a training dataset cache. The frontend produces about 112.5GB every 15 minutes, so using roughly 100-120 1GB shards per window turns 50,000 tiny events/sec into large sequential object reads. A single 1GB file every 15 minutes would not feed a 2.5GB/s training loop; the throughput comes from parallel shard readers and read-ahead over the materialized dataset. This prevents expensive GPUs from idling on I/O while reducing object-store requests from per-event operations to per-shard reads and writes. The 15-minute freshness lag is a worthwhile trade-off for throughput and cost.
   common_mistake: |
     **The Pitfall:** Defaulting to continuous Kafka streaming to maximize "freshness".
     **The Rationale:** Engineers prioritize real-time ingestion latency over total system throughput, treating ML training like a standard microservice.
@@ -22,12 +22,14 @@ details:
     - GPU consumption rate: 2.5 GB/s.
 
     **Calculations:**
-    - Streaming requests: 50,000 events/sec = 4.32 billion API requests/day.
+    - If handled as per-event object operations, streaming requests would be 50,000 events/sec = 4.32 billion object operations/day.
     - Data velocity: 50,000 × 2.5 KB = 125 MB/s.
     - 15-minute batch size: 125 MB/s × 900 seconds ≈ 112.5 GB.
+    - Approximate 1GB Parquet shards per window: 112.5GB / 1GB ≈ 113 shards.
+    - To feed 2.5GB/s from 1GB shards, the training input layer needs parallel readers/read-ahead over the shard set; for example, 32 readers each sustaining ~80MB/s provide ~2.56GB/s.
 
     **Conclusion & Interpretation:**
-    - **Result: Batching sustains 2.5 GB/s GPU reads while saving billions of API calls (I/O-Bound)**.
+    - **Result: Partitioned batch ingestion can sustain 2.5GB/s GPU reads while avoiding billions of per-event object-store calls (I/O-Bound)**.
 status: published
 provenance: imported
 requires_explanation: true

@@ -11,20 +11,24 @@ title: Calibration Dataset Outlier Bias
 scenario: Your team is deploying an anomaly detection CNN on an ARM Cortex-M7 + Ethos-U55 subsystem. During dataset curation for post-training quantization (PTQ), the team uses active learning to aggressively select edge cases, resulting in a calibration dataset filled with extreme, high-amplitude sensor outliers. When deployed, inference latency is unaffected, but the model completely fails to detect subtle, low-amplitude anomalies that it previously caught as a float32 model.
 question: Why does this specific calibration dataset composition cause the integer-only NPU to fail on subtle inputs?
 details:
-  realistic_solution: The inclusion of extreme outliers in the calibration dataset artificially widens the minimum and maximum bounds used to calculate the int8 quantization scale. Because the Ethos-U55 relies purely on 8-bit integer math, this widened range forces a much larger step size. This dramatically reduces the numerical resolution available for subtle, low-amplitude features, causing them to round to zero and be entirely lost during NPU execution.
+  realistic_solution: The inclusion of extreme outliers in the calibration dataset artificially widens the activation range used to calculate the int8 quantization scale. Because the Ethos-U55 relies on 8-bit integer math, this widened range forces a much larger step size. Subtle, low-amplitude features may not literally round to zero, but they are represented by far fewer integer levels, so small distinctions that mattered in float32 collapse during NPU execution.
   common_mistake: |
     **The Pitfall:** Assuming the model overfit to outliers during training or blaming the SRAM limits for activation spillage.
     **The Rationale:** Candidates miss that PTQ calibration only scales activations and does not change model weights or memory footprint.
     **The Consequence:** Misdiagnosing the issue as an overfitting or memory problem rather than a quantization range scaling artifact.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Int8 asymmetric quantization (255 positive steps). Typical subtle anomalies ~5.0, extreme outliers ~127.5.
+    - Use an 8-bit asymmetric activation quantizer whose scale covers the endpoints with 255 intervals between 256 integer codes.
+    - Typical subtle anomaly range: 0 to 5.1.
+    - Outlier-biased calibration range: 0 to 128.0.
 
     **Calculations:**
-    - Outlier-biased scale = 127.5 / 255 = 0.5 per step. Subtle feature value 1.0 quantizes to round(1.0 / 0.5) = 2. Unbiased scale (max 5.1) = 5.1 / 255 = 0.02 per step. Subtle feature 1.0 quantizes to round(1.0 / 0.02) = 50.
+    - Outlier-biased scale = 128.0 / 255 = 0.502 per code. A subtle value of 1.0 maps to round(1.0 / 0.502) = 2 codes above zero point.
+    - Representative scale = 5.1 / 255 = 0.020 per code. The same value maps to round(1.0 / 0.020) = 50 codes above zero point.
+    - Scale ratio = 0.502 / 0.020 = 25.1x, so the outlier-biased calibration has about 25x coarser resolution over subtle features.
 
     **Conclusion & Interpretation:**
-    - **Result: 96% of integer resolution is destroyed by outlier bias (Quantization-Bound Accuracy Loss)**.
+    - **Result: 25x coarser resolution for subtle inputs (Quantization-Bound Accuracy Loss)**. The outliers force a coarse scale, collapsing low-amplitude anomalies into too few integer codes for the NPU path to preserve the float32 model's distinctions.
 status: published
 provenance: imported
 requires_explanation: false

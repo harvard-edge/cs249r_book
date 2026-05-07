@@ -8,25 +8,31 @@ competency_area: networking
 bloom_level: analyze
 phase: both
 title: Optimizing Distributed Training Throughput with RoCE on GPUs
-scenario: You are leading a team training a large language model across 64 GPUs. These GPUs are interconnected over a 200 Gbps RoCE v2 network. You've observed that while individual GPU utilization is high during computation, the overall training throughput is significantly lower than expected during gradient synchronization. Specifically, a single all-reduce operation for a 100 GB gradient tensor across all 64 GPUs takes much longer than theoretical expectations. Your current framework uses standard TCP/IP sockets for inter-GPU communication over the RoCE fabric.
-question: "How would you reconfigure the RoCE v2 communication stack so the 64 GPUs use RDMA and GPUDirect for the 100 GB all-reduce instead of TCP/IP?"
+scenario: You are leading a team training a large language model across 64 GPUs. These GPUs are interconnected over a 200 Gbps RoCE v2 network. You've observed that while individual GPU utilization is high during computation, the overall training throughput is significantly lower than expected during gradient synchronization. Specifically, a single ring all-reduce operation for a 100 GB gradient tensor on each GPU takes much longer than theoretical expectations. Your current framework uses standard TCP/IP sockets for inter-GPU communication over the RoCE fabric.
+question: How would you reconfigure the RoCE v2 communication stack so the 64 GPUs use RDMA and GPUDirect for the 100 GB all-reduce instead of TCP/IP?
 details:
-  realistic_solution: 'To resolve this, you need to ensure your deep learning framework''s communication backend is correctly configured to leverage RoCE''s RDMA capabilities. This involves: 1. **Verifying RDMA Driver Installation**: Confirm Mellanox OFED drivers are installed and `ib_verbs` are accessible on all nodes. 2. **NCCL Configuration**: Set environment variables like `NCCL_IB_DISABLE=0` and potentially `NCCL_NET_GDR_LEVEL=3` to enable GPUDirect RDMA. This allows data to move directly from GPU memory to the network interface card (NIC) without CPU involvement or host memory copies (zero-copy). 3. **UCX Integration**: If using an MPI-based communication backend, ensure UCX (Unified Communication X) is enabled and configured to use InfiniBand/RoCE transport for optimal performance, as it natively supports kernel bypass and RDMA verbs. 4. **MTU/Jumbo Frames**: Configure the network interfaces to use jumbo frames (e.g., 9000 bytes MTU) to reduce packet overhead and increase the effective bandwidth for large data transfers during gradient exchange.'
+  realistic_solution: |
+    Switch the communication backend from TCP sockets to an RDMA-capable path over RoCE v2, such as NCCL or UCX using verbs and GPUDirect RDMA. The target data path is GPU memory to NIC to fabric to peer NIC to peer GPU memory, bypassing the kernel TCP stack and avoiding host-memory staging copies. Verify the NIC firmware, GPU/NIC peer-direct support, RDMA drivers, lossless or congestion-controlled RoCE configuration, MTU, PFC/ECN policy, and framework transport selection on every node. Environment variables such as NCCL or UCX transport knobs are useful validation tools, but the architectural requirement is that the collective library uses RoCE RDMA and GPUDirect rather than ordinary IP sockets.
   common_mistake: |
     **The Pitfall:** Assuming that simply plugging servers into a RoCE-enabled network automatically utilizes high-performance RDMA.
     **The Rationale:** Overlooking the need to explicitly configure deep learning frameworks (like NCCL) to bypass the OS kernel and use RDMA verbs.
     **The Consequence:** Network traffic routes through the CPU's slow TCP/IP stack, neutralizing the benefits of the advanced fabric and bottlenecking training.
   napkin_math: |
-    1. **Assumptions & Constraints:**
-       - All-Reduce Volume: 100 GB gradient * 2 = 200 GB total.
-       - Network: 200 Gbps (25 GB/s) RoCE v2.
-       - TCP/IP Overhead: Drops effective bandwidth to ~8 GB/s.
-    2. **Calculations:**
-       - Optimal RoCE Effective Bandwidth ≈ 22 GB/s.
-       - Optimal RDMA Time = 200 GB / 22 GB/s = ~9.1 seconds.
-       - TCP/IP Time = 200 GB / 8 GB/s = 25.0 seconds.
-    3. **Conclusion & Interpretation:**
-       - **Result: 25.0s vs 9.1s (Network-Protocol-Bound).** Relying on TCP/IP over RoCE makes the communication step 2.75x slower than configuring true GPUDirect RDMA.
+    **Assumptions & Constraints:**
+    - Ring all-reduce over 64 GPUs.
+    - Gradient tensor size per GPU: 100 GB.
+    - RoCE v2 link rate: 200 Gbps = 25 GB/s raw.
+    - Proper RDMA/GPUDirect path reaches 85% efficiency, or 21.25 GB/s effective.
+    - TCP socket path over the same Ethernet fabric reaches 45% efficiency, or 11.25 GB/s effective, because of copies and kernel overhead.
+
+    **Calculations:**
+    - Ring all-reduce per-GPU traffic: 2 * (64 - 1) / 64 * 100 GB = 196.875 GB.
+    - RDMA/GPUDirect time: 196.875 GB / 21.25 GB/s = 9.3 seconds.
+    - TCP socket time: 196.875 GB / 11.25 GB/s = 17.5 seconds.
+    - Protocol overhead factor: 17.5 / 9.3 = 1.9x.
+
+    **Conclusion & Interpretation:**
+    - **Result: Network-Protocol-Bound.** RoCE v2 is the RDMA-capable Ethernet fabric; the fix is to configure NCCL/UCX for RDMA and GPUDirect rather than sending the same traffic through TCP sockets.
 status: published
 provenance: imported
 requires_explanation: false
@@ -36,7 +42,7 @@ validation_status: WARN
 validation_date: '2026-04-01'
 validation_model: gemini-2.5-flash
 validation_issues:
-- Napkin Math is truncated and does not provide a complete comparison or conclusion.
+  - Napkin Math is truncated and does not provide a complete comparison or conclusion.
 math_verified: true
 math_status: CORRECT
 math_date: '2026-04-03'

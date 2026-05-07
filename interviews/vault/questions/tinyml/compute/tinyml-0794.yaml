@@ -7,25 +7,30 @@ topic: mcu-compute-constraints
 competency_area: compute
 bloom_level: analyze
 phase: inference
-title: 'Tinyml New 0017'
-scenario: 'During the heaviest convolution layer of an anomaly detection model, the Cortex-M4 microcontroller randomly resets. The software logic has been heavily tested and proves flawless.'
-question: 'Why can the heaviest convolution layer cause random Cortex-M4 resets even when the software logic is correct?'
+title: Cortex-M4 Brownout Resets During Convolution Current Bursts
+scenario: During the heaviest convolution layer of an anomaly detection model, the Cortex-M4 microcontroller randomly resets. The software logic has been heavily tested and proves flawless.
+question: Why can the heaviest convolution layer cause random Cortex-M4 resets even when the software logic is correct?
 details:
-  realistic_solution: 'The system is experiencing a brownout reset. The heaviest convolution layer causes maximum simultaneous switching of the ALU transistors. This draws an instantaneous spike in current that the power supply or decoupling capacitors cannot handle, causing the Vdd voltage to dip below the MCU''s minimum operating threshold. Fix by adding larger decoupling capacitors or lowering the clock speed.'
+  realistic_solution: The system is experiencing a brownout reset during the peak compute burst. The heaviest convolution layer raises total MCU current because the core, buses, SRAM, flash interface, and clock tree are active at high utilization. If the regulator, board traces, or local decoupling cannot supply that transient quickly enough, Vdd can dip below the MCU's brownout threshold even though the software is correct. Fix by checking the power rail with a scope, improving local bulk and high-frequency decoupling, reducing supply impedance, lowering clock speed, or spreading the workload.
   common_mistake: |
     **The Pitfall:** Blaming memory leaks or software bugs for hardware resets.
-    **The Rationale:** Candidates overlook power delivery network constraints and fail to analyze peak current draw during maximum simultaneous switching.
+    **The Rationale:** Candidates overlook power delivery network constraints and fail to analyze peak MCU current during dense compute bursts.
     **The Consequence:** Wasting time debugging flawless software while the hardware repeatedly browns out under peak ML load.
   napkin_math: |
     **Assumptions & Constraints:**
-    - Formula: Peak current I = C * V * f.
-    - Values: C = 10nF, V = 3.3V, f = 168 MHz.
+    - Normal MCU active current: 50 mA.
+    - Extra transient current during heavy MAC operations: up to 150 mA for a short interval.
+    - Vdd = 3.3V, Brownout threshold = 2.7V.
+    - Local high-frequency decoupling capacitor considered for the first microsecond: 100 nF.
 
     **Calculations:**
-    - Current per Node: 10e-9 * 3.3 * 168e6 = 5.54mA.
+    - Local droop estimate: dV = I * dt / C.
+    - If the regulator and bulk capacitance do not respond for the first 1 µs, dV = (0.150 A * 1e-6 s) / 100e-9 F = 1.5 V on that local decoupler.
+    - A 1.5 V transient droop from a 3.3 V rail would momentarily pull the local rail toward 1.8 V, below the 2.7 V brownout threshold.
+    - In a real board, the regulator, bulk capacitors, trace inductance, and ESR share the transient; the calculation shows why 100 nF alone is not enough for this burst.
 
     **Conclusion & Interpretation:**
-    - **Result: Ampere-level Peak (Power-Bound)**. Instantaneous switching of all ALU transistors pushes the transient current into the ampere range, dropping Vdd below the minimum threshold.
+    - **Result: Potential 1.5 V local transient droop (Power-Delivery-Bound).** The heavy compute burst can pull the local rail below the brownout threshold before the power delivery network recovers, causing a hardware reset.
 status: published
 provenance: imported
 requires_explanation: false
@@ -39,7 +44,7 @@ math_status: CORRECTED
 math_date: '2026-04-03'
 math_model: gemini-3.1-pro-preview
 math_issues:
-- Math calculates instantaneous current using f=240MHz, but the Cortex-M4 hardware spec strictly requires 168MHz.
+  - Math calculates instantaneous current using f=240MHz, but the Cortex-M4 hardware spec strictly requires 168MHz.
 human_reviewed:
   status: not-reviewed
   by: null

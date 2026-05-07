@@ -7,28 +7,33 @@ topic: gradient-synchronization
 competency_area: parallelism
 bloom_level: create
 phase: training
-title: Gradient All-to-All for Expert Parallelism
-scenario: 'A Mixture-of-Experts (MoE) model with 128 experts distributed across 128 MI300X GPUs uses All-to-All communication for token routing. Each GPU holds 1 expert and routes tokens to the correct expert on another GPU. With a batch of 4096 tokens and top-2 routing, each GPU must send ~64 tokens (each 4KB with hidden dim 2048 in FP16) to each of the 128 GPUs.'
-question: 'How would you design the MoE All-to-All token routing pattern across 128 MI300X GPUs, and how does its bandwidth compare to AllReduce?'
+title: MoE Token Routing All-to-All vs AllReduce
+scenario: A Mixture-of-Experts (MoE) model with 128 experts distributed across 128 MI300X GPUs uses All-to-All communication for token routing. Each GPU holds 1 expert and routes tokens to the correct expert on another GPU. With 4096 local tokens per GPU and top-2 routing, balanced routing sends ~64 token copies (each 4KB with hidden dim 2048 in FP16) from each GPU to each of the 128 GPUs.
+question: How would you design the MoE All-to-All token routing pattern across 128 MI300X GPUs, and how does its bandwidth compare to AllReduce?
 details:
   realistic_solution: |
-    Per GPU sends 256KB to each of 128 GPUs, totaling 32MB outbound and 32MB inbound. Total All-to-All data is 4GB network traffic. While All-to-All creates 128 concurrent small flows (256KB each) per GPU, making it latency-bound, NCCL's pipelining can overlap these flows.
+    Group token activations by destination expert, pack each destination's tokens into a contiguous send buffer, exchange counts or use padded capacity slots, run All-to-All/All-to-Allv, then unpack received tokens into the local expert batch. Balanced top-2 routing gives each GPU 4096 * 2 / 128 = 64 token copies per destination. At 4KB per token copy, that is 256KB to each peer and 32MB outbound per GPU. This is far less per-GPU payload than a 2GB gradient Ring AllReduce, which injects about 3.97GB per GPU, but the MoE exchange touches many destinations with small messages, so latency, packing overhead, and load imbalance dominate unless sends are coalesced and pipelined.
   common_mistake: |
-    **The Pitfall:** Treating All-to-All communication like an AllReduce operation.
-    **The Rationale:** Candidates assume All-to-All is bandwidth-bound like AllReduce, failing to recognize it creates many small latency-bound flows.
-    **The Consequence:** Severe miscalculation of communication latency because the overhead of establishing 128^2 individual connections is ignored.
+    **The Pitfall:** Treating MoE token routing like one large bandwidth-bound AllReduce.
+    **The Rationale:** All-to-All moves smaller per-destination buffers and needs packing, count exchange, and many concurrent peer transfers, so latency and load imbalance matter more than total bytes alone.
+    **The Consequence:** The design underestimates small-message overhead and expert skew, even though it does not literally create a new network connection for every source-destination pair.
   napkin_math: |
     **Assumptions & Constraints:**
-    - 128 MI300X GPUs, batch 4096 tokens.
-    - Each GPU sends 64 tokens (4KB each) to 128 GPUs.
+    - 128 MI300X GPUs.
+    - 4096 local tokens per GPU with top-2 routing.
+    - Balanced routing across 128 experts.
+    - Each token activation copy is 4KB.
 
     **Calculations:**
-    - Per GPU outbound: 64 tokens * 4KB = 256KB to each of 128 GPUs = 32MB.
-    - Total All-to-All data: 128 GPUs * 32MB = 4GB network traffic.
-    - AllReduce for 2GB gradients: 2 * (127/128) * 2GB = 3.97GB total.
+    - Token copies per GPU: 4096 * 2 = 8192.
+    - Token copies per destination under balance: 8192 / 128 = 64.
+    - Per-destination payload: 64 * 4KB = 256KB.
+    - Per-GPU All-to-All outbound payload: 128 * 256KB = 32MB.
+    - Cluster-wide injected All-to-All payload: 128 * 32MB = 4GB.
+    - Per-GPU Ring AllReduce payload for a 2GB gradient: 2 * (127/128) * 2GB = 3.97GB.
 
     **Conclusion & Interpretation:**
-    - **Result: All-to-All creates 16,384 independent small latency-bound flows compared to Ring AllReduce's 128 flows. (Latency-Bound Network)**. Distributed MoE training is uniquely sensitive to fabric latency rather than just bandwidth.
+    - **Result: MoE All-to-All is smaller in bytes per GPU than a 2GB AllReduce, but it is more latency- and skew-sensitive.** Coalescing per-destination sends and balancing expert load are the core design requirements.
 status: published
 provenance: imported
 requires_explanation: true

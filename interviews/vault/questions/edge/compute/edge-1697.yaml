@@ -7,11 +7,11 @@ topic: gpu-compute-architecture
 competency_area: compute
 bloom_level: analyze
 phase: both
-title: 'Optimizing INT8 Compute Utilization on Qualcomm AI 100'
-scenario: 'Your team is porting a heavy INT8 vision workload from a datacenter GPU to an on-premise Qualcomm Cloud AI 100 accelerator (400 TOPS INT8, 32 GB LPDDR4x, 75W). Initial profiling shows that while the model fits entirely within the 32 GB LPDDR4x memory, compute utilization is stuck at barely 5% of the theoretical 400 TOPS peak.'
-question: 'How would you quantify the memory bottleneck behind 5% Cloud AI 100 utilization and improve it with fusion, coalescing, and batching?'
+title: Optimizing INT8 Compute Utilization on Qualcomm AI 100
+scenario: Your team is porting a heavy INT8 vision workload from a datacenter GPU to an on-premise Qualcomm Cloud AI 100 accelerator (400 TOPS INT8, 32 GB LPDDR4x, 75W). Initial profiling shows that while the model fits entirely within the 32 GB LPDDR4x memory, compute utilization is stuck at barely 5% of the theoretical 400 TOPS peak.
+question: How would a roofline analysis quantify the 5% utilization bottleneck and guide fusion, coalescing, and batching?
 details:
-  realistic_solution: 'The correct approach is to calculate the required arithmetic intensity and restructure the workload to maximize on-chip SRAM reuse. Because the LPDDR4x memory bandwidth is constrained compared to the 400 TOPS capacity, the solution involves deep operator fusion, memory coalescing, and increasing batch sizes to ensure every byte fetched is reused.'
+  realistic_solution: The correct approach is to use a roofline calculation to compare required arithmetic intensity against available LPDDR4x bandwidth. At 5% utilization, the workload is not compute-limited; it is starved by bytes fetched from memory. The fix is to restructure the workload for higher on-chip SRAM reuse through deep operator fusion, coalesced memory access, and larger batches so each fetched byte feeds many more INT8 operations.
   common_mistake: |
     **The Pitfall:** Assuming INT8 quantization automatically guarantees peak TOPS utilization without analyzing arithmetic intensity.
     **The Rationale:** Candidates over-index on raw compute numbers and ignore memory bandwidth starvation.
@@ -22,11 +22,13 @@ details:
     - Memory bandwidth: 136 GB/s.
 
     **Calculations:**
-    - Required arithmetic intensity: 400,000 / 136 = ~2,941 OPS/byte.
-    - Current intensity (at 5% util / 20 TOPS): 20,000 / 136 = ~147 OPS/byte.
-    - Optimized intensity (10x reuse): 1,470 OPS/byte.
-    - New throughput: 1,470 OPS/byte $\times$ 136 GB/s = ~200 TOPS.
+    - Roofline knee for peak compute: 400 TOP/s / 136 GB/s = 2,941 ops/byte. Workloads below this intensity are memory-bound.
+    - Observed throughput at 5% utilization: 0.05 * 400 TOP/s = 20 TOP/s.
+    - If memory bandwidth is saturated at that point, observed arithmetic intensity is about 20 TOP/s / 136 GB/s = 147 ops/byte, far below the 2,941 ops/byte knee.
+    - A 10x reuse improvement raises intensity to about 1,470 ops/byte, still below the knee.
+    - Roofline throughput estimate after reuse: min(400 TOP/s, 1,470 ops/byte * 136 GB/s) = ~200 TOP/s.
 
     **Conclusion & Interpretation:**
-    - **Result: ~200 TOPS (Memory Bandwidth-Bound)**. LPDDR4x bandwidth severely restricts throughput without aggressive operator fusion and batching.
+    - **Result: ~200 TOP/s if 10x reuse is achieved (Still Memory-Bound)**. LPDDR4x bandwidth restricts throughput until arithmetic intensity approaches about 2,941 ops/byte.
 status: published
+provenance: imported
