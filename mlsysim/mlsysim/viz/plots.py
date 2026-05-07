@@ -3,7 +3,15 @@
 # Ensures all generated figures across Vol 1 & 2 share a consistent,
 # MIT Press-ready aesthetic.
 
+import os
+
+# Prefer a headless-safe backend unless the caller explicitly requested one.
+# This prevents macOS/AppKit aborts when tests or notebooks render figures from
+# a shell without an attached GUI session.
 try:
+    import matplotlib
+    if "MPLBACKEND" not in os.environ:
+        matplotlib.use("Agg", force=True)
     import matplotlib.pyplot as plt
     import numpy as np
     _matplotlib_available = True
