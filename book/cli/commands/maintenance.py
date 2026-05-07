@@ -472,6 +472,7 @@ class MaintenanceCommand:
             lines = file.read_text(encoding="utf-8").splitlines(keepends=True)
             in_code = False
             in_div = False
+            in_html_comment = False
             modified = False
             chapter_title = None
             section_hierarchy: list[str] = []
@@ -479,8 +480,20 @@ class MaintenanceCommand:
             # Find chapter title first
             tmp_code = False
             tmp_div = False
+            tmp_html_comment = False
             for line in lines:
                 s = line.strip()
+                # HTML comments are tracked OUTSIDE code blocks so a fence
+                # inside an HTML comment (e.g. a hidden TikZ example) does
+                # not flip in_code and corrupt the rest of the file's state.
+                if not tmp_code:
+                    if "<!--" in s and "-->" not in s:
+                        tmp_html_comment = True
+                        continue
+                    if tmp_html_comment:
+                        if "-->" in s:
+                            tmp_html_comment = False
+                        continue
                 if code_pat.match(s):
                     tmp_code = not tmp_code
                     continue
@@ -508,6 +521,14 @@ class MaintenanceCommand:
                 count = 0
                 for i, line in enumerate(lines, 1):
                     s = line.strip()
+                    if not in_code:
+                        if "<!--" in s and "-->" not in s:
+                            in_html_comment = True
+                            continue
+                        if in_html_comment:
+                            if "-->" in s:
+                                in_html_comment = False
+                            continue
                     if code_pat.match(s):
                         in_code = not in_code
                         continue
@@ -548,6 +569,14 @@ class MaintenanceCommand:
 
             for i, line in enumerate(lines):
                 s = line.strip()
+                if not in_code:
+                    if "<!--" in s and "-->" not in s:
+                        in_html_comment = True
+                        continue
+                    if in_html_comment:
+                        if "-->" in s:
+                            in_html_comment = False
+                        continue
                 if code_pat.match(s):
                     in_code = not in_code
                     continue
