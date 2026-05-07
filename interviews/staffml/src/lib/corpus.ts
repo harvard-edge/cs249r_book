@@ -530,7 +530,7 @@ async function getStaticFullDetail(id: string, summary: Question): Promise<Quest
     if (!res.ok) {
       throw new Error(
         `Static corpus.json not available at /data/corpus.json (status ${res.status}). ` +
-        "Run \`vault build --local-json\` from the repo root to regenerate it.",
+        "Run 'vault build --local-json' from the repo root to regenerate it.",
       );
     }
     const data = (await res.json()) as Question[];
