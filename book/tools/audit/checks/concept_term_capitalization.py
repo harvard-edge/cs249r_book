@@ -28,8 +28,17 @@ automatically.
     5. In `\\index{}` entries
     6. In callout `title="..."` attributes
     7. In bold table headers
-    8. "Iron Law of Processor Performance" (H&P canonical reference)
-    9. "Bitter Lesson" when used as Sutton's essay title
+    8. In bold structural labels inside callouts (e.g. `**The Iron Law Connection:**`)
+    9. In table cells that list principles by name (pipe-table rows
+       that reference a canonical principle anchor like `\\ref{pri-...}`)
+    10. In `fig-cap` / `tbl-cap` bold-title position (the `**Bold Title**:`
+        before the colon)
+    11. "Iron Law of Processor Performance" (H&P canonical reference)
+    12. "Bitter Lesson" when used as Sutton's essay title
+
+See `book-prose.md §10.3` (rule), `§10.3.2` (5-tier list), and `§10.3.3`
+(audit and edit workflow). When the rule and this script disagree, the
+rule wins; update this script to match.
 
 Auto-fixable: YES. The lowercase replacement is deterministic and has
 been validated against vol1 in round 1 pass 4. Detection and fix are
@@ -245,6 +254,14 @@ def _skip_concept_term_line(line: str, state) -> bool:
         return True
     # Bold table header rows
     if is_table_header_row(line):
+        return True
+    # §10.3 exception #9: pipe-table rows that list principles by name.
+    # Detection: the row starts with `|` and contains a canonical
+    # principle anchor reference (`\ref{pri-...}`). The principle-name
+    # cell in such a row is a label, not body prose, so concept terms
+    # like "Iron Law of ML Systems" stay Title Case.
+    stripped = line.lstrip()
+    if stripped.startswith("|") and "\\ref{pri-" in line:
         return True
     return False
 
