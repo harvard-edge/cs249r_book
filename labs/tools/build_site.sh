@@ -33,6 +33,27 @@ fi
 
 python3 -m build --wheel "${MLSYSIM_DIR}"
 
+# Verify the built wheel version matches what labs reference via micropip.
+# A mismatch causes BadZipFile in the browser (micropip fetches a 404 HTML page).
+BUILT_VERSION=$(python3 -c "
+import tomllib, pathlib
+p = pathlib.Path('${MLSYSIM_DIR}/pyproject.toml')
+print(tomllib.loads(p.read_text())['project']['version'])
+")
+BUILT_WHL="${MLSYSIM_DIR}/dist/mlsysim-${BUILT_VERSION}-py3-none-any.whl"
+if [ ! -f "${BUILT_WHL}" ]; then
+  echo "ERROR: Expected wheel not found after build: ${BUILT_WHL}" >&2
+  exit 1
+fi
+# Spot-check one lab to confirm the micropip URL references the built version
+SAMPLE_LAB="${LABS_DIR}/vol1/lab_01_ml_intro.py"
+if ! grep -q "mlsysim-${BUILT_VERSION}-py3-none-any.whl" "${SAMPLE_LAB}"; then
+  echo "ERROR: Version mismatch -- built wheel is ${BUILT_VERSION} but ${SAMPLE_LAB} references a different version." >&2
+  echo "Update all micropip.install() calls to reference mlsysim-${BUILT_VERSION}-py3-none-any.whl" >&2
+  exit 1
+fi
+echo "Wheel version check passed: ${BUILT_VERSION}"
+
 rm -rf "${LABS_DIR}/_wasm_build" "${LABS_DIR}/_build"
 mkdir -p "${LABS_DIR}/_wasm_build/wheels"
 cp "${MLSYSIM_DIR}"/dist/mlsysim-*.whl "${LABS_DIR}/_wasm_build/wheels/"
