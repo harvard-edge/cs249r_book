@@ -1222,7 +1222,9 @@ class EconomicsModel(BaseModel):
         
         unit_cost = fleet.node.accelerator.unit_cost
         if unit_cost is None:
-            unit_cost = GPU_UNIT_COST_H100
+            # Unknown hardware price should not silently inherit an H100 cost.
+            # Registries with sourced pricing populate unit_cost explicitly.
+            unit_cost = Q_("0 USD")
         total_capex_hardware = unit_cost.magnitude * fleet.total_accelerators
         # Apply infrastructure multiplier for networking, cooling, facility, staff costs
         # Default 1.0 (hardware only). Set 2.0-2.5x for full datacenter TCO.
@@ -1281,11 +1283,22 @@ class DataModel(BaseModel):
             Pipeline metrics including utilization and stall probability.
         """
         # 1. Resolve Hardware Supply
-        storage_bw = getattr(hardware.storage, 'bandwidth', Q_("0 GB/s")) if hardware.storage else Q_("0 GB/s")
-        io_bw = getattr(hardware.interconnect, 'bandwidth', Q_("0 GB/s")) if hardware.interconnect else Q_("0 GB/s")
-        
-        # The pipeline is limited by the minimum of storage and interconnect BW
-        supply_bw = min(storage_bw.to("GB/s"), io_bw.to("GB/s"))
+        storage_bw = getattr(hardware.storage, 'bandwidth', None) if hardware.storage else None
+        io_bw = getattr(hardware.interconnect, 'bandwidth', None) if hardware.interconnect else None
+
+        # The pipeline is limited by the slowest modeled data path. If a
+        # subsystem is absent from the hardware spec, do not treat it as a
+        # physical 0 GB/s link; use the paths that are actually described.
+        available_paths = []
+        if storage_bw is not None and storage_bw.to("GB/s").magnitude > 0:
+            available_paths.append(("Storage", storage_bw.to("GB/s")))
+        if io_bw is not None and io_bw.to("GB/s").magnitude > 0:
+            available_paths.append(("Interconnect", io_bw.to("GB/s")))
+
+        if available_paths:
+            bottleneck, supply_bw = min(available_paths, key=lambda item: item[1].magnitude)
+        else:
+            bottleneck, supply_bw = "Unknown", Q_("0 GB/s")
         demand_bw = workload_data_rate.to("GB/s")
         
         utilization = (demand_bw / supply_bw).magnitude if supply_bw.magnitude > 0 else float('inf')
@@ -1296,7 +1309,7 @@ class DataModel(BaseModel):
             utilization=utilization,
             demand_bw=demand_bw,
             supply_bw=supply_bw,
-            bottleneck="Storage" if (storage_bw < io_bw and storage_bw.magnitude > 0) else "Interconnect",
+            bottleneck=bottleneck,
             margin=(supply_bw - demand_bw).to("GB/s"),
         )
 
@@ -1893,7 +1906,7 @@ class SensitivitySolver(BaseSolver):
         Solves for sensitivities and identifies the binding constraint.
         """
         from copy import deepcopy
-        from ..hardware.types import ComputeCore, MemoryHierarchy
+        from ..hardware.types import ComputeCore
 
         baseline = Engine.solve(model, hardware, precision=precision, efficiency=efficiency)
         t_base = baseline.latency.to("ms").magnitude
@@ -1909,18 +1922,14 @@ class SensitivitySolver(BaseSolver):
         sensitivities["peak_flops"] = (t_flops - t_base) / t_base if t_base > 0 else 0.0
 
         hw_bw = deepcopy(hardware)
-        hw_bw.memory = MemoryHierarchy(
-            capacity=hardware.memory.capacity,
-            bandwidth=hardware.memory.bandwidth * factor
-        )
+        hw_bw.memory = deepcopy(hardware.memory)
+        hw_bw.memory.bandwidth = hardware.memory.bandwidth * factor
         t_bw = Engine.solve(model, hw_bw, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_bandwidth"] = (t_bw - t_base) / t_base if t_base > 0 else 0.0
 
         hw_mem = deepcopy(hardware)
-        hw_mem.memory = MemoryHierarchy(
-            capacity=hardware.memory.capacity * factor,
-            bandwidth=hardware.memory.bandwidth
-        )
+        hw_mem.memory = deepcopy(hardware.memory)
+        hw_mem.memory.capacity = hardware.memory.capacity * factor
         t_mem = Engine.solve(model, hw_mem, precision=precision, efficiency=efficiency).latency.to("ms").magnitude
         sensitivities["memory_capacity"] = (t_mem - t_base) / t_base if t_base > 0 else 0.0
 
@@ -2225,4 +2234,3 @@ class PlacementOptimizer(BaseOptimizer):
             total_searched=len(candidates),
             top_candidates=top_n
         )
-

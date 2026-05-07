@@ -316,10 +316,7 @@ def HardwareTetrisDashboard(eval_obj):
     fig = go.Figure()
     
     # 1. MFU Gauge
-    mfu_val = perf.get('mfu', 0)
-    if mfu_val == 0 and 'fleet_throughput' in perf:
-        # It's a distributed result without pure MFU in top level metrics, approximate
-        mfu_val = 0.52 * perf.get('fleet_throughput', 0) / 10000.0 # Just a placeholder
+    mfu_val = perf.get('mfu', perf.get('scaling_eff', perf.get('scaling_efficiency', 0)))
         
     if mfu_val <= 1.0: mfu_val *= 100.0 # Convert to percent
         
