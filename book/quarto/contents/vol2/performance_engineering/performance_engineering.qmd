@@ -259,7 +259,7 @@ The memory wall is not static; it grows wider with each hardware generation. Com
 
 The **Roofline Model**[^fn-roofline-origin] provides a quantitative framework for diagnosing whether a workload is compute-bound or memory-bound on a specific piece of hardware. Introduced by @williams2009, the model plots achievable performance as a function of **arithmetic intensity**, defined as the ratio of floating-point operations to bytes transferred from memory. The intersection of these two regimes is known as the **ridge point**[^fn-roofline-ridge].
 
-[^fn-roofline-ridge]: **Ridge Point**: The intersection of the memory-bound and compute-bound lines on a Roofline plot. It represents the minimum **Arithmetic Intensity** required to reach peak hardware performance ($R_{\text{peak}}$). For an H100 GPU (FP16), the ridge point is roughly 295 FLOP/byte; if an operator's intensity is below this "ridge," it will never saturate the Tensor Cores, regardless of how much compute is available. \index{Roofline Model!ridge point}
+[^fn-roofline-ridge]: **Ridge Point**: The intersection of the memory-bound and compute-bound lines on a Roofline plot. It represents the minimum **Arithmetic Intensity** required to reach peak hardware performance $(R_{\text{peak}})$. For an H100 GPU (FP16), the ridge point is roughly 295 FLOP/byte; if an operator's intensity is below this "ridge," it will never saturate the Tensor Cores, regardless of how much compute is available. \index{Roofline Model!ridge point}
 
 [^fn-roofline-origin]: **Roofline Model**: Published as "Roofline: An Insightful Visual Performance Model for Multicore Architectures" in *Communications of the ACM* (April 2009). Originally designed for CPU multicore workloads, the model's power lies in its hardware-agnostic simplicity: two numbers (peak FLOPS and peak bandwidth) define the entire performance envelope. This same simplicity now drives GPU purchasing decisions for ML inference, where the ridge point determines whether a workload benefits from faster compute or faster memory. \index{Roofline Model!origin}
 
@@ -607,7 +607,7 @@ $$
 I_{\text{decode}}(\text{batch}) = \frac{2 \times \text{params} \times \text{batch}}{\text{params} \times \text{bytes\_per\_param} + \text{batch} \times d \times \text{bytes\_per\_elem}}
 $$
 
-At batch size 1, the denominator is dominated by the weight term ($\text{params} \times \text{bytes\_per\_param}$), and $I \approx 2 / \text{bytes\_per\_param} \approx 1$ FLOP/byte for FP16. At batch size 256, the weight term still dominates, but the same weight bytes are amortized across more requests, so $I \approx 2 \times 256 / \text{bytes\_per\_param} \approx 256$ FLOP/byte, approaching the compute-bound regime.
+At batch size 1, the denominator is dominated by the weight term $(\text{params} \times \text{bytes\_per\_param})$, and $I \approx 2 / \text{bytes\_per\_param} \approx 1$ FLOP/byte for FP16. At batch size 256, the weight term still dominates, but the same weight bytes are amortized across more requests, so $I \approx 2 \times 256 / \text{bytes\_per\_param} \approx 256$ FLOP/byte, approaching the compute-bound regime.
 
 At large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving 2 percent utilization at batch size 1 may achieve 60 percent utilization at batch size 256. The economic implication is stark: the cost per token decreases by 30$\times$ as batch size increases from 1 to 256.
 
@@ -627,7 +627,7 @@ Paged attention and KV cache quantization interact multiplicatively. Paged atten
 
 Modern LLM serving systems decompose each request into two distinct phases with fundamentally different performance characteristics. The distinction between these phases drives system architecture and optimization strategy.
 
-The **prefill phase**\index{Prefill Phase} processes the entire input prompt in parallel. If the prompt contains $S$ tokens, the prefill phase executes a single forward pass over all $S$ tokens simultaneously. The GEMM operations have shape $[S,d]{\times}[d,d]$, making the batch dimension equal to $S$. For a prompt of 1024 tokens, this is arithmetically intensive: the arithmetic intensity is approximately $2 \times 1024/2 = 1024$ FLOP/byte for FP16 weights, well into the compute-bound regime. Prefill is therefore limited by Tensor Core throughput, not memory bandwidth.
+The **prefill phase**\index{Prefill Phase} processes the entire input prompt in parallel. If the prompt contains $N$ tokens, the prefill phase executes a single forward pass over all $N$ tokens simultaneously. The GEMM operations have shape $[N,d]{\times}[d,d]$, making the batch dimension equal to $N$. For a prompt of 1024 tokens, this is arithmetically intensive: the arithmetic intensity is approximately $2 \times 1024/2 = 1024$ FLOP/byte for FP16 weights, well into the compute-bound regime. Prefill is therefore limited by Tensor Core throughput, not memory bandwidth.
 
 The **decode phase**\index{Decode Phase} generates output tokens one at a time, autoregressively. Each step has a batch dimension of 1 (for a single request) or the number of concurrent requests (for batched serving). At batch size 1, decode is deeply memory-bound as analyzed in @sec-performance-engineering-workload-placement.
 
@@ -719,8 +719,8 @@ Each GPU kernel launch involves overhead: the CPU must prepare launch parameters
 Each unfused kernel must also materialize its output in HBM. Consider a sequence of three operations: $Y = \text{LayerNorm}(\text{GELU}(XW + b))$. Without fusion, this requires:
 
 1. **GEMM kernel**\index{GEMM!kernel}: Read $X$ and $W$ from HBM, compute $XW + b$, write result $Z_1$ to HBM.
-2. **GELU kernel**\index{GELU!kernel}: Read $Z_1$ from HBM, compute GELU($Z_1$), write $Z_2$ to HBM.
-3. **LayerNorm kernel**\index{LayerNorm!kernel}: Read $Z_2$ from HBM, compute LayerNorm($Z_2$), write $Y$ to HBM.
+2. **GELU kernel**\index{GELU!kernel}: Read $Z_1$ from HBM, compute $\text{GELU}(Z_1)$, write $Z_2$ to HBM.
+3. **LayerNorm kernel**\index{LayerNorm!kernel}: Read $Z_2$ from HBM, compute $\text{LayerNorm}(Z_2)$, write $Y$ to HBM.
 
 Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $Y$. For a hidden dimension of 4096 and batch size of 2048 in FP16, each intermediate tensor is $4096 \times 2048 \times 2 = 16$ MB. The unfused execution reads and writes 32 MB of intermediate data that a fused kernel avoids entirely by holding $Z_1$ and $Z_2$ in registers or shared memory (SRAM) within the SM.
 
@@ -1002,11 +1002,11 @@ Post-training quantization to INT8 or INT4 delivers even greater bandwidth savin
 
 ::: {.callout-definition title="Block-wise Quantization"}
 
-***Block-wise Quantization***\index{Quantization!block-wise, definition} is a quantization scheme that partitions a weight tensor into non-overlapping groups of $B$ elements and computes a per-group scale $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$, bounding worst-case quantization error within each group independently.
+***Block-wise Quantization***\index{Quantization!block-wise, definition} is a quantization scheme that partitions a weight tensor into non-overlapping groups of $B_{\text{block}}$ elements and computes a per-group scale $s_i = (x_{\max,i} - x_{\min,i}) / (2^b - 1)$, bounding worst-case quantization error within each group independently.
 
-1.  **Significance (Quantitative):** With block size $B = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits—a $4\times$ memory reduction—while per-group scale tensors add $1/B$ overhead in FP16, totaling $\approx 1.6\%$ metadata overhead. This yields an effective bit-width of $4 + 16/64 = 4.25$ bits per weight, compared to a pure 4-bit scheme at exactly 4 bits.
+1.  **Significance (Quantitative):** With block size $B_{\text{block}} = 64$ and $b = 4$ bits, weights compress from 16 bits to 4 bits—a 4$\times$ memory reduction—while per-group scale tensors add $1/B_{\text{block}}$ overhead in FP16, totaling $\approx 1.6\%$ metadata overhead. This yields an effective bit-width of $4 + 16/64 = 4.25$ bits per weight, compared to a pure 4-bit scheme at exactly 4 bits.
 2.  **Distinction (Durable):** Unlike **Per-Tensor Quantization**\index{Quantization!per-tensor}, which applies a single scale across the entire weight matrix and forces that scale to accommodate outlier values at the cost of wasting precision on the majority of near-zero weights, Block-wise Quantization contains outlier damage within individual blocks, preventing a single extreme value from degrading quantization fidelity for the whole tensor.
-3.  **Common Pitfall:** Treating block size as a free hyperparameter is wrong. Smaller blocks ($B = 32$) reduce quantization error but double the metadata overhead vs. $B = 64$. At $B = 16$, metadata overhead reaches $6.25\%$—eroding the memory savings that motivated quantization in the first place.
+3.  **Common Pitfall:** Treating block size as a free hyperparameter is wrong. Smaller blocks ($B_{\text{block}} = 32$) reduce quantization error but double the metadata overhead vs. $B_{\text{block}} = 64$. At $B_{\text{block}} = 16$, metadata overhead reaches $6.25\%$—eroding the memory savings that motivated quantization in the first place.
 
 :::
 
@@ -1651,7 +1651,7 @@ The techniques covered so far -- fusion, precision, compilation, speculative dec
 
 ## System Profiling {#sec-performance-engineering-profiling}
 
-An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kernel to make it $5\times$ faster, only to discover the overall model latency did not budge because the system was entirely I/O bound. Performance engineering without measurement is expensive guesswork. System profiling provides the surgical diagnostics required to identify exactly where the GPU is waiting, allowing us to apply our optimizations with precision.
+An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kernel to make it 5$\times$ faster, only to discover the overall model latency did not budge because the system was entirely I/O bound. Performance engineering without measurement is expensive guesswork. System profiling provides the surgical diagnostics required to identify exactly where the GPU is waiting, allowing us to apply our optimizations with precision.
 
 ::: {.callout-perspective title="The Physics of Profiling (The Heisenberg Effect)"}
 Observing a distributed ML system fundamentally alters its behavior. Gathering high-resolution telemetry—such as tracking every CUDA kernel launch or memory allocation—consumes PCIe bandwidth, CPU cycles, and memory capacity. In heavily optimized serving pipelines, the overhead of profiling can artificially induce the very latency spikes the engineer is trying to diagnose. This "Heisenberg Effect" requires a deliberate strategy: deploying low-overhead, sampling-based telemetry for continuous production monitoring, and only enabling high-fidelity, synchronous tracing in isolated diagnostic environments.
@@ -2100,7 +2100,7 @@ The case study demonstrates how disparate optimizations compound sequentially, t
 
 ## Fallacies and Pitfalls {#sec-performance-engineering-fallacies}
 
-A team upgrades their inference cluster from A100s to H100s, expecting a $3\times$ latency reduction based on the spec sheet's teraFLOPS rating, only to find their generative model barely runs 15 percent faster. The trap is pervasive: assuming that raw compute capacity dictates inference speed when the workload is entirely bound by memory bandwidth.
+A team upgrades their inference cluster from A100s to H100s, expecting a 3$\times$ latency reduction based on the spec sheet's teraFLOPS rating, only to find their generative model barely runs 15 percent faster. The trap is pervasive: assuming that raw compute capacity dictates inference speed when the workload is entirely bound by memory bandwidth.
 
 **Fallacy:** *More FLOPS means faster inference.*
 
