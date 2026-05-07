@@ -123,6 +123,22 @@ _TERMS = {
     "Starving Accelerator": "starving accelerator",
     "Latency Cliff":       "latency cliff",
     "Four Pillars Framework": "four pillars framework",
+    #
+    # Tier 5 family extensions (walls, taxes, gaps, bottlenecks, cliffs
+    # beyond the core list above) are NOT enforced auto-fixably here.
+    # They follow the categorical-default lowercase rule per §10.3.2 but
+    # have contextual exceptions the auto-fix cannot reliably distinguish:
+    # scare-quoted canonical introductions ("Coordination Tax." at first
+    # mention), pedagogical bullets in `.callout-learning-objectives` and
+    # `.callout-checkpoint`, italic uniform structural-label patterns
+    # ("**The Impediment**: *Physical Limits*" / "*The Coordination Tax*").
+    # Use the manual grep + LLM-Edit workflow per §10.3.3 for Tier 5
+    # family sweeps. Audit grep example:
+    #
+    #   grep -rEn '\b(Coordination Tax|Iteration Tax|...|Network Wall|
+    #     Capacity Wall|Communication Wall)\b' book/quarto/contents \
+    #     --include='*.qmd' \
+    #     | grep -vE '(\\index\{|^[^:]*:[0-9]+:##|title=|...)'
 }
 
 
