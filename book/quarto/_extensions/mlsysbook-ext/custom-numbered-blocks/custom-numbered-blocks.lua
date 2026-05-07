@@ -236,6 +236,56 @@ local function makeKnownClassDetector(knownclasses)
   end
 end
 
+-- Global-scoped counter support.
+--
+-- A "global" scope (declared in the YAML group config) means the counter for
+-- that group accumulates across the entire book in render order, rather than
+-- restarting at each file. The book's principle group is the canonical user:
+-- the conclusion's `\ref{pri-iron-law}` etc. expect "Principle 3" not "Principle 1".
+--
+-- fbx.global_scoped_groups is populated in Meta_initClassDefaults and is a
+-- list of {cntname, pattern} tables. cntname is the counter key in fbx.counter;
+-- pattern is a Lua pattern that matches occurrences of the class in raw QMD
+-- source (used to seed the counter from prior files in the render order).
+local function is_global_scoped_cntname(cntname)
+  if not fbx.global_scoped_groups then return false end
+  for _, g in ipairs(fbx.global_scoped_groups) do
+    if g.cntname == cntname then return true end
+  end
+  return false
+end
+
+-- For each global-scoped group, walk book.render in order and count callout
+-- occurrences in every chapter file that precedes the current one. Seeds
+-- fbx.counter[cntname] so that the first callout in this file gets the
+-- correct cumulative number.
+local function seed_global_counters(book, processedfile)
+  if not book or not book.render then return end
+  if not fbx.global_scoped_groups or #fbx.global_scoped_groups == 0 then return end
+
+  for _, g in ipairs(fbx.global_scoped_groups) do
+    fbx.counter[g.cntname] = 0
+  end
+
+  for _, v in ipairs(book.render) do
+    if str(v.type) == "chapter" then
+      local fpath = str(v.file)
+      local stem = pandoc.path.split_extension(fpath)
+      if stem == processedfile then break end
+      local fh = io.open(fpath, "r")
+      if fh then
+        local content = fh:read("*a")
+        fh:close()
+        for _, g in ipairs(fbx.global_scoped_groups) do
+          for _ in content:gmatch(g.pattern) do
+            fbx.counter[g.cntname] = fbx.counter[g.cntname] + 1
+          end
+        end
+      end
+    end
+  end
+end
+
 local function Meta_initClassDefaults (meta)
   -- do we want to prefix fbx numbers with section numbers?
   -- Configuration is now only under filter-metadata
@@ -298,6 +348,22 @@ local function Meta_initClassDefaults (meta)
  -- pout("---class----");  pout(clinfo)
   end
   fbx.is_cunumblo = makeKnownClassDetector(fbx.knownclasses)
+
+  -- Identify classes whose group has scope: global. For each, record the
+  -- counter key and a Lua pattern that matches the class in raw QMD source.
+  -- Then seed each global counter by counting prior occurrences across all
+  -- chapter files that render before this one.
+  fbx.global_scoped_groups = {}
+  for key, val in pairs(fbx.classDefaults) do
+    if str(replaceifnil(val.scope, "local")) == "global" then
+      table.insert(fbx.global_scoped_groups, {
+        cntname = val.cntname,
+        pattern = "%." .. str(key):gsub("%-", "%%-")
+      })
+    end
+  end
+  seed_global_counters(meta.book, fbx.processedfile)
+
 -- gather lists-of and make filenames by going through all classes
   for _, val in pairs(fbx.classDefaults) do
   --  pout("--classdefault: "..str(key))
@@ -484,7 +550,11 @@ local function Pandoc_prefix_count(doc)
          -- this would be more complicated if there are different levels
          -- of numbering depth
          -- then: add a numdepth variable to fbx with a list of keys
-         for k in pairs(fbx.counter) do fbx.counter[k]=0 end
+         -- Global-scoped counters (e.g. principle, scope: global) intentionally
+         -- accumulate across the whole book and must NOT reset on H1 boundaries.
+         for k in pairs(fbx.counter) do
+           if not is_global_scoped_cntname(k) then fbx.counter[k]=0 end
+         end
       end
 
       -- problem: only the outer divs are captured
