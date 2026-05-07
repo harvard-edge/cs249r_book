@@ -236,8 +236,17 @@ _HAS_BW_RE = re.compile(r"\\text\{BW\}")
 _HAS_BW_BARE_RE = re.compile(r"(?<![A-Za-z\\])BW(?![A-Za-z])")
 _HAS_DVOL_RE = re.compile(r"D_\{\\text\{vol\}\}")
 _HAS_RPEAK_RE = re.compile(r"R_\{\\text\{peak\}\}")
-_HAS_LLAT_RE = re.compile(r"L_\{\\text\{lat\}\}")
+# Accept any \text{}-wrapped subscript on L: L_{\text{lat}}, L_{\text{lat,network}},
+# L_{\text{net}}, L_{\text{lat,target}}, etc. The convention (per _notation_body.qmd)
+# is that any \text{}-wrapped subscript denotes a named latency variant; bare L is
+# what we flag.
+_HAS_LLAT_RE = re.compile(r"L_\{\\text\{[^}]+\}\}")
 _HAS_LOSS_RE = re.compile(r"\\mathcal\{L\}")
+# Subscripted, superscripted, or function-call forms of P are NOT bare-P uses:
+#  - P_t, P_0          : distribution / parameter variants (canonical)
+#  - P^{0.74}, P^{...} : parameter-count formulas (Chinchilla-style)
+#  - P(\hat{Y} | A=a)  : probability operator
+_HAS_P_NONBARE_RE = re.compile(r"P[_^(]")
 
 _HAS_GREEK = {
     "eta": re.compile(r"\\eta\b"),
@@ -293,6 +302,25 @@ _CTX_PEAK_RATE = [
     re.compile(r"\broofline\b", re.IGNORECASE),
     re.compile(r"\brate\b", re.IGNORECASE),
     re.compile(r"\bthroughput\b", re.IGNORECASE),
+]
+
+# When prose nearby talks about parameter count or probability, a bare P is
+# almost certainly the canonical-ML "$P$ = parameters" or a probability operator,
+# not "peak FLOP/s." These suppress the bare-P flag even if peak-rate keywords
+# also appear on the same line (common in MFU paragraphs that mention both).
+_CTX_PARAMETERS = [
+    re.compile(r"\bparameter\b", re.IGNORECASE),
+    re.compile(r"\bparameters\b", re.IGNORECASE),
+    re.compile(r"\bparams?\b", re.IGNORECASE),
+    re.compile(r"\bweights?\b", re.IGNORECASE),
+    re.compile(r"\bprobability\b", re.IGNORECASE),
+    re.compile(r"\bdistribution\b", re.IGNORECASE),
+    re.compile(r"\bmodel\s+size\b", re.IGNORECASE),
+    re.compile(r"\bscaling\s+law\b", re.IGNORECASE),
+    re.compile(r"\bscaling\s+laws\b", re.IGNORECASE),
+    re.compile(r"\bchinchilla\b", re.IGNORECASE),
+    re.compile(r"\bhoffmann\b", re.IGNORECASE),
+    re.compile(r"\bkaplan\b", re.IGNORECASE),
 ]
 
 _CTX_LATENCY = [
@@ -405,7 +433,17 @@ def check(
                 counter += 1
 
         # Hard convention: peak compute rate is R_{text{peak}}, not P.
-        if _HAS_SINGLE["P"].search(m) and not _HAS_RPEAK_RE.search(m):
+        # Skip subscripted/superscripted/function-call P forms (P_t, P^{0.74}, P(...)),
+        # which are canonical ML uses (distributions, parameter formulas, probability).
+        # Also skip when surrounding prose names parameters/probability/distributions —
+        # in that context "$P$" is the canonical ML "Parameters" symbol per the
+        # Notations chapter, not peak FLOP/s.
+        if (
+            _HAS_SINGLE["P"].search(m)
+            and not _HAS_RPEAK_RE.search(m)
+            and not _HAS_P_NONBARE_RE.search(m)
+            and not _ctx_has_any(ctx, _CTX_PARAMETERS)
+        ):
             if _ctx_has_any(ctx, _CTX_PEAK_RATE):
                 issues.append(
                     Issue(

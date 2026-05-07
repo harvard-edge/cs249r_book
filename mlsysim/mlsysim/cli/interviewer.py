@@ -1,5 +1,6 @@
 import json
 import random
+from pathlib import Path
 from typing import Optional
 from pydantic import BaseModel
 
@@ -71,7 +72,8 @@ FORMAT YOUR RESPONSE AS JSON:
 
 if __name__ == "__main__":
     # Test loading
-    corpus = InterviewCorpus("/Users/VJ/GitHub/MLSysBook/interviews/corpus.json")
+    _repo_root = Path(__file__).resolve().parents[3]
+    corpus = InterviewCorpus(_repo_root / "interviews" / "corpus.json")
     q = corpus.get_random(track="cloud", level="L4")
     print(f"Random Q: {q.title} ({q.level})")
     print(f"Scenario: {q.scenario}")
