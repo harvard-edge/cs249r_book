@@ -143,21 +143,21 @@ class SerializationCost:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     csv_speed_str = f"~{csv_speed_mb}"
     parquet_speed_str = f"> {parquet_speed_mb:,}"
-    csv_cycles_str = f"~{csv_cycles}"
-    parquet_cycles_str = f"~{parquet_cycles}"
+    csv_cycles_str = "High"
+    parquet_cycles_str = "Low"
     proto_speed_str = f"~{proto_speed_mb}"
-    proto_cycles_str = f"~{proto_cycles}"
+    proto_cycles_str = "Medium"
 ```
 
 Even after data arrives at the machine, we face one final hurdle: the serialization tax.[^fn-serialization] As @tbl-serialization-cost shows, many engineers meticulously optimize their accelerator kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JavaScript Object Notation (JSON) or CSV is extremely CPU-intensive, often leaving the accelerator idling while the CPU struggles to convert strings into floating-point numbers.
 
 [^fn-serialization]: **Serialization**: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time; @sec-data-engineering covers pipeline design strategies that minimize this overhead.
 
-| **Format**        |                               **Decoding Speed (MB/s)** |                                    **CPU Cycles per Byte** | **Suitability**         |
-|:------------------|--------------------------------------------------------:|-----------------------------------------------------------:|:------------------------|
-| **CSV/JSON**      |         `{python} SerializationCost.csv_speed_str` MB/s |         `{python} SerializationCost.csv_cycles_str` cycles | Debugging only          |
-| **Protobuf**      |       `{python} SerializationCost.proto_speed_str` MB/s |       `{python} SerializationCost.proto_cycles_str` cycles | RPC/Messages            |
-| **Parquet/Arrow** | **`{python} SerializationCost.parquet_speed_str` MB/s** | **`{python} SerializationCost.parquet_cycles_str` cycles** | **High-Scale Training** |
+| **Format**        |                           **Decoding Speed (MB/s)** |                    **Relative CPU Decode Cost** | **Suitability**     |
+|:------------------|----------------------------------------------------:|------------------------------------------------:|:--------------------|
+| **CSV/JSON**      |     `{python} SerializationCost.csv_speed_str` MB/s |     `{python} SerializationCost.csv_cycles_str` | Debugging only      |
+| **Protobuf**      |   `{python} SerializationCost.proto_speed_str` MB/s |   `{python} SerializationCost.proto_cycles_str` | RPC/Messages        |
+| **Parquet/Arrow** | `{python} SerializationCost.parquet_speed_str` MB/s | `{python} SerializationCost.parquet_cycles_str` | High-Scale Training |
 
 : **Serialization Overhead.** Zero-copy formats like Arrow are 10--100$\times$ faster than row-based text formats because they align directly with internal memory structures. {#tbl-serialization-cost}
 
@@ -378,7 +378,7 @@ class LongTailScale:
 
 ### Distributions and the long tail {#sec-data-foundations-distributions-long-tail-901f}
 
-In systems, the mean is often misleading. Latency distributions are almost always long-tailed (log-normal or power law). A "P99" (99th percentile) latency of 500 ms means one percent of your users experience extreme slowness, which at scale (`{python} LongTailScale.n_users_str` users) is `{python} LongTailScale.n_unhappy_str` unhappy people.
+In systems, the mean is often misleading. Latency distributions are almost always long-tailed (log-normal or power law). A "P99" (99th percentile) latency of 500 ms means one percent of requests experience that tail latency; with many requests per session, the fraction of users who see at least one slow request can be much higher. At scale (`{python} LongTailScale.n_users_str` users), even a one-percent affected-user rate would be `{python} LongTailScale.n_unhappy_str` unhappy people.
 
 ```{python}
 #| label: tail-latency-probability
@@ -592,7 +592,7 @@ Since PSI = `{python} KLDrift.psi_str` < `{python} DriftThresholds.psi_threshold
 
 Because KL divergence is asymmetric ($D_{\text{KL}}(P||Q) \neq D_{\text{KL}}(Q||P)$), practitioners often use PSI, a symmetric metric derived from KL divergence that is easier to threshold. A PSI > `{python} DriftThresholds.psi_threshold_str` typically triggers an alert for retraining.
 
-[^fn-kl]: **KL Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected number of extra bits needed to encode samples from $P$ using a code optimized for $Q$. In production ML, KL divergence is the theoretical backbone of most drift-detection metrics.
+[^fn-kl]: **KL Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from $P$ using a code optimized for $Q$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits. In production ML, KL divergence is the theoretical backbone of many drift-detection metrics.
 
 Both KL divergence and PSI are grounded in a deeper framework—information theory—which provides the units and bounds that make these metrics principled rather than ad hoc.
 
@@ -600,13 +600,13 @@ Both KL divergence and PSI are grounded in a deeper framework—information theo
 
 In the information roofline model (@sec-dam-taxonomy), we treat data quality as a physical constraint similar to bandwidth. Information theory provides the units for this constraint. Three concepts are central:
 
-**Entropy ($H$)**[^fn-entropy] is the average information content (uncertainty) in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. A uniform distribution has maximum entropy (maximum uncertainty). This connects directly to KL divergence above: $D_{\text{KL}}$ measures excess bits needed when using the wrong distribution.
+**Entropy ($H$)**[^fn-entropy] is the average information content (uncertainty) in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. The log base sets the unit: natural logs give nats, while $\log_2$ gives bits. A uniform distribution has maximum entropy (maximum uncertainty). This connects directly to KL divergence above: $D_{\text{KL}}$ measures excess information needed when using the wrong distribution.
 
 **Information Density** is the amount of useful signal per unit of storage. High-quality data has high information density; noisy data has low density.
 
 **Signal-to-Noise Ratio (SNR)** is the ratio of useful information to irrelevant variance. In ML, training on low-SNR data is like trying to learn a pattern from static—you hit the information roofline where adding more compute yields no improvement.
 
-[^fn-entropy]: **Entropy**: From Greek *entropia* (transformation). Shannon borrowed the term from thermodynamics in 1948 to quantify information content. In systems terms, entropy tells you the theoretical minimum number of bits needed to encode a message from a source—directly relevant to compression ratios and data pipeline sizing.
+[^fn-entropy]: **Entropy**: From Greek *entropia* (transformation). Shannon borrowed the term from thermodynamics in 1948 to quantify information content. In systems terms, entropy tells you the theoretical minimum code length needed to encode a message from a source, measured in bits when using $\log_2$ and nats when using natural logs, directly relevant to compression ratios and data pipeline sizing.
 
 ### Logits and numerical stability {#sec-data-foundations-logits-numerical-stability-13e2}
 
@@ -616,7 +616,7 @@ Neural networks output *logits*[^fn-logit] (unnormalized scores), not probabilit
 
 $$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
 
-The problem is that if $z_i$ is large (for example, `{python} DriftThresholds.logit_val_str`), the exponential $e^{z_i}$ overflows floating-point range. The solution is to compute in log-space: the "Log-Sum-Exp" trick allows us to compute $\log(\sum e^{z_j})$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp]
+The problem is that if $z_i$ is large (for example, `{python} DriftThresholds.logit_val_str`), the exponential $e^{z_i}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The solution is to compute in log-space: the "Log-Sum-Exp" trick allows us to compute $\log(\sum e^{z_j})$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp]
 
 [^fn-logsumexp]: **Log-Sum-Exp**: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log(\sum e^{x_i}) = a + \log(\sum e^{x_i - a})$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.
 
@@ -740,7 +740,7 @@ Sum = `{python} LogSumExp.sum_str`. LogSumExp = `{python} LogSumExp.a_str` `{pyt
 
 Softmax: `{python} LogSumExp.sm_expr`
 
-All intermediate values are in $[0, 1]$—no overflow risk, even in FP16.
+The exponentiated shifted values and the resulting softmax probabilities are in $[0, 1]$—no overflow risk, even in FP16.
 
 :::
 
@@ -784,7 +784,7 @@ These pitfalls share a common root: treating data as a solved problem rather tha
 - Serialization format is a first-order performance decision. Columnar binary formats (Parquet, Arrow) can be 10--100$\times$ faster to decode than text formats (CSV, JSON), directly determining whether accelerators starve or stay fed.
 - The three algebraic primitives—selection, projection, and join—have radically different I/O costs. Joins in particular can amplify network traffic by orders of magnitude; choosing between shuffle and broadcast joins depends on relative table sizes.
 - Average metrics lie. Long-tailed distributions mean that the P99 latency becomes the typical user experience at scale, and monitoring only the mean creates dangerous blind spots.
-- Drift detection requires comparing full distributions, not summary statistics. KL divergence and its symmetric derivative PSI provide principled measures of distribution shift that catch problems before accuracy metrics react.
+- Drift detection requires comparing full distributions, not summary statistics. KL divergence and the symmetric PSI/Jeffreys divergence provide principled measures of distribution shift that catch problems before accuracy metrics react.
 - Numerical stability is not optional. The log-sum-exp trick and log-space computation prevent overflow in softmax and loss calculations, making them essential building blocks of any training or inference pipeline.
 
 :::
