@@ -277,8 +277,8 @@ def test_extended_gpu_specs():
     ok &= check("TPUv4 BW", TPUV4_MEM_BW.to(GB / second).magnitude, 1200.0)
 
     # TPUv6
-    ok &= check("TPUv6 BF16", TPUV6_FLOPS_BF16.to(TFLOPs / second).magnitude, 2150.0)
-    ok &= check("TPUv6 BW", TPUV6_MEM_BW.to(TB / second).magnitude, 4.5)
+    ok &= check("TPUv6 BF16", TPUV6_FLOPS_BF16.to(TFLOPs / second).magnitude, 918.0)
+    ok &= check("TPUv6 BW", TPUV6_MEM_BW.to(GB / second).magnitude, 1600.0)
 
     # T4
     ok &= check("T4 TDP", T4_TDP.to(watt).magnitude, 70.0)
