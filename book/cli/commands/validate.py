@@ -178,7 +178,7 @@ class ValidateCommand:
         labels     — duplicate labels, orphaned/unreferenced labels
         headers    — section header IDs and headline-case policy
         bib        — bibliography (.bib) hygiene + canonical forms
-        footnotes  — placement, integrity, cross-chapter, capitalization
+        footnotes  — definition-shape, placement, integrity, cross-chapter, capitalization
         figures    — captions/alt-text, float flow, image files
         markup     — low-level markup (patterns, div fences, dropcaps)
         prose      — prose style (contractions, dup words, ASCII, ...)
@@ -258,6 +258,11 @@ class ValidateCommand:
             Scope("key-content", "_run_bib_key_content", default=False),
         ],
         "footnotes": [
+            Scope(
+                "definition-shape",
+                "_run_footnote_definition_shape",
+                note="bold head + colon per book-prose §5 (shapes S1–S5)",
+            ),
             Scope("placement", "_run_footnote_placement"),
             Scope("integrity", "_run_footnote_refs"),
             Scope("cross-chapter", "_run_footnote_cross_chapter", default=False),
@@ -4989,6 +4994,102 @@ class ValidateCommand:
         return ValidationRunResult(
             name="footnote_capitalization",
             description="Footnote definitions must begin with a capital letter",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Footnote definition shape  (book-prose.md §5 — S1–S5 canonical openers)
+    # ------------------------------------------------------------------
+
+    def _run_footnote_definition_shape(self, root: Path) -> ValidationRunResult:
+        """Footnote definition lines must match one canonical opener shape.
+
+        After ``[^fn-slug]:`` and optional ``[offset=…mm]``, the body must begin with:
+
+        - **S3** ``**Term** (gloss): `` — etymology / parenthetical gloss before colon
+        - **S2** ``**Term**\\index{…}\\index{…}: `` — index tags stacked before colon
+        - **S1/S5** ``**Term**: `` — standard definitional head (incl. biography)
+
+        Bare ``@sec-`` openers and plain prose (no bold head) are rejected.
+        Reference: ``.claude/rules/book-prose.md`` *Canonical definition-line shapes*.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        def_line = re.compile(r"^\[\^(fn-[a-z0-9-]+)\]:\s*(.*)$")
+        offset_prefix = re.compile(r"^\[offset=[^\]]+\]\s*")
+        # S3: **Term** (…): or **Term**\index{}… (…): — gloss colon after closing )
+        pat_etymology = re.compile(
+            r"^\*\*.+?\*\*(?:\\index\{[^}]+\}\s*)*\s*\([^)]*\):\s*",
+            re.DOTALL,
+        )
+        # S2: **Term**\index{}…+: before colon
+        pat_index_first = re.compile(
+            r"^\*\*.+?\*\*\s*(?:\\index\{[^}]+\}\s*)+:\s*",
+            re.DOTALL,
+        )
+        # S1/S5: **Term**: — bold span then colon
+        pat_standard = re.compile(
+            r"^\*\*.+?\*\*:\s*",
+            re.DOTALL,
+        )
+
+        def opener_ok(rest: str) -> bool:
+            rest = rest.strip()
+            om = offset_prefix.match(rest)
+            if om:
+                rest = rest[om.end() :].lstrip()
+            if not rest:
+                return False
+            if rest.startswith("@"):
+                return False
+            if pat_etymology.match(rest):
+                return True
+            if pat_index_first.match(rest):
+                return True
+            if pat_standard.match(rest):
+                return True
+            return False
+
+        for file in files:
+            text = self._read_text(file)
+            in_fence = False
+            for idx, line in enumerate(text.splitlines(), 1):
+                if line.lstrip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    continue
+                m = def_line.match(line)
+                if not m:
+                    continue
+                body = m.group(2)
+                if opener_ok(body):
+                    continue
+                fn_id = m.group(1)
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="footnote_definition_shape",
+                        message=(
+                            f"Footnote [^{fn_id}] does not match canonical opener "
+                            r"(**Term**:, **Term**\index{}:, or **Term** (gloss):). "
+                            "See book-prose.md §5 Canonical definition-line shapes."
+                        ),
+                        severity="error",
+                        context=(line.strip()[:140]),
+                    )
+                )
+
+        return ValidationRunResult(
+            name="footnote-definition-shape",
+            description=(
+                "Footnote definitions use bold head + colon per book-prose §5 (S1–S5)"
+            ),
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
