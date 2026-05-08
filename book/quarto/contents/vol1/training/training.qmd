@@ -161,7 +161,7 @@ Any mismatch in the throughput of these stages creates **accelerator bubbles**\i
 
 [^fn-mixed-precision-training]: **Mixed-Precision Training**: Uses half-precision (FP16 or BF16) for computation while maintaining FP32 "master weights" for accumulation, where rounding errors would otherwise compound. A loss scaling trick prevents gradient underflow in FP16's limited dynamic range, yielding nearly 2$\times$ memory savings and 2--8$\times$ throughput gains on Tensor Cores. BF16 ("Brain Floating Point," from Google Brain, 2018) later eliminated loss scaling by matching FP32's 8-bit exponent range, simplifying the dominant failure mode of half-precision training. \index{Mixed-Precision Training!trade-off}
 
-The chapter proceeds through five stages. First, we formalize the *iron law of Training Performance*, a specialized application of the general iron law (@sec-introduction-iron-law-ml-systems-c32a) that decomposes training time into total operations, peak throughput, and utilization, three levers that every optimization technique in this chapter targets. Second, we examine the *mathematical foundations* that underpin training: neural network computation as a systems workload, optimization algorithms that navigate loss landscapes, backpropagation mechanics, and the arithmetic intensity analysis that determines whether training is compute bound or memory bound. Third, we dissect the *pipeline architecture* of a training system as a staged pipeline where data loading, forward pass, backward pass, and parameter updates each constrain the next. Fourth, we develop *pipeline optimizations* that target specific iron law terms to close the gap between theoretical peak and actual training speed: mixed-precision training, FlashAttention, gradient accumulation, and checkpointing. Fifth, we explore how training *scales* beyond a single GPU to multi-GPU and multi-node configurations, where communication overhead introduces new bottlenecks.
+The chapter proceeds through five stages. First, we formalize the *iron law of training performance*, a specialized application of the general iron law (@sec-introduction-iron-law-ml-systems-c32a) that decomposes training time into total operations, peak throughput, and utilization, three levers that every optimization technique in this chapter targets. Second, we examine the *mathematical foundations* that underpin training: neural network computation as a systems workload, optimization algorithms that navigate loss landscapes, backpropagation mechanics, and the arithmetic intensity analysis that determines whether training is compute bound or memory bound. Third, we dissect the *pipeline architecture* of a training system as a staged pipeline where data loading, forward pass, backward pass, and parameter updates each constrain the next. Fourth, we develop *pipeline optimizations* that target specific iron law terms to close the gap between theoretical peak and actual training speed: mixed-precision training, FlashAttention, gradient accumulation, and checkpointing. Fifth, we explore how training *scales* beyond a single GPU to multi-GPU and multi-node configurations, where communication overhead introduces new bottlenecks.
 
 Before formalizing the iron law, consider how these constraints interact in practice. The theoretical framework matters because failures are expensive: a single *gradient explosion* can erase days of computation worth thousands of dollars.
 
@@ -184,11 +184,11 @@ Before formalizing the iron law, consider how these constraints interact in prac
 ## Iron Law of Training Performance {#sec-model-training-iron-law-training-performance-a53f}
 
 \index{Training!iron law of Performance}\index{Iron Law of Training Performance!utilization gap}
-Frameworks provide abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The iron law provides the organizing framework for understanding how every optimization technique improves training time. This is a specialized application of the general iron law of ML Systems introduced in @sec-introduction-iron-law-ml-systems-c32a, focused specifically on maximizing computational throughput.
+Frameworks provide abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The iron law provides the organizing framework for understanding how every optimization technique improves training time. This is a specialized application of the general iron law of ML systems introduced in @sec-introduction-iron-law-ml-systems-c32a, focused specifically on maximizing computational throughput.
 
 ::: {.callout-definition title="The iron law of training performance"}
 
-***The iron law of Training Performance***\index{Iron Law of Training Performance!definition} is the simplified form of the general iron law (see @sec-introduction-iron-law-ml-systems-c32a) that isolates the computational bottleneck of iterative optimization:
+***The Iron Law of Training Performance***\index{Iron Law of Training Performance!definition} is the simplified form of the general iron law (see @sec-introduction-iron-law-ml-systems-c32a) that isolates the computational bottleneck of iterative optimization:
 $$T_{\text{train}} = \frac{O}{R_{\text{peak}} \times \eta_{\text{hw}}}$$ {#eq-training-iron-law}
 
 The simplification is valid when the pipeline is correctly staged: at training scale with large batches, data movement $(D_{\text{vol}}/\text{BW})$ is overlapped with compute via prefetching pipelines, and communication overhead $(L_{\text{lat}})$ is absorbed by gradient overlap strategies, leaving hardware utilization as the dominant remaining lever. When pipelines are poorly staged, $D_{\text{vol}}/\text{BW}$ resurfaces as the bottleneck and the simplified form no longer applies.
@@ -309,7 +309,7 @@ GPT-2 (1.5B) serves as our primary case study for **large-scale training** becau
 :::
 
 **Key Systems Challenge:**
-Training GPT-2 is primarily **memory-bound** (due to activation storage) and **compute-intensive** (requiring massive matrix multiplications). It forces us to move beyond simple training loops to sophisticated pipelines that manage data movement as carefully as computation.
+Training GPT-2 is primarily memory-bound (due to activation storage) and compute-intensive (requiring massive matrix multiplications). It forces us to move beyond simple training loops to sophisticated pipelines that manage data movement as carefully as computation.
 
 :::
 
@@ -1433,7 +1433,7 @@ Training large models requires managing the memory wall (the bandwidth bottlenec
 
 **Scaling Limits**
 
-- [ ] **Batch Size Constraints**: Why does memory capacity limit the maximum batch size, and how does **Gradient Accumulation** solve this without increasing memory?
+- [ ] **Batch Size Constraints**: Why does memory capacity limit the maximum batch size, and how does gradient accumulation solve this without increasing memory?
 
 :::
 
@@ -2913,7 +2913,7 @@ Consider a representative large model like ResNet-50 (a widely-used image classi
 
 The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to `{python} ResNetMemoryScaling.resnet_batch_64_str` increases activation memory to `{python} ResNetMemoryScaling.act_gb_b64_str` GB and gradient memory to `{python} ResNetMemoryScaling.grad_gb_b64_str` GB, totaling `{python} ResNetMemoryScaling.total_gb_b64_str` GB and approaching memory limits. Training larger models at the scale of GPT-3 (`{python} TrainingModels.gpt3_params_b_str` B parameters, representing current large language models) requires approximately `{python} ResNetMemoryScaling.gpt3_fp32_str` GB just for parameters in FP32 (`{python} ResNetMemoryScaling.gpt3_fp16_str` GB in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
 
-GPUs typically provide `{python} ResNetMemoryScaling.gpu_mem_range_min_str`--`{python} ResNetMemoryScaling.gpu_mem_range_max_str` GB of memory in high-end training configurations, which must accommodate activations, model parameters, gradients, and optimization states. Two techniques address this constraint directly: **activation checkpointing**\index{Activation Checkpointing!recomputation trade-off} trades recomputation for reduced activation storage, and **mixed-precision training** halves memory per value by using FP16 instead of FP32. Both are examined in detail in @sec-model-training-pipeline-optimizations-cd9d; here, the key insight is that memory capacity, not compute throughput, often determines the maximum feasible batch size and model depth. Practitioners frequently start with large batch sizes during initial development on smaller networks, then adjust downward when scaling to deeper architectures or memory-constrained hardware.
+GPUs typically provide `{python} ResNetMemoryScaling.gpu_mem_range_min_str`--`{python} ResNetMemoryScaling.gpu_mem_range_max_str` GB of memory in high-end training configurations, which must accommodate activations, model parameters, gradients, and optimization states. Two techniques address this constraint directly: **activation checkpointing**\index{Activation Checkpointing!recomputation trade-off} trades recomputation for reduced activation storage, and mixed-precision training halves memory per value by using FP16 instead of FP32. Both are examined in detail in @sec-model-training-pipeline-optimizations-cd9d; here, the key insight is that memory capacity, not compute throughput, often determines the maximum feasible batch size and model depth. Practitioners frequently start with large batch sizes during initial development on smaller networks, then adjust downward when scaling to deeper architectures or memory-constrained hardware.
 
 \index{Backward Pass!gradient computation}\index{Backward Pass!memory operations}The backward pass reverses this flow, computing gradients at approximately twice the forward pass cost (as established in @sec-model-training-backpropagation-mechanics-0b64). The per-layer memory costs accumulate rapidly across the full network: deeper in ResNet-50, mid-network convolutional layers use `{python} ResNetMemoryScaling.mid_layer_filters_str` filters, quadrupling per-layer memory and computation requirements relative to the initial `{python} ResNetMemoryScaling.bwd_filters_str`-filter layer. Across all `{python} ResNetMemoryScaling.resnet_layers_str` layers, gradient storage alone reaches approximately `{python} ResNetMemoryScaling.bwd_total_grad_gb_str` GB---approaching the memory limits of many GPUs before accounting for activations, weight updates, and intermediate computations. Each layer's computation can only begin after receiving gradient signals from the subsequent layer, creating a strict sequential dependency. The GPU must maintain a large working set throughout the backward pass, with each layer temporarily reaching peak memory during its computation phase. The system cannot release this memory until gradient calculations complete and results pass to the previous layer.
 
@@ -3219,7 +3219,7 @@ Production systems typically achieve 30–50 percent MFU[^fn-mfu]; values below 
 
 :::
 
-Training bottlenecks fall into three categories that map directly to the **D·A·M taxonomy**\index{D·A·M Taxonomy!bottleneck classification} (Data, Algorithm, Machine; see @sec-dam-taxonomy for the full diagnostic framework, troubleshooting matrix, and D·A·M Scorecard). @tbl-dam-training-bottlenecks connects each D·A·M axis to the corresponding training bottleneck, its observable symptoms, and the optimization techniques that address it.
+Training bottlenecks fall into three categories that map directly to the D·A·M taxonomy\index{D·A·M Taxonomy!bottleneck classification} (Data, Algorithm, Machine; see @sec-dam-taxonomy for the full diagnostic framework, troubleshooting matrix, and D·A·M Scorecard). @tbl-dam-training-bottlenecks connects each D·A·M axis to the corresponding training bottleneck, its observable symptoms, and the optimization techniques that address it.
 
 | **D·A·M Axis** | **Bottleneck** | **Symptoms**                                                                                                              | **Primary Solutions**                                                  |
 |:---------------|:---------------|:--------------------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------|
@@ -5897,7 +5897,7 @@ When single-node multi-GPU training remains insufficient, distributed training e
 
 ::: {.callout-perspective title="The Physics of Synchronization"}
 
-Recall the **Energy-Movement Invariant**\index{Energy-Movement Invariant!distributed training} from @sec-data-engineering: moving data is 100--1,000$\times$ more expensive than computing on it. In distributed training, this physical law manifests as the **communication tax**\index{Distributed Training!dataset scale bottleneck}.
+Recall the Energy-Movement Invariant\index{Energy-Movement Invariant!distributed training} from @sec-data-engineering: moving data is 100--1,000$\times$ more expensive than computing on it. In distributed training, this physical law manifests as the **communication tax**\index{Distributed Training!dataset scale bottleneck}.
 
 Synchronizing gradients across a fleet of GPUs means moving megabytes of data across a network or PCIe bus for every few milliseconds of computation. If the energy required for communication ($E_{\text{move}}$ across the network) exceeds the energy for computation ($E_{\text{compute}}$), system efficiency $(\eta_{\text{hw}})$ collapses. Techniques like **Mixed Precision** (@sec-model-training-mixedprecision-training-9218) and **Gradient Compression**\index{Training!wall-clock time limit}\index{Gradient Compression!definition} address this directly: they reduce the bytes moved per synchronization step, managing the physical limits of distributed scaling.
 
@@ -6142,7 +6142,7 @@ Scaling trades compute bottlenecks for communication bottlenecks.
 
 **When to Scale**
 
-- [ ] **Hard limits**: Can you identify which limit is binding for a given training run: **memory exhaustion**, **wall-clock time**, or **dataset scale**?
+- [ ] **Hard limits**: Can you identify which limit is binding for a given training run: memory exhaustion, wall-clock time, or dataset scale?
 - [ ] **Single-node first**: Can you explain why mixed precision, accumulation, checkpointing, and prefetching should be exhausted before adding devices?
 
 **How to Scale**
@@ -6329,7 +6329,7 @@ This co-design principle, where algorithms, software frameworks, and hardware ar
 
 :::
 
-The practitioners who internalize the **iron law** can look at a slow training job and immediately classify the bottleneck: compute-bound (increase batch size, enable mixed precision), memory-bound (activate checkpointing, reduce model size), or communication-bound (adjust gradient accumulation, rethink parallelism strategy). This diagnostic discipline distinguishes engineers who solve problems from those who throw hardware at symptoms. Treating training as a black box leads to wasted GPU-months on misdiagnosed problems: hardware upgrades for algorithmic bottlenecks, more GPUs for data pipeline starvation, precision reduction for communication-bound workloads. As training runs scale to millions of dollars and months of calendar time, the ability to profile, diagnose, and apply targeted optimizations determines whether organizations can iterate fast enough to remain competitive.
+The practitioners who internalize the iron law can look at a slow training job and immediately classify the bottleneck: compute-bound (increase batch size, enable mixed precision), memory-bound (activate checkpointing, reduce model size), or communication-bound (adjust gradient accumulation, rethink parallelism strategy). This diagnostic discipline distinguishes engineers who solve problems from those who throw hardware at symptoms. Treating training as a black box leads to wasted GPU-months on misdiagnosed problems: hardware upgrades for algorithmic bottlenecks, more GPUs for data pipeline starvation, precision reduction for communication-bound workloads. As training runs scale to millions of dollars and months of calendar time, the ability to profile, diagnose, and apply targeted optimizations determines whether organizations can iterate fast enough to remain competitive.
 
 ::: {.callout-chapter-connection title="From Training to Compression"}
 

@@ -25,7 +25,7 @@ engine: jupyter
 
 _How do we make billion-parameter models run on millisecond timescales?_
 
-Model compression, covered in earlier chapters, reduces the size of what we compute. Performance engineering reshapes *how* we compute to match the physics of the hardware. The distinction matters: a quantized model loaded naively into a GPU kernel that reads every weight from off-chip memory wastes the very bandwidth savings that quantization was designed to provide. Real performance comes from understanding the full path a tensor travels, from registers through SRAM to HBM and back, and then engineering each step to eliminate wasted movement. This chapter develops the system-level optimization techniques that bridge the gap between a theoretically efficient model and a production artifact that saturates hardware. We examine operator fusion and tiling strategies that keep data in fast SRAM, precision formats that double effective bandwidth, compilation frameworks that automate kernel selection, and algorithmic innovations like **speculative decoding**[^fn-speculative-decoding-pe] and sparse expert routing that fundamentally change the performance equation. Together, these techniques transform a model that "should" be fast into one that *is* fast, often by an order of magnitude.
+Model compression, covered in earlier chapters, reduces the size of what we compute. Performance engineering reshapes *how* we compute to match the physics of the hardware. The distinction matters: a quantized model loaded naively into a GPU kernel that reads every weight from off-chip memory wastes the very bandwidth savings that quantization was designed to provide. Real performance comes from understanding the full path a tensor travels, from registers through SRAM to HBM and back, and then engineering each step to eliminate wasted movement. This chapter develops the system-level optimization techniques that bridge the gap between a theoretically efficient model and a production artifact that saturates hardware. We examine operator fusion and tiling strategies that keep data in fast SRAM, precision formats that double effective bandwidth, compilation frameworks that automate kernel selection, and algorithmic innovations like speculative decoding[^fn-speculative-decoding-pe] and sparse expert routing that fundamentally change the performance equation. Together, these techniques transform a model that "should" be fast into one that *is* fast, often by an order of magnitude.
 
 [^fn-speculative-decoding-pe]: **Speculative Decoding**: A technique that uses a small, fast "draft" model to predict multiple tokens in parallel, which are then verified by the large "target" model in a single forward pass. This trades "wasted" compute (to process rejected tokens) for reduced memory bandwidth pressure: the target model's massive weights are loaded from HBM once to process $k$ tokens, effectively increasing the arithmetic intensity of the decode phase by $k\times$. \index{Speculative Decoding!bandwidth optimization}
 
@@ -69,7 +69,7 @@ from mlsysim.core.formulas import calc_bottleneck, model_memory
 
 ::: {.callout-perspective title="Connection: The Fleet Stack"}
 
-Performance Engineering is the **Optimization Layer** of the fleet stack. While Inference at Scale (@sec-inference-scale) defines the serving architecture and scheduling policies, Performance Engineering optimizes the individual operations that execute within each serving node. In the **Fleet Stack** (@sec-vol2-introduction), this chapter sits between the Serving Layer (how work is scheduled) and the Infrastructure Layer (how hardware executes). Every technique here targets the same goal: closing the gap between theoretical hardware peak and achieved throughput, turning the **iron law**\index{Iron Law} from a speed limit into a speedometer that reads closer to maximum.
+Performance Engineering is the **Optimization Layer** of the fleet stack. While Inference at Scale (@sec-inference-scale) defines the serving architecture and scheduling policies, Performance Engineering optimizes the individual operations that execute within each serving node. In the **Fleet Stack** (@sec-vol2-introduction), this chapter sits between the Serving Layer (how work is scheduled) and the Infrastructure Layer (how hardware executes). Every technique here targets the same goal: closing the gap between theoretical hardware peak and achieved throughput, turning the iron law\index{Iron Law} from a speed limit into a speedometer that reads closer to maximum.
 
 :::
 
@@ -81,7 +81,7 @@ Part II established the distributed logic of the fleet: parallelism strategies (
 
 ### The iron law of ML performance {#sec-performance-engineering-efficiency-frontier}
 
-Performance engineering operates within a constrained optimization space defined by the **iron law** of ML system performance:
+Performance engineering operates within a constrained optimization space defined by the iron law of ML system performance:
 
 $$
 \text{Time} = \max\left( \frac{\text{Compute}}{\text{FLOPS}}, \; \frac{\text{Memory Access}}{\text{Bandwidth}} \right) + \text{Overhead}
@@ -205,7 +205,7 @@ class MemoryWallScenario:
     h100_mem_str = f"{mem.m_as(GB):.0f}"
 ```
 
-An NVIDIA H100 delivers `{python} MemoryWallScenario.h100_fp8_str` TFLOPS of FP8 compute but only `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s of memory bandwidth. If every byte loaded from memory does fewer than `{python} MemoryWallScenario.h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the **memory wall**, and it defines the landscape within which all performance engineering operates.
+An NVIDIA H100 delivers `{python} MemoryWallScenario.h100_fp8_str` TFLOPS of FP8 compute but only `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s of memory bandwidth. If every byte loaded from memory does fewer than `{python} MemoryWallScenario.h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
 
 The memory wall represents a fundamental physical constraint rather than a temporary engineering limitation. Moving data costs energy proportional to distance. Accessing a value from on-chip SRAM (L1 cache) costs approximately 0.5 pJ, while fetching the same value from off-chip HBM costs roughly 640 pJ, a ratio of `{python} MemoryWallScenario.energy_ratio_str`$\times$. Manufacturing constraints limit the amount of SRAM that can sit close to the compute units. HBM provides capacity (the H100 offers `{python} MemoryWallScenario.h100_mem_str` GB) but at physically greater distance, requiring the data to traverse longer wires. The fundamental tension is that models need gigabytes of parameters and state, but physics dictates that only kilobytes of data can be near the compute units at any given moment.
 
@@ -257,9 +257,9 @@ The memory wall is not static; it grows wider with each hardware generation. Com
 
 ### The roofline model {#sec-performance-engineering-roofline}
 
-The **Roofline Model**[^fn-roofline-origin] provides a quantitative framework for diagnosing whether a workload is compute-bound or memory-bound on a specific piece of hardware. Introduced by @williams2009, the model plots achievable performance as a function of **arithmetic intensity**, defined as the ratio of floating-point operations to bytes transferred from memory. The intersection of these two regimes is known as the **ridge point**[^fn-roofline-ridge].
+The Roofline Model[^fn-roofline-origin] provides a quantitative framework for diagnosing whether a workload is compute-bound or memory-bound on a specific piece of hardware. Introduced by @williams2009, the model plots achievable performance as a function of **arithmetic intensity**, defined as the ratio of floating-point operations to bytes transferred from memory. The intersection of these two regimes is known as the **ridge point**[^fn-roofline-ridge].
 
-[^fn-roofline-ridge]: **Ridge Point**: The intersection of the memory-bound and compute-bound lines on a Roofline plot. It represents the minimum **Arithmetic Intensity** required to reach peak hardware performance $(R_{\text{peak}})$. For an H100 GPU (FP16), the ridge point is roughly 295 FLOP/byte; if an operator's intensity is below this "ridge," it will never saturate the Tensor Cores, regardless of how much compute is available. \index{Roofline Model!ridge point}
+[^fn-roofline-ridge]: **Ridge Point**: The intersection of the memory-bound and compute-bound lines on a Roofline plot. It represents the minimum arithmetic intensity required to reach peak hardware performance $(R_{\text{peak}})$. For an H100 GPU (FP16), the ridge point is roughly 295 FLOP/byte; if an operator's intensity is below this "ridge," it will never saturate the Tensor Cores, regardless of how much compute is available. \index{Roofline Model!ridge point}
 
 [^fn-roofline-origin]: **Roofline Model**: Published as "Roofline: An Insightful Visual Performance Model for Multicore Architectures" in *Communications of the ACM* (April 2009). Originally designed for CPU multicore workloads, the model's power lies in its hardware-agnostic simplicity: two numbers (peak FLOPS and peak bandwidth) define the entire performance envelope. This same simplicity now drives GPU purchasing decisions for ML inference, where the ridge point determines whether a workload benefits from faster compute or faster memory. \index{Roofline Model!origin}
 
@@ -279,7 +279,7 @@ $$
 \text{Achievable FLOPS} = \min(R_{\text{peak}}, \; \text{BW} \times I)
 $$ {#eq-performance-roofline}
 
-The transition point where these two limits intersect is the **ridge point**:
+The transition point where these two limits intersect is the ridge point:
 
 $$
 I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}}
@@ -1163,7 +1163,7 @@ In the **graph capture** stage, the compiler traces the model's execution to con
 
 During **graph-level optimization**\index{Optimization!graph-level}, the compiler applies algebraic simplifications and operation rewriting. It identifies that the bias addition in the first `Linear` layer can be folded into the matrix multiplication kernel. It also recognizes that the `GELU` activation is an element-wise operation that depends only on the output of the first `Linear`. These standard compiler optimizations can reduce graph size by 10--30 percent before any hardware-specific work begins.
 
-The **operator fusion** pass is the most critical for performance. It identifies sequences of operations that can be combined into single kernels to reduce memory traffic. For the FFN block, the compiler fuses the `GELU` activation into the tail of the first `Linear` kernel (if supported as an epilogue) or fuses the `GELU` and the subsequent `LayerNorm` into a single kernel. Instead of writing the intermediate result of the first `Linear` to HBM and reading it back for `GELU`, the fused kernel keeps the data in the GPU's SRAM or registers. This typically reduces the number of HBM accesses by 30--50 percent, directly alleviating the memory bandwidth bottleneck.
+The operator fusion pass is the most critical for performance. It identifies sequences of operations that can be combined into single kernels to reduce memory traffic. For the FFN block, the compiler fuses the `GELU` activation into the tail of the first `Linear` kernel (if supported as an epilogue) or fuses the `GELU` and the subsequent `LayerNorm` into a single kernel. Instead of writing the intermediate result of the first `Linear` to HBM and reading it back for `GELU`, the fused kernel keeps the data in the GPU's SRAM or registers. This typically reduces the number of HBM accesses by 30--50 percent, directly alleviating the memory bandwidth bottleneck.
 
 The memory planning pass determines when to allocate and free tensors. Without optimization, a 24-layer transformer might allocate separate buffers for every intermediate activation. The compiler analyzes tensor lifetimes, recognizing that the input to the first `Linear` is no longer needed after the second `Linear` computes its output, and reuses the same physical memory addresses. For a 70B model where activations can consume gigabytes per layer, this buffer reuse reduces peak memory requirements from $O(L)$ to $O(1)$, where $L$ is the number of layers. For a model where activations consume 10 GB per layer across 80 layers, this optimization reduces peak activation memory from 800 GB (impossible on any single GPU) to approximately 10--20 GB (comfortably within a single H100). Memory planning also interacts with operator fusion: fusing two operations eliminates the intermediate tensor between them, which both removes the HBM traffic and removes the memory allocation. The compiler must reason about both effects jointly to make profitable decisions.
 
@@ -1848,7 +1848,7 @@ Optimizing a single node is a prerequisite, but the ultimate test of performance
 
 ### The fleet efficiency metric {#sec-performance-engineering-fleet-efficiency-metric-dff4}
 
-While Hardware Utilization reports how often GPUs are busy, it fails to distinguish between useful work and wasted cycles (such as activation recomputation or communication bubbles). The gold standard for fleet measurement is **Model FLOPs Utilization (MFU)**. By focusing on the "useful" FLOPs required by the model architecture, MFU provides an invariant measure of system efficiency that remains comparable across different software stacks and parallelization strategies.
+While Hardware Utilization reports how often GPUs are busy, it fails to distinguish between useful work and wasted cycles (such as activation recomputation or communication bubbles). The gold standard for fleet measurement is Model FLOPs Utilization (MFU). By focusing on the "useful" FLOPs required by the model architecture, MFU provides an invariant measure of system efficiency that remains comparable across different software stacks and parallelization strategies.
 
 ::: {.callout-definition title="Model FLOPs Utilization (MFU)"}
 
@@ -1957,7 +1957,7 @@ Consider a raw, unoptimized 70-billion parameter PyTorch model that must serve 1
 
 When approaching a new ML workload for optimization, follow this sequence:
 
-1. **Baseline Measurement**\index{Baseline Measurement}: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the **Model FLOPs Utilization (MFU)**\index{Nsight Systems} as established in @sec-performance-engineering-measurement-scale. An MFU below 30 percent indicates substantial optimization opportunity; above 50 percent is good; above 60 percent is excellent for large models.
+1. **Baseline Measurement**\index{Baseline Measurement}: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the Model FLOPs Utilization (MFU)\index{Nsight Systems} as established in @sec-performance-engineering-measurement-scale. An MFU below 30 percent indicates substantial optimization opportunity; above 50 percent is good; above 60 percent is excellent for large models.
 
 2. **Roofline Classification**\index{Roofline Classification}: For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
 
@@ -1994,9 +1994,9 @@ The most performant production systems combine multiple techniques simultaneousl
 - **INT4 weight quantization** (GPTQ or AWQ) with FP16 dequantization during GEMM
 - **INT8 KV cache compression** with per-channel scaling
 - **torch.compile**\index{torch.compile} or **TensorRT**\index{TensorRT} for element-wise fusion and kernel selection
-- **Speculative decoding** for latency reduction at low batch sizes
-- **Continuous batching**\index{Continuous Batching} with dynamic sequence grouping for high throughput
-- **Tensor parallelism**\index{Tensor Parallelism} across GPUs with overlapped AllReduce
+- Speculative decoding for latency reduction at low batch sizes
+- Continuous batching\index{Continuous Batching} with dynamic sequence grouping for high throughput
+- Tensor parallelism\index{Tensor Parallelism} across GPUs with overlapped AllReduce
 
 The speedups from these techniques are not additive; they interact in ways that demand careful sequencing. For instance, INT4 weight quantization reduces per-token HBM traffic by 4$\times$, which might shift the bottleneck from memory-bound to compute-bound. Once compute-bound, further bandwidth optimizations (KV cache compression) yield diminishing returns, and compute optimizations (FP8 Tensor Cores) become the priority. This is why the iterative profile-optimize-verify loop is essential: the optimal combination depends on the specific model, hardware, and workload characteristics.
 
@@ -2008,7 +2008,7 @@ A practical heuristic for sequencing optimizations is to apply them in order of 
 2. **Weight quantization** (INT4/FP8, hours of calibration, 2--4$\times$ throughput): Apply second. Frees memory for batching.
 3. **FlashAttention**\index{FlashAttention} (library swap, 2--32$\times$ for attention): Apply third. Usually a configuration flag.
 4. **KV cache compression** (INT8, library support, 2$\times$ cache reduction): Apply fourth. Enables larger batches.
-5. **Speculative decoding** (requires draft model, engineering effort): Apply last, only if latency target not met. Most complex to deploy.
+5. Speculative decoding (requires draft model, engineering effort): Apply last, only if latency target not met. Most complex to deploy.
 
 This ordering reflects the principle that passive optimizations (compiler, library swaps) should precede active ones (algorithmic changes, new model components). Each step is validated by reprofiling before proceeding to the next.
 
@@ -2153,7 +2153,7 @@ Performance engineering transforms a model that should be efficient into one tha
 ![](images/svg/profiling-hierarchy.svg)
 :::
 
-The **Roofline Model** provides the diagnostic framework, classifying operations as compute-bound or memory-bound based on their arithmetic intensity relative to the hardware's ridge point. For the NVIDIA H100, this ridge point is approximately `{python} RooflineRidgeCalc.h100_fp16_ridge_str` FLOP/byte at FP16, meaning most transformer operations fall in the memory-bound regime.
+The Roofline Model provides the diagnostic framework, classifying operations as compute-bound or memory-bound based on their arithmetic intensity relative to the hardware's ridge point. For the NVIDIA H100, this ridge point is approximately `{python} RooflineRidgeCalc.h100_fp16_ridge_str` FLOP/byte at FP16, meaning most transformer operations fall in the memory-bound regime.
 
 Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, reducing attention HBM traffic by `{python} FlashAttentionSavings.savings_str`$\times$ for long sequences through tiling and online softmax. Ring Attention extends this principle across GPUs for extreme sequence lengths.
 
@@ -2169,7 +2169,7 @@ Communication-computation overlap hides network latency by executing communicati
 
 System profiling provides the measurement infrastructure to identify which bottleneck dominates and which optimization to apply, closing the loop between diagnosis and treatment.
 
-Together, these techniques compose a coherent optimization stack. Precision engineering and operator fusion attack the **iron law** at the hardware level, reducing the memory and compute terms. Graph compilation automates these hardware-level optimizations across the full model. Communication overlap attacks the distributed overhead term. Speculative decoding and MoE change the algorithm itself, fundamentally restructuring the terms of the equation.
+Together, these techniques compose a coherent optimization stack. Precision engineering and operator fusion attack the iron law at the hardware level, reducing the memory and compute terms. Graph compilation automates these hardware-level optimizations across the full model. Communication overlap attacks the distributed overhead term. Speculative decoding and MoE change the algorithm itself, fundamentally restructuring the terms of the equation.
 
 The case study in @sec-performance-engineering-case-study demonstrated how these techniques compound in practice: INT4 quantization freed memory for larger batches, which changed the arithmetic intensity, which determined whether further bandwidth or compute optimizations were profitable. Each optimization shifted the bottleneck, requiring reprofiling and a new optimization decision. This iterative, measurement-driven process is the discipline of performance engineering.
 
@@ -2177,7 +2177,7 @@ The unifying principle is that performance engineering is not about making hardw
 
 ::: {.callout-takeaways title="Match the Software to the Silicon"}
 
-* The **memory wall** is the defining constraint of modern ML performance: most transformer operations are memory-bound, with arithmetic intensity far below the hardware ridge point. Performance engineering is primarily about reducing bytes moved, not operations computed.
+* The memory wall is the defining constraint of modern ML performance: most transformer operations are memory-bound, with arithmetic intensity far below the hardware ridge point. Performance engineering is primarily about reducing bytes moved, not operations computed.
 * **Operator Fusion** and **Tiling** (FlashAttention) eliminate redundant HBM traffic by keeping intermediate results in on-chip SRAM, reducing attention memory traffic from quadratic to linear in sequence length.
 * **Precision Engineering** doubles effective bandwidth by reducing numerical representation (FP8, INT4), but requires careful handling of outlier features (LLM.int8(), GPTQ, AWQ) and dynamic scaling for training stability.
 * **Graph Compilation**\index{Graph Compilation!graph capture}\index{Graph Compilation!memory planning}\index{Graph Compilation!kernel selection} (torch.compile, XLA, TensorRT) automates known optimizations across the entire model graph, but cannot discover algorithmic innovations like FlashAttention or speculative decoding.
