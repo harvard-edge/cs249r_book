@@ -661,7 +661,7 @@ Different model architectures stress different operations, and selecting the wro
     *   *Semantics*: Worker $i$ receives the $i$-th block of $\sum x_j$.
     *   *Complexity*: Ring achieves $\frac{N-1}{N}\frac{M}{\beta}$; functionally the inverse of AllGather.
 
-A key insight is that AllReduce can be decomposed into ReduceScatter followed by AllGather. This is not merely a mathematical equivalence; it is precisely how Ring AllReduce works internally (the Scatter-Reduce phase is a ReduceScatter, the AllGather phase is an AllGather). FSDP exploits this decomposition by separating the two phases in time: ReduceScatter runs immediately after the backward pass (reducing and sharding the gradients), while AllGather runs later, just before the next forward pass (reconstructing the full parameters). By inserting the optimizer step between ReduceScatter and AllGather, FSDP avoids ever materializing the full gradient tensor on any single GPU, reducing peak memory usage by $N \times$.
+A key insight is that AllReduce can be decomposed into ReduceScatter followed by AllGather. This is not merely a mathematical equivalence; it is precisely how Ring AllReduce works internally (the Scatter-Reduce phase is a ReduceScatter, the AllGather phase is an AllGather). FSDP exploits this decomposition by AllGathering parameter shards before a module needs them and ReduceScattering gradients after backward so each rank retains only its shard for the optimizer step. This shards parameters, gradients, and optimizer state across workers, reducing persistent model-state memory roughly by $N \times$, while temporary full-parameter buffers and prefetching determine peak memory.
 
 6.  **AllToAll**: The most general pattern. Worker $i$ sends a distinct chunk of data to worker $j$. This is effectively a matrix transpose of distributed data.
     *   *Use Case*: **Mixture of Experts (MoE)** routing tokens to experts; **DLRM**[^fn-dlrm-embedding] exchanging embedding lookups across workers.
@@ -933,15 +933,15 @@ Tree AllReduce has worse bandwidth efficiency because of link underutilization. 
 - At level 1: $N/4$ nodes send to $N/4$ parents. Three-quarters are idle.
 - At the root: Only 2 nodes communicate. $(N-2)$ nodes sit idle.
 
-The result: while Ring achieves near-100 percent link utilization, Tree achieves only approximately 50 percent on average because at each level, half the participating nodes are receiving (not sending).
+The result: while Ring achieves near-100 percent link utilization for large messages on a balanced ring, a simple tree can leave many links idle and concentrate traffic near the root or interior links.
 
-The resulting time complexity reflects this trade-off:
-$$ T_{\text{tree}} = \underbrace{2\log_2 N \cdot \alpha}_{\text{Latency}} + \underbrace{2 \log_2 N \frac{M}{\beta}}_{\text{Bandwidth}} $$
+The resulting time complexity depends on the specific tree variant. A simple reduce-then-broadcast tree has logarithmic latency but nonuniform traffic and root/interior bottlenecks; recursive-doubling-style variants can incur $O(\log N)$ full-message bandwidth per rank. The simplified model below captures the latency advantage and the potential bandwidth penalty of tree-like collectives:
+$$ T_{\text{tree-like}} \approx \underbrace{2\log_2 N \cdot \alpha}_{\text{Latency}} + \underbrace{2 \log_2 N \frac{M}{\beta}}_{\text{Bandwidth penalty in full-message exchange variants}} $$
 
 *   **Latency**: Logarithmic ($O(\log N)$). For 1024 nodes, Ring needs 2046 steps while Tree needs only 20. This 100$\times$ reduction in steps makes Tree the preferred algorithm for latency-sensitive collectives such as tensor parallelism's per-layer AllReduce, where message sizes are small but frequency is high.
-*   **Bandwidth**: The $\log_2 N$ factor in the bandwidth term (vs. Ring's constant factor of 2) means Tree sends $\log_2 N$ times more data per node. For 64 GPUs, this amounts to 6$\times$ more bandwidth consumed. This bandwidth penalty makes Tree a poor choice for data parallelism's large gradient AllReduce, where bandwidth efficiency determines whether the network is fully utilized or partially idle.
+*   **Bandwidth**: Tree-like algorithms can underutilize links or concentrate traffic on interior links, and recursive-doubling-style full-message exchanges add a $\log_2 N$ bandwidth factor. These penalties make naive tree variants a poor choice for data parallelism's large gradient AllReduce, where bandwidth efficiency determines whether the network is fully utilized or partially idle.
 
-This bandwidth penalty is catastrophic for large-scale data parallelism. For our 175B parameter model's 350 GB gradient AllReduce across 1,000 GPUs, the bandwidth term's $\log_2(1000) \approx 10$ multiplier means Tree would move roughly 10 times more data through the network than Ring---7 *terabytes* per GPU per training step. This would saturate the network for an order of magnitude longer, completely erasing any latency advantage.
+This bandwidth penalty is catastrophic for large-scale data parallelism when the implementation repeatedly exchanges full messages or creates root/interior bottlenecks. For our 175B parameter model's 350 GB gradient AllReduce across 1,000 GPUs, a bandwidth-inefficient tree-like variant can erase the latency advantage that motivated it. Optimized double-tree algorithms exist precisely to keep logarithmic latency without imposing that naive bandwidth penalty.
 
 Tree AllReduce is, however, the correct choice when latency is the primary bottleneck, typically for smaller collectives with small message sizes. The canonical use case is the AllReduce required for tensor parallelism, which operates on activations or weight gradients within a single layer. For an 8-GPU group inside a node communicating a 50 MB tensor, the latency drops from Ring's $2(8-1)\alpha = 14\alpha$ to Tree's $2\log_2(8)\alpha = 6\alpha$. The bandwidth penalty is a mere factor of $\log_2(8)=3$, a small price to pay for more than halving the latency.
 
@@ -956,7 +956,7 @@ $$ T_{\text{butterfly}} = 2\log_2 N \cdot \alpha + 2\frac{N-1}{N} \cdot \frac{M}
 
 This achieves the best of both worlds: logarithmic latency ($O(\log N)$, like Tree) and bandwidth-optimal data movement ($2(N-1)/N \cdot M/\beta$, like Ring). The catch is that it requires non-neighbor communication (GPU $i$ must communicate with GPU $i \oplus 2^k$, which may be physically distant), and it requires $N$ to be a power of two. For clusters where $N$ is not a power of two, additional complexity is needed to handle the irregular cases.
 
-In practice, NCCL uses Recursive Halving-Doubling as one of its internal algorithm choices for medium-sized messages on smaller GPU counts where it outperforms both Ring and Tree. For clusters with thousands of GPUs, the non-local communication pattern creates contention on shared network links that erodes the theoretical advantage.
+Recursive halving-doubling is used in MPI-style collective implementations and is useful as a theoretical point in the latency-bandwidth trade-off. NCCL's documented algorithm choices instead include Ring, Tree/double-tree-derived variants, CollNet, NVLS/NVLSTree, and PAT depending on version and topology. For clusters with thousands of GPUs, non-local communication patterns can create contention on shared network links that erodes theoretical advantages.
 
 To make this concrete, consider the ReduceScatter phase for 8 GPUs, which proceeds in $\log_2(8) = 3$ rounds. In round $k=0$, each GPU $i$ partners with GPU $i \oplus 1$, pairing neighbors: (0,1), (2,3), (4,5), (6,7). They exchange half their data and reduce. In round $k=1$, the distance doubles: GPU $i$ partners with GPU $i \oplus 2$, creating pairs (0,2), (1,3), (4,6), (5,7). In round $k=2$, the distance doubles again: GPU $i$ partners with GPU $i \oplus 4$, creating pairs (0,4), (1,5), (2,6), (3,7).
 
@@ -1100,18 +1100,18 @@ $$ \frac{2M}{\beta}(-\log_2 N) \approx 2\alpha(-N) $$
 
 $$ M_{\text{crossover}} \approx \frac{N \cdot \alpha \cdot \beta}{\log_2 N} $$
 
-For practical purposes (and because the constants wash out in real systems), this is often approximated as:
+For a rough upper-scale mental model, engineers sometimes drop the logarithmic factor:
 $$ \boxed{M_{\text{crossover}} \approx N \cdot \alpha \cdot \beta} $$
 
-This crossover formula yields a direct selection rule:
+The more direct crossover formula yields a useful intuition, not a hard selection rule:
 
 *   If Message Size $M > M_{\text{crossover}}$: Use **Ring** (Bandwidth limited).
 *   If Message Size $M < M_{\text{crossover}}$: Use **Tree** (Latency limited).
 
-Communication libraries like NCCL dynamically select the algorithm based on this threshold. For a cluster with $\alpha=5 \mu s$, $\beta=50$ GB/s, and $N=100$:
-$$M_{\text{crossover}} \approx 100 \times 5\cdot 10^{-6} \times 50\cdot 10^9 \approx 25 \text{ MB}$$
+For a cluster with $\alpha=5 \mu s$, $\beta=50$ GB/s, and $N=100$, the direct approximation gives:
+$$M_{\text{crossover}} \approx \frac{100 \times 5\cdot 10^{-6} \times 50\cdot 10^9}{\log_2 100} \approx 3.8 \text{ MB}$$
 
-Gradients smaller than 25 MB use Tree; larger use Ring. In practice, NCCL's algorithm selection is more nuanced than a simple two-way split. The Double Binary Tree algorithm offers logarithmic latency with near-optimal bandwidth, making it competitive with both Ring and Tree across a broad range of message sizes. NCCL also considers the number of channels (parallel communication streams), the network topology, and whether inter-node or intra-node links are being used. The effective selection logic resembles a multi-way decision tree indexed by (message size, GPU count, topology type) rather than a single crossover point.
+In practice, NCCL's algorithm selection is more nuanced than a simple two-way split. The Double Binary Tree algorithm offers logarithmic latency with near-optimal bandwidth, making it competitive with both Ring and Tree across a broad range of message sizes. NCCL also considers the number of channels (parallel communication streams), the network topology, and whether inter-node or intra-node links are being used. The effective selection logic resembles a multi-way decision tree indexed by (message size, GPU count, topology type) rather than a single crossover point.
 
 Nevertheless, the crossover formula remains the essential mental model for understanding *why* libraries make the choices they do. When a library selects an unexpected algorithm, the crossover analysis provides the reasoning framework to evaluate whether the choice is correct or whether manual override is warranted. A worked example applies this framework to a concrete scenario:
 
@@ -1796,11 +1796,11 @@ Beyond raw performance, NCCL's topology auto-discovery is a critical differentia
 
 NCCL also implements automatic algorithm selection based on message size and GPU count. Internally, it maintains a tuning table (populated by NVIDIA's benchmarking across hardware configurations) that maps (message size, GPU count, topology) triples to the optimal algorithm (Ring, Tree, or hybrid). Users can override these defaults through environment variables (`NCCL_ALGO`, `NCCL_PROTO`) when benchmarking reveals suboptimal choices for specific workloads. The `NCCL_DEBUG=INFO` flag exposes the algorithm and protocol selected for each collective, providing essential visibility for performance debugging.
 
-A more recent development is NCCL's support for user-defined reductions and custom datatypes, enabling applications to perform application-specific aggregation (such as averaging with outlier clipping) within the communication pipeline. This avoids the overhead of a separate post-communication reduction kernel, further tightening the integration between communication and computation.
+A more recent development is NCCL's limited support for user-defined reduction operators, such as the documented pre-multiplied-sum reduction for a communicator and datatype. This support is narrower than MPI-style arbitrary reductions and custom datatypes, so application-specific aggregation such as outlier clipping usually still requires separate kernels or framework-level logic.
 
-Despite its dominance, NCCL is not without limitations. It is tightly coupled to NVIDIA hardware and cannot be used on AMD or Intel accelerators. Its closed-source nature means that debugging subtle performance issues requires relying on log output and environment variable tuning rather than reading the source code. For organizations building multi-vendor infrastructure or requiring full control over the communication stack, these limitations motivate the use of alternative libraries.
+Despite its dominance, NCCL is not without limitations. It is open source but tightly coupled to NVIDIA GPUs and networking, and cannot be used as the native collective library on AMD or Intel accelerators. For organizations building multi-vendor infrastructure or requiring full control over the communication stack, these limitations motivate the use of alternative libraries.
 
-[^fn-nccl-dominance]: **NCCL (NVIDIA Collective Communications Library)**: First released in 2015, NCCL achieves 85--95 percent of theoretical peak bandwidth on well-configured clusters by combining kernel fusion, GPUDirect RDMA, and topology-aware path selection. Its closed-source, NVIDIA-only design creates a vendor lock-in trade-off: organizations gain 2--5$\times$ better collective performance than generic MPI but lose portability to AMD (RCCL) or Intel (oneCCL) hardware. \index{NCCL!performance}
+[^fn-nccl-dominance]: **NCCL (NVIDIA Collective Communications Library)**: First released in 2015, NCCL achieves 85--95 percent of theoretical peak bandwidth on well-configured clusters by combining kernel fusion, GPUDirect RDMA, and topology-aware path selection. Its NVIDIA-specific design creates a vendor lock-in trade-off: organizations gain 2--5$\times$ better collective performance than generic MPI but lose portability to AMD (RCCL) or Intel (oneCCL) hardware. \index{NCCL!performance}
 
 ### MPI: The HPC foundation {#sec-communication-mpi}
 
@@ -1902,7 +1902,7 @@ Communication-computation overlap has fundamental limits. The LogP model's overh
 
 Additionally, the first and last layers of the backward pass cannot overlap. The first layer to complete (the output layer) has no prior communication to overlap with. The last layer to communicate (the input layer) has no subsequent computation to overlap with. For shallow models (2--3 layers), these boundary effects consume a significant fraction of the total time, limiting the achievable overlap to 50--60 percent. For deep models (dozens of layers or more), the boundary effects are negligible, and overlap can hide 90--95 percent of communication time.
 
-A third limitation arises from memory pressure. Overlapping communication with computation requires maintaining additional GPU memory buffers: the gradient being communicated must remain in memory while the backward pass continues producing new gradients for earlier layers. For FSDP workloads, where memory optimization is the primary motivation, this additional buffer requirement can conflict with the memory savings that FSDP provides. The engineering challenge is to find the sweet spot where overlap is aggressive enough to hide communication but not so aggressive that it pushes the GPU into out-of-memory territory. PyTorch's `GradScaler` and FSDP's `limit_all_gathers` parameter provide knobs for this trade-off.
+A third limitation arises from memory pressure. Overlapping communication with computation requires maintaining additional GPU memory buffers: the gradient being communicated must remain in memory while the backward pass continues producing new gradients for earlier layers. For FSDP workloads, where memory optimization is the primary motivation, this additional buffer requirement can conflict with the memory savings that FSDP provides. The engineering challenge is to find the sweet spot where overlap is aggressive enough to hide communication but not so aggressive that it pushes the GPU into out-of-memory territory. PyTorch FSDP settings such as `limit_all_gathers`, `backward_prefetch`, `forward_prefetch`, and resharding or prefetch choices provide knobs for this trade-off.
 
 A realistic training configuration quantifies the impact of these overlap limits.
 

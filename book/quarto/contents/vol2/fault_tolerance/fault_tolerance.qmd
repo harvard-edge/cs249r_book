@@ -1023,7 +1023,7 @@ node[below,pos=0.91](ULDD4){SAO \textcolor{red}{SA1}}(DD4);
 
 :::
 
-For ML systems, permanent faults during training cause gradient calculation errors and parameter corruption that persist until hardware replacement, requiring more sophisticated recovery strategies than transient faults demand [@he2023]. Permanent faults in storage can compromise entire training datasets or saved models [@zhang2018]. Mitigating permanent faults requires integrated fault-tolerant design combining hardware redundancy and error-correcting codes [@kim2015] with checkpoint and restart mechanisms[^fn-checkpoint-restart-training] [@egwutuoha2013]. The Young-Daly formula, derived in @sec-data-storage, balances checkpoint overhead against lost computation; the key insight is that increasing MTBF through hardware hardening yields diminishing returns due to the square-root relationship, so systems must balance investment in hardware reliability against investment in fast checkpointing infrastructure.
+For ML systems, permanent faults during training cause gradient calculation errors and parameter corruption that persist until hardware replacement, requiring more sophisticated recovery strategies than transient faults demand [@he2023]. Permanent faults in storage can compromise entire training datasets or saved models [@zhang2018]. Mitigating permanent faults requires integrated fault-tolerant design combining hardware redundancy and error-correcting codes [@kim2015] with checkpoint and restart mechanisms[^fn-checkpoint-restart-training] [@egwutuoha2013]. The Young-Daly formula, introduced in @sec-fault-tolerance-young-daly, balances checkpoint overhead against lost computation; the key insight is that increasing MTBF through hardware hardening yields diminishing returns due to the square-root relationship, so systems must balance investment in hardware reliability against investment in fast checkpointing infrastructure.
 
 [^fn-checkpoint-restart-training]: **Checkpoint-restart**: Originated in 1960s mainframe batch processing, where restarting multi-hour jobs from scratch was prohibitively expensive. Modern distributed training checkpoints 100+ GB model states every 10--30 minutes; Google’s TPU pods achieve 99.9 percent training completion rates through coordinated checkpointing, reducing wasted computation from node failures to less than 1 percent of total training time. \index{Checkpoint-Restart!training completion}
 
@@ -1179,7 +1179,7 @@ Hardware redundancy uses component duplication and voting to detect and mask fau
 ![](images/svg/error-masking.svg)
 :::
 
-At the software level, distributed ML systems employ runtime monitoring [@francalanza2017; @mahmoud2021], anomaly detection (statistical outlier detection, One-Class SVM [@chandola2009]), consistency checks across distributed model parameters [@lindholm2019], and heartbeat mechanisms [@kawazoe_aguilera1997] that detect node failures within configurable timeout periods. Software-implemented fault tolerance (scale-invariant feature transform (SIFT)) techniques [@reis2005swift] such as N-version programming and Reed-Solomon error correction codes [@plank1997; @reed1960] add redundancy at the software level, enabling detection and correction of errors without dedicated hardware. Watchdog timers [@pont2002using] monitor task execution and trigger recovery actions when systems become unresponsive.
+At the software level, distributed ML systems employ runtime monitoring [@francalanza2017; @mahmoud2021], anomaly detection (statistical outlier detection, One-Class SVM [@chandola2009]), consistency checks across distributed model parameters [@lindholm2019], and heartbeat mechanisms [@kawazoe_aguilera1997] that detect node failures within configurable timeout periods. Software-implemented fault tolerance techniques such as SWIFT (Software Implemented Fault Tolerance) [@reis2005swift], N-version programming, and Reed-Solomon error correction codes [@plank1997; @reed1960] add redundancy at the software level, enabling detection and correction of errors without dedicated hardware. Watchdog timers [@pont2002using] monitor task execution and trigger recovery actions when systems become unresponsive.
 
 ## Software Faults {#sec-ft-software-faults}
 
@@ -2227,7 +2227,7 @@ class CheckpointDebug:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     weights_gb = model_params_b * bytes_per_param
-    optimizer_gb = weights_gb * 2 # Adam m + v
+    optimizer_gb = weights_gb * 4 # Adam m + v in FP32
     total_ckpt_gb_val = weights_gb + optimizer_gb
 
     nfs_gbs_val = nfs_gbps / 8
@@ -2241,7 +2241,7 @@ class CheckpointDebug:
     extended_weeks_val = base_weeks * (1 + overhead_pct / 100)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(total_ckpt_gb_val == 420, f"Expected 420 GB checkpoint, got {total_ckpt_gb_val}")
+    check(total_ckpt_gb_val == 700, f"Expected 700 GB checkpoint, got {total_ckpt_gb_val}")
     check(serialized_min_val > 300, "Serialized time should be large due to contention")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -2269,7 +2269,7 @@ The fleet stack framework (@sec-vol2-introduction) structures our investigation 
 
 Analysis begins at the bottom of the stack, examining the hardware constraints:
 
-- **Model state size**\index{Model State Size}: 70B parameters $\times$ 2 bytes (BF16) = `{python} CheckpointDebug.weights_gb_str` GB for weights, plus `{python} CheckpointDebug.optimizer_gb_str` GB for Adam optimizer states (first and second moments), totaling approximately `{python} CheckpointDebug.total_ckpt_gb_str` GB per checkpoint
+- **Model state size**\index{Model State Size}: 70B parameters $\times$ 2 bytes (BF16) = `{python} CheckpointDebug.weights_gb_str` GB for weights, plus `{python} CheckpointDebug.optimizer_gb_str` GB for FP32 Adam optimizer states (first and second moments), totaling approximately `{python} CheckpointDebug.total_ckpt_gb_str` GB per checkpoint before gradients, master weights, metadata, or framework overhead
 - **Storage system**\index{Storage!system}: Shared NFS filer with 10 Gbps network attachment
 - **Theoretical bandwidth**\index{Bandwidth!theoretical}: 10 Gbps = `{python} CheckpointDebug.nfs_gbs_str` GB/s maximum throughput
 - **Minimum write time**\index{Minimum Write Time}: `{python} CheckpointDebug.total_ckpt_gb_str` GB/`{python} CheckpointDebug.nfs_gbs_str` GB/s = `{python} CheckpointDebug.min_write_s_str` seconds (`{python} CheckpointDebug.min_write_min_str` minutes)
@@ -2415,9 +2415,9 @@ Detection is the first line of defense, governed by a fundamental trade-off betw
 
 Heartbeat monitoring is the standard mechanism: each worker periodically sends "I am alive" signals to a central coordinator or monitoring service. Missing heartbeats trigger failure classification. The heartbeat interval $H$ and timeout $T_{\text{timeout}}$ control the trade-off. In high-scale clusters, heartbeat arrival times often follow a heavy-tailed distribution due to network congestion, necessitating adaptive timeouts rather than static thresholds. Production systems typically use $T_{\text{timeout}} = H + k\sigma_d$ where $k$ ranges from 3 to 5 and $\sigma_d$ is the observed network delay variance.
 
-Collective communication timeouts provide a second detection layer. During synchronous training, collective operations (AllReduce, Broadcast) are blocking: if a single rank fails silently—a frozen GPU driver, for instance—every other rank in the communicator hangs indefinitely waiting for data that will never arrive. NCCL[^fn-nccl-timeout-tradeoff] provides configurable timeout parameters for this purpose. In practice, the `NCCL_TIMEOUT` is often set conservatively (10–20 minutes) to avoid crashing jobs during legitimate periods of slow communication, which unfortunately extends $T_{\text{detect}}$.
+Collective communication timeouts provide a second detection layer. During synchronous training, collective operations (AllReduce, Broadcast) are blocking: if a single rank fails silently—a frozen GPU driver, for instance—every other rank in the communicator hangs indefinitely waiting for data that will never arrive. NCCL[^fn-nccl-timeout-tradeoff] provides configurable transport and RAS timeout parameters for this purpose, while higher-level frameworks may impose process-group operation timeouts. These settings are often set conservatively to avoid crashing jobs during legitimate periods of slow communication, which unfortunately extends $T_{\text{detect}}$.
 
-[^fn-nccl-timeout-tradeoff]: **NCCL Timeout**\index{NCCL!timeout}: NVIDIA's collective communication library defaults to a 30-minute timeout (`NCCL_TIMEOUT`), which means a silently failed GPU can stall an entire training cluster for 30 minutes before detection. Reducing this to 5 minutes accelerates failure detection but risks false positives during legitimate long AllReduce operations on large models, forcing a trade-off between detection latency and training stability that has no universal optimum. \index{NCCL!timeout trade-off}
+[^fn-nccl-timeout-tradeoff]: **NCCL Timeout**\index{NCCL!timeout}: NVIDIA's collective communication library exposes transport and RAS timeout controls such as `NCCL_IB_TIMEOUT` and `NCCL_RAS_TIMEOUT_FACTOR`; higher-level frameworks such as PyTorch Distributed may also configure process-group operation timeouts. Aggressive timeout settings accelerate failure detection but risk false positives during legitimate long collective operations on large models, forcing a trade-off between detection latency and training stability that has no universal optimum. \index{NCCL!timeout trade-off}
 
 Container orchestration health checks provide a third layer. Kubernetes and SLURM offer liveness probes\index{Liveness Probe} (verifying that processes are running) and readiness probes\index{Readiness Probe} (verifying that processes are ready to handle requests). These operate independently of the training framework, catching failures that application-level heartbeats might miss—such as a process that is alive but deadlocked.
 
@@ -2510,7 +2510,7 @@ The standard recovery procedure described earlier is a **cold restart**\index{Co
 
 A **warm restart**\index{Warm Restart} preserves the state of surviving workers. When a rank fails, surviving ranks detect the failure but do not exit. They enter a waiting state, preserving loaded model weights and optimizer states in GPU memory. The scheduler replaces only the failed node. The new node joins, loads its partition of the state from disk (or receives it via broadcast from a peer), and the communicator is rebuilt. Training resumes with minimal disruption.
 
-Warm restarts can reduce $T_{\text{load}}$ and $T_{\text{warmup}}$ to near-zero for 99.9 percent of the cluster, cutting total recovery time from minutes to seconds. For our 1,000-GPU example, a warm restart avoids reloading `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB from storage, saving the 50-second $T_{\text{load}}$ and 2-minute $T_{\text{warmup}}$ for all but the replacement node.
+Warm restarts can reduce $T_{\text{load}}$ and $T_{\text{warmup}}$ to near-zero for 99.9 percent of the cluster, cutting total recovery time from minutes to seconds. For our 1,000-GPU example, a warm restart avoids reloading `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB from storage, saving the 21-second $T_{\text{load}}$ and 2-minute $T_{\text{warmup}}$ for all but the replacement node.
 
 The trade-off is software complexity. Warm restarts require the application to handle dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. Frameworks like TorchElastic and DeepSpeed provide this capability, but the failure modes during warm restart itself—a crash during communicator rebuild, for instance—must be handled by falling back to cold restart. Production systems implement warm restart as the fast path with cold restart as the safety net.
 
@@ -2882,7 +2882,7 @@ LLM serving with conversational context presents significant fault tolerance cha
 
 The KV cache[^fn-kv-cache-serving-ft] can be substantial (gigabytes for long contexts across attention layers). Losing the KV cache requires regenerating all previous turns, which can take seconds to minutes.
 
-[^fn-kv-cache-serving-ft]: **KV Cache**: Stores key and value projections for all previous tokens across all attention layers, scaling as $2 \times L \times H \times S \times D$. For a 70B model with 80 layers, 64 heads, 128K context, and 128-dimension heads, the KV cache reaches approximately 160 GB per conversation. Losing this state on failure forces regeneration of all prior tokens, converting a sub-second failover into a minutes-long re-computation that violates serving latency SLAs. \index{KV Cache!serving fault tolerance}
+[^fn-kv-cache-serving-ft]: **KV Cache**: Stores key and value projections for all previous tokens across all attention layers, scaling as $2 \times L \times H_{\text{KV}} \times S \times D \times \text{bytes}$. For a Llama-family 70B model with 80 layers, 8 key-value heads, 128K context, 128-dimension heads, and BF16 storage, the KV cache is about 43 GB per conversation; using 64 independent key-value heads would be about 344 GB. Losing this state on failure forces regeneration of all prior tokens, converting a sub-second failover into a minutes-long re-computation that violates serving latency SLAs. \index{KV Cache!serving fault tolerance}
 
 LLM serving fault tolerance takes multiple approaches. Accepting regeneration cost means regenerating KV cache from conversation history on failure. This approach is simple but can significantly increase latency for long conversations. KV cache checkpointing periodically saves KV cache state. This enables partial recovery but introduces storage overhead and latency for checkpointing. KV cache replication duplicates KV cache to standby. This provides fast failover but doubles memory requirements. Prefix caching\index{Prefix Caching} stores common prefixes separately. System prompts and shared context are cached. On failure, common prefixes restore quickly. Only session-specific state requires regeneration.
 

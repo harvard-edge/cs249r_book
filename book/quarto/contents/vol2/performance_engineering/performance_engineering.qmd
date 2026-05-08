@@ -168,7 +168,7 @@ The efficiency frontier establishes what we are optimizing *toward*. The physics
 # │
 # │ Imports: mlsysim.core.constants (H100_FLOPS_FP8_TENSOR, H100_MEM_BW,
 # │          H100_MEM_CAPACITY, ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
-# │          TFLOPs, TB, GB, second, flop, byte)
+# │          TFLOPs, TB, GiB, second, flop, byte)
 # │ Exports: MemoryWallScenario.h100_fp8_str, MemoryWallScenario.h100_hbm_bw_str,
 # │          MemoryWallScenario.h100_ridge_fp8_str, MemoryWallScenario.energy_ratio_str,
 # │          MemoryWallScenario.h100_mem_str
@@ -176,7 +176,7 @@ The efficiency frontier establishes what we are optimizing *toward*. The physics
 from mlsysim.core.constants import (
     H100_FLOPS_FP8_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY,
     ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
-    TFLOPs, TB, GB, second, flop, byte
+    TFLOPs, TB, GiB, second, flop, byte
 )
 
 class MemoryWallScenario:
@@ -202,7 +202,7 @@ class MemoryWallScenario:
     h100_hbm_bw_str = f"{bw.m_as(TB/second):.2f}"
     h100_ridge_fp8_str = f"{ridge_fp8:.0f}"
     energy_ratio_str = f"{energy_ratio.m_as(''):.0f}"
-    h100_mem_str = f"{mem.m_as(GB):.0f}"
+    h100_mem_str = f"{mem.m_as(GiB):.0f}"
 ```
 
 An NVIDIA H100 delivers `{python} MemoryWallScenario.h100_fp8_str` TFLOPS of FP8 compute but only `{python} MemoryWallScenario.h100_hbm_bw_str` TB/s of memory bandwidth. If every byte loaded from memory does fewer than `{python} MemoryWallScenario.h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
@@ -253,7 +253,7 @@ The memory wall is not static; it grows wider with each hardware generation. Com
 
 : **The Widening memory wall**. Compute throughput has increased 18$\times$ from V100 to B200 over seven years, while memory bandwidth has increased only 8.9$\times$. The ridge point has increased 2$\times$, meaning more workloads fall into the memory-bound regime with each generation. {#tbl-widening-gap}
 
-@tbl-widening-gap quantifies this trend. The ridge point increased from 139 FLOP/byte on the V100 to 563 FLOP/byte on the B200. An operation with arithmetic intensity of 200 FLOP/byte was compute-bound on the V100 and A100, but memory-bound on the H100 and B200. Performance engineering techniques targeting memory efficiency, fusion, precision, and tiling therefore become *more* important with each hardware generation, not less. The engineering effort invested in FlashAttention and INT4 quantization today will yield even greater returns on future hardware.
+@tbl-widening-gap quantifies this trend. For the FP16/BF16 table as written, the ridge point increased from 139 FLOP/byte on the V100 to 281 FLOP/byte on the B200, about a 2$\times$ increase. An operation with arithmetic intensity of 200 FLOP/byte was compute-bound on the V100 and A100, but memory-bound on the H100 and B200. Performance engineering techniques targeting memory efficiency, fusion, precision, and tiling therefore become *more* important with each hardware generation, not less. The engineering effort invested in FlashAttention and INT4 quantization today will yield even greater returns on future hardware.
 
 ### The roofline model {#sec-performance-engineering-roofline}
 
@@ -358,9 +358,9 @@ class RooflineRidgeCalc:
 
 Any operation performing fewer than `{python} RooflineRidgeCalc.h100_fp16_ridge_str` floating-point operations per byte loaded is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} RooflineRidgeCalc.h100_fp8_str` TFLOPS while bandwidth remains `{python} RooflineRidgeCalc.h100_hbm_bw_str` TB/s, the ridge point rises to approximately `{python} RooflineRidgeCalc.h100_fp8_ridge_str` FLOP/byte. The A100, with `{python} RooflineRidgeCalc.a100_fp16_str` TFLOPS and `{python} RooflineRidgeCalc.a100_hbm_bw_str` TB/s, has a lower ridge point of approximately `{python} RooflineRidgeCalc.a100_ridge_str` FLOP/byte at FP16. Each hardware generation increases compute faster than bandwidth, pushing the ridge point higher and making more workloads memory-bound.
 
-@fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational shift visible at a glance. The ridge point has grown from 139 FLOP/byte on the V100 to 563 FLOP/byte on the B200, a 4$\times$ increase in seven years. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, is memory-bound on every generation and falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as large matrix multiplications, are compute-bound on V100 and A100 but memory-bound on H100 and B200. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
+@fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational shift visible at a glance. For FP16/BF16 arithmetic, the ridge point has grown from 139 FLOP/byte on the V100 to 281 FLOP/byte on the B200, about a 2$\times$ increase in seven years. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, is memory-bound on every generation and falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as some matrix multiplications and fused blocks, can change regime as hardware changes. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
 
-::: {#fig-shifting-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Shifting Roofline Across GPU Generations**. Overlaid roofline models for V100 through B200 show the ridge point growing from 139 to 563 FLOP/byte. Operations near 200 FLOP/byte are compute-bound on V100 and A100 but become memory-bound on H100 and B200 as the roofline shifts. The same kernel can change performance regime across hardware generations." fig-alt="Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked"}
+::: {#fig-shifting-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Shifting Roofline Across GPU Generations**. Overlaid FP16/BF16 roofline models for V100 through B200 show the ridge point growing from 139 to 281 FLOP/byte. Operations near 200 FLOP/byte can change regime as the roofline shifts. The same kernel can change performance regime across hardware generations." fig-alt="Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked"}
 
 ```{python}
 #| echo: false
@@ -369,7 +369,7 @@ Any operation performing fewer than `{python} RooflineRidgeCalc.h100_fp16_ridge_
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-shifting-roofline—roofline across GPU generations
 # │
-# │ Goal: Overlay rooflines for V100–B200; show ridge point growth 139→563;
+# │ Goal: Overlay rooflines for V100–B200; show ridge point growth 139→281;
 # │       mark ops moving from compute-bound to memory-bound.
 # │ Show: Log-log; four rooflines; ridge points; example ops.
 # │ How: Peak TFLOPS, HBM BW; ridge = TFLOPS/BW; viz.setup_plot().
@@ -378,7 +378,7 @@ Any operation performing fewer than `{python} RooflineRidgeCalc.h100_fp16_ridge_
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Overlay rooflines for V100–B200; show ridge point growth 139→563;
+# │ Overlay rooflines for V100–B200; show ridge point growth 139→281;
 import numpy as np
 import matplotlib.pyplot as plt
 from mlsysim import viz
@@ -392,7 +392,7 @@ gpus = [
     ("V100", 125, 0.900, COLORS["VioletLine"]),
     ("A100", 312, 2.039, COLORS["BlueLine"]),
     ("H100", 989, 3.350, COLORS["GreenLine"]),
-    ("B200", 4500, 8.000, COLORS["OrangeLine"]),
+    ("B200", 2250, 8.000, COLORS["OrangeLine"]),
 ]
 
 ai_range = np.logspace(0, 4, 500)  # 1 to 10000 FLOP/byte
@@ -469,7 +469,7 @@ for label, ai_val, va_pos in ops:
 
 # ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
 ax.annotate("",
-    xy=(563, 4500),
+    xy=(281, 2250),
             xytext=(141, 140),
             arrowprops=dict(
                 arrowstyle="->",
@@ -992,7 +992,7 @@ FlashAttention eliminates the memory wall within a single GPU by tiling across t
 
 ## Precision Engineering {#sec-performance-engineering-precision}
 
-Moving a 2-byte FP16 weight from memory to compute takes 100 nanoseconds. Shrinking that weight to a 1-byte FP8 value cuts the transfer time in half. Precision engineering exploits the fact that machine learning algorithms are resilient to numerical noise, compressing data types to double effective memory bandwidth and throughput. While we examine 8-bit floating point (FP8) as a training-time primitive in @sec-distributed-training-systems, here we focus on the quantization techniques that enable efficient inference at scale.
+Moving FP16 weights through HBM consumes twice as many bytes as FP8. For bandwidth-bound kernels, shrinking weights from 2 bytes to 1 byte can roughly halve weight-read traffic and increase effective memory bandwidth. Precision engineering exploits the fact that machine learning algorithms are resilient to numerical noise, compressing data types to double effective memory bandwidth and throughput. While we examine 8-bit floating point (FP8) as a training-time primitive in @sec-distributed-training-systems, here we focus on the quantization techniques that enable efficient inference at scale.
 
 ### Block-wise quantization {#sec-performance-engineering-block-quant}
 
@@ -1027,7 +1027,7 @@ The storage cost for block-wise quantization is minimal. Storing one FP32 scale 
 
 ::: {.callout-lighthouse title="Archetype C (Federated MobileNet): TinyML Survival"}
 
-For **Archetype C (Federated MobileNet)**, quantization is a prerequisite for survival, not an optimization. On a microcontroller with only 512 KB of SRAM, an FP16 model is physically impossible to load. **Binary Neural Networks (BNN)** and **1-bit Quantization** push this to the extreme, representing weights as single bits (+1/-1). While this trades significant accuracy, it reduces the memory footprint by 32$\times$ and the energy per operation by up to 100$\times$, enabling intelligence on devices that operate on harvested energy (microwatts).
+For **Archetype C (Federated MobileNet)**, quantization is a prerequisite for survival, not an optimization. On a microcontroller with only 512 KB of SRAM, an FP16 model is physically impossible to load. **Binary Neural Networks (BNN)** and **1-bit Quantization** push this to the extreme, representing weights as single bits (+1/-1). While this trades significant accuracy, it reduces the weight memory footprint by 16$\times$ relative to FP16 (32$\times$ relative to FP32) and the energy per operation by up to 100$\times$, enabling intelligence on devices that operate on harvested energy (microwatts).
 
 :::
 
@@ -1223,7 +1223,7 @@ The trade-off for XLA's performance is compilation latency and rigidity. Because
 
 NVIDIA TensorRT is a specialized inference compiler that treats the model not as a flexible program but as a rigid global optimization problem. Because inference requires no backward pass and no gradient storage, TensorRT applies aggressive transformations that would be mathematically invalid or impractically slow for training. It performs a calibration pass where it runs the model on representative data to determine the numerical range of every activation tensor.
 
-This calibration enables **mixed-precision quantization** at a granular level. Blindly quantizing all layers of a 70B parameter LLM to INT8 often degrades perplexity. TensorRT analyzes the sensitivity of each layer individually, keeping precision-sensitive layers (typically the first and last 3 attention blocks) in FP16 while aggressively quantizing the middle 74 layers to INT8. This automated mixed-precision strategy recovers accuracy while capturing the throughput benefits of lower precision. TensorRT also eliminates training-only operations (dropout, batch normalization running statistics updates), optimizes for static shapes by generating kernels tuned for exact dimensions, and plans memory precisely since no gradient tensors are needed.
+This calibration enables **mixed-precision quantization** at a granular level. Blindly quantizing all layers of a 70B parameter LLM to INT8 often degrades perplexity. TensorRT can calibrate INT8 ranges from representative data and can build mixed-precision inference engines when precisions are enabled or constrained; for LLMs, layer-wise fallback policies usually require explicit quantization analysis or user-specified precision constraints. TensorRT also eliminates training-only operations (dropout, batch normalization running statistics updates), optimizes for static shapes by generating kernels tuned for exact dimensions, and plans memory precisely since no gradient tensors are needed.
 
 TensorRT performs **kernel autotuning**\index{Kernel Autotuning} far beyond simple heuristics. For every operation in the graph, it benchmarks dozens of candidate kernels, varying tile sizes, thread block configurations, and unrolling factors, on the actual target hardware. It selects the single fastest implementation for that specific GPU and input shape. The performance gap between TensorRT and general-purpose compilers is substantial: in head-to-head comparisons for serving a 70B LLM, TensorRT-LLM typically achieves 1.3--1.8$\times$ higher throughput than `torch.compile` with TorchInductor.
 
@@ -1886,7 +1886,8 @@ class FleetEfficiencyCalc:
     p_params = LLAMA2_70B_PARAMS.m_as(param)
     n_gpus = 128
     r_peak_per_gpu = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second) * TRILLION
-    tokens_per_step = 2048 * 32 # seq_len * global_batch
+    local_tokens_per_step = 2204
+    fleet_tokens_per_step = 35446
 
     # Observed times
     t_local_step_ms = 180.0  # 8-GPU node baseline
@@ -1894,11 +1895,12 @@ class FleetEfficiencyCalc:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Useful FLOPs per step = 6 * P * Tokens
-    flops_per_step = 6 * p_params * tokens_per_step
+    local_flops_per_step = 6 * p_params * local_tokens_per_step
+    fleet_flops_per_step = 6 * p_params * fleet_tokens_per_step
 
     # Step 2: MFU = useful_flops / (n_gpus * r_peak * time)
-    local_mfu = flops_per_step / (8 * r_peak_per_gpu * (t_local_step_ms / 1000))
-    global_mfu = flops_per_step / (n_gpus * r_peak_per_gpu * (t_fleet_step_ms / 1000))
+    local_mfu = local_flops_per_step / (8 * r_peak_per_gpu * (t_local_step_ms / 1000))
+    global_mfu = fleet_flops_per_step / (n_gpus * r_peak_per_gpu * (t_fleet_step_ms / 1000))
 
     scaling_tax = (1 - (global_mfu/local_mfu)) * 100
 
