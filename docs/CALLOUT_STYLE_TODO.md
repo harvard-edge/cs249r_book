@@ -22,3 +22,8 @@ Source of truth: `/Users/VJ/GitHub/AIConfigs/projects/MLSysBook/.claude/rules/bo
   - Use search only to flag candidates.
   - Do not apply regex/global replacements to QMD prose.
   - Commit after each major pass.
+- Audit bare calculation-step labels in numbered lists.
+  - Search by structure, not by remembered example terms: flag numbered/bulleted bold lead-ins with multiple capitalized words before the colon, then read each hit in context.
+  - Use sentence style for ordinary labels such as `**Network bandwidth**:`, `**Transfer time**:`, `**Training cost**:`, and `**Detection latency**:`.
+  - Preserve Title Case only for acronyms, product names, named methods, named datasets, and formal law/principle names.
+  - Check whether repeated scaffold labels should drop leading `The` where appropriate: prefer `**Math**:`, `**Invariant**:`, `**Systems insight**:` only if the book adopts that pattern consistently.
