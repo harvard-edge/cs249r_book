@@ -511,6 +511,8 @@ _POSITIVE_LINES = [
     "A Starving Accelerator is bottlenecked on data delivery.",
     "The Four Pillars Framework organizes our analysis.",
     "With Data Gravity, computation pulls toward large corpora.",
+    # Non-principle callout titles are sentence-style box heads.
+    '::: {.callout-definition title="Iron Law"}',
 ]
 
 _NEGATIVE_LINES = [
@@ -536,8 +538,8 @@ _NEGATIVE_LINES = [
     "### The Bitter Lesson",
     # Exception 5: inside \index{}
     "Earlier discussion \\index{Iron Law!definition} established the framework.",
-    # Exception 6: inside title="..."
-    '::: {.callout-definition title="Iron Law"}',
+    # Exception 6: principle callout titles are formal labels.
+    '::: {.callout-principle title="The Iron Law of ML Systems"}',
     # Exception 7: table header row (bold-in-pipe)
     "| **Iron Law** | **Memory Wall** | **Power Wall** |",
     # Exception 8: H&P canonical reference

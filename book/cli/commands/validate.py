@@ -6428,7 +6428,7 @@ class ValidateCommand:
         wall, data wall, bitter lesson, scaling laws, verification gap,
         degradation equation, etc. Respects the exception contexts
         (bold first-definition, §10.3 exception 2; §10.9 H1/H2 headline
-        case; callout titles; `\\index{}` keys).
+        case; principle callout titles; `\\index{}` keys).
         """
         return self._run_audit_check(
             root, "audit.checks.concept_term_capitalization",
