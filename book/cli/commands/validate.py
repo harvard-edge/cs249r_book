@@ -272,6 +272,8 @@ class ValidateCommand:
         ],
         "figures": [
             Scope("captions", "_run_figures"),
+            Scope("caption-heads", "_run_caption_head_style",
+                  note="fig-cap/tbl-cap/lst-cap use **Bold Title**: Explanation"),
             Scope("div-syntax", "_run_figure_div_syntax"),
             # flow: deferred to copyeditor's PDF layout pass (2026-05-03).
             # The "near first reference" heuristic conflicts with the
@@ -2614,6 +2616,133 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # Figures  (ported from check_figure_completeness.py)
     # ------------------------------------------------------------------
+
+    _CAPTION_HEAD_ATTR_RE = re.compile(
+        r"""\b(?P<key>fig-cap|tbl-cap|lst-cap)\s*=\s*"(?P<value>[^"]*)\""""
+    )
+    _MARKDOWN_CAPTION_HEAD_RE = re.compile(
+        r"""^\s*:\s+(?P<value>.+?)\s+\{#(?P<label>(?:fig|tbl|lst)-[\w-]+)"""
+    )
+    _CHUNK_CAPTION_HEAD_RE = re.compile(
+        r"""^\s*(?:#|%%)\|\s*(?P<key>fig-cap|tbl-cap|lst-cap)\s*:\s*(?P<value>.*?)\s*$"""
+    )
+    _CAPTION_HEAD_STYLE_RE = re.compile(
+        r"""^\*\*(?P<head>[^*\n]+)\*\*(?P<index>(?:\\index\{[^}\n]+\})*):\s+(?P<body>\S.*)$"""
+    )
+
+    def _run_caption_head_style(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        def check_caption(
+            file: Path,
+            line_no: int,
+            key: str,
+            value: str,
+            context: str,
+        ) -> None:
+            if not value.startswith("**"):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_missing_bold",
+                        message=f"{key} must start with a bold caption head: **Bold Title**: Explanation",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+                return
+
+            match = self._CAPTION_HEAD_STYLE_RE.match(value)
+            if not match:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_separator",
+                        message=f"{key} must use colon outside bold: **Bold Title**: Explanation",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+                return
+
+            head = match.group("head").strip()
+            body = match.group("body").lstrip()
+            if head.endswith((".", ":", ";", "!", "?")):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_terminal_punctuation",
+                        message=f"{key} caption head should not end with punctuation inside bold",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+            if body and re.match(r"[a-z]", body[0]):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_body_lowercase_after_colon",
+                        message=f"{key} caption text after the colon should begin as a sentence",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.rstrip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                chunk_match = self._CHUNK_CAPTION_HEAD_RE.match(line)
+                if chunk_match:
+                    check_caption(
+                        file,
+                        idx,
+                        chunk_match.group("key"),
+                        chunk_match.group("value").strip().strip("'\""),
+                        line.strip(),
+                    )
+                    continue
+                if in_code:
+                    continue
+
+                for attr_match in self._CAPTION_HEAD_ATTR_RE.finditer(line):
+                    check_caption(
+                        file,
+                        idx,
+                        attr_match.group("key"),
+                        attr_match.group("value").strip(),
+                        line.strip(),
+                    )
+
+                md_match = self._MARKDOWN_CAPTION_HEAD_RE.match(line)
+                if md_match:
+                    label = md_match.group("label")
+                    key = f"{label.split('-', 1)[0]}-caption"
+                    check_caption(
+                        file,
+                        idx,
+                        key,
+                        md_match.group("value").strip(),
+                        line.strip(),
+                    )
+
+        return ValidationRunResult(
+            name="caption-heads",
+            description="Check figure, table, and listing caption heads use **Bold Title**: Explanation",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_figures(self, root: Path) -> ValidationRunResult:
         start = time.time()
