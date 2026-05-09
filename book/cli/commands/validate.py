@@ -223,6 +223,8 @@ class ValidateCommand:
                   note='"[@k; @k]" or "[@k] [@k]" — same-key citeproc dup'),
             Scope("manual-bracket", "_run_manual_bracket_citation",
                   note='*et al.*(…) — manual attribution next to [@k]'),
+            Scope("principles", "_run_principle_refs",
+                  note="principles use #pri-* IDs and Principle \\ref{pri-*}"),
             # inline scope is run with --check-patterns OFF in the curated set
             # (matches former pre-commit hook). Pattern hazards still live in
             # the corpus; opt in with --check-patterns when cleaning them up.
@@ -292,6 +294,8 @@ class ValidateCommand:
                   note="low-level markup (backticks, dollar signs, asterisks)"),
             Scope("div-fences", "_run_div_fences",
                   note=":::/ :::: balance and form"),
+            Scope("callouts", "_run_callout_structure",
+                  note="supported callout types, titles, and attributes"),
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
@@ -1107,6 +1111,111 @@ class ValidateCommand:
         return ValidationRunResult(
             name="refs",
             description="Validate citation/reference placement in raw/code blocks",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _CALLOUT_OPEN_RE = re.compile(r"^:{3,}\s*\{([^}]*)\}")
+    _ATTR_CLASS_RE = re.compile(r"\.([A-Za-z0-9_-]+)")
+    _ATTR_ID_RE = re.compile(r"#([A-Za-z0-9_-]+)")
+
+    def _run_principle_refs(self, root: Path) -> ValidationRunResult:
+        """Validate semantic principle IDs and references.
+
+        This is a markup/semantic invariant, not a style-capitalization pass:
+        it does not decide whether a principle name should be lowercase in
+        prose. It only enforces the reference mechanics in book-prose §4.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        manual_principle_re = re.compile(r"\b[Pp]rinciple\s+\d+(?:\.\d+)?\b")
+        bad_principle_ref_re = re.compile(r"\b[Pp]rinciple\s+\\ref\{(?!pri-)([^}]+)\}")
+        cite_principle_re = re.compile(r"@pri-[A-Za-z0-9_-]+")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                opener = self._CALLOUT_OPEN_RE.match(stripped)
+                if opener:
+                    attrs = opener.group(1)
+                    classes = set(self._ATTR_CLASS_RE.findall(attrs))
+                    if "callout-principle" in classes:
+                        ids = self._ATTR_ID_RE.findall(attrs)
+                        if not any(label.startswith("pri-") for label in ids):
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="principle_missing_pri_id",
+                                    message="Principle callout must use a semantic #pri-* ID",
+                                    severity="error",
+                                    context=stripped[:160],
+                                )
+                            )
+                        if any(label.startswith("nte-") for label in ids):
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="principle_uses_note_id",
+                                    message="Principle callout uses #nte-*; use #pri-* for principles",
+                                    severity="error",
+                                    context=stripped[:160],
+                                )
+                            )
+
+                manual_match = manual_principle_re.search(line)
+                if manual_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="manual_principle_number",
+                            message="Avoid manual principle numbering; use Principle \\ref{pri-*}",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+                bad_ref_match = bad_principle_ref_re.search(line)
+                if bad_ref_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="principle_ref_non_pri",
+                            message="Principle references must point to \\ref{pri-*}",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+                cite_match = cite_principle_re.search(line)
+                if cite_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="principle_citation_syntax",
+                            message="Use Principle \\ref{pri-*}, not @pri-* citation syntax",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="principles",
+            description="Principle callout IDs and reference mechanics",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -4518,6 +4627,113 @@ class ValidateCommand:
         return ValidationRunResult(
             name="div-fences",
             description="Malformed div fences (::: / ::::) with trailing text",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _ALLOWED_CALLOUT_CLASSES = {
+        "callout-chapter-connection",
+        "callout-checkpoint",
+        "callout-colab",
+        "callout-definition",
+        "callout-example",
+        "callout-important",
+        "callout-learning-objectives",
+        "callout-lighthouse",
+        "callout-note",
+        "callout-notebook",
+        "callout-perspective",
+        "callout-principle",
+        "callout-takeaways",
+        "callout-theorem",
+        "callout-tip",
+        "callout-war-story",
+        "callout-warning",
+    }
+    _CALLOUT_TITLE_OPTIONAL_CLASSES = {"callout-learning-objectives"}
+
+    def _run_callout_structure(self, root: Path) -> ValidationRunResult:
+        """Validate generic callout mechanics from book-prose §4."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                opener = self._CALLOUT_OPEN_RE.match(stripped)
+                if not opener:
+                    continue
+
+                attrs = opener.group(1)
+                classes = [
+                    cls for cls in self._ATTR_CLASS_RE.findall(attrs)
+                    if cls.startswith("callout-")
+                ]
+                if not classes:
+                    continue
+
+                if "icon=false" in attrs:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="callout_icon_false",
+                            message="Remove icon=false; callout icons should follow the type default",
+                            severity="error",
+                            context=stripped[:160],
+                        )
+                    )
+
+                has_title = re.search(r'\btitle\s*=', attrs) is not None
+                for cls in classes:
+                    if cls not in self._ALLOWED_CALLOUT_CLASSES:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="unsupported_callout_type",
+                                message=f"Unsupported callout type .{cls}; use a type from book-prose §4",
+                                severity="error",
+                                context=stripped[:160],
+                            )
+                        )
+                    if cls in self._CALLOUT_TITLE_OPTIONAL_CLASSES:
+                        if has_title:
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="learning_objectives_explicit_title",
+                                    message="Learning Objectives callouts use the auto-generated label; omit title=",
+                                    severity="warning",
+                                    context=stripped[:160],
+                                )
+                            )
+                    elif not has_title:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="callout_missing_title",
+                                message=f".{cls} callout needs an explicit chapter-specific title",
+                                severity="error",
+                                context=stripped[:160],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="callouts",
+            description="Callout types, required titles, and unsupported attributes",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
