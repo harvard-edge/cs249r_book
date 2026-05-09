@@ -105,7 +105,7 @@ class DAMTaxonomy:
 
 ::: {.callout-learning-objectives}
 
-- Classify any ML system bottleneck into one of three MECE categories: Data, Algorithm, or Machine
+- Classify an ML system bottleneck by its dominant Data, Algorithm, or Machine axis, while recognizing cross-axis interactions
 - Map optimization techniques to their D·A·M intersection zone to understand which axes they span
 - Apply the iron law equation to quantitatively diagnose performance problems
 - Distinguish between memory-bound and compute-bound workloads using Arithmetic Intensity
@@ -114,9 +114,9 @@ class DAMTaxonomy:
 
 :::
 
-The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy enables practitioners to isolate the bottleneck to one of three mutually exclusive and collectively exhaustive (MECE[^fn-mece]) axes.
+The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy helps practitioners isolate the dominant bottleneck among three collectively exhaustive axes[^fn-mece], while recognizing that real systems often involve boundary cases where two or more axes interact.
 
-[^fn-mece]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, MECE ensures that every bottleneck maps to exactly one D·A·M axis, preventing both diagnostic gaps and double-counting.
+[^fn-mece]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. D·A·M uses the exhaustive part as a first-pass diagnostic: every bottleneck should be explainable through Data, Algorithm, Machine, or their interactions, even when the cleanest diagnosis names a dominant axis plus a boundary effect.
 
 ## Diagnostic Summary {#sec-dam-taxonomy-diagnostic-summary-9f73}
 
@@ -166,7 +166,7 @@ Understanding the landscape tells you *where* a technique lives. The next step i
 
 The performance of any ML task is governed by the distribution of work across the D·A·M axes. The iron law Mapping reveals which component's variables dominate the execution time:
 
-$$ T = \underbrace{ \frac{D_{\text{vol}}}{BW} }_{\text{Data (D)}} + \underbrace{ \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} }_{\text{Algorithm (A) / Machine (M)}} + \underbrace{ L_{\text{lat}} }_{\text{Overhead}} $$
+$$ T = \underbrace{ \frac{D_{\text{vol}}}{\text{BW}} }_{\text{Data (D)}} + \underbrace{ \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} }_{\text{Algorithm (A) / Machine (M)}} + \underbrace{ L_{\text{lat}} }_{\text{Overhead}} $$
 
 Note that Algorithm and Machine share the compute term; they are separated by which variable you control. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a **Machine** lever.
 
@@ -182,16 +182,16 @@ This equation transforms performance debugging from a qualitative guessing game 
 
 The additive iron law represents **sequential execution**—the worst case where Data, Algorithm, and Machine take turns. But skilled systems engineering transforms the sum into a max:
 
-$$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{BW} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} \quad \xrightarrow{\text{overlap}} \quad T_{\text{pipelined}} = \max\left(\frac{D_{\text{vol}}}{BW}, \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}\right) + L_{\text{lat}} $$
+$$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} \quad \xrightarrow{\text{overlap}} \quad T_{\text{pipelined}} = \max\left(\frac{D_{\text{vol}}}{\text{BW}}, \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}\right) + L_{\text{lat}} $$
 
 The systems engineer's job is to make these components run in parallel, not in series. @tbl-dam-overlap summarizes key D·A·M Coordination techniques:
 
-| **Technique**           | **D·A·M Axes Overlapped**    | **Implementation**                                   |
-|:------------------------|:-----------------------------|:-----------------------------------------------------|
-| **Prefetching**         | D overlaps M                 | DataLoader with `prefetch_factor`, `pin_memory=True` |
-| **CUDA Streams**        | D overlaps M                 | Separate streams for H2D transfer and compute        |
-| **Async Gradient Sync** | M (communication) overlaps A | Overlap AllReduce with next forward pass             |
-| **Double Buffering**    | D overlaps M                 | Fill buffer N+1 while computing on buffer N          |
+| **Technique**           | **D·A·M Axes Overlapped**    | **Implementation**                                             |
+|:------------------------|:-----------------------------|:---------------------------------------------------------------|
+| **Prefetching**         | D overlaps M                 | DataLoader with `prefetch_factor`, `pin_memory=True`           |
+| **CUDA Streams**        | D overlaps M                 | Separate streams for H2D transfer and compute                  |
+| **Async Gradient Sync** | M (communication) overlaps A | Overlap bucketed AllReduce with remaining backward computation |
+| **Double Buffering**    | D overlaps M                 | Fill buffer N+1 while computing on buffer N                    |
 
 : **D·A·M Overlap Techniques.** Each technique allows one D·A·M axis to execute while another is in flight, converting the iron law's additive terms into overlapped terms. The payoff is transforming $T = a + b$ into $T = \max(a, b)$, which can cut latency nearly in half when the terms are balanced. {#tbl-dam-overlap}
 
@@ -301,7 +301,7 @@ You have hit the physical limits of the single chip.
 
 *   **Scale Up**: Move to a newer generation GPU (for example, A100 to H100).
 *   **Scale Out**: Distribute training across multiple accelerators (Data Parallelism).
-*   **Lower Precision**: Switch from FP32 to BF16 (doubling theoretical TFLOPS).
+*   **Lower Precision**: Switch from FP32/TF32 training to BF16 where numerically safe; on NVIDIA Tensor Core paths, BF16 peak throughput is typically about 2$\times$ TF32 peak, with realized speedup depending on kernels and bottlenecks.
 
 ::: {.callout-checkpoint title="D·A·M Diagnosis Check"}
 
@@ -404,7 +404,7 @@ A production image classification service runs on an A100 GPU. The `nvidia-smi` 
 
 #### Exercise two: *Iron law analysis* {.unnumbered}
 
-Consider a transformer model with `{python} DAMTaxonomy.ex2_params_str` parameters performing inference with batch size 1. The model requires `{python} DAMTaxonomy.ex2_flops_per_pass_str` TFLOPs per forward pass. On an H100 GPU (`{python} DAMTaxonomy.h100_fp16_tflops_str` TFLOPS peak FP16 Tensor Core), the measured latency is `{python} DAMTaxonomy.ex2_latency_ms_str` ms. Calculate the achieved utilization ($\eta_{\text{hw}}$). Is this system Data-bound, Algorithm-bound, or Machine-bound? Justify your answer.
+Consider a decoder-only transformer model with `{python} DAMTaxonomy.ex2_params_str` parameters generating one token in the autoregressive decode phase at batch size 1. Using the 2 FLOPs-per-parameter rule of thumb, the decode step requires `{python} DAMTaxonomy.ex2_flops_per_pass_str` TFLOPs. On an H100 GPU (`{python} DAMTaxonomy.h100_fp16_tflops_str` TFLOPS peak FP16 Tensor Core), the measured latency is `{python} DAMTaxonomy.ex2_latency_ms_str` ms. Calculate the achieved utilization ($\eta_{\text{hw}}$). Is this system Data-bound, Algorithm-bound, or Machine-bound? Justify your answer.
 
 **Answer**: First, calculate achieved throughput:
 

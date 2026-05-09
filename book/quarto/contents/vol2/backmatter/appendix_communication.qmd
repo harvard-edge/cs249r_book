@@ -225,14 +225,15 @@ $M_{\text{cross}} = \alpha \times \beta =$ `{python} CF.ib_ndr_alpha_us_str` $\t
 
 ### The LogGP model extension {#sec-comm-foundations-loggp}
 
-The $\alpha$-$\beta$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP model** [@alexandrov1995] extends $\alpha$-$\beta$ with two additional parameters:
+The $\alpha$-$\beta$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP model** [@alexandrov1995] extends LogP with a long-message gap parameter:
 
 - **$g$ (gap)**: The minimum interval between consecutive message injections at the sender. This models the NIC's injection rate limit.
 - **$o$ (overhead)**: The CPU time consumed by the processor to initiate or complete a message, during which it cannot do useful compute.
 
-For pipelined transfers of $k$ messages of size $m$, the LogGP model predicts:
+For a long message of $k$ bytes, LogGP models transfer time as approximately:
+$$T_{\text{long}} \approx o_s + L + (k - 1)G + o_r$$
 
-$$ T = \alpha + (k - 1) \times g + k \times \frac{m}{\beta} + o $$
+where $G$ is the gap per byte for long messages and $g$ controls the minimum interval between consecutive message injections. Informal alpha-beta-style approximations can be useful for ML profiling, but the standard LogGP model keeps these gap parameters distinct from a simple bandwidth term.
 
 In most ML training scenarios, the $\alpha$-$\beta$ model is sufficient because gradient tensors are large enough that pipelining effects are secondary to raw bandwidth. The LogGP model becomes important when analyzing the overhead of many small control messages or when modeling the interaction between communication and computation overlap---situations that arise in fine-grained pipeline parallelism and asynchronous gradient updates.
 
@@ -318,9 +319,9 @@ Broadcast sends a single $M$-byte tensor from one root GPU to all $N - 1$ others
 
 Tree Broadcast
 
-$$ T_{\text{broadcast}} = \frac{M}{\beta} + \log_2 N \cdot \alpha $$ {#eq-broadcast}
+$$ T_{\text{broadcast}} = \log_2 N \left(\alpha + \frac{M}{\beta}\right) $$ {#eq-broadcast}
 
-Broadcast is inherently asymmetric (one sender, many receivers), which makes a tree topology natural. The bandwidth term is just $M/\beta$ because the root only sends the message once to its children, who forward it down the tree. The latency term is $\log_2 N$ tree levels.
+Broadcast is inherently asymmetric (one sender, many receivers), which makes a tree topology natural. In an unsegmented tree broadcast, the full $M$-byte payload is forwarded at each tree level, so both the latency and bandwidth terms appear along the $\log_2 N$-level critical path. Segmented or scatter-allgather broadcast variants can reduce the bandwidth term, but they require a different algorithm-specific model.
 
 ### Collective complexity summary {.unnumbered}
 
@@ -333,11 +334,11 @@ Broadcast is inherently asymmetric (one sender, many receivers), which makes a t
 | **AllGather (Ring)**     | $\frac{N-1}{N} \cdot \frac{M}{\beta}$         | $(N-1) \cdot \alpha$     | FSDP parameter reconstruction    |
 | **ReduceScatter (Ring)** | $\frac{N-1}{N} \cdot \frac{M}{\beta}$         | $(N-1) \cdot \alpha$     | FSDP/ZeRO gradient sharding      |
 | **AllToAll (Ring)**      | $\frac{N-1}{N} \cdot \frac{M}{\beta}$         | $(N-1) \cdot \alpha$     | MoE expert routing               |
-| **Broadcast (Tree)**     | $\frac{M}{\beta}$                             | $\log_2 N \cdot \alpha$  | Weight distribution, config sync |
+| **Broadcast (Tree)**     | $\log_2 N \cdot \frac{M}{\beta}$              | $\log_2 N \cdot \alpha$  | Weight distribution, config sync |
 
 : **Collective Operation Cost Summary**: Bandwidth and latency terms for ring and tree algorithms. The bandwidth term determines cost for large messages (gradients, parameters); the latency term determines cost for small messages (scalars, barriers). $N$ = GPU count, $M$ = total message size in bytes. {#tbl-collective-summary}
 
-Two patterns emerge from this table. First, bandwidth-optimal ring algorithms all share the $(N-1)/N$ factor, which approaches 1 for large $N$---meaning the total data moved is nearly equal to the message size, regardless of GPU count. This is the best achievable bandwidth utilization. Second, the latency term grows linearly with $N$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
+Two patterns emerge from this table. First, bandwidth-optimal ring algorithms all share the $(N-1)/N$ factor, which approaches 1 for large $N$. Per-rank communication therefore approaches a constant multiple of $M$: about $2M$ for AllReduce and about $M$ for AllGather, ReduceScatter, or AllToAll. Aggregate traffic still scales with the number of ranks. Second, the latency term grows linearly with $N$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
 
 ## Algorithm Selection {#sec-comm-foundations-algorithm-selection}
 
@@ -374,7 +375,7 @@ Modern clusters have a two-level topology: GPUs within a node are connected by N
 2. **Inter-node AllReduce** (InfiniBand): The per-node results are all-reduced across nodes. Only $N/8$ nodes participate, so the ring has $N/8$ steps instead of $N$.
 3. **Intra-node broadcast** (NVLink): Each node broadcasts the global result to its 8 local GPUs.
 
-The hierarchical approach reduces the inter-node ring size from $N$ to $N/8$, cutting the latency term by 8$\times$ and confining the bandwidth-hungry phases to the fast intra-node links. NCCL uses hierarchical algorithms by default when it detects a multi-node topology---this is the standard execution path for all large-scale training.
+The hierarchical approach reduces the inter-node ring size from $N$ to $N/8$, cutting the latency term by 8$\times$ and confining the bandwidth-hungry phases to the fast intra-node links. NCCL selects among topology-aware algorithms such as Ring, Tree, CollNet variants, NVLS/NVLSTree, and PAT based on the collective, message size, topology, architecture, and version; hierarchical communication is common on multi-node systems but is not a universal default.
 
 Understanding the cost structure of collectives enables reasoning about data-parallel overhead. But pipeline parallelism introduces a different kind of overhead: idle time caused by the sequential dependency between pipeline stages. The next section quantifies that cost.
 

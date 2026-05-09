@@ -1203,7 +1203,7 @@ The Four Pillars provide the evaluative lens; now we apply it to the first concr
 
 ## Data Acquisition {#sec-data-engineering-strategic-data-acquisition-418f}
 
-\index{Data Acquisition!strategies}ImageNet's 14.2 million labeled images took 49,000 crowdsourced workers to assemble. GPT-3's training corpus required petabytes of web text filtered through elaborate quality pipelines. Our KWS system needs 23 million audio samples spanning fifty languages, a volume that no single collection method can economically provide. These examples illustrate a recurring reality: data acquisition is a strategic decision that determines a system's capabilities and limitations. Sourcing strategies (existing datasets, web scraping, crowdsourcing, synthetic generation) trade off quality, cost, scale, and ethics differently. No single approach satisfies all requirements; successful ML systems combine multiple strategies, balancing complementary strengths against competing constraints.
+\index{Data Acquisition!strategies}ImageNet's 14.2 million labeled images took 49,000 crowdsourced workers to assemble. GPT-3's training corpus used tens of terabytes of raw Common Crawl text filtered to hundreds of gigabytes, combined with curated web, books, and Wikipedia data [@brown2020language]. Our KWS system needs 23 million audio samples spanning fifty languages, a volume that no single collection method can economically provide. These examples illustrate a recurring reality: data acquisition is a strategic decision that determines a system's capabilities and limitations. Sourcing strategies (existing datasets, web scraping, crowdsourcing, synthetic generation) trade off quality, cost, scale, and ethics differently. No single approach satisfies all requirements; successful ML systems combine multiple strategies, balancing complementary strengths against competing constraints.
 
 Our KWS system illustrates these interconnected requirements. Achieving 98 percent accuracy across diverse acoustic environments requires representative data spanning accents, ages, and recording conditions (quality). Maintaining consistent detection despite device variations demands data from varied hardware (reliability). Supporting millions of concurrent users requires data volumes that manual collection cannot economically provide (scalability). Protecting user privacy in always-listening systems constrains collection methods and requires careful anonymization (governance). These interconnected requirements demonstrate why acquisition strategy must be evaluated systematically rather than through ad-hoc source selection.
 
@@ -2025,35 +2025,52 @@ The following listing demonstrates how these mechanical expectations translate t
 ```{.python}
 import great_expectations as gx
 
-# Create a data context and load training data
+# Create a data context
 context = gx.get_context()
-batch = context.get_batch("training_users")
 
 # Define an expectation suite as executable quality contract
-suite = context.create_expectation_suite("user_data_quality")
+suite = gx.ExpectationSuite(name="user_data_quality")
+suite = context.suites.add(suite)
 
 # Range validation: prevents physiologically impossible values
-batch.expect_column_values_to_be_between(
-    column="age", min_value=0, max_value=120
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToBeBetween(
+        column="age", min_value=0, max_value=120
+    )
 )
 
 # Null detection: ensures primary key integrity for joins
-batch.expect_column_values_to_not_be_null(column="user_id")
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToNotBeNull(column="user_id")
+)
 
 # Uniqueness: prevents duplicate training examples
-batch.expect_column_values_to_be_unique(column="user_id")
+suite.add_expectation(
+    gx.expectations.ExpectColumnValuesToBeUnique(column="user_id")
+)
 
 # Categorical validation: detects unexpected values
 # from upstream changes
-batch.expect_column_distinct_values_to_be_in_set(
-    column="country_code", value_set=["US", "CA", "UK", "DE", "FR"]
+suite.add_expectation(
+    gx.expectations.ExpectColumnDistinctValuesToBeInSet(
+        column="country_code",
+        value_set=["US", "CA", "UK", "DE", "FR"],
+    )
 )
 
-# Run validation and fail pipeline if expectations not met
-results = context.run_validation_operator(
-    "action_list_operator", assets_to_validate=[batch]
+# Link the suite to a preconfigured Batch Definition and run
+# validation
+# (the Batch Definition connects GX to the training_users data asset)
+validation_definition = gx.ValidationDefinition(
+    name="training_users_validation",
+    data=batch_definition,
+    suite=suite,
 )
-if not results["success"]:
+validation_definition = context.validation_definitions.add(
+    validation_definition
+)
+results = validation_definition.run()
+if not results.success:
     raise ValueError(f"Data quality check failed: {results}")
 ```
 
@@ -2620,7 +2637,7 @@ class EtlEltCost:
 
 :::
 
-When implementing streaming components within ETL/ELT architectures, distributed systems principles become critical. The CAP theorem (consistency, availability, partition-tolerance)\index{CAP Theorem!streaming systems}[^fn-cap-theorem-ml-storage], which states that distributed systems cannot simultaneously guarantee Consistency (all nodes see the same data), Availability (the system remains operational), and Partition tolerance (the system continues despite network failures), constrains streaming system design choices. Apache Kafka\index{Apache Kafka!event streaming}[^fn-kafka-ordering-guarantee] emphasizes consistency and partition tolerance, making it well-suited for reliable event ordering but potentially experiencing availability issues during network partitions. Apache Pulsar emphasizes availability and partition tolerance, providing better fault tolerance but with relaxed consistency guarantees. Amazon Kinesis balances all three properties through careful configuration but requires understanding these trade-offs for proper deployment.
+When implementing streaming components within ETL/ELT architectures, distributed systems principles become critical. The CAP theorem (consistency, availability, partition-tolerance)\index{CAP Theorem!streaming systems}[^fn-cap-theorem-ml-storage], which states that distributed systems cannot simultaneously guarantee Consistency (all nodes see the same data), Availability (the system remains operational), and Partition tolerance (the system continues despite network failures), constrains streaming system design choices. Apache Kafka\index{Apache Kafka!event streaming}[^fn-kafka-ordering-guarantee] emphasizes consistency and partition tolerance, making it well-suited for reliable event ordering but potentially experiencing availability issues during network partitions. Apache Pulsar emphasizes availability and partition tolerance, providing better fault tolerance but with relaxed consistency guarantees. Amazon Kinesis exposes operational trade-offs through shard capacity, retention, and producer/consumer configuration, but under CAP it still cannot guarantee both strict consistency and availability during a network partition.
 
 [^fn-kafka-ordering-guarantee]: **Apache Kafka**: Kafka achieves its ordering guarantee by using a partitioned, leader-based log; all writes for a partition must go through a single leader replica. This design prioritizes Consistency and Partition tolerance, as the system will halt writes to a partition if the leader becomes unreachable rather than risk an inconsistent state (sacrificing Availability). This trade-off manifests as a tangible availability gap, where a partition can become unwritable for several seconds during a leader re-election event. \index{Kafka!ordering guarantee}
 
@@ -2759,15 +2776,15 @@ Data locality becomes critical at this scale. At 10 GB/s peak throughput, transf
 **Option A (Centralized)**:
 
 - Transfer 1 TB at 10 GB/s network: **100 seconds**
-- Compute mean on single node: **~1 second**
-- Total: **~101 seconds**
+- Compute mean on single node: **~5--20 seconds** at RAM bandwidth
+- Total: **~105--120 seconds**
 
 **Option B (Distributed)**:
 
-- Each node computes local mean: **~0.01 seconds** (10 GB at RAM speed)
+- Each node computes local mean: **~0.05--0.2 seconds** (10 GB at RAM speed)
 - Send 100 partial means (8 bytes each): **<1 ms**
 - Aggregate: **negligible**
-- Total: **~0.01 seconds** (10,000$\times$ faster)
+- Total: **~0.05--0.2 seconds** (hundreds to a few thousand times faster)
 
 **The Engineering Lesson**: Operations that *reduce* data (sum, mean, count) should always run locally first. Operations that *expand* data (joins, cross-products) face unavoidable network costs. Pipeline design should minimize data movement by pushing computation to where data resides, the compute-follows-data principle central to systems like MapReduce [@dean2004mapreduce], Spark [@zaharia2010spark], and modern ML frameworks.
 
@@ -2824,7 +2841,7 @@ Classification labels\index{Classification Labels!storage requirements} represen
 
 Bounding boxes\index{Bounding Box!definition}\index{Bounding Box!bounding box annotation, localization}\index{Object Detection!bounding boxes} extend beyond simple classification by identifying object locations, drawing a box around each object of interest. Our system now needs to track not just what objects exist, but where they are in each frame. This spatial information introduces new storage and processing challenges, especially when tracking moving objects across video frames. Each bounding box requires storing four coordinates (x, y, width, height) plus the object class, multiplying storage by 5$\times$ compared to classification. Bounding box annotation requires pixel-precise positioning that takes 10--20$\times$ longer than classification, dramatically affecting labeling throughput and cost.
 
-Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the most comprehensive information by classifying objects at the pixel level, highlighting each object in a distinct color. For our traffic monitoring system, this might mean precisely outlining each vehicle, pedestrian, and road sign. These detailed annotations significantly increase our storage and processing requirements. A segmentation mask for a $1920{\times}1080$ image requires two million labels (one per pixel), compared to perhaps ten bounding boxes or a single classification label. This ~200,000$\times$ storage increase relative to bounding boxes, combined with the hours required per image for manual segmentation, makes this approach suitable only when pixel-level precision is essential.
+Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the most comprehensive information by classifying objects at the pixel level, highlighting each object in a distinct color. For our traffic monitoring system, this might mean precisely outlining each vehicle, pedestrian, and road sign. These detailed annotations significantly increase our storage and processing requirements. A segmentation mask for a $1920{\times}1080$ image requires about two million labels (one per pixel), compared to perhaps ten bounding boxes or a single classification label. If each box stores four coordinates, that is roughly 50,000$\times$ more scalar label entries than ten boxes before accounting for per-value encoding, and the hours required per image for manual segmentation make this approach suitable only when pixel-level precision is essential.
 
 ::: {#fig-labels fig-env="figure" fig-pos="htb" fig-cap="**Data annotation granularity**: Four label types applied to the same image of a dog on a blanket: a classification label, a bounding box, a segmentation mask, and a free-text transcription. Each type progressively increases labeling cost and storage requirements while providing a richer training signal." fig-alt="Four-row table showing label types for a dog on a blanket: classification (Dog, Blanket, No cat), a bounding box around the dog, a segmentation mask on the dog, and a text transcription."}
 
@@ -3142,7 +3159,7 @@ Beyond the core storage capabilities we have examined, ML workloads introduce un
 
 Modern ML models contain millions to billions of parameters\index{Model Parameters!storage requirements} requiring storage and retrieval patterns fundamentally different from traditional data. GPT-3 [@brown2020language] requires approximately `{python} DataEngineeringSetup.gpt3_fp32_str` gigabytes for model weights when stored in FP32 format (`{python} DataEngineeringSetup.gpt3_params_str` billion parameters times 4 bytes), though practical deployments typically use FP16 (`{python} DataEngineeringSetup.gpt3_fp16_str` GB) or quantized formats for reduced storage and faster inference (see @sec-model-compression for quantization techniques). Even at FP16 precision, this exceeds many organizations' entire operational databases. The trajectory reveals accelerating scale: from AlexNet's `{python} DataEngineeringSetup.alexnet_params_str` million parameters [@krizhevsky2012imagenet] to GPT-3's `{python} DataEngineeringSetup.gpt3_params_str` billion parameters [@brown2020language], model size grew approximately `{python} DataEngineeringSetup.model_growth_str`-fold in eight years (`{python} DataEngineeringSetup.alexnet_params_str` M to `{python} DataEngineeringSetup.gpt3_params_str` B parameters). Storage systems must handle these dense numerical arrays efficiently for both capacity and access speed. Unlike typical files where sequential organization matters for readability, model weights benefit from block-aligned storage enabling parallel reads across parameter groups. When multiple GPUs need to read model data from shared storage, whether during training initialization or checkpoint loading, storage systems must deliver aggregate bandwidth approaching network interface limits, often 25 Gbps or higher, without introducing bottlenecks that would idle expensive compute resources.
 
-The iterative nature of ML development introduces versioning requirements\index{Model Versioning!requirements} qualitatively different from traditional software. Git excels at tracking code changes where files are predominantly text with small incremental modifications, but it fails for large binary files where even small model changes result in entirely new checkpoints. Storing ten versions of a 10 GB model naively would consume 100 GB, but most ML versioning systems store only deltas between versions, reducing storage proportionally to how much models actually change. Tools like DVC (Data Version Control) and MLflow\index{MLflow!model versioning} maintain pointers to model artifacts rather than storing copies, enabling efficient versioning while preserving the ability to reproduce any historical model. A typical ML project generates hundreds of model versions during hyperparameter tuning—one version per training run as engineers explore learning rates, batch sizes, architectures, and regularization strategies. Without systematic versioning capturing training configuration, accuracy metrics, and training data version alongside model weights, reproducing results becomes impossible when yesterday's model performed better than today's but teams cannot identify which configuration produced it. This reproducibility challenge connects directly to governance requirements: regulatory compliance often requires demonstrating exactly which data and process produced specific model predictions, a concern addressed by the data debt and remediation strategies in @sec-data-engineering-data-debt-hidden-liability-3335.
+The iterative nature of ML development introduces versioning requirements\index{Model Versioning!requirements} qualitatively different from traditional software. Git excels at tracking code changes where files are predominantly text with small incremental modifications, but it fails for large binary files where even small model changes result in entirely new checkpoints. Storing ten versions of a 10 GB model naively would consume 100 GB; ML versioning systems typically keep lightweight metadata pointers in Git or a registry and store artifacts in external content-addressed storage. Identical files can be deduplicated, but changed binary checkpoints are often stored as separate objects unless the backend adds its own delta compression. Tools like DVC (Data Version Control) and MLflow\index{MLflow!model versioning} maintain pointers to model artifacts rather than storing copies, enabling efficient versioning while preserving the ability to reproduce any historical model. A typical ML project generates hundreds of model versions during hyperparameter tuning—one version per training run as engineers explore learning rates, batch sizes, architectures, and regularization strategies. Without systematic versioning capturing training configuration, accuracy metrics, and training data version alongside model weights, reproducing results becomes impossible when yesterday's model performed better than today's but teams cannot identify which configuration produced it. This reproducibility challenge connects directly to governance requirements: regulatory compliance often requires demonstrating exactly which data and process produced specific model predictions, a concern addressed by the data debt and remediation strategies in @sec-data-engineering-data-debt-hidden-liability-3335.
 
 Large-scale training generates substantial intermediate data requiring storage systems to handle concurrent read/write operations efficiently. When training jobs use multiple GPUs, each processing unit works on different portions of data, requiring storage systems to handle many simultaneous reads and writes. The specific patterns depend on the parallelization strategy employed, which @sec-model-training examines in detail. From a storage perspective, systems must handle concurrent I/O at rates proportional to the number of processing units, with each potentially writing tens to hundreds of megabytes of intermediate results during model updates. Memory optimization strategies like *activation checkpointing\index{Activation Checkpointing!memory optimization}* (also called gradient checkpointing\index{Gradient Checkpointing}) trade computation for storage by discarding intermediate activations during the forward pass and recomputing them during backpropagation. This approach reduces GPU memory requirements but increases storage I/O as intermediate values write to disk. Storage systems must provide low-latency access to support efficient coordination. If workers spend more time waiting for storage than performing computations, parallel processing becomes counterproductive regardless of the specific training approach used.
 
@@ -3381,9 +3398,9 @@ Storage performance optimization extends beyond format and compression to data l
 
 \index{ML Lifecycle!storage requirements}Storage requirements evolve substantially as ML systems progress from development through deployment. The same dataset is accessed through fundamentally different patterns during exploratory analysis (random sampling for visualization), model training (sequential scanning for epochs), and production serving (random access for individual predictions). These diverse patterns require storage architectures that accommodate all three access modes.
 
-During development, flexibility matters more than raw performance. The key challenge is managing dataset versions without overwhelming storage capacity: ten experiments on a 100 GB dataset would naively require 1 TB of copies. Tools like DVC address this by tracking versions through pointers and storing only deltas. Governance considerations demand tiered access controls where synthetic or anonymized datasets are broadly available for experimentation, while production data containing sensitive information requires approval and audit trails.
+During development, flexibility matters more than raw performance. The key challenge is managing dataset versions without overwhelming storage capacity: ten experiments on a 100 GB dataset would naively require 1 TB of copies. Tools like DVC address this by tracking versions through metadata pointers and content-addressed artifact storage, deduplicating identical content when possible. Governance considerations demand tiered access controls where synthetic or anonymized datasets are broadly available for experimentation, while production data containing sensitive information requires approval and audit trails.
 
-Training phase requirements shift dramatically toward throughput. Modern deep learning processes massive datasets repeatedly across dozens or hundreds of epochs, making I/O efficiency critical. Training ResNet-50 on ImageNet across eight GPUs requires loading approximately 40,000 images per second—roughly 500 MB/s of decompressed data. Storage unable to sustain this throughput idles GPUs, directly increasing infrastructure costs. The feature computation placement trade-off (@sec-data-engineering-feature-computation-placement-a998) is especially acute here: precomputing features achieves 30-fold storage reduction (150 KB images to 5 KB vectors) but introduces staleness risk when extraction logic changes.
+Training phase requirements shift dramatically toward throughput. Modern deep learning processes massive datasets repeatedly across dozens or hundreds of epochs, making I/O efficiency critical. Training ResNet-50 on ImageNet across eight GPUs at 40,000 images per second would require roughly 6 GB/s for 150 KB compressed images, and substantially more if decoded FP32 tensors are staged. Storage unable to sustain this throughput idles GPUs, directly increasing infrastructure costs. The feature computation placement trade-off (@sec-data-engineering-feature-computation-placement-a998) is especially acute here: precomputing features achieves 30-fold storage reduction (150 KB images to 5 KB vectors) but introduces staleness risk when extraction logic changes.
 
 Deployment and serving requirements prioritize low-latency random access.\index{Inference!real-time, storage requirements} A recommendation system serving 10,000 requests per second with 10 ms latency budgets requires 100,000 random reads per second, achievable only through in-memory databases like Redis\index{In-memory Database!feature serving}\index{In-memory Database!ML serving} or aggressive caching. Edge deployment\index{Edge Deployment!storage} adds further constraints: limited device storage, intermittent connectivity, and the need for model updates without disrupting inference, typically addressed through tiered storage\index{Tiered Storage!edge deployment} where models cache locally while reference data pulls from the cloud. Model versioning\index{Model Versioning!deployment patterns} must support smooth transitions between versions, rapid rollback, and serving multiple versions simultaneously for A/B testing, operational patterns examined in @sec-ml-operations.
 

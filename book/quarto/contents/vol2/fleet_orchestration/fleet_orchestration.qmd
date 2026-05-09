@@ -155,13 +155,13 @@ In the Fleet Stack (@sec-vol2-introduction), orchestration operates at the Distr
 # │ How: GPU_Count * hourly_rate * 24.
 # │
 # │ Imports: mlsysim.core.constants (GPUS_PER_HOST, A100_MEM_CAPACITY, H100_MEM_CAPACITY,
-# │          GB), mlsysim.book (fmt, check)
+# │          GiB), mlsysim.book (fmt, check)
 # │ Exports: FleetSetup.cluster_size_str, FleetSetup.daily_cost_str, FleetSetup.annual_cost_str,
 # │          daily_waste_str, annual_waste_str, equivalent_gpus_str,
 # │          gpu_hour_cost_usd, idle_fraction, util_low, util_high,
 # │          a100_mem_str, h100_mem_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import GPUS_PER_HOST, A100_MEM_CAPACITY, H100_MEM_CAPACITY, GB
+from mlsysim.core.constants import GPUS_PER_HOST, A100_MEM_CAPACITY, H100_MEM_CAPACITY, GiB
 from mlsysim.fmt import fmt, check
 
 class ClusterEconomicsContext:
@@ -194,8 +194,8 @@ class ClusterEconomicsContext:
     daily_waste_str = fmt(daily_waste, precision=0)
     annual_waste_str = f"{annual_waste_m:.0f}"
     equivalent_gpus_str = fmt(gpu_gain, precision=0)
-    a100_mem_str = f"{a100_mem.m_as(GB):.0f}"
-    h100_mem_str = f"{h100_mem.m_as(GB):.0f}"
+    a100_mem_str = f"{a100_mem.m_as(GiB):.0f}"
+    h100_mem_str = f"{h100_mem.m_as(GiB):.0f}"
 ```
 
 To make the scheduling problem concrete, consider a research organization operating a `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster. Training GPT-3 required 1,024 V100 GPUs running continuously for 34 days [@brown2020language]. Imagine 100 such training jobs queued, alongside thousands of smaller experiments and inference workloads all competing for the same resources. The system must decide which jobs run, when they run, and where they run. A naive first-come-first-served policy would let the first few large jobs monopolize the cluster for weeks, starving smaller experiments that researchers need to iterate quickly. A strict fair-share policy would fragment GPUs across many small allocations, preventing any large job from assembling the contiguous thousand-GPU block it needs. Neither extreme works. The scheduler must navigate a multi-dimensional trade-off space where every decision affects throughput, fairness, cost, and researcher productivity simultaneously.
@@ -549,9 +549,9 @@ The fundamental distinction is between *imperative* and *declarative* resource m
 
 ### Slurm: The HPC heritage {#sec-fleet-orchestration-slurm}
 
-**Slurm**[^fn-slurm-hpc] (Simple Linux Utility for Resource Management) [@yoo2003] dominates HPC environments and extends naturally to GPU-intensive ML training. Originating from Lawrence Livermore National Laboratory in 2002, Slurm was designed for the distinctive requirements of scientific computing: long-running batch jobs, expensive shared hardware, and users who understand their resource needs. Its partition-based architecture maps well to heterogeneous accelerator pools, and its decades of deployment in national laboratories, university research clusters, and increasingly in industry training infrastructure have produced a mature, well-understood system.
+**Slurm Workload Manager**[^fn-slurm-hpc] [@yoo2003] dominates HPC environments and extends naturally to GPU-intensive ML training. Originating from Lawrence Livermore National Laboratory in 2002, Slurm was designed for the distinctive requirements of scientific computing: long-running batch jobs, expensive shared hardware, and users who understand their resource needs. Its partition-based architecture maps well to heterogeneous accelerator pools, and its decades of deployment in national laboratories, university research clusters, and increasingly in industry training infrastructure have produced a mature, well-understood system.
 
-[^fn-slurm-hpc]: **Slurm (Simple Linux Utility for Resource Management)**: Developed at Lawrence Livermore National Laboratory beginning in 2002, Slurm's centralized controller (`slurmctld`) provides strong consistency guarantees by maintaining a single authoritative view of all resource allocations. This architecture scales to approximately 10,000 nodes before scheduling throughput becomes a bottleneck, which is why the largest ML training clusters (10,000+ GPUs) often partition into multiple Slurm federations. \index{Slurm!scheduling}
+[^fn-slurm-hpc]: **Slurm Workload Manager**: Originally "SLURM," an acronym for Simple Linux Utility for Resource Management, the project dropped the acronym capitalization in 2012. Developed at Lawrence Livermore National Laboratory beginning in 2002, Slurm's centralized controller (`slurmctld`) provides strong consistency guarantees by maintaining a single authoritative view of all resource allocations. This architecture scales to approximately 10,000 nodes before scheduling throughput becomes a bottleneck, which is why the largest ML training clusters (10,000+ GPUs) often partition into multiple Slurm federations. \index{Slurm!scheduling}
 
 Slurm's scheduling model is fundamentally **imperative**\index{Imperative}: users submit job scripts specifying exact resource requirements, and the scheduler places jobs into partitions based on priority, fairness, and resource availability. This directness makes reasoning about allocation guarantees straightforward. When a user submits `sbatch --gres=gpu:8 --nodes=4`, Slurm guarantees that if the job starts, it will have exactly 32 GPUs across 4 nodes. The user knows precisely what they are getting, and the scheduler knows precisely what it must provide. The cost of this directness is that users must understand their resource needs precisely; requesting more than needed wastes resources, while requesting less causes out-of-memory errors or reduced performance.
 
@@ -639,7 +639,7 @@ This binary allocation model creates a significant inefficiency for inference wo
 
 : **A100 MIG Profiles**\index{A100 MIG Profiles}: Multi-Instance GPU configurations trade GPU memory and compute resources for increased sharing density. Each profile provides hardware-isolated resources, making MIG suitable for multi-tenant inference clusters where workloads from different teams or customers must not interfere. The SM (Streaming Multiprocessor) count determines compute throughput within each instance. {#tbl-fleet-orchestration-mig-profiles}
 
-As @tbl-fleet-orchestration-mig-profiles summarizes, gang scheduling in Kubernetes requires extensions beyond the default scheduler, which was designed for microservice workloads where individual pods are independently schedulable. The default scheduler evaluates pods one at a time, placing each on the best available node. For a distributed training job with 64 pods, this means 64 independent scheduling decisions, with no guarantee that all 64 will succeed. If the cluster has resources for 60 pods but not 64, the default scheduler will place 60 pods and leave the remaining 4 pending, creating exactly the partial-allocation waste that gang scheduling prevents.
+As @tbl-fleet-orchestration-mig-profiles summarizes, default Kubernetes pod scheduling is independent and many production ML clusters still use Volcano, Coscheduling, or Kueue for gang semantics. Upstream Kubernetes also has alpha, disabled-by-default gang scheduling via PodGroup, so this area is evolving. The default scheduler evaluates pods one at a time, placing each on the best available node. For a distributed training job with 64 pods, this means 64 independent scheduling decisions, with no guarantee that all 64 will succeed. If the cluster has resources for 60 pods but not 64, the default scheduler may place 60 pods and leave the remaining 4 pending, creating exactly the partial-allocation waste that gang scheduling prevents.
 
 The **Volcano**[^fn-volcano-k8s] batch scheduler and **Coscheduling** scheduler plugin address this gap by implementing gang semantics through **PodGroup**\index{PodGroup} abstractions. A PodGroup declares that a set of pods must be scheduled together, specifying a minimum member count that must be satisfiable before any pod in the group starts. The scheduler evaluates the entire group atomically: either all minimum members can be placed, and they are placed simultaneously, or none are placed and the group waits in the queue. This transforms Kubernetes' pod-level scheduling into job-level scheduling that respects the all-or-nothing requirements of distributed training.
 
@@ -679,15 +679,15 @@ Many production environments recognize that neither paradigm alone satisfies all
 
 The following table summarizes the key trade-offs between the two paradigms across the dimensions most relevant to ML workloads:
 
-| **Dimension**          | **Slurm**                                                               | **Kubernetes**                                                            |
-|:-----------------------|:------------------------------------------------------------------------|:--------------------------------------------------------------------------|
-| **Scheduling model**   | Imperative: user specifies exact resources and scheduler allocates them | Declarative: user specifies desired state, system reconciles continuously |
-| **Failure handling**   | External monitoring and manual resubmission                             | Self-healing through control loops                                        |
-| **Gang scheduling**    | Native support through backfill scheduler                               | Requires extensions (Volcano, Coscheduling)                               |
-| **Fair-share**         | Mature multi-factor priority with configurable decay                    | Kueue provides basic fair-share with ClusterQueue borrowing               |
-| **Container overhead** | None (bare-metal execution)                                             | 1 to 5 percent network overhead, container startup time                   |
-| **Service management** | No native support for long-running services                             | Native Deployment, rolling updates, health checks                         |
-| **Ecosystem**          | MPI, OpenMP, scientific computing libraries                             | Cloud-native, microservices mesh, observability stack                     |
+| **Dimension**                    | **Slurm**                                                                                                   | **Kubernetes**                                                                                                                  |
+|:---------------------------------|:------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------|
+| **Scheduling model**             | Imperative: user specifies exact resources and scheduler allocates them                                     | Declarative: user specifies desired state, system reconciles continuously                                                       |
+| **Failure handling**             | External monitoring and manual resubmission                                                                 | Self-healing through control loops                                                                                              |
+| **Gang/atomic multi-node start** | Atomic job allocation plus backfill; Slurm "gang scheduling" specifically refers to time-slicing/preemption | Production clusters commonly use PodGroup-based support such as Volcano, Coscheduling, Kueue, or upstream alpha gang scheduling |
+| **Fair-share**                   | Mature multi-factor priority with configurable decay                                                        | Kueue provides basic fair-share with ClusterQueue borrowing                                                                     |
+| **Container overhead**           | None (bare-metal execution)                                                                                 | 1 to 5 percent network overhead, container startup time                                                                         |
+| **Service management**           | No native support for long-running services                                                                 | Native Deployment, rolling updates, health checks                                                                               |
+| **Ecosystem**                    | MPI, OpenMP, scientific computing libraries                                                                 | Cloud-native, microservices mesh, observability stack                                                                           |
 
 : **Slurm vs. Kubernetes for ML Workloads**\index{Slurm vs. Kubernetes for ML Workloads}: The two paradigms reflect different design philosophies optimized for different workload characteristics. Most production ML platforms use elements of both, with Slurm managing dedicated training clusters and Kubernetes managing inference serving and pipeline orchestration. {#tbl-fleet-orchestration-paradigm-comparison}
 
@@ -1974,14 +1974,14 @@ As @tbl-fleet-orchestration-debug-inventory shows, the physical topology creates
 - 8 medium jobs requesting 32 A100-40 GB GPUs (total demand: 256 A100-40 GB)
 - Zero jobs explicitly requesting V100 resources
 
-The scheduler's allocation log shows A100-80 GB GPUs at 95 percent allocation (380/400), but with only 5 jobs actually running because gang scheduling holds resources for jobs that cannot yet be fully satisfied. The remaining 10 large jobs each hold partial allocations (64 to 96 GPUs reserved) while waiting for additional A100-80 GB resources that never become available, creating a **hold-and-wait deadlock pattern**.
+The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few running jobs, while the remaining large jobs stay pending because no full 64-GPU A100-80 GB allocation can be formed. The result is not a standard Slurm partial-allocation deadlock; it is a policy-induced utilization gap where strict resource requests leave A100-40 GB and V100 pools idle while A100-80 GB jobs wait.
 
 **Diagnosis**\index{Diagnosis}: Multiple pathologies compound to create low utilization:
 
 1. **Over-specification**\index{Over-Specification}: Model memory analysis reveals that 12 of the 15 large jobs actually require only 35 GB peak memory per GPU, well within A100-40 GB capacity. Users copied job templates specifying A100-80 GB without recalculating requirements.
 2. **Pool fragmentation**\index{Pool Fragmentation}: The strict homogeneity requirement means a 64-GPU job requesting "A100-80 GB" cannot use any A100-40 GB GPUs, even when 300 A100-40 GB GPUs sit idle.
 3. **Stranded resources**\index{Stranded Resources}: No jobs target V100 hardware because researchers perceive it as "legacy." The 200 V100 GPUs contribute zero productive work despite consuming power and cooling.
-4. **Gang scheduling deadlock**\index{Gang Scheduling!deadlock}: Without a timeout or preemption policy, partially-satisfied jobs hold resources indefinitely, blocking other work.
+4. **Atomic-allocation starvation**\index{Gang Scheduling!starvation}: Large jobs remain pending until a full compatible allocation appears, while other resource pools sit idle because policy prevents compatible substitutions or backfill.
 
 **Root Cause (Policy-Infrastructure Mismatch)**: Job templates and organizational practices evolved for a homogeneous A100-80 GB cluster. When infrastructure expanded with heterogeneous hardware, the Distribution Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
 
@@ -1989,7 +1989,7 @@ The scheduler's allocation log shows A100-80 GB GPUs at 95 percent allocation (3
 
 1. **Capability-based scheduling**\index{Capability-Based Scheduling}: Replace exact GPU type requests with capability requirements. Instead of `--gres=gpu:a100-80g:64`, jobs specify `--constraint="gpu_mem>=40 GB"` and let the scheduler select appropriate hardware. This eliminates over-specification by expressing what the job *needs* rather than what hardware it *prefers*. The scheduler can then match jobs to the cheapest available hardware that meets their requirements.
 2. **Topology-aware placement**\index{Topology-Aware Placement}: For jobs requiring tensor parallelism (identified by requesting more than 1 GPU per node), add constraint `--constraint="nvlink"` to ensure placement on NVLink-connected nodes. Data-parallel jobs that request only 1 GPU per node can omit this constraint, enabling scheduling on V100 nodes where NVLink is absent but data parallelism works efficiently over any network.
-3. **Gang scheduling with timeout**: Configure `SchedulerParameters=bf_continue,bf_window=7200` to enable backfill scheduling and prevent indefinite resource holding. Jobs waiting more than 2 hours for gang completion release their partial allocations back to the free pool. This timeout prevents the accumulating deadlock where partially-satisfied jobs hold resources indefinitely.
+3. **Backfill and queue policy**: Enable or tune backfill scheduling so smaller compatible jobs can use otherwise idle pools without delaying higher-priority reservations. Revise resource constraints and queue priorities so jobs that can run on A100-40 GB or V100 hardware are not blocked behind A100-80 GB-only requests. Do not rely on `bf_window` or `bf_continue` as a gang-completion timeout; those parameters control backfill lookahead and scheduler behavior, not release of partial GPU allocations.
 4. **V100 workload seeding**\index{V100 Workload Seeding}: Create a "legacy-gpu" queue with lower cost accounting (reflecting V100's lower capability) to incentivize researchers to submit appropriate workloads to V100 hardware. Small-scale experiments, single-GPU development, and data-parallel training of models under 30B parameters can run effectively on V100s.
 5. **Workload-hardware matching guidance**\index{Workload-Hardware Matching Guidance}: Provide researchers with a decision matrix mapping model sizes to minimum GPU memory requirements, reducing over-specification by making the correct resource request the easiest choice.
 

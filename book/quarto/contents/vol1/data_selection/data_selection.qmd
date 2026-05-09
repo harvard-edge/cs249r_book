@@ -331,8 +331,9 @@ To make this concrete, consider training a model in the **GPT-2/Llama Lighthouse
 # │ Context: "Defining Data Selection" section - 70B Llama model example
 # │
 # │ Goal: Demonstrate the "Data Wall" with a concrete scale example.
-# │ Show: That cluster capacity (10T tokens) already exceeds available quality data (5T).
-# │ How: Contrast H100 compute throughput with public dataset token counts.
+# │ Show: That cluster capacity can exceed a single curated corpus scale even when
+# │       the broader public text stock is much larger.
+# │ How: Contrast H100 compute throughput with public and filtered corpus estimates.
 # │
 # │ Imports: mlsysim.book (fmt)
 # │ Exports: llama_params_str, h100_count_str, tokens_capacity_str, etc.
@@ -353,24 +354,26 @@ class ComputeDataGap:
     months = 3
     model = Models.Language.Llama2_70B
 
-    tokens_available = 5e12 # 5T tokens (RedPajama/RefinedWeb scale)
-    tokens_capacity = 10e12 # Capacity of the cluster
+    filtered_corpus_tokens = 5e12 # 5T tokens (single filtered-corpus scale)
+    public_text_stock = 300e12    # quality/repetition-adjusted public text stock estimate
+    tokens_capacity = 10e12       # capacity of the cluster
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    gap_ratio = tokens_capacity/tokens_available
+    corpus_reuse_ratio = tokens_capacity/filtered_corpus_tokens
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(gap_ratio >= 1.0, f"Compute ({tokens_capacity:.1e}) is less than Data ({tokens_available:.1e}). No Data Wall.")
+    check(public_text_stock > tokens_capacity, "Public stock estimate should exceed the example training run capacity.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_count_str = fmt(h100_count, precision=0, commas=True)
     tokens_capacity_str = fmt(tokens_capacity/TRILLION, precision=0, commas=False) + "T"
-    tokens_available_str = fmt(tokens_available/TRILLION, precision=0, commas=False) + "T"
-    compute_gap_str = fmt(gap_ratio, precision=0, commas=False)
+    filtered_corpus_tokens_str = fmt(filtered_corpus_tokens/TRILLION, precision=0, commas=False) + "T"
+    public_text_stock_str = fmt(public_text_stock/TRILLION, precision=0, commas=False) + "T"
+    corpus_reuse_ratio_str = fmt(corpus_reuse_ratio, precision=0, commas=False)
     training_months_str = fmt(months, precision=0, commas=False)
 ```
 
-The compute budget (`{python} ComputeDataGap.h100_count_str` H100 GPUs for `{python} ComputeDataGap.training_months_str` months) represents tens of millions of dollars and can process over `{python} ComputeDataGap.tokens_capacity_str` tokens. Yet only ~`{python} ComputeDataGap.tokens_available_str` tokens of deduplicated, filtered web text exist, leaving a `{python} ComputeDataGap.compute_gap_str`$\times$ gap between what compute can process and what quality data can fill. The team faces three options: train on the same data for multiple epochs (diminishing returns after epochs 2--3), lower quality thresholds to include more data (degrades model quality), or invest in data selection through better filtering, curriculum design, and synthetic augmentation to extract more learning from each token. The third option is increasingly the dominant approach.
+The compute budget (`{python} ComputeDataGap.h100_count_str` H100 GPUs for `{python} ComputeDataGap.training_months_str` months) represents tens of millions of dollars and can process over `{python} ComputeDataGap.tokens_capacity_str` tokens. Estimates of quality- and repetition-adjusted public human-generated text are on the order of `{python} ComputeDataGap.public_text_stock_str` tokens, far larger than a single curated web corpus. The practical bottleneck is narrower: how much of that stock is accessible, legally usable, high quality, deduplicated, and useful for the target distribution. If a team has only a `{python} ComputeDataGap.filtered_corpus_tokens_str` filtered corpus ready for use, the compute budget can already process it roughly `{python} ComputeDataGap.corpus_reuse_ratio_str`$\times$ over. The team faces three options: train on the same data for multiple epochs (diminishing returns after epochs 2--3), lower quality thresholds to include more data (which can degrade model quality), or invest in data selection through better filtering, curriculum design, and synthetic augmentation to extract more learning from each token. The third option is increasingly the dominant approach.
 
 The data selection imperative applies across model architectures, though the bottlenecks differ. Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are **memory bandwidth-bound** during inference (though often compute-bound during training as well) and still benefit enormously from data selection during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs. Because data selection benefits every architecture regardless of its dominant bottleneck, the appropriate framing is systemic rather than purely statistical.
 
@@ -1003,7 +1006,7 @@ class IcrCoresetComparison:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     m_resnet = Models.ResNet50
     resnet50_fwd_gflops_value = m_resnet.inference_flops.m_as(GFLOPs)
-    resnet50_fwdbwd_gflops_value = (m_resnet.inference_flops * 2).m_as(GFLOPs)
+    resnet50_fwdbwd_gflops_value = (m_resnet.inference_flops * 3).m_as(GFLOPs)
     full_epoch_flops_value = imagenet_size_value * resnet50_fwdbwd_gflops_value * BILLION
 
     icr_random_value = acc_gain_random_value/full_epoch_flops_value
@@ -1020,7 +1023,7 @@ class IcrCoresetComparison:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     resnet50_fwd_gflops_str = fmt(m_resnet.inference_flops.to(GFLOPs), precision=1)
-    resnet50_fwdbwd_gflops_str = fmt((m_resnet.inference_flops * 2).to(GFLOPs), precision=1)
+    resnet50_fwdbwd_gflops_str = fmt((m_resnet.inference_flops * 3).to(GFLOPs), precision=1)
     full_epoch_flops_str = f"{full_epoch_flops_value:.2e}"
     icr_random_str = f"{icr_random_value:.1e}"
     imagenet_size_str = fmt(imagenet_size_value/MILLION, precision=2) + "M"
@@ -1041,7 +1044,7 @@ class IcrCoresetComparison:
 **Setup**:
 
 - Dataset: ImageNet (`{python} IcrCoresetComparison.imagenet_size_str` images)
-- Model: ResNet-50 Lighthouse (~`{python} IcrCoresetComparison.resnet50_fwd_gflops_str` GFLOPs per forward pass, ~`{python} IcrCoresetComparison.resnet50_fwdbwd_gflops_str` GFLOPs forward + backward)
+- Model: ResNet-50 Lighthouse (~`{python} IcrCoresetComparison.resnet50_fwd_gflops_str` GFLOPs per forward pass, roughly `{python} IcrCoresetComparison.resnet50_fwdbwd_gflops_str` GFLOPs for a forward plus backward training step, depending on implementation)
 - One epoch: `{python} IcrCoresetComparison.imagenet_size_str` $\times$ `{python} IcrCoresetComparison.resnet50_fwdbwd_gflops_str` GFLOPs = **`{python} IcrCoresetComparison.full_epoch_flops_str` FLOPs**
 - Accuracy improvement per epoch (early training): ~`{python} IcrCoresetComparison.acc_gain_random_str` percent points
 
@@ -1389,7 +1392,7 @@ train_full_model(model, coreset)  # 10x faster training
 ### Data deduplication {#sec-data-selection-data-deduplication-6c20}
 
 \index{Deduplication!definition}
-While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets what to remove: exact and near-duplicates. Deduplication provides immediate efficiency gains with no accuracy penalty and requires no model training. This makes it the most accessible optimization in data selection, offering guaranteed compute savings with zero risk of degrading model quality.
+While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets what to remove: exact and near-duplicates. Deduplication can provide immediate efficiency gains, especially for byte-for-byte duplicates, and requires no model training. This makes it one of the most accessible optimizations in data selection, but near-duplicate thresholds must be validated so the pipeline does not remove useful distributional signal.
 
 \index{Deduplication!hash-based, exact matching}
 The simplest form of deduplication (introduced as a data engineering pipeline stage in @sec-data-engineering-systematic-data-processing-aebc, and here elevated to an optimization lever) uses hash-based methods for exact matches. By computing a cryptographic hash (MD5 or SHA-256) for each sample and removing those with identical hashes, practitioners can eliminate byte-for-byte duplicates that inevitably accumulate in large web-scraped corpora. This process is computationally cheap, scaling linearly with dataset size, and can be parallelized trivially.
@@ -1432,7 +1435,7 @@ Label error detection represents the most impactful form of quality pruning. Too
 Outlier removal addresses a different pathology: samples far from any cluster center in feature space. While outliers might represent valuable edge cases, they more often indicate noise, annotation errors, or data corruption. The key is distinguishing between informative outliers (rare but valid examples of a class) and noise (samples that do not belong to any class). Conservative thresholds help avoid discarding genuinely rare examples.
 
 \index{Perplexity!filtering, low-information text removal}
-Low-information filtering applies domain-specific heuristics to remove samples that lack sufficient signal for learning. For text corpora, this means removing documents below a perplexity threshold or with low semantic coherence, often indicative of machine-generated spam or garbled content. For image datasets, filtering targets blurry, corrupted, or near-uniform samples that provide little visual information.
+Low-information filtering applies domain-specific heuristics to remove samples that lack sufficient signal for learning. For text corpora, this often means removing high-perplexity garbled text and, in some pipelines, very low-perplexity boilerplate or repetitive text. For image datasets, filtering targets blurry, corrupted, or near-uniform samples that provide little visual information.
 
 Together, these three static pruning techniques, coreset selection, deduplication, and quality filtering, show that careful curation before training yields significant efficiency gains. The compute savings are multiplicative across the entire training process: a 50 percent dataset reduction means 50 percent fewer forward passes, backward passes, and gradient updates across all training epochs. For a model trained for 100 epochs, this translates to 50 epochs worth of saved compute, yielding substantial reductions in both training time and energy consumption.
 
@@ -2107,9 +2110,9 @@ Despite these limitations, semi-supervised learning reduces label requirements b
 \index{Self-supervised Learning!definition}
 \index{Masked Modeling!self-supervised breakthrough}
 \index{Self-supervised Learning!etymology}
-GPT was trained to predict the next word in a sentence. BERT was trained to fill in masked words. Neither task required a single human label. **Self-supervised learning**[^fn-self-supervised-paradigm] generalizes this insight: by designing *pretext tasks* that derive supervision from the data's inherent structure, models learn general-purpose representations from unlabeled data at scale. Where the progression from active learning to semi-supervised learning drove required labels asymptotically toward zero, SSL breaks through that asymptote entirely. It represents the field's most effective response to the data wall introduced in @sec-data-selection-data-selection-fundamentals-e839: rather than searching for more high-quality labeled data in a finite pool, SSL redefines what counts as training data by extracting supervision from the structure of unlabeled corpora that exist at web scale.
+GPT was trained to predict the next token in a sequence. BERT was trained to fill in masked tokens. Neither task required a single human label. **Self-supervised learning**[^fn-self-supervised-paradigm] generalizes this insight: by designing *pretext tasks* that derive supervision from the data's inherent structure, models learn general-purpose representations from unlabeled data at scale. Where the progression from active learning to semi-supervised learning drove required labels asymptotically toward zero, SSL breaks through that asymptote entirely. It represents the field's most effective response to the data wall introduced in @sec-data-selection-data-selection-fundamentals-e839: rather than searching for more high-quality labeled data in a finite pool, SSL redefines what counts as training data by extracting supervision from the structure of unlabeled corpora that exist at web scale.
 
-[^fn-self-supervised-paradigm]: **Self-supervised Learning**: The pretext task—predicting the next word (GPT) or a masked word (BERT)—provides a supervisory signal inherent to the unlabeled data itself, removing the human-labeling bottleneck. This reframes the system-building challenge from one of data acquisition to one of pure computational investment, where pretraining can cost >10,000$\times$ more than a single downstream fine-tuning. The expense is amortized across thousands of downstream tasks. \index{Self-supervised Learning!iron law restructuring}
+[^fn-self-supervised-paradigm]: **Self-supervised Learning**: The pretext task—predicting the next token (GPT) or a masked token (BERT)—provides a supervisory signal inherent to the unlabeled data itself, removing the human-labeling bottleneck. This reframes the system-building challenge from one of data acquisition to one of large-scale computational investment, where pretraining can cost >10,000$\times$ more than a single downstream fine-tuning. The expense is amortized across thousands of downstream tasks. \index{Self-supervised Learning!iron law restructuring}
 
 \index{Pretext Tasks!self-supervised learning}
 The key insight is that labels represent just one form of supervision. Data structure itself provides rich learning signals that require no human annotation, as @tbl-self-supervised-tasks summarizes.
@@ -2117,18 +2120,18 @@ The key insight is that labels represent just one form of supervision. Data stru
 | **Modality**    | **Self-Supervised Task** | **Supervision Signal**                      |
 |:----------------|:-------------------------|:--------------------------------------------|
 | **Text**        | Masked language modeling | Predict [MASK] from context                 |
-| **Text**        | Next-token prediction    | Predict next word in sequence               |
+| **Text**        | Next-token prediction    | Predict next token in sequence              |
 | **Images**      | Contrastive learning     | Same image (augmented) vs. different images |
 | **Images**      | Masked autoencoding      | Reconstruct masked patches                  |
 | **Multi-modal** | CLIP-style alignment     | Match image-text pairs                      |
 
-: **Self-Supervised Pretext Tasks by Modality.** Each task extracts supervision from data structure rather than human labels, enabling pretraining on unlimited unlabeled corpora. {#tbl-self-supervised-tasks .striped .hover}
+: **Self-Supervised Pretext Tasks by Modality.** Each task extracts supervision from data structure rather than human labels, enabling pretraining on large-scale unlabeled corpora. {#tbl-self-supervised-tasks .striped .hover}
 
 \index{Masked Language Modeling!pretext task}
 \index{Next-Token Prediction!pretext task}
 \index{Contrastive Learning!pretext task}
 \index{Multimodal Alignment!contrastive pretraining}
-Pretext tasks generate supervision signals automatically. A model trained to predict masked words necessarily learns grammar, semantics, and world knowledge; a model trained to distinguish augmented views of the same image learns visual features invariant to transformations. The architectural details of these approaches, from contrastive methods like SimCLR and MoCo to masked modeling and generative pretraining, are examined in @sec-network-architectures. From a data selection perspective, the systems implication is what matters: self-supervised pretraining moves the data cost off the critical path. Instead of waiting for labels before training begins, pretraining starts immediately on unlabeled data, often web-scale corpora of billions of samples. The separation of pretraining from task-specific labeling restructures the economics of machine learning.
+Pretext tasks generate supervision signals automatically. A model trained to predict masked tokens necessarily learns grammar, semantics, and world knowledge; a model trained to distinguish augmented views of the same image learns visual features invariant to transformations. The architectural details of these approaches, from contrastive methods like SimCLR and MoCo to masked modeling and generative pretraining, are examined in @sec-network-architectures. From a data selection perspective, the systems implication is what matters: self-supervised pretraining moves the data cost off the critical path. Instead of waiting for labels before training begins, pretraining starts immediately on unlabeled data, often web-scale corpora of billions of samples. The separation of pretraining from task-specific labeling restructures the economics of machine learning.
 
 ### The economics of amortization {#sec-data-selection-economics-amortization-98bb}
 
@@ -2339,7 +2342,7 @@ plt.close()
 
 \index{Foundation Model!definition}
 \index{Contrastive Learning!batch-based methods}
-The amortization economics favor self-supervised learning broadly, though different SSL methods occupy different points on the cost-efficiency frontier. Contrastive approaches [@chen2020simclr; @he2020] require large batch sizes (4,096+ samples) but yield excellent downstream performance with minimal labeled data. Masked modeling methods work with smaller batches at the cost of more training iterations. Generative pretraining scales log-linearly with data volume, making it the preferred approach for foundation models where pretraining cost is amortized across thousands of tasks. The architectural distinctions between these families are examined in @sec-network-architectures; what matters for data selection is the shared conclusion: self-supervised pretraining represents a **1,000$\times$ or greater multiplier** on the value of labeled data. Instead of labeling millions of task-specific examples, practitioners fine-tune on hundreds or thousands of labeled samples while inheriting knowledge distilled from billions of unlabeled tokens.
+The amortization economics favor self-supervised learning broadly, though different SSL methods occupy different points on the cost-efficiency frontier. Contrastive approaches [@chen2020simclr; @he2020] require large batch sizes (4,096+ samples) but yield excellent downstream performance with minimal labeled data. Masked modeling methods work with smaller batches at the cost of more training iterations. Generative pretraining follows empirical power-law scaling with data, parameters, and compute, making it attractive for foundation models where pretraining cost is amortized across thousands of tasks. The architectural distinctions between these families are examined in @sec-network-architectures; what matters for data selection is the shared conclusion: self-supervised pretraining represents a **1,000$\times$ or greater multiplier** on the value of labeled data. Instead of labeling millions of task-specific examples, practitioners fine-tune on hundreds or thousands of labeled samples while inheriting knowledge distilled from billions of unlabeled tokens.
 
 The multiplicative advantage of SSL creates the *foundation model paradigm*\index{Self-supervised Learning!foundation model paradigm}[^fn-foundation-model-risk] [@bommasani2021opportunities] that defines modern ML systems. The data selection principles discussed throughout this chapter (coreset selection, curriculum learning, active learning) remain relevant within the foundation model paradigm. Pretraining corpus curation applies the same deduplication and quality filtering techniques at web scale, and fine-tuning data selection determines which labeled examples maximize downstream task performance.
 
@@ -2362,7 +2365,7 @@ Data augmentation expands a dataset by applying transformations to existing samp
 \index{CutMix!image augmentation}
 For image data, augmentation techniques span a range of complexity. Geometric transformations such as rotation, flipping, cropping, and scaling introduce spatial variation that makes models robust to viewpoint changes. Photometric transformations adjust brightness, contrast, saturation, and hue to simulate different lighting conditions and camera characteristics. More advanced techniques like Cutout[^fn-cutout-augmentation] (which applies random rectangular masks), MixUp [@zhang2018mixup] (which blends two images and their labels), and CutMix[^fn-cutmix-augmentation] (which pastes patches between images) push augmentation further by creating entirely synthetic training examples that regularize learning.
 
-[^fn-cutout-augmentation]: **Cutout**: Randomly masks square regions of input images during training, forcing the model to recognize objects from partial information rather than relying on any single discriminative region. Unlike dropout (which zeroes *neurons* in feature space), Cutout operates in input space. A single hyperparameter (patch size) yields consistent 1--2 percent accuracy improvements on CIFAR-10/100 and ImageNet with negligible compute overhead, making it one of the highest-ICR augmentation techniques: more information per sample at near-zero additional cost to the pipeline. \index{Cutout!augmentation efficiency}
+[^fn-cutout-augmentation]: **Cutout**: Randomly masks square regions of input images during training, forcing the model to recognize objects from partial information rather than relying on any single discriminative region. Unlike dropout (which zeroes *neurons* in feature space), Cutout operates in input space. The original Cutout experiments produced roughly 1--2 percentage-point gains on CIFAR-10/100 and strong gains on SVHN with negligible compute overhead, making it a high-ICR augmentation technique when occlusion-style invariance matches the task: more information per sample at near-zero additional cost to the pipeline. \index{Cutout!augmentation efficiency}
 
 [^fn-cutmix-augmentation]: **CutMix**: Replaces Cutout's zeroed-out region with a patch from a different training image, mixing labels proportionally to patch area (30 percent of image A replaced by image B yields a 70/30 label split). This addresses Cutout's weakness: zeroed regions waste pixel information that could carry learning signal. CutMix improves ImageNet top-1 accuracy by approximately one percent over baseline while also improving robustness to occlusion, providing stronger regularization than either Cutout or MixUp alone at identical compute cost. \index{CutMix!label mixing}
 
@@ -3361,11 +3364,11 @@ The amortization pattern reveals which circumstances favor infrastructure invest
 
 **The Context**: For years, ImageNet and CIFAR-10 were the gold standards for computer vision. Researchers competed to squeeze every 0.1 percent accuracy gain, assuming higher scores meant better generalization.
 
-**The Failure**: In 2019, researchers at UC Berkeley discovered that these datasets contained significant near-duplicates between the training and test sets. A model could "solve" a test image simply by memorizing a nearly identical training image.
+**The Failure**: In 2019, researchers at UC Berkeley built new CIFAR-10 and ImageNet test sets using the original collection methodology. Models that performed extremely well on the standard test sets dropped on the newly collected examples.
 
-**The Consequence**: When the researchers constructed a truly independent test set (CIFAR-10.1) by re-collecting images from the original source with the same methodology, model accuracy dropped by 11–14 percent. The "superhuman" performance was partly an illusion of memorization.
+**The Consequence**: Accuracy dropped by roughly 3--15 percentage points on the CIFAR-10 variants and 11--14 percentage points on ImageNetV2, depending on the model. The new test sets were slightly harder despite using the same broad data-generation process, showing that standard benchmark accuracy could overstate robustness to newly collected examples.
 
-**The Systems Lesson**: Data leakage\index{Data Leakage!test set contamination} is the silent killer of generalization. A test set that is not rigorously deduplicated against the training set produces accuracy metrics that measure memorization, not intelligence [@recht2019imagenet].
+**The Systems Lesson**: Benchmark results are sensitive to the construction details of the evaluation set. Data leakage\index{Data Leakage!test set contamination} is one failure mode that requires train/test deduplication; distribution shift and example difficulty are another, as demonstrated by the ImageNet replication study [@recht2019imagenet].
 
 :::
 
@@ -4411,7 +4414,7 @@ Aggressive coreset selection removes rare classes entirely because they contribu
 
 **Pitfall:** *Training on deduplicated data while evaluating on duplicated test sets.*
 
-Web-scraped datasets contain `{python} FpScalingCalc.test_contamination_pct_str` percent train-test overlap on average. Deduplicating only training data inflates apparent test accuracy to `{python} FpScalingCalc.inflated_acc_str` percent when true generalization is `{python} FpScalingCalc.true_acc_str` percent, a `{python} FpScalingCalc.inflation_gap_str`-point gap that masks real-world performance. @sec-data-selection-data-deduplication-6c20 emphasizes joint deduplication: hash both train and test sets, removing any sample appearing in both. As noted in that section, GPT-3 and LLaMA training studies confirm that deduplicated data improves both efficiency and generalization. Teams observing accuracy drops after deduplication are measuring improved generalization, not degradation.
+Some standard language-modeling datasets have measurable train-test overlap; a deduplication study reports overlap affecting over 4 percent of validation examples in evaluated datasets [@lee2022]. Deduplicating only training data is therefore insufficient: evaluation sets must also be checked against the training corpus. @sec-data-selection-data-deduplication-6c20 emphasizes joint deduplication for reliable evaluation. As noted in that section, deduplicated data can improve both efficiency and generalization, but teams should validate the effect because near-duplicate thresholds and domain distributions matter.
 
 **Pitfall:** *Active learning without considering annotation latency.*
 
@@ -4444,7 +4447,7 @@ Translating these techniques into production requires systems engineering: the S
 ::: {.callout-takeaways title="Curate, Do not Accumulate"}
 
 * **Data selection is a systems problem, and ICR is its metric**: The goal is reduced total cost across the entire pipeline (compute, storage, labeling, energy), not just "fewer samples for same accuracy." The Information-Compute Ratio quantifies this: learning gained per FLOP spent. Maximizing ICR is mathematically equivalent to improving hardware throughput, but often cheaper to achieve.
-* **Start with deduplication**: It is the only data selection technique with guaranteed zero accuracy penalty and immediate compute savings. Deduplication should precede all other selection methods in any data pipeline.
+* **Start with deduplication**: Exact deduplication is often the lowest-risk data selection technique and can deliver immediate storage and compute savings; a deduplication study reports train-test overlap affecting over 4 percent of validation examples in evaluated language-modeling datasets [@lee2022]. Near-duplicate and semantic deduplication should precede expensive selection methods only after thresholds are validated against downstream quality metrics.
 * **The Selection Inequality gates every technique**: $T_{\text{selection}} + T_{\text{train}}(\text{subset}) < T_{\text{train}}(\text{full})$. Selection overhead should stay below ten percent of training time. Proxy models and cached embeddings keep $T_{\text{selection}}$ low; expensive selection algorithms can consume all the savings they promise.
 * **Dynamic selection adapts the data diet as the model learns**: Curriculum learning (easy-to-hard ordering) and active learning (uncertainty-guided labeling) exploit the insight that the optimal training distribution changes during training, improving convergence speed and label efficiency respectively.
 * **Self-supervised pretraining delivers a 1000$\times$ labeled-data multiplier**: Foundation models amortize expensive pretraining across many downstream tasks, reducing per-task label requirements by 100$\times$ and marginal compute by 20$\times$. This cost amortization is strongest when techniques are reused across teams and training runs.

@@ -146,7 +146,7 @@ With these three problems in mind, we can now define *what* a machine learning f
 
 1.  **Significance (Quantitative):** Frameworks directly determine the system efficiency $(\eta_{\text{hw}})$ term in the iron law. Accelerated Linear Algebra (XLA)'s operator fusion, for example, eliminates intermediate memory writes between consecutive elementwise operations: fusing a matrix multiplication, bias add, and rectified linear unit (ReLU) into a single kernel reduces the total data movement $(D_{\text{vol}})$ by 2--3$\times$ vs. three separate kernel launches, yielding observed end-to-end speedups of 1.5--2$\times$ on transformer training without any model changes.
 2.  **Distinction (Durable):** Unlike a numerical library such as NumPy, which executes each operation immediately (eager evaluation), an ML framework can defer execution to analyze the full computational graph and apply global optimizations: operator fusion, memory layout transformations, and parallel scheduling. These optimizations are impossible when operations are evaluated one at a time.
-3.  **Common Pitfall:** A frequent misconception is that frameworks are interchangeable API wrappers. Framework choice determines which hardware optimizations are available: a PyTorch model using the default eager execution mode cannot benefit from XLA's graph-level fusion until explicitly compiled with `torch.compile()`, and the resulting throughput difference can exceed 2$\times$ on the same hardware.
+3.  **Common Pitfall:** A frequent misconception is that frameworks are interchangeable API wrappers. Framework choice determines which compiler paths are available: PyTorch eager execution can use `torch.compile()` to capture graphs and route them through TorchDynamo, AOTAutograd, and TorchInductor, while TensorFlow and JAX commonly use XLA-backed graph compilation. Moving from eager execution to a compiler path commonly changes throughput by 1.2--3$\times$ on supported workloads, but the exact gain depends on model structure, shapes, and operator support.
 
 :::
 
@@ -614,13 +614,13 @@ After `backward()` completes, the autograd tape is **destroyed** to free memory.
 
 ::: {.callout-war-story title="The Silent Gradient Killer"}
 
-**The Context**: An ML engineer at Facebook AI Research (FAIR) implemented a custom activation function in PyTorch. To save memory, they used the in-place operation `x += 1` instead of `x = x + 1`.
+**The Context**: An ML engineer implemented a custom activation function in PyTorch. To save memory, they used an in-place operation such as `x += 1` instead of `x = x + 1`.
 
-**The Failure**: In-place operations modify the data directly in memory. However, the autograd tape (the computational graph) often needs the *original* value of `x` to compute gradients for previous layers. By overwriting `x`, the engineer destroyed the history needed for the chain rule.
+**The Failure**: In-place operations modify the data directly in memory. However, the autograd tape often needs the *original* value of a tensor to compute gradients for previous layers. Modern PyTorch tracks tensor version counters and usually raises an error when a saved tensor has been modified before backward, because the original value needed for the chain rule is no longer available.
 
-**The Consequence**: The framework did not crash. Instead, it computed gradients using the *modified* value of `x`, resulting in mathematically incorrect updates. The model trained, but its loss plateaued at a high value. The team spent weeks debugging hyperparameters, never suspecting that a "memory optimization" had silently corrupted the calculus.
+**The Consequence**: The "memory optimization" failed at backward time rather than silently producing a trustworthy training run. The error message can be cryptic to new users, but it is an important safety mechanism: the framework refuses to compute a gradient when it cannot guarantee that the saved forward values are still valid.
 
-**The Systems Lesson**: Frameworks are graph construction engines, and in-place operations violate the immutability required for automatic differentiation. Writing `x += 1` does not merely add a number: it sabotages the graph's history [@paszke2019pytorch].
+**The Systems Lesson**: Frameworks are graph construction engines, and in-place operations must respect the values saved for automatic differentiation. Writing `x += 1` does not merely add a number: it can invalidate the graph's history, which is why production frameworks invest in mutation tracking and runtime checks [@paszke2019pytorch].
 
 :::
 
@@ -4354,28 +4354,26 @@ No framework optimizes all three problems simultaneously; each makes deliberate 
 
 These design differences are not arbitrary; they reflect which term of the iron law each framework prioritizes. TensorFlow's graph compilation minimizes the *Overhead* term through ahead-of-time optimization, PyTorch's eager execution minimizes the *developer iteration* overhead at the cost of runtime optimization, and JAX's XLA backend minimizes the *Data Movement* term through aggressive operation fusion.
 
-### Quantitative framework efficiency comparison {#sec-ml-frameworks-quantitative-framework-efficiency-comparison-3b77}
+### Framework efficiency comparison {#sec-ml-frameworks-quantitative-framework-efficiency-comparison-3b77}
 
-How large are these differences in practice? @tbl-framework-efficiency-matrix compares major frameworks across efficiency dimensions using benchmark workloads representative of production deployment scenarios.
+How large are these differences in practice? The answer depends on the model, operator mix, input shape, batch size, hardware backend, and compiler configuration. @tbl-framework-efficiency-matrix therefore compares major framework families qualitatively rather than presenting a single set of benchmark numbers as universal.
 
-| **Framework**             | **Inference** **Latency (ms)** | **Memory** **Usage (MB)** | **Energy** **(mJ/inference)** | **Model Size** **Reduction** | **Hardware** **Utilization (%)** |
-|:--------------------------|:------------------------------:|:-------------------------:|:-----------------------------:|:----------------------------:|:--------------------------------:|
-| **TensorFlow**            |               45               |           2,100           |              850              |             None             |                35                |
-| **TensorFlow Lite**       |               12               |            180            |              120              |    4$\times$ (quantized)     |                65                |
-| **TensorFlow Lite Micro** |               8                |             32            |               45              |   8$\times$ (pruned+quant)   |                75                |
-| **PyTorch**               |               52               |           1,800           |              920              |             None             |                32                |
-| **PyTorch Mobile**        |               18               |            220            |              180              |    3$\times$ (quantized)     |                58                |
-| **ONNX Runtime**          |               15               |            340            |              210              |    2$\times$ (optimized)     |                72                |
-| **TensorRT**              |               3                |            450            |               65              |  2$\times$ (precision opt)   |                88                |
-| **Apache TVM**            |               6                |            280            |               95              |     3$\times$ (compiled)     |                82                |
+| **Framework family**            | **Typical deployment role**    | **Useful scale anchor**                                           | **Primary optimization path**                 | **Main limitation**                        |
+|:--------------------------------|:-------------------------------|:------------------------------------------------------------------|:----------------------------------------------|:-------------------------------------------|
+| **PyTorch eager**               | Research and iteration         | Baseline latency; full Python/runtime footprint                   | Dynamic graphs, eager debugging               | Less ahead-of-time optimization by default |
+| **Compiled PyTorch/TensorFlow** | Server training and serving    | Often 1.2--3$\times$ speedup when graph capture is clean          | Graph capture, fusion, layout planning        | Operator coverage and graph breaks         |
+| **TensorFlow Lite/Core ML**     | Mobile and edge inference      | Commonly targets tens of ms latency and MB-scale model packages   | Quantization, static graphs, NPU delegates    | Target-specific conversion constraints     |
+| **TF Lite Micro/microTVM**      | Microcontroller inference      | KB-scale RAM budgets, often <256 KB for small TinyML deployments  | Static allocation, int8 kernels               | Small operator set and no dynamic runtime  |
+| **ONNX Runtime**                | Cross-framework serving        | Backend-dependent; can match native runtimes for supported graphs | Standard graph format, execution providers    | Export gaps and custom-operator fallbacks  |
+| **TensorRT/TVM**                | Hardware-specialized inference | Often 2--10$\times$ latency gains over untuned eager baselines    | Kernel fusion, precision lowering, autotuning | Narrower target and conversion assumptions |
 
-: **Framework Efficiency Comparison.** Quantitative comparison of major ML frameworks across efficiency dimensions using ResNet-50 inference on representative hardware (NVIDIA A100 GPU for server frameworks, ARM Cortex-A78 for mobile). Metrics reflect production workloads with accuracy maintained within one percent of baseline. Hardware utilization represents percentage of theoretical peak performance on typical operations. {#tbl-framework-efficiency-matrix tbl-colwidths="[24,14,12,15,17,19]"}
+: **Framework Efficiency Comparison.** Quantitative anchors for major ML framework families. These are not universal benchmark results: actual latency, memory use, energy, and hardware utilization must be measured for the specific model, hardware, precision, batch size, and compiler configuration. {#tbl-framework-efficiency-matrix tbl-colwidths="[24,20,24,24,22]"}
 
 \index{TensorRT!hardware utilization}
 \index{Apache TVM!ML compiler}
-The efficiency data reveals several important patterns. First, specialized inference frameworks (TensorRT, Apache TVM) achieve 10--15$\times$ lower latency than general-purpose training frameworks (PyTorch, TensorFlow) on identical hardware, demonstrating that framework selection has quantitative performance implications beyond qualitative design preferences. Second, mobile-optimized variants (TF Lite, PyTorch Mobile) reduce memory requirements by 10$\times$ compared to their full counterparts while maintaining accuracy within one percent through quantization and graph optimization [@pytorch_mobile]. Third, hardware utilization varies dramatically: TensorRT achieves 88 percent GPU utilization through aggressive kernel fusion while vanilla PyTorch achieves only 32 percent, a 2.75$\times$ efficiency gap that directly translates to cost differences in production deployment.
+The comparison reveals several important patterns. First, specialized inference frameworks such as TensorRT and TVM can deliver multi-fold latency gains, often in the 2--10$\times$ range, when the model can be converted cleanly and the deployment target is known. Second, mobile-optimized runtimes such as TensorFlow Lite, Core ML, and ExecuTorch reduce runtime footprint by removing training machinery and relying on static graphs, quantization, and platform delegates; moving from a full training framework to an inference-only mobile runtime commonly changes the memory budget from hundreds or thousands of MB to MB-scale packages. Third, hardware utilization depends as much on compiler coverage and operator fusion as on the framework API: unsupported operators, dynamic shapes, or graph breaks can erase the expected advantage of a compiled path.
 
-These efficiency gaps, significant in the data center, become existential as we move beyond the server room. A 17$\times$ latency difference between PyTorch and TensorRT is an optimization opportunity on a cloud GPU; on a microcontroller with 256 KB of RAM, a framework that requires 1.8 GB of memory simply cannot run at all. The question shifts from "which framework is fastest?" to "which framework fits?"
+These efficiency gaps, significant in the data center, become existential as we move beyond the server room. A 2--10$\times$ latency gap between eager execution and a specialized inference engine is an optimization opportunity on a cloud GPU; on a microcontroller with 256 KB of RAM, a framework that requires a full training runtime simply cannot run at all. The question shifts from "which framework is fastest?" to "which framework fits?"
 
 ## Deployment Targets {#sec-ml-frameworks-deployment-targets-13f1}
 
@@ -4386,12 +4384,12 @@ As ML models move from cloud servers to edge devices, the efficiency gaps measur
 
 @tbl-deployment-frameworks summarizes framework choices by deployment target:
 
-| **Environment**              | **Primary Frameworks**           | **Key Optimizations**                 | **Typical Constraints**           |
-|:-----------------------------|:---------------------------------|:--------------------------------------|:----------------------------------|
-| **Cloud/Server**             | PyTorch, TensorFlow, JAX         | Distributed training, mixed precision | Throughput, cost                  |
-| **Edge**                     | TensorFlow Lite, ONNX Runtime    | Quantization (INT8), static graphs    | Latency <10 ms, limited memory    |
-| **Mobile**                   | TF Lite, Core ML, PyTorch Mobile | NPU acceleration, model compression   | Battery, thermal, app size limits |
-| **Microcontroller (TinyML)** | TF Lite Micro,  uTensor          | 4-bit quantization, static allocation | <256 KB RAM,  no dynamic memory   |
+| **Environment**              | **Primary Frameworks**        | **Key Optimizations**                 | **Typical Constraints**           |
+|:-----------------------------|:------------------------------|:--------------------------------------|:----------------------------------|
+| **Cloud/Server**             | PyTorch, TensorFlow, JAX      | Distributed training, mixed precision | Throughput, cost                  |
+| **Edge**                     | TensorFlow Lite, ONNX Runtime | Quantization (INT8), static graphs    | Latency <10 ms, limited memory    |
+| **Mobile**                   | TF Lite, Core ML, ExecuTorch  | NPU acceleration, model compression   | Battery, thermal, app size limits |
+| **Microcontroller (TinyML)** | TF Lite Micro, microTVM       | INT8 quantization, static allocation  | <256 KB RAM,  no dynamic memory   |
 
 : **Framework Selection by Deployment Target.** Recommended frameworks, optimization techniques, and key constraints for each deployment tier, from cloud servers to microcontrollers. {#tbl-deployment-frameworks tbl-colwidths="[19,27,27,27]"}
 
@@ -4399,7 +4397,7 @@ As ML models move from cloud servers to edge devices, the efficiency gaps measur
 
 \index{ONNX!definition}
 \index{ONNX!hub-and-spoke interoperability}
-The Open Neural Network Exchange (ONNX)\index{ONNX!cross-framework portability}[^fn-onnx-portability] format addresses this fragmentation by enabling model portability across frameworks: train in PyTorch, deploy via TensorFlow Lite or ONNX Runtime. This standardization eliminates manual conversion when moving between development and production environments. @fig-onnx captures this hub-and-spoke interoperability model---notice how ONNX sits at the center, accepting models from any training framework on the left and dispatching them to ONNX Runtime and other frameworks on the right. Detailed deployment optimization (quantization, pruning, hardware-specific compilation) appears in @sec-model-compression and @sec-model-serving.
+The Open Neural Network Exchange (ONNX)\index{ONNX!cross-framework portability}[^fn-onnx-portability] format addresses this fragmentation by enabling model portability across many runtimes: train in PyTorch, export through ONNX, and deploy through ONNX Runtime or a hardware-specific backend. TensorFlow Lite has its own conversion path rather than being a direct ONNX target in typical workflows. Standard interchange formats reduce manual conversion work when moving between development and production environments, but they do not eliminate compatibility testing, operator coverage gaps, or custom-kernel work. @fig-onnx captures this hub-and-spoke interoperability model---notice how ONNX sits at the center, accepting models from common training frameworks on the left and dispatching them to ONNX Runtime and other compatible runtimes on the right. Detailed deployment optimization (quantization, pruning, hardware-specific compilation) appears in @sec-model-compression and @sec-model-serving.
 
 ::: {#fig-onnx fig-env="figure" fig-pos="htb" fig-cap="**Framework Interoperability**: ONNX enables model portability across frameworks, allowing training in one framework and deployment in another." fig-alt="Hub diagram with ONNX at center. Left side (export): PyTorch, TensorFlow, Keras, Caffe2, MXNet, Microsoft CNTK with arrows pointing inward. Right side (load): ONNX Runtime plus the same six frameworks with arrows pointing outward."}
 
@@ -4421,7 +4419,7 @@ Framework selection involves three interconnected tensions. The first is between
 
 This velocity-performance tension leads directly to the second: flexibility vs. optimization depth. Dynamic graphs enable the arbitrary control flow that makes eager development fast, but they limit the compiler's scope. Static graphs constrain expressiveness but enable aggressive fusion and hardware-specific code generation. As @tbl-mlfm-graphs demonstrated, this trade-off cascades through memory management, utilization, and debugging workflows---it is not a single design decision but a system-wide constraint.
 
-The flexibility-optimization tension, in turn, exposes a third: ecosystem breadth vs. specialization. General-purpose frameworks cover broad operation sets but underperform specialized runtimes. TensorRT achieves 88 percent GPU utilization vs. PyTorch's 32 percent (@tbl-framework-efficiency-matrix) precisely because it optimizes for a narrower problem. ONNX bridges this gap through standardized interchange, but the underlying trade-off remains [@bai2019onnx]: the more a runtime specializes, the faster it runs and the less it supports.
+The flexibility-optimization tension, in turn, exposes a third: ecosystem breadth vs. specialization. General-purpose frameworks cover broad operation sets but often underperform specialized runtimes on workloads those runtimes can optimize deeply. TensorRT, TVM, and similar systems optimize for narrower deployment targets through fusion, precision selection, and hardware-specific scheduling. ONNX bridges part of this gap through standardized interchange, but the underlying trade-off remains [@bai2019onnx]: the more a runtime specializes, the faster it may run and the less it can support without conversion work or fallbacks.
 
 ::: {.callout-perspective title="Framework Selection Constraints"}
 
@@ -4494,7 +4492,7 @@ These hardware constraints cascade into performance trade-offs that are tightly 
 
 What determines whether a framework remains viable five years into a production deployment? Technical capabilities are necessary but not sufficient. Community composition shapes framework evolution in measurable ways: PyTorch's academic community drives research-oriented features and reproducibility tools, though production tooling (PyTorch Lightning, TorchServe) has historically lagged; TensorFlow's enterprise community emphasizes production reliability through TFX pipelines, TensorBoard visualization, and TensorFlow Model Analysis; JAX's smaller community concentrates on mathematical rigor, producing specialized research tools (composable transformations, custom VJP rules) but with a steeper onboarding curve.
 
-A framework's practical utility, however, often depends more on its surrounding ecosystem than on its core capabilities. Hugging Face provides consistent model APIs across all three major frameworks, making pretrained model availability a near-commodity. Cross-framework tools (Weights & Biases, MLflow for experiment tracking; ONNX Runtime for serving) reduce lock-in, while framework-native tools (XLA, TorchScript, TensorFlow Serving) offer deeper optimization at the cost of portability. Cloud ML services (SageMaker [@ye2020], Google AI Platform, Azure ML) provide native integration for specific frameworks, creating operational advantages that compound over time.
+A framework's practical utility, however, often depends more on its surrounding ecosystem than on its core capabilities. Hugging Face provides consistent model APIs across all three major frameworks, making pretrained model availability a near-commodity. Cross-framework tools (Weights & Biases, MLflow for experiment tracking; ONNX Runtime for serving) reduce lock-in, while framework-native tools (XLA, TorchScript, TensorFlow Serving) offer deeper optimization at the cost of portability. Cloud ML services (SageMaker [@ye2020], Vertex AI, Azure ML) provide native integration for specific frameworks, creating operational advantages that compound over time.
 
 These compounding effects make framework migration progressively harder. Integration with existing CI/CD pipelines, monitoring infrastructure, and cloud providers creates operational inertia that resists change. The measurable indicators of viability---contributor diversity (single-company dependence is a risk), backward compatibility track record, and hiring pool alignment with organizational needs---should be evaluated before commitment, not after. The mitigation strategy is defensive: use standardized formats (ONNX), maintain framework-agnostic data pipelines, and document framework-specific customizations to preserve future flexibility.
 
@@ -4776,55 +4774,13 @@ This detailed trace through a single training step demonstrates how deeply the t
 
 Framework selection involves subtle trade-offs where intuitions from conventional software engineering fail. The memory wall, kernel fusion constraints, and deployment target diversity create pitfalls that waste months of engineering effort and cause production systems to miss latency targets by 10$\times$ or more.
 
-```{python}
-#| label: framework-gaps-calc
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ FRAMEWORK PERFORMANCE GAPS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-ml-frameworks-fallacies-pitfalls-61ef—first two Fallacy/Pitfall
-# │          items on framework equivalence and deployment memory footprint
-# │
-# │ Goal: Quantify the latency gap (PyTorch vs TensorRT: 52 ms vs 3 ms = 17×)
-# │       and runtime memory gap (PyTorch Mobile vs TFLite Micro: 6875×).
-# │ Show: "17× performance gap" and "6875× memory difference"—inline in both
-# │       Fallacy and Pitfall prose paragraphs.
-# │ How: Simple ratio arithmetic on hardcoded benchmark values; no pint units
-# │      (pure latency ms and memory MB/KB scalars from @tbl-framework-efficiency-matrix).
-# │
-# │ Imports: mlsysim.book (fmt, check)
-# │ Exports: pytorch_ms_str, tensorrt_ms_str, perf_gap_str, pytorch_mobile_mb_str,
-# │          tflite_micro_kb_str, memory_ratio_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-class FrameworkGapsCalc:
-    """PyTorch vs TensorRT latency gap and PyTorch Mobile vs TFLite Micro memory gap."""
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    pytorch_ms = 52                                                             # 52 ms inference
-    tensorrt_ms = 3                                                             # 3 ms inference
-    pytorch_mobile_mb = 220                                                     # 220 MB runtime
-    tflite_micro_kb = 32                                                        # 32 KB runtime
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    perf_gap = pytorch_ms/tensorrt_ms                                         # ~17x gap
-    memory_ratio = pytorch_mobile_mb * 1000 / tflite_micro_kb                  # ~6875x gap (decimal SI: 1 MB = 1000 KB)
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    pytorch_ms_str = fmt(pytorch_ms, precision=0, commas=False)                # e.g. "52"
-    tensorrt_ms_str = fmt(tensorrt_ms, precision=0, commas=False)              # e.g. "3"
-    pytorch_mobile_mb_str = fmt(pytorch_mobile_mb, precision=0, commas=False)  # e.g. "220"
-    tflite_micro_kb_str = fmt(tflite_micro_kb, precision=0, commas=False)      # e.g. "32"
-    perf_gap_str = fmt(perf_gap, precision=0, commas=False)                    # e.g. "17"
-    memory_ratio_str = fmt(memory_ratio, precision=0, commas=False)            # e.g. "6875"
-```
-
 **Fallacy:** *"All frameworks provide equivalent performance for the same model architecture."*
 
-Engineers assume that ResNet-50 yields identical performance across frameworks since the mathematics is the same. In production, framework implementation matters enormously. @tbl-framework-efficiency-matrix shows PyTorch achieves `{python} FrameworkGapsCalc.pytorch_ms_str` ms inference at 32 percent hardware utilization while TensorRT delivers `{python} FrameworkGapsCalc.tensorrt_ms_str` ms at 88 percent utilization---a **`{python} FrameworkGapsCalc.perf_gap_str`$\times$ performance gap** on identical hardware. The difference arises from kernel fusion depth, graph optimization strategies, and memory access patterns that vary dramatically between frameworks. Organizations that assume equivalence miss latency service level agreements (SLAs) and require costly last-minute framework migrations.
+Engineers assume that ResNet-50 yields identical performance across frameworks since the mathematics is the same. In production, framework implementation matters enormously: compiled execution can improve supported eager workloads by 1.2--3$\times$, and hardware-specialized inference engines such as TensorRT or TVM often deliver 2--10$\times$ latency gains over untuned eager baselines when conversion is clean. The difference arises from kernel fusion depth, graph optimization strategies, memory access patterns, precision support, and backend libraries that vary dramatically between frameworks. Organizations that assume equivalence can miss latency service level agreements (SLAs) and require costly last-minute framework migrations.
 
 **Pitfall:** *Choosing frameworks based on popularity rather than project requirements.*
 
-Engineers assume the most popular framework works for any project. In reality, deployment constraints dominate. @tbl-framework-efficiency-matrix shows PyTorch Mobile requires `{python} FrameworkGapsCalc.pytorch_mobile_mb_str` MB memory while TensorFlow Lite Micro runs in `{python} FrameworkGapsCalc.tflite_micro_kb_str` KB---a **`{python} FrameworkGapsCalc.memory_ratio_str`$\times$ difference**. Teams that prototype edge applications with PyTorch face either memory bloat that exceeds device capacity or two- to three-month framework migrations after development completes. Evaluate deployment targets per @sec-ml-frameworks-deployment-targets-13f1 *before* selecting a training framework.
+Engineers assume the most popular framework works for any project. In reality, deployment constraints dominate. A mobile runtime such as ExecuTorch or TensorFlow Lite and a microcontroller runtime such as TensorFlow Lite Micro make different assumptions about memory allocation, operator coverage, and hardware delegates; the former targets phones with GB-scale memory, while the latter often targets devices with hundreds of KB of RAM, commonly below 256 KB for small TinyML deployments. Teams that prototype edge applications without checking the final runtime can face memory bloat that exceeds device capacity or a late framework migration after development completes. Evaluate deployment targets per @sec-ml-frameworks-deployment-targets-13f1 *before* selecting a training framework.
 
 **Fallacy:** *"Framework abstractions eliminate the need for systems knowledge."*
 
@@ -4832,7 +4788,7 @@ Engineers assume high-level APIs handle all optimization automatically. The Roof
 
 **Pitfall:** *Ignoring vendor lock-in from framework-specific formats.*
 
-Engineers assume framework migration is straightforward since models are "just math." Converting TensorFlow SavedModel to PyTorch requires rewriting custom operations, validating numerical equivalence across 10,000+ test cases, and retraining when operations lack exact equivalents---typically **three to six engineer-months** for production systems. ONNX (@sec-ml-frameworks-deployment-targets-13f1) provides portability but supports only 80--85 percent of operations. Organizations that ignore this during initial framework selection face costly migrations when deployment requirements change or better frameworks emerge.
+Engineers assume framework migration is straightforward since models are "just math." Converting TensorFlow SavedModel to PyTorch can require rewriting custom operations, validating numerical equivalence across large test suites, and retraining when operations lack exact equivalents---typically **three to six engineer-months** for production systems. ONNX (@sec-ml-frameworks-deployment-targets-13f1) improves portability, but custom operators, dynamic shapes, and backend-specific optimizations can still require manual work. Organizations that ignore this during initial framework selection face costly migrations when deployment requirements change or better frameworks emerge.
 
 **Pitfall:** *Selecting development frameworks without evaluating production infrastructure.*
 
@@ -4939,7 +4895,7 @@ These problems are interconnected and constrained by the iron law of performance
 * **The memory wall drives optimization**: Compute has grown approximately 1000$\times$ faster than memory bandwidth. Kernel fusion, activation checkpointing, mixed-precision training, and data layout optimizations all target the data movement term $(D_{\text{vol}})$ in the iron law, not the compute term.
 * **Compilation pays off only at scale**: The Compilation Continuum principle (@eq-compilation-benefit) quantifies when compilation benefits exceed costs. Research prototyping favors eager mode; production training and inference favor progressive compilation from JIT to AOT. The Dispatch Overhead Law (@eq-dispatch-overhead) explains why small models benefit disproportionately.
 * **The nn.Module pattern is widely adopted**: Automatic parameter discovery, mode-dependent behavior, and hierarchical composition with serialization appear across major frameworks, enabling million-parameter optimization in a single `optimizer.step()` call regardless of API syntax.
-* **Framework choice constrains deployment by orders of magnitude**: A 17$\times$ latency gap (PyTorch vs. TensorRT) and 6,875$\times$ memory gap (PyTorch Mobile vs. TFLite Micro) on identical models demonstrate that frameworks are not interchangeable. Deployment target must be evaluated before framework selection.
+* **Framework choice constrains deployment by orders of magnitude**: Specialized inference engines, mobile runtimes, and microcontroller runtimes make different trade-offs about operator coverage, memory allocation, compilation, and hardware delegates. A 2--10$\times$ latency gap between untuned eager execution and specialized inference, or the gap between GB-scale server runtimes and <256 KB microcontroller budgets, is not an implementation detail. The deployment target must be evaluated before framework selection.
 
 :::
 

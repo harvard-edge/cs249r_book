@@ -104,7 +104,7 @@ class ReliabilityFoundations:
     cluster_mtbf_10k = node_mtbf/nodes_10k
 
     # Step 4: Young-Daly (10K cluster, 175B model)
-    ckpt_175b_bytes = calc_checkpoint_size(175e9, 16)
+    ckpt_175b_bytes = calc_checkpoint_size(175e9, 14)
     ckpt_175b_gb = ckpt_175b_bytes.m_as(GB)
     ckpt_write_time_s = ckpt_175b_gb/ckpt_write_bw
 
@@ -133,7 +133,7 @@ class ReliabilityFoundations:
 
     @classmethod
     def ckpt_size_gb(cls, n_params):
-        return calc_checkpoint_size(n_params, 16).m_as(GB)
+        return calc_checkpoint_size(n_params, 14).m_as(GB)
 
     @classmethod
     def avail_stacked(cls, k):
@@ -381,15 +381,14 @@ The formula assumes that failures follow an exponential distribution (memoryless
 
 ### Checkpoint sizing {#sec-reliability-foundations-checkpoint-sizing}
 
-Checkpoint size determines the write time $\delta$ that feeds into the Young-Daly formula. For mixed-precision training with the Adaptive Moment Estimation (Adam) optimizer, each parameter requires approximately 16 bytes of state:
+Checkpoint size determines the write time $\delta$ that feeds into the Young-Daly formula. For common mixed-precision training checkpoints with the Adaptive Moment Estimation (Adam) optimizer, each parameter requires approximately 14 bytes of persistent state:
 
 - 2 bytes for BF16 model weights
-- 2 bytes for BF16 gradients
 - 4 bytes for FP32 master weights
 - 4 bytes for FP32 first moment (Adam $m$)
 - 4 bytes for FP32 second moment (Adam $v$)
 
-$$ \text{Checkpoint Size} = N_\text{params} \times 16 \text{ bytes/param} $$ {#eq-checkpoint-size}
+$$ \text{Checkpoint Size} = N_\text{params} \times 14 \text{ bytes/param} $$ {#eq-checkpoint-size}
 
 ```{python}
 #| label: checkpoint-sizing-table
@@ -429,7 +428,7 @@ for i, n_params in enumerate(R.model_sizes_params):
 | **`{python} ckpt_data[2]["label"]`** | `{python} ckpt_data[2]["ckpt_gb"]` | `{python} ckpt_data[2]["write_time"]`                      |
 | **`{python} ckpt_data[3]["label"]`** | `{python} ckpt_data[3]["ckpt_gb"]` | `{python} ckpt_data[3]["write_time"]`                      |
 
-: **Checkpoint Sizes for Mixed-Precision Adam Training.** Each parameter requires 16 bytes of state (weights + gradients + optimizer state). Write times assume 100 GB/s aggregate storage bandwidth. {#tbl-checkpoint-size}
+: **Checkpoint Sizes for Mixed-Precision Adam Training.** Each parameter requires about 14 bytes of persistent checkpoint state (model weights + FP32 master weights + optimizer moments); gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state. Write times assume 100 GB/s aggregate storage bandwidth. {#tbl-checkpoint-size}
 
 As @tbl-checkpoint-size shows, at frontier scale (175B+ parameters), checkpoint sizes reach the terabyte range. This makes checkpoint write time a significant cost that directly affects the Young-Daly optimal interval. The checkpoint strategies in @sec-fault-tolerance-reliability discuss techniques for reducing $\delta$---asynchronous checkpointing, incremental deltas, and distributed storage---all of which improve the Young-Daly result by shrinking the numerator under the square root.
 
@@ -509,7 +508,7 @@ class WorkedExampleYoungDaly:
 
 :::
 
-The boundary conditions of the Young-Daly formula are worth noting. When $\delta \geq M$ (checkpoint cost exceeds MTBF), the formula yields $\tau_\text{opt} \geq M$, meaning you would lose more than one MTBF interval of work per failure---a regime where checkpoint/restart alone cannot maintain forward progress. In such cases, redundancy or elastic training becomes necessary, as discussed in @sec-reliability-foundations-strategies.
+The boundary conditions of the Young-Daly formula are worth noting. When $\delta$ approaches $M$ (checkpoint cost approaches MTBF), checkpoint and rework overheads become so large that checkpoint/restart alone may fail to maintain useful forward progress. In such cases, redundancy or elastic training becomes necessary, as discussed in @sec-reliability-foundations-strategies.
 
 ---
 
@@ -570,7 +569,7 @@ The other phases offer engineering optimization targets. $T_\text{detect}$ can b
 
 Not all time spent on a training cluster produces useful progress. **Rawput** is the total number of training steps executed (including steps that will be discarded after a failure). **Goodput** is the number of training steps that actually contribute to the final model:
 
-$$ \text{Goodput Ratio} = \frac{\text{Useful Steps}}{\text{Wall-Clock Time}} $$
+$$ \text{Goodput Ratio} = \frac{\text{Useful Steps}}{\text{Total Executed Steps}} \approx \frac{T_{\text{useful}}}{T_{\text{wall}}} $$
 
 The gap between rawput and goodput comes from three sources:
 

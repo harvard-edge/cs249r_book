@@ -119,7 +119,7 @@ This appendix covers the mathematical and computational machinery that powers ne
 Deep learning systems are, at their core, engines for transforming massive matrices. While frameworks like PyTorch abstract away the raw math, understanding the underlying linear algebra is essential for performance engineering. Now that we know how numbers are stored (from @sec-machine-foundations), we must understand how they are manipulated.
 
 ::: {.callout-perspective title="Why This Matters"}
-Every neural network, regardless of architecture, spends most of its time doing matrix multiplication. A single forward pass through a transformer layer executes four large GEMMs (for the Q, K, V projections and the output projection) plus the attention score computation—all matrix multiplies. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. If you can reason about matrix dimensions and arithmetic intensity, you can predict whether a workload is compute bound or memory-bound *before* running a single profiler trace.
+Many modern dense neural networks, especially transformers and large CNNs, spend much of their compute time in matrix multiplication or GEMM-like kernels. A single forward pass through a transformer layer executes four large GEMMs (for the Q, K, V projections and the output projection) plus the attention score computation—all matrix multiplies. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. Reasoning about matrix dimensions and arithmetic intensity predicts whether a dense workload is compute bound or memory-bound *before* any profiler trace runs.
 :::
 
 ### Tensor operations and notation {#sec-algorithm-foundations-tensor-operations-notation-2758}
@@ -157,7 +157,7 @@ The arithmetic intensity of GEMM scales linearly with matrix dimension. For squa
 This explains several important phenomena:
 
 - **Larger batches improve efficiency**: Batching increases the effective matrix dimensions, pushing workloads toward the compute-bound region of the roofline.
-- **Power-of-two dimensions help**: Hardware tensor cores are optimized for specific tile sizes (typically $16\times16$ or $32\times32$). Dimensions that align with these sizes avoid padding overhead.
+- **Aligned dimensions help**: Hardware tensor cores are optimized for precision- and architecture-specific tile multiples. Dimensions that align with these multiples avoid padding overhead and improve kernel efficiency, but they do not need to be powers of two.
 - **Small matrices are inefficient**: A square GEMM with $n =$ `{python} AlgorithmFoundations.n_small_str` has intensity `{python} AlgorithmFoundations.n_small_str`/3 ≈ `{python} AlgorithmFoundations.small_intensity_str` FLOP/byte, well below the ridge point (`{python} AlgorithmFoundations.a100_ridge_str`), achieving only ~`{python} AlgorithmFoundations.small_efficiency_pct_str` percent of peak throughput.
 
 ### Sparse matrix formats {#sec-algorithm-foundations-sparse-matrix-formats-0bd0}
@@ -170,7 +170,7 @@ The **Compressed Sparse Row (CSR)** format uses three arrays:
 - `Col_Idx`: The column index of each nonzero element
 - `Row_Ptr`: The starting position in `Values` for each row (length = num_rows + 1)
 
-CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements and $K$ nonzeros, CSR uses $O(K)$ storage instead of $O(N)$.
+CSR is essential for recommendation systems (sparse embedding tables) and pruned models. For a matrix with $N$ elements, $R$ rows, and $K$ nonzeros, CSR uses $O(K + R)$ storage instead of $O(N)$; when $K$ is large relative to $R$, this is often summarized as $O(K)$.
 
 To see the trade-off concretely, consider a vocabulary embedding matrix with `{python} AlgorithmFoundations.vocab_size_str` rows and `{python} AlgorithmFoundations.embed_dim_str` columns (`{python} AlgorithmFoundations.total_elements_str` billion parameters):
 
@@ -192,18 +192,18 @@ Your logic is correct, but your code crashes with a shape mismatch error. Or wor
 
 @tbl-tensor-op-ref provides a quantitative reference for the most common building blocks. Use these formulas for napkin-math estimation of model size and compute requirements *before* you provision hardware. If you know the layer type and input shape, you can predict whether a model will fit in memory.
 
-| **Layer Type**              | **Output Shape**              |                             **Parameters ($P$)** |                                                           **FLOPs (per Forward Pass)** |
-|:----------------------------|:------------------------------|-------------------------------------------------:|---------------------------------------------------------------------------------------:|
-| **Linear**                  | $(B, N_{\text{out}})$         |      $(N_{\text{in}} + 1) \times N_{\text{out}}$ |                                $2 \times B \times N_{\text{in}} \times N_{\text{out}}$ |
-| **Conv2D**                  | $(B, C_{\text{out}}, H', W')$ | $K^2 \times C_{\text{in}} \times C_{\text{out}}$ | $2 \times B \times H' \times W' \times K^2 \times C_{\text{in}} \times C_{\text{out}}$ |
-| **Attention (Single Head)** | $(B, S, d_{\text{model}})$    |                    $4 \times d_{\text{model}}^2$ |                           $B \times (4 S^2 d_{\text{model}} + 8 S d_{\text{model}}^2)$ |
-| **LayerNorm**               | $(B, S, d_{\text{model}})$    |                      $2 \times d_{\text{model}}$ |                                                $O(B \times S \times d_{\text{model}})$ |
+| **Layer Type**              | **Output Shape**              |                                                                 **Parameters ($P$)** |                                                           **FLOPs (per Forward Pass)** |
+|:----------------------------|:------------------------------|-------------------------------------------------------------------------------------:|---------------------------------------------------------------------------------------:|
+| **Linear**                  | $(B, N_{\text{out}})$         |                                          $(N_{\text{in}} + 1) \times N_{\text{out}}$ |                                $2 \times B \times N_{\text{in}} \times N_{\text{out}}$ |
+| **Conv2D**                  | $(B, C_{\text{out}}, H', W')$ | $K^2 \times C_{\text{in}} \times C_{\text{out}} + C_{\text{out}}$ if bias is enabled | $2 \times B \times H' \times W' \times K^2 \times C_{\text{in}} \times C_{\text{out}}$ |
+| **Attention (Single Head)** | $(B, S, d_{\text{model}})$    |                                                        $4 \times d_{\text{model}}^2$ |                           $B \times (4 S^2 d_{\text{model}} + 8 S d_{\text{model}}^2)$ |
+| **LayerNorm**               | $(B, S, d_{\text{model}})$    |                                                          $2 \times d_{\text{model}}$ |                                                $O(B \times S \times d_{\text{model}})$ |
 
 : **Deep Learning Tensor Primitives**: Summary of shapes, parameters, and FLOP counts. Note: $B$ is batch size, $S$ is sequence length, $K$ is kernel size. The Attention FLOPs include QKV projections and the $S^2$ attention matrix interactions. The $S^2$ term dominates for long sequences (explaining why LLM inference slows with context length); the $d^2$ term dominates for large hidden dimensions. {#tbl-tensor-op-ref}
 
 ### Shapes and strides {#sec-algorithm-foundations-shapes-strides-1aea}
 
-A tensor is a view over a contiguous block of memory.
+A tensor is a view over an underlying storage buffer, described by shape, stride, dtype, and offset metadata. Only contiguous tensors lay their logical elements out as one adjacent block.
 
 *   **Shape:** The dimensions of the tensor (for example, `(3, 4)`).
 *   **Stride:** The number of elements to skip in memory to move to the next element in a dimension.
@@ -243,7 +243,7 @@ $$ \frac{\partial y}{\partial x} = \frac{\partial f_3}{\partial f_2} \cdot \frac
 
 Each factor in this product is a *local* derivative—computed at one layer using only that layer's inputs and outputs. This locality is what makes the algorithm tractable: you never need to differentiate the entire network as a monolithic function. Instead, each layer computes its own local derivative during the backward pass and multiplies it by the gradient flowing in from the layer above.
 
-Modern frameworks use **reverse-mode automatic differentiation**, which computes gradients for all $N$ parameters in a single backward pass. The key insight is that starting from the output and working backward (reverse mode) requires one pass regardless of the number of parameters, whereas starting from each input and working forward (forward mode) would require $N$ passes—one per parameter. This is why training (one forward + one backward pass) has similar compute cost to two inference passes, rather than $N$ passes.
+Modern frameworks use **reverse-mode automatic differentiation**, which computes gradients for all $N$ parameters in a single backward pass. The key insight is that starting from the output and working backward (reverse mode) requires one pass regardless of the number of parameters, whereas starting from each input and working forward (forward mode) would require $N$ passes—one per parameter. This is why a training step is a small constant multiple of inference, commonly about 2--3$\times$ a forward pass for dense networks, rather than $N$ passes.
 
 ### The backpropagation algorithm {#sec-algorithm-foundations-backpropagation-algorithm-93f7}
 
@@ -329,7 +329,7 @@ To see how these components interact in practice, consider a concrete model.
 # │ How:     Scalar arithmetic from pint constants.
 # │
 # │ Imports: mlsysim.core.constants (GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
-# │                           BYTES_FP16, BYTES_FP32, GB, byte, ureg, param)
+# │                           BYTES_FP16, BYTES_FP32, GB, GiB, byte, ureg, param)
 # │          mlsysim.book (fmt, check)
 # │ Exports: gpt2_P_str, gpt2_layers_str, gpt2_d_str, gpt2_bf16_str,
 # │          gpt2_weights_gb_str, gpt2_grads_gb_str, gpt2_optim_bytes_str,
@@ -340,7 +340,7 @@ To see how these components interact in practice, consider a concrete model.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import (
     GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
-    BYTES_FP16, BYTES_FP32, GB, byte, ureg, param,
+    BYTES_FP16, BYTES_FP32, GB, GiB, byte, ureg, param,
     A100_MEM_CAPACITY
 )
 from mlsysim.fmt import fmt, check, sci_latex, md_math
@@ -352,7 +352,7 @@ class GPT2TrainingMem:
     d = GPT2_HIDDEN_DIM
     bf16 = int(BYTES_FP16.m_as(ureg.byte))
     fp32 = int(BYTES_FP32.m_as(ureg.byte))
-    accel_gb = A100_MEM_CAPACITY.m_as(GB)
+    accel_gb = A100_MEM_CAPACITY.m_as(GiB)
     batch_small = 8
     batch_large = 64
     seq_len = 1024
@@ -413,7 +413,7 @@ class GPT2TrainingMem:
 
 **Activations (scale with batch)**:
 
-Per-layer activation memory for a transformer is approximately $12 \times B \times S \times d$ bytes (in BF16), where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
+Per-layer retained activations for a transformer are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
 
 `{python} GPT2TrainingMem.layers_str` $\times 12 \times$ `{python} GPT2TrainingMem.batch_small_str` $\times$ `{python} GPT2TrainingMem.seq_len_str` $\times$ `{python} GPT2TrainingMem.d_str` $\times$ `{python} GPT2TrainingMem.bf16_str` bytes $\approx$ `{python} GPT2TrainingMem.act_small_gb_str` GB
 

@@ -76,7 +76,7 @@ class DAMTaxonomy:
 
 ::: {.callout-learning-objectives}
 
-- Classify any single-machine bottleneck into one of three MECE categories: Data, Algorithm, or Machine
+- Classify single-machine bottlenecks by dominant Data, Algorithm, or Machine axis while recognizing mixed causes
 - Map optimization techniques to their D·A·M intersection zone to understand which axes they span
 - Apply the iron law equation to quantitatively diagnose performance problems
 - Distinguish between memory-bound and compute-bound workloads using Arithmetic Intensity
@@ -85,9 +85,9 @@ class DAMTaxonomy:
 
 :::
 
-The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy enables practitioners to isolate the bottleneck to one of three mutually exclusive and collectively exhaustive (MECE[^fn-mece-v2]) axes.
+The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy helps practitioners decompose bottlenecks across three diagnostic axes[^fn-mece-v2], while recognizing that real systems can involve mixed causes or interactions between axes.
 
-[^fn-mece-v2]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, MECE ensures that every bottleneck maps to exactly one D·A·M axis, preventing both diagnostic gaps and double-counting.
+[^fn-mece-v2]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, it is useful as an idealized decomposition, but D·A·M bottlenecks often overlap in practice: a kernel can be simultaneously memory-bound, synchronization-heavy, and poorly matched to available hardware.
 
 ## Diagnostic Summary {#sec-dam-taxonomy-diagnostic-summary}
 
@@ -107,7 +107,7 @@ The performance of any ML task is governed by the distribution of work across th
 
 $$ T = \underbrace{ \frac{D_{\text{vol}}}{\text{BW}} }_{\text{Data (D)}} + \underbrace{ \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} }_{\text{Algorithm (A)/Machine (M)}} + \underbrace{ L_{\text{lat}} }_{\text{Overhead}} $$
 
-Note that Algorithm and Machine share the compute term; they are separated by which variable you control. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta$) is a **Machine** lever.
+Note that Algorithm and Machine share the compute term; they are separated by which variable you control. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a **Machine** lever.
 
 ### D·A·M coordination: From sum to max {#sec-dam-taxonomy-dam-coordination-sum-max}
 
@@ -117,12 +117,12 @@ $$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{
 
 The systems engineer's job is to make these components run in parallel, not in series. @tbl-v2-dam-overlap summarizes key D·A·M Coordination techniques:
 
-| **Technique**           | **D·A·M Axes Overlapped**    | **Implementation**                                   |
-|:------------------------|:-----------------------------|:-----------------------------------------------------|
-| **Prefetching**         | D overlaps M                 | DataLoader with `prefetch_factor`, `pin_memory=True` |
-| **CUDA Streams**        | D overlaps M                 | Separate streams for H2D transfer and compute        |
-| **Async Gradient Sync** | M (communication) overlaps A | Overlap AllReduce with next forward pass             |
-| **Double Buffering**    | D overlaps M                 | Fill buffer N+1 while computing on buffer N          |
+| **Technique**           | **D·A·M Axes Overlapped**    | **Implementation**                                                                              |
+|:------------------------|:-----------------------------|:------------------------------------------------------------------------------------------------|
+| **Prefetching**         | D overlaps M                 | DataLoader with `prefetch_factor`, `pin_memory=True`                                            |
+| **CUDA Streams**        | D overlaps M                 | Separate streams for H2D transfer and compute                                                   |
+| **Async Gradient Sync** | M (communication) overlaps A | Overlap gradient AllReduce with remaining backward computation as gradient buckets become ready |
+| **Double Buffering**    | D overlaps M                 | Fill buffer N+1 while computing on buffer N                                                     |
 
 : **D·A·M Overlap Techniques.** Each technique allows one D·A·M axis to execute while another is in flight, converting the iron law's additive terms into overlapped terms. {#tbl-v2-dam-overlap}
 
@@ -141,13 +141,13 @@ The boundary between **Data** (Memory-Bound) and **Machine** (Compute-Bound) is 
 
 Once you identify the bottleneck, @tbl-v2-bottleneck-actions tells you what to do—and what NOT to do:
 
-| **If You are...** | **Dominant Term**                            | **Optimization That Works**                               | **Optimization That is Wasted**                    |
-|:------------------|:---------------------------------------------|:----------------------------------------------------------|:---------------------------------------------------|
-| **Memory-Bound**  | $D_{\text{vol}}/\text{BW}$                   | Quantization, pruning, batching, kernel fusion            | Faster GPU (more FLOP/s will not help)             |
-| **Compute-Bound** | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster GPU, lower precision | More memory bandwidth (already saturated)          |
-| **Latency-Bound** | $L_{\text{lat}}$                             | Batching requests, kernel fusion, async dispatch          | Neither compute nor bandwidth (overhead dominates) |
+| **If You are...** | **Dominant Term**                            | **Optimization That Works**                                             | **Optimization That is Wasted**                    |
+|:------------------|:---------------------------------------------|:------------------------------------------------------------------------|:---------------------------------------------------|
+| **Memory-Bound**  | $D_{\text{vol}}/\text{BW}$                   | Quantization, pruning, batching, kernel fusion, higher memory bandwidth | More peak FLOP/s alone                             |
+| **Compute-Bound** | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster GPU, lower precision               | More memory bandwidth (already saturated)          |
+| **Latency-Bound** | $L_{\text{lat}}$                             | Batching requests, kernel fusion, async dispatch                        | Neither compute nor bandwidth (overhead dominates) |
 
-: **What Works vs. What is Wasted.** Optimizing the wrong term yields exactly zero improvement. A memory-bound model will not speed up from a faster GPU; the GPU will simply idle faster while waiting for memory. {#tbl-v2-bottleneck-actions}
+: **What Works vs. What is Wasted.** Optimizing the wrong term yields limited improvement and poor cost efficiency. A memory-bound model will not speed up from more peak FLOP/s alone; it needs higher arithmetic intensity, less data movement, or a faster memory subsystem. {#tbl-v2-bottleneck-actions}
 
 ## Tooling Map {#sec-dam-taxonomy-tooling-map}
 
@@ -167,11 +167,11 @@ Use the efficiency ratios in @tbl-v2-dam-scorecard to grade your system's perfor
 
 [^fn-mfu-v2]: **MFU (Model FLOPs Utilization)**: Measures only *useful* model computation, excluding overhead like gradient synchronization and memory management.
 
-| **Axis**      | **Metric**        | **Definition**                                         |   **Failing Grade** |       **Passing Grade** |
-|:--------------|:------------------|:-------------------------------------------------------|--------------------:|------------------------:|
-| **Data**      | **I/O Overhead**  | $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$ |      $>$ 10 percent |           $<$ 1 percent |
-| **Algorithm** | **Active Params** | $\frac{\text{Non-Zero Params}}{\text{Total Params}}$   | 100 percent (Dense) | $<$ 50 percent (Sparse) |
-| **Machine**   | **MFU**           | $\frac{\text{Achieved FLOPs}}{\text{Peak FLOPs}}$      |      $<$ 30 percent |          $>$ 50 percent |
+| **Axis**      | **Metric**                     | **Definition**                                                                   |  **Failing Grade** |  **Passing Grade** |
+|:--------------|:-------------------------------|:---------------------------------------------------------------------------------|-------------------:|-------------------:|
+| **Data**      | **I/O Overhead**               | $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$                           |     $>$ 10 percent |      $<$ 1 percent |
+| **Algorithm** | **Compression/Sparsity Ratio** | $\frac{\text{Effective or active parameters}}{\text{Dense baseline parameters}}$ | Workload-dependent | Workload-dependent |
+| **Machine**   | **MFU**                        | $\frac{\text{Achieved FLOPs}}{\text{Peak FLOPs}}$                                |     $<$ 30 percent |     $>$ 50 percent |
 
 : **The D·A·M Efficiency Rubric.** Use these three numbers to characterize single-machine maturity. {#tbl-v2-dam-scorecard}
 

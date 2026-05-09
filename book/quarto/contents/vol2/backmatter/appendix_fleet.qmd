@@ -145,10 +145,10 @@ class FleetFoundations:
     tcp_lat = TCP_LATENCY_US
 
     # Checkpoint sizes (GB or TB for display)
-    ckpt_7b_gb = calc_checkpoint_size(7e9, 16).m_as(GB)
-    ckpt_70b_gb = calc_checkpoint_size(70e9, 16).m_as(GB)
-    ckpt_175b_gb = calc_checkpoint_size(175e9, 16).m_as(GB)
-    ckpt_1t_tb = calc_checkpoint_size(1e12, 16).m_as(TB)
+    ckpt_7b_gb = calc_checkpoint_size(7e9, 14).m_as(GB)
+    ckpt_70b_gb = calc_checkpoint_size(70e9, 14).m_as(GB)
+    ckpt_175b_gb = calc_checkpoint_size(175e9, 14).m_as(GB)
+    ckpt_1t_tb = calc_checkpoint_size(1e12, 14).m_as(TB)
 
     # Rack & PUE
     rack_trad = RACK_POWER_TRADITIONAL_KW
@@ -242,7 +242,7 @@ The following provides a compact reference for the key foundational ideas that r
 - **The iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
 - **Roofline Model**: Distinguishes compute-bound from memory-bound workloads using arithmetic intensity. At fleet scale, a third ceiling appears: **network-bound** workloads whose performance is limited by inter-node bandwidth.
 - **Amdahl's Law**: Caps strong-scaling speedup at $1/s$. At fleet scale, the "serial fraction" includes not just sequential code but also synchronization barriers, collective communication, and pipeline bubbles.
-- **Training memory rule**: 16 bytes per parameter for mixed-precision Adaptive Moment Estimation (Adam) training. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
+- **Training state rule**: about 14 bytes per parameter for common mixed-precision Adam checkpoint state (BF16 weights, FP32 master weights, and Adam moments), before framework metadata and implementation-specific extras. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
 - **Little's Law** ($N_{\text{req}} = \lambda T_{\text{lat}}$): Sizes inference infrastructure. At fleet scale, it determines how many serving replicas are needed behind a load balancer.
 
 The transition from single-machine to fleet-scale reasoning requires extending these models with new dimensions: network topology, failure probability, and coordination overhead. The numbers in the next section provide the quantitative foundation for that extension.
@@ -254,7 +254,7 @@ The transition from single-machine to fleet-scale reasoning requires extending t
 Just as single-machine analysis depends on a set of core numbers, fleet-scale engineering is governed by a set of predictable ratios and scaling behaviors. The single-machine numbers still apply within each node, but a new set of numbers governs the spaces *between* nodes. While absolute values evolve with hardware generations, the *ratios* between communication tiers and the *scaling behavior* of failure rates remain remarkably stable. **Memorize the ratios and scaling trends; use the specific numbers as sanity checks.**
 
 ::: {.callout-perspective title="Node-Level Numbers for Fleet Reasoning"}
-Fleet reasoning depends on a few node-level numbers that directly affect fleet design: **16 bytes per parameter** (checkpoint sizing, ZeRO partitioning, memory budgets); **NVLink vs. HBM bandwidth** (intra-node parallelism placement); **peak FLOPS and HBM capacity** (MFU and effective FLOPS, batch and model sharding). The hardware table below and the communication numbers in the preceding section give inter-node and current-generation values; the memory hierarchy and roofline ridge points within a node provide the necessary baseline.
+Fleet reasoning depends on a few node-level numbers that directly affect fleet design: **about 14 bytes per parameter** for common Adam checkpoint state, with larger footprints when gradients, activations, metadata, or extra optimizer buffers are included; **NVLink vs. HBM bandwidth** (intra-node parallelism placement); **peak FLOPS and HBM capacity** (MFU and effective FLOPS, batch and model sharding). The hardware table below and the communication numbers in the preceding section give inter-node and current-generation values; the memory hierarchy and roofline ridge points within a node provide the necessary baseline.
 :::
 
 ::: {.callout-takeaways title="Three Fleet Numbers That Matter Most"}
@@ -310,7 +310,7 @@ class FleetQuickRef:
 | **Communication**          | IB NDR ~`{python} FleetQuickRef.ib_ndr_gbs` GB/s, ~`{python} FleetQuickRef.ib_ndr_us` μs one-way                                                                     | Inter-node bandwidth and latency                                    |
 | **Computation**            | MFU `{python} FleetQuickRef.mfu_lo`--`{python} FleetQuickRef.mfu_hi`%, η ~`{python} FleetQuickRef.eff_1024`% @ 1K, ~`{python} FleetQuickRef.eff_8192`% @ 8K          | Effective FLOPS and scaling sanity checks                           |
 | **Coordination**           | MTBF 8K: ~`{python} FleetQuickRef.mtbf_8k_min` min; 100K: ~`{python} FleetQuickRef.mtbf_100k_min` min                                                                | Failure expectation and checkpoint cadence                          |
-| **Coordination**           | 175B checkpoint ~`{python} FleetQuickRef.ckpt_175` GB (16 B/param)                                                                                                   | Recovery and storage sizing                                         |
+| **Coordination**           | 175B checkpoint ~`{python} FleetQuickRef.ckpt_175` GB (14 B/param common Adam state)                                                                                 | Recovery and storage sizing                                         |
 | **Coordination**           | Goodput ~`{python} FleetQuickRef.goodput`% after overheads                                                                                                           | Wall-clock utilization                                              |
 | **Power & sustainability** | AI rack ~`{python} FleetQuickRef.rack_ai` kW; air limit ~`{python} FleetQuickRef.air_limit` kW                                                                       | Cooling feasibility (liquid required above air limit)               |
 | **Power & sustainability** | PUE liquid ~`{python} FleetQuickRef.pue_liq`, typical ~`{python} FleetQuickRef.pue_typ`; H100 `{python} FleetQuickRef.h100_tdp` W -> 10K GPUs ≈ 7 MW IT $\times$ PUE | Facility load and carbon (see @sec-fleet-foundations-thermal-power) |
@@ -337,7 +337,7 @@ This is pure arithmetic, not an approximation. Doubling the cluster size halves 
 
 #### AllReduce overhead scaling {.unnumbered}
 
-The bandwidth-optimal Ring AllReduce algorithm transfers $2(N-1)/N \times M$ bytes, where $M$ is the message size and $N$ is the number of participants. As $N$ grows large, this approaches $2M$---the total bytes transferred is nearly independent of the number of GPUs. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(N-1) \times \alpha$, making latency the bottleneck for small messages on large rings. This trade-off motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
+The bandwidth-optimal Ring AllReduce algorithm transfers $2(N-1)M/N$ bytes per participant, where $M$ is the message size and $N$ is the number of participants. As $N$ grows large, this approaches $2M$ per GPU, so the per-GPU bandwidth term is nearly independent of the number of GPUs; aggregate cluster traffic still grows with the number of participants. This is why Ring AllReduce scales well in the bandwidth term. The latency term, however, grows as $2(N-1) \times \alpha$, making latency the bottleneck for small messages on large rings. This trade-off motivates hierarchical AllReduce strategies that use Ring AllReduce within nodes and Tree AllReduce across nodes.
 
 ### Communication numbers {.unnumbered}
 
@@ -480,7 +480,7 @@ The key takeaway: at 8,192 GPUs and above, failure is not a risk---it is a certa
 
 #### Checkpoint sizes {.unnumbered}
 
-Checkpointing is the primary recovery mechanism, and its cost depends on the model size. @tbl-fleet-checkpoint-sizes shows checkpoint sizes for mixed-precision Adam training (16 bytes per parameter: 2B for BF16 weights, 2B for gradients, 12B for FP32 master weights + momentum + variance).
+Checkpointing is the primary recovery mechanism, and its cost depends on the model size. @tbl-fleet-checkpoint-sizes shows checkpoint sizes for common mixed-precision Adam training checkpoints (14 bytes per parameter: 2B for BF16 weights and 12B for FP32 master weights + momentum + variance). Gradients are normally transient and recomputed after restore rather than serialized as durable checkpoint state.
 
 ```{python}
 #| label: fleet-checkpoint-sizes
@@ -509,11 +509,11 @@ class FleetCheckpointSizes:
 | **Model Size**      | **Checkpoint Size**                          | **Write Time @ 100 GB/s** |
 |:--------------------|:---------------------------------------------|:--------------------------|
 | **7B parameters**   | `{python} FleetCheckpointSizes.ckpt_7b` GB   | ~1 second                 |
-| **70B parameters**  | `{python} FleetCheckpointSizes.ckpt_70b` GB  | ~11 seconds               |
-| **175B parameters** | `{python} FleetCheckpointSizes.ckpt_175b` GB | ~28 seconds               |
-| **1T parameters**   | `{python} FleetCheckpointSizes.ckpt_1t` TB   | ~2.7 minutes              |
+| **70B parameters**  | `{python} FleetCheckpointSizes.ckpt_70b` GB  | ~10 seconds               |
+| **175B parameters** | `{python} FleetCheckpointSizes.ckpt_175b` GB | ~25 seconds               |
+| **1T parameters**   | `{python} FleetCheckpointSizes.ckpt_1t` TB   | ~2.3 minutes              |
 
-: **Checkpoint Sizes by Model Scale**: Uses 16 bytes/parameter (mixed-precision Adam). Write time assumes 100 GB/s aggregate storage bandwidth. Asynchronous checkpointing (@sec-fault-tolerance-reliability) can overlap writes with training, reducing the visible overhead. {#tbl-fleet-checkpoint-sizes}
+: **Checkpoint Sizes by Model Scale**: Uses 14 bytes/parameter for common mixed-precision Adam checkpoint state. Write time assumes 100 GB/s aggregate storage bandwidth. Asynchronous checkpointing (@sec-fault-tolerance-reliability) can overlap writes with training, reducing the visible overhead. {#tbl-fleet-checkpoint-sizes}
 
 #### Overhead budgets {.unnumbered}
 
@@ -636,7 +636,7 @@ class FleetHardwareRef:
 
 : **Fleet-Scale Hardware Reference (c. 2025--2026)**: Per-accelerator specifications for the current and emerging generations. The B200, MI300X, and Tensor Processing Unit (TPU) v6 (Trillium) represent the frontier of fleet-scale compute density and memory bandwidth. {#tbl-fleet-hardware-ref}
 
-As @tbl-fleet-hardware-ref summarizes, a DGX H100 SuperPOD contains 32 DGX H100 nodes (256 H100 GPUs). Meta's Grand Teton cluster deployed 16,384 H100 GPUs. Google's TPU v5p pods scale to 8,960 chips. The largest announced clusters (as of 2025) exceed 100,000 accelerators.
+As @tbl-fleet-hardware-ref summarizes, a DGX H100 SuperPOD contains 32 DGX H100 nodes (256 H100 GPUs). Meta announced two 24,576-H100 data-center-scale clusters built on the Grand Teton hardware platform. Google's TPU v5p pods scale to 8,960 chips. The largest announced clusters (as of 2025) exceed 100,000 accelerators.
 
 ---
 
@@ -805,7 +805,7 @@ Tensor parallelism within a node achieves $\rho =$ `{python} FleetCommCompRatio.
 
 Amdahl's Law paints a pessimistic picture because it assumes a fixed problem size. In practice, fleet-scale training often follows **weak scaling**: the problem size (tokens, data, model parameters) grows proportionally with the number of GPUs. Gustafson's Law captures this more optimistic view.
 
-The key insight for fleet-scale ML is that weak scaling is not just a mathematical convenience---it reflects reality. Engineers do not use 8,192 GPUs to train a 7B model faster; they use them to train a 70B or 700B model in reasonable time. As the model grows, the computation per step grows quadratically (more parameters, larger activations), while communication grows linearly (gradient size scales with parameter count). This means the communication-computation ratio $\rho$ actually *improves* for larger models on larger clusters---a property sometimes called **strong scaling in weak scaling's clothing**.
+The key insight for fleet-scale ML is that weak scaling is not just a mathematical convenience---it reflects reality. Engineers do not use 8,192 GPUs to train a 7B model faster; they use them to train a 70B or 700B model in reasonable time. As models and training batches grow, engineers often increase the compute performed between synchronization points. For dense Transformers, compute is commonly estimated as about 6$\times$ parameters $\times$ tokens, while gradient communication scales with parameter bytes, so the communication-computation ratio $\rho$ depends on batch size, sequence length, accumulation, and parallelism layout rather than on parameter count alone.
 
 ```{python}
 #| label: fleet-effective-flops
@@ -896,7 +896,7 @@ Power Usage Effectiveness (PUE) measures how efficiently a datacenter converts e
 | **Industry average**            | `{python} fmt(FF.pue_typical, precision=2, commas=False)` | 400 kW overhead                |
 | **Legacy enterprise**           | `{python} fmt(FF.pue_legacy, precision=2, commas=False)`  | 580 kW overhead                |
 
-: **Power Usage Effectiveness (PUE)**: Lower is better. Liquid cooling achieves PUE near 1.0 because it removes heat directly from the chip without the intermediate step of heating air. The gap between legacy (1.58) and liquid-cooled (1.06) represents a 49 percent reduction in total facility power. {#tbl-fleet-pue-fleet}
+: **Power Usage Effectiveness (PUE)**: Lower is better. Liquid cooling achieves PUE near 1.0 because it removes heat directly from the chip without the intermediate step of heating air. The gap between legacy (1.58) and liquid-cooled (1.06) represents about a 33 percent reduction in total facility power at fixed IT load; the non-IT overhead drops from 0.58 MW to 0.06 MW per MW of IT load. {#tbl-fleet-pue-fleet}
 
 For fleet-scale cost calculations, PUE directly multiplies the electricity bill. A 10 MW IT load in a legacy datacenter (PUE 1.58) requires 15.8 MW total, while the same load in a liquid-cooled facility (PUE 1.06) requires only 10.6 MW---a savings of 5.2 MW. At typical commercial electricity rates, this difference translates to millions of dollars per year. @sec-sustainable-ai covers the full sustainability implications.
 
