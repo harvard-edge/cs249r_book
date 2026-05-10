@@ -2693,6 +2693,17 @@ class ValidateCommand:
                         context=context[:160],
                     )
                 )
+            if "**" in body:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_body_extra_bold",
+                        message=f"{key} caption body should be plain prose; only the leading caption head is bold",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
 
         for file in files:
             lines = self._read_text(file).splitlines()
