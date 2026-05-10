@@ -624,12 +624,7 @@ class GELU:
         HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
         ### BEGIN SOLUTION
-        # GELU approximation: x * sigmoid(1.702 * x)
-        # First compute sigmoid part
-        sigmoid_part = 1.0 / (1.0 + np.exp(-1.702 * x.data))
-        # Then multiply by x
-        result = x.data * sigmoid_part
-        return Tensor(result)
+        return Sigmoid()(x * 1.702) * x
         ### END SOLUTION
 
     def __call__(self, x: Tensor) -> Tensor:
