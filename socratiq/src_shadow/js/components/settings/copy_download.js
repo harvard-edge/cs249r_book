@@ -40,14 +40,22 @@ export function copy_download(shadowEle, clone) {
     const getMarkdownContent = () => {
         const markdown = clone.getAttribute('data-markdown');
         if (markdown) {
-            // Clean up the markdown by removing HTML style tags and attributes
-            return markdown.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '') // Remove style tags and their content
-                          .replace(/<[^>]+style="[^"]*"[^>]*>/g, '') // Remove style attributes
-                          .replace(/id="[^"]*"/g, '') // Remove id attributes
-                          .replace(/class="[^"]*"/g, '') // Remove class attributes
-                          .replace(/<div[^>]*>([\s\S]*?)<\/div>/g, '$1') // Replace div tags with their content
-                          .replace(/\s+/g, ' ') // Normalize whitespace
-                          .trim(); // Remove leading/trailing whitespace
+            // Clean up the markdown by removing HTML style tags and attributes (repeat until stable)
+            let out = markdown;
+            let prev;
+            do {
+                prev = out;
+                out = out
+                    .replace(/<style[^>]*>[\s\S]*?<\/style\s*>/gi, '') // Remove style tags and their content
+                    .replace(/<script[^>]*>[\s\S]*?<\/script\s*>/gi, '') // Remove script tags if present
+                    .replace(/<[^>]+style="[^"]*"[^>]*>/g, '') // Remove style attributes
+                    .replace(/id="[^"]*"/g, '') // Remove id attributes
+                    .replace(/class="[^"]*"/g, '') // Remove class attributes
+                    .replace(/<div[^>]*>([\s\S]*?)<\/div\s*>/gi, '$1') // Replace div tags with their content
+                    .replace(/\s+/g, ' ') // Normalize whitespace
+                    .trim();
+            } while (out !== prev);
+            return out;
         }
         
         const textSource = clone.querySelector('.text-sm.text-zinc-800');

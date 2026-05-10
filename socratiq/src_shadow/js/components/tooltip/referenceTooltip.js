@@ -71,32 +71,65 @@ export class ReferenceTooltip {
     const tooltip = document.createElement('div');
     tooltip.id = 'reference-tooltip';
     tooltip.className = 'reference-tooltip';
-    
+
     const { sourceReference, sourceLabel, sourceUrl, sourcePosition } = sourceData;
-    
-    tooltip.innerHTML = `
-      <div class="tooltip-content">
-        <div class="tooltip-header">
-          <span class="tooltip-title">Source Reference</span>
-          <button class="tooltip-close" aria-label="Close tooltip">×</button>
-        </div>
-        <div class="tooltip-section">
-          <div class="tooltip-label">From: ${sourceLabel}</div>
-          <div class="tooltip-text">${this.truncateText(sourceReference, 200)}</div>
-        </div>
-        <div class="tooltip-actions">
-          <button class="tooltip-action-btn go-to-source" data-url="${sourceUrl}" data-position="${sourcePosition}">
+
+    const content = document.createElement('div');
+    content.className = 'tooltip-content';
+
+    const header = document.createElement('div');
+    header.className = 'tooltip-header';
+
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'tooltip-title';
+    titleSpan.textContent = 'Source Reference';
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'tooltip-close';
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Close tooltip');
+    closeBtn.textContent = '×';
+
+    header.append(titleSpan, closeBtn);
+
+    const section = document.createElement('div');
+    section.className = 'tooltip-section';
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'tooltip-label';
+    labelEl.textContent = `From: ${sourceLabel ?? ''}`;
+
+    const textEl = document.createElement('div');
+    textEl.className = 'tooltip-text';
+    textEl.textContent = this.truncateText(sourceReference, 200);
+
+    section.append(labelEl, textEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'tooltip-actions';
+
+    const goBtn = document.createElement('button');
+    goBtn.className = 'tooltip-action-btn go-to-source';
+    goBtn.type = 'button';
+    if (sourceUrl != null && sourceUrl !== '') {
+      goBtn.dataset.url = String(sourceUrl);
+    }
+    if (sourcePosition != null && sourcePosition !== '') {
+      goBtn.dataset.position = String(sourcePosition);
+    }
+    goBtn.innerHTML = `
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
               <polyline points="15,3 21,3 21,9"></polyline>
               <line x1="10" y1="14" x2="21" y2="3"></line>
             </svg>
-            Go to Source
-          </button>
-        </div>
-      </div>
-    `;
-    
+            Go to Source`;
+
+    actions.appendChild(goBtn);
+
+    content.append(header, section, actions);
+    tooltip.appendChild(content);
+
     return tooltip;
   }
 

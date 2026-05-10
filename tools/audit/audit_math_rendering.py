@@ -45,8 +45,9 @@ LEAK_PATTERNS: list[tuple[str, re.Pattern]] = [
 
 # Patterns to strip BEFORE scanning (legitimate LaTeX zones).
 STRIP_PATTERNS: list[re.Pattern] = [
-    re.compile(r"<script\b[^>]*>.*?</script>", re.DOTALL | re.IGNORECASE),
-    re.compile(r"<style\b[^>]*>.*?</style>", re.DOTALL | re.IGNORECASE),
+    # Allow whitespace before the closing `>` (e.g. `</script >`) per HTML tokenization
+    re.compile(r"<script\b[^>]*>.*?</script\s*>", re.DOTALL | re.IGNORECASE),
+    re.compile(r"<style\b[^>]*>.*?</style\s*>", re.DOTALL | re.IGNORECASE),
     re.compile(r"<pre\b[^>]*>.*?</pre>", re.DOTALL | re.IGNORECASE),
     re.compile(r"<code\b[^>]*>.*?</code>", re.DOTALL | re.IGNORECASE),
     re.compile(r'<span class="math[^"]*">.*?</span>', re.DOTALL),

@@ -716,7 +716,11 @@ export function processReferences(markdownText, htmlContent) {
     processedHTML = processedHTML.replace(/\d+:\s*\(id=[^)]+\)/g, '');
     
     // Remove any remaining standalone footnote definitions that might be in divs or other containers
-    processedHTML = processedHTML.replace(/<[^>]*>\s*\d+:\s*\(id=[^)]+\)[^<]*<\/[^>]*>/g, '');
+    let prevFootHtml;
+    do {
+      prevFootHtml = processedHTML;
+      processedHTML = processedHTML.replace(/<[^>]*>\s*\d+:\s*\(id=[^)]+\)[^<]*<\/[^>]*>/g, '');
+    } while (processedHTML !== prevFootHtml);
     
     return processedHTML;
   } catch (error) {

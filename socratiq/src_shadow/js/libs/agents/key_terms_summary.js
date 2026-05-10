@@ -100,6 +100,18 @@ export function extractNouns(text) {
 //     return matches;
 //   }
 // accumulatedResponse: **Sure, here are the 3 main keywords extracted from the text:**<br/><br/>**[Multitasking], [Podcasts], [Burnout]**
+
+/** Strip HTML-like tags; repeat until stable so paired fragments cannot re-form unsafe sequences. */
+function stripHtmlTagsComplete(input) {
+  let s = String(input ?? '');
+  let prev;
+  do {
+    prev = s;
+    s = s.replace(/<[^>]*>/g, '');
+  } while (s !== prev);
+  return s;
+}
+
 export function extractPhrasesInBrackets(text) {
     // Regular expression to match content inside brackets only
     const regex = /\[([^\]]+)\]/g;
@@ -121,7 +133,7 @@ export function extractPhrasesInBrackets(text) {
 
 export function extractWords(inputString) {
     // Step 1: Remove HTML tags and non-alphabetic characters, except spaces and dashes
-    const cleanedString = inputString.replace(/<[^>]*>/g, "").replace(/[^a-zA-Z\s-]/g, "");
+    const cleanedString = stripHtmlTagsComplete(inputString).replace(/[^a-zA-Z\s-]/g, "");
   
     // Step 2 and 3: Split by spaces or dashes and filter out any empty strings
     const wordsArray = cleanedString.split(/[\s-]+/).filter(word => word.trim() !== "");
@@ -164,7 +176,7 @@ function removeStopWords(text) {
   
   function cleanText(inputText) {
     // Step 1: Remove HTML tags
-    let cleanedText = inputText.replace(/<[^>]*>/g, "");
+    let cleanedText = stripHtmlTagsComplete(inputText);
   
     // Step 2: Remove specific phrases, case-insensitive
     const phrasesToRemove = [
