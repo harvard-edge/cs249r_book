@@ -320,7 +320,7 @@ You have just finished the foundations tier. You can train an MLP, run optimizat
 
 Convolution is the answer for images. A photograph has structure that a generic MLP throws away: neighboring pixels matter together, the same edge can appear anywhere in the frame, and shifting a cat one pixel to the left should not require relearning what a cat looks like. A convolutional layer bakes those assumptions in — locality, weight sharing, and translation equivariance — and that *structural prior* is the reason CNNs dominated computer vision for a decade.
 
-In this module you implement `Conv2d`, `MaxPool2d`, and `AvgPool2d` as explicit nested loops. No vectorization tricks, no GPU kernel calls. The loops are the point: they expose where every multiply-accumulate goes and why a single forward pass on a 224×224 batch costs billions of operations. Once you have felt that cost in code, the optimizations real frameworks pile on top — im2col, Winograd, cuDNN — stop feeling like magic.
+In this module you implement `Conv2d`, `MaxPool2d`, and `AvgPool2d` as explicit nested loops. No vectorization tricks, no GPU kernel calls. The loops are the point: they expose where every multiply-accumulate goes and why a single forward pass on a $224{\times}224$ batch costs billions of operations. Once you have felt that cost in code, the optimizations real frameworks pile on top — im2col, Winograd, cuDNN — stop feeling like magic.
 
 ## Learning Objectives
 
@@ -510,32 +510,32 @@ def forward(self, x):
 
 : **Listing 9.1 — `Conv2d.forward()` written as seven explicit nested loops, exposing the `O(B * C_out * H * W * C_in * K^2)` cost that im2col and GEMM later optimise away.** {#lst-09-convolutions-conv2d-forward}
 
-Each output pixel summarizes information from a local neighborhood in the input. A 3×3 convolution looks at 9 pixels to produce each output value, enabling the network to detect local patterns like edges, corners, and textures.
+Each output pixel summarizes information from a local neighborhood in the input. A $3{\times}3$ convolution looks at 9 pixels to produce each output value, enabling the network to detect local patterns like edges, corners, and textures.
 
 ### Stride and Padding
 
 Stride controls how far the kernel moves between positions, and padding adds zeros around the input border. Together, they determine the output spatial dimensions and receptive field coverage.
 
-**Stride = 1** means the kernel moves one pixel at a time, producing an output nearly as large as the input. **Stride = 2** means the kernel jumps two pixels, halving the spatial dimensions and dramatically reducing computation. A stride-2 convolution processes 4× fewer positions than stride-1.
+**Stride = 1** means the kernel moves one pixel at a time, producing an output nearly as large as the input. **Stride = 2** means the kernel jumps two pixels, halving the spatial dimensions and dramatically reducing computation. A stride-2 convolution processes 4$\times$ fewer positions than stride-1.
 
-**Padding** solves the border problem. Without padding, a 3×3 convolution on a 224×224 image produces a 222×222 output, shrinking the representation. With `padding=1`, you add a 1-pixel border of zeros, keeping the output at 224×224. This preserves spatial dimensions and ensures edge pixels get processed as many times as center pixels.
+**Padding** solves the border problem. Without padding, a $3{\times}3$ convolution on a $224{\times}224$ image produces a $222{\times}222$ output, shrinking the representation. With `padding=1`, you add a 1-pixel border of zeros, keeping the output at $224{\times}224$. This preserves spatial dimensions and ensures edge pixels get processed as many times as center pixels.
 
 ```
 No Padding (shrinks):           Padding=1 (preserves):
-Input: 5×5                      Input: 5×5 → Padded: 7×7
-Kernel: 3×3                     Kernel: 3×3
-Output: 3×3                     Output: 5×5
+Input: 5x5                      Input: 5x5 → Padded: 7x7
+Kernel: 3x3                     Kernel: 3x3
+Output: 3x3                     Output: 5x5
 
 ┌─────────┐                    ┌───────────┐
 │ 1 2 3 4 5│                   │0 0 0 0 0 0 0│
-│ 6 7 8 9 0│    3×3 kernel     │0 1 2 3 4 5 0│
+│ 6 7 8 9 0│    3x3 kernel     │0 1 2 3 4 5 0│
 │ 1 2 3 4 5│    →              │0 6 7 8 9 0 0│
-│ 6 7 8 9 0│    3×3 output     │0 1 2 3 4 5 0│
+│ 6 7 8 9 0│    3x3 output     │0 1 2 3 4 5 0│
 │ 1 2 3 4 5│                   │0 6 7 8 9 0 0│
 └─────────┘                    │0 1 2 3 4 5 0│
                                 │0 0 0 0 0 0 0│
                                 └───────────┘
-                                5×5 output preserved
+                                5x5 output preserved
 ```
 
 The formula connecting these parameters is:
@@ -544,7 +544,7 @@ The formula connecting these parameters is:
 output_size = (input_size + 2×padding - kernel_size) / stride + 1
 ```
 
-For a 224×224 input with kernel=3, padding=1, stride=1:
+For a $224{\times}224$ input with kernel=3, padding=1, stride=1:
 
 output_size = (224 + 2×1 - 3) / 1 + 1 = 224
 
@@ -554,25 +554,25 @@ output_size = (224 + 2×1 - 3) / 2 + 1 = 112
 
 ### Receptive Fields
 
-The **receptive field** of an output neuron is the region of the original input that can influence its value. A single 3×3 convolution gives every output pixel a 3×3 receptive field. Stack two 3×3 convolutions and each output now depends on a 5×5 region of the original input. Five stacked 3×3 convolutions reach 11×11.
+The **receptive field** of an output neuron is the region of the original input that can influence its value. A single $3{\times}3$ convolution gives every output pixel a $3{\times}3$ receptive field. Stack two $3{\times}3$ convolutions and each output now depends on a $5{\times}5$ region of the original input. Five stacked $3{\times}3$ convolutions reach $11{\times}11$.
 
 That growth is why depth matters. Early layers see only enough pixels to detect edges and textures. Middle layers see enough to assemble parts — eyes, wheels, corners. Deep layers see enough of the input to recognize whole objects. The hierarchy in the network mirrors the hierarchy in the data: pixels → textures → parts → objects.
 
 ```
 Receptive Field Growth:
 
-Layer 1 (3×3 conv):    Layer 2 (3×3 conv):    Layer 3 (3×3 conv):
+Layer 1 ($3{\times}3$ conv):    Layer 2 ($3{\times}3$ conv):    Layer 3 ($3{\times}3$ conv):
 ┌───┐                  ┌─────┐                ┌───────┐
-│▓▓▓│ → 3×3 RF        │▓▓▓▓▓│ → 5×5 RF       │▓▓▓▓▓▓▓│ → 7×7 RF
+│▓▓▓│ → $3{\times}3$ RF        │▓▓▓▓▓│ → $5{\times}5$ RF       │▓▓▓▓▓▓▓│ → $7{\times}7$ RF
 └───┘                  └─────┘                └───────┘
 
-Stacking N 3×3 convolutions:
+Stacking N $3{\times}3$ convolutions:
 Receptive Field = 1 + 2×N
 
 VGG-16 uses this principle: stack many small kernels instead of few large ones.
 ```
 
-Parameter sharing means the same 3×3 kernel processes every position in the image. This drastically reduces parameters compared to fully connected layers while maintaining translation equivariance: if you shift the input, the output shifts identically.
+Parameter sharing means the same $3{\times}3$ kernel processes every position in the image. This drastically reduces parameters compared to fully connected layers while maintaining translation equivariance: if you shift the input, the output shifts identically.
 
 ### Pooling Operations
 
@@ -612,7 +612,7 @@ def forward(self, x):
 
 : **Listing 9.2 — `MaxPool2d.forward()` selects the largest value in each sliding window, no learnable parameters — just comparisons.** {#lst-09-convolutions-maxpool2d-forward}
 
-A 2×2 max pooling with stride=2 divides spatial dimensions by 2, reducing memory and computation by 4×. For a 224×224×64 feature map (12.3 MB in float32), pooling produces 112×112×64 (3.1 MB), saving 9.2 MB per layer.
+A $2{\times}2$ max pooling with stride=2 divides spatial dimensions by 2, reducing memory and computation by 4$\times$. For a $224{\times}224{\times}64$ feature map (12.3 MB in float32), pooling produces $112{\times}112{\times}64$ (3.1 MB), saving 9.2 MB per layer.
 
 Max pooling provides translation invariance: if a cat's ear moves one pixel, the max in that region remains roughly the same, making the network robust to small shifts. This is crucial for object recognition where precise pixel alignment doesn't matter.
 
@@ -674,12 +674,12 @@ Operations = 32 × 64 × 224 × 224 × 3 × 3 × 3
 Executing billions of scattered operations sequentially via deeply nested `for` loops yields catastrophic cache-miss rates because it fails to leverage **temporal locality** (reusing recently accessed data) and **spatial locality** (accessing contiguous memory blocks). This forces engineers to radically restructure how convolutions map to massively parallel hardware.
 
 :::{.callout-note title="Systems Implication: Memory Duplication (im2col)"}
-Modern GPUs physically cannot execute branching, nested `for` loops efficiently; however, they possess thousands of highly specialized cores explicitly optimized for dense General Matrix Multiplication (GEMM) via hardware cache tiling. To bridge this architectural gap, frameworks employ `im2col` (Image to Column). This algorithm systematically duplicates the spatial image memory in VRAM, unrolling the overlapping sliding windows into one massive, contiguous 2D matrix. By deliberately sacrificing raw memory capacity, `im2col` artificially creates perfect **spatial locality** for the GEMM hardware. This structural reorganization ensures that cache tiling can maximally exploit **temporal locality**, transforming a disjointed spatial traversal into a monolithic matrix multiplication and achieving a 100× throughput acceleration.
+Modern GPUs physically cannot execute branching, nested `for` loops efficiently; however, they possess thousands of highly specialized cores explicitly optimized for dense General Matrix Multiplication (GEMM) via hardware cache tiling. To bridge this architectural gap, frameworks employ `im2col` (Image to Column). This algorithm systematically duplicates the spatial image memory in VRAM, unrolling the overlapping sliding windows into one massive, contiguous 2D matrix. By deliberately sacrificing raw memory capacity, `im2col` artificially creates perfect **spatial locality** for the GEMM hardware. This structural reorganization ensures that cache tiling can maximally exploit **temporal locality**, transforming a disjointed spatial traversal into a monolithic matrix multiplication and achieving a 100$\times$ throughput acceleration.
 :::
 
-While `im2col` elegantly bypasses the compute bottleneck, it aggressively transfers that pressure directly onto VRAM capacity. This harsh tension between tensor memory duplication and computational vectorization underscores why spatial kernel size is aggressively optimized. Because a 7×7 kernel imposes `{python} kernel_ratio`× more compute and spatial redundancy than a 3×3 kernel, modern architectures (like VGG and ResNet) strictly favor stacking deep sequences of 3×3 convolutions rather than deploying monolithic, large-footprint kernels.
+While `im2col` elegantly bypasses the compute bottleneck, it aggressively transfers that pressure directly onto VRAM capacity. This harsh tension between tensor memory duplication and computational vectorization underscores why spatial kernel size is aggressively optimized. Because a $7{\times}7$ kernel imposes `{python} kernel_ratio`$\times$ more compute and spatial redundancy than a $3{\times}3$ kernel, modern architectures (like VGG and ResNet) strictly favor stacking deep sequences of $3{\times}3$ convolutions rather than deploying monolithic, large-footprint kernels.
 
-Pooling operations are cheap by comparison: no learnable parameters, just comparison or addition operations. A 2×2 max pooling visits each output position once and compares 4 values, requiring only 4× comparisons per output.
+Pooling operations are cheap by comparison: no learnable parameters, just comparison or addition operations. A $2{\times}2$ max pooling visits each output position once and compares 4 values, requiring only 4$\times$ comparisons per output.
 
 @tbl-09-convolutions-operation-complexity summarises the time and memory cost of the core operations.
 
@@ -835,7 +835,7 @@ The scale of production vision systems is what makes convolution optimization a 
 Your educational Conv2d takes hundreds of milliseconds on CPU for a single forward pass. The equivalent PyTorch call runs in single-digit milliseconds on GPU, and the gap is bridged by three ideas you should know by name:
 
 - **im2col + GEMM** — reshape the convolution into a matrix multiply and hand it to a tuned BLAS kernel
-- **Winograd** — algebraic identity that cuts the multiplication count for 3×3 kernels by ~2.25×
+- **Winograd** — algebraic identity that cuts the multiplication count for $3{\times}3$ kernels by ~2.25$\times$
 - **FFT convolution** — for large kernels, Fourier-domain multiplication trades O(n²) for O(n log n)
 
 Module 17 is where you replace your loops with the first of these. Before you can optimize convolution, you have to feel why it is slow — which is exactly what the loops you wrote in this module make undeniable.
@@ -846,9 +846,9 @@ Module 17 is where you replace your loops with the first of these. Before you ca
 Before moving on, verify you can articulate each of the following:
 
 - [ ] The im2col trick — how it transforms a convolution into a single GEMM at the cost of memory duplication, and why that cost is worth paying on hardware that is optimized for dense matrix multiply.
-- [ ] Why weight sharing gives convolution a ~5000× parameter advantage over a dense layer on the same image, and why that is a structural — not incidental — property.
+- [ ] Why weight sharing gives convolution a ~5,000$\times$ parameter advantage over a dense layer on the same image, and why that is a structural — not incidental — property.
 - [ ] How to compute output shape, parameter count, and MACs for any `Conv2d(C_in, C_out, K, stride, padding)` configuration without reaching for a calculator.
-- [ ] Why receptive field grows with depth (and with stride products), and why stacking 3×3 convolutions beats a single 7×7 — both in parameters and in the FLOPs per covered region.
+- [ ] Why receptive field grows with depth (and with stride products), and why stacking $3{\times}3$ convolutions beats a single $7{\times}7$ — both in parameters and in the FLOPs per covered region.
 
 If any of these feels fuzzy, revisit the Computational Complexity and Receptive Fields sections before moving on.
 :::
@@ -883,11 +883,11 @@ Weight: 64 × 3 × 3 × 3 = 1,728 parameters
 Bias: 64 parameters
 Total: **1,792 parameters**
 
-Compare this to a fully connected layer for 224×224 RGB images:
+Compare this to a fully connected layer for $224{\times}224$ RGB images:
 
-Dense(224×224×3, 64) = 150,528 × 64 = 9,633,792 parameters.
+Dense($224{\times}224{\times}3, 64$) = 150,528 × 64 = 9,633,792 parameters.
 
-Convolution uses **5,376× fewer parameters** for the same task — that is the price of weight sharing, and it is the structural advantage that makes deep CNNs trainable on commodity hardware.
+Convolution uses **5,376$\times$ fewer parameters** for the same task — that is the price of weight sharing, and it is the structural advantage that makes deep CNNs trainable on commodity hardware.
 :::
 
 **Q3: Computational Complexity**
@@ -935,20 +935,20 @@ Deep CNNs need GPUs with large memory (16 GB and up) for exactly this reason. Ba
 
 **Q5: Receptive Field Growth**
 
-Starting with 224×224 input, you stack: Conv(3×3, stride=1) → MaxPool(2×2, stride=2) → Conv(3×3, stride=1) → Conv(3×3, stride=1). What's the receptive field of the final layer?
+Starting with $224{\times}224$ input, you stack: Conv(3x3, stride=1) → MaxPool(2x2, stride=2) → Conv(3x3, stride=1) → Conv(3x3, stride=1). What's the receptive field of the final layer?
 
 :::{.callout-tip collapse="true" title="Answer"}
 
 Track receptive field growth through each layer:
 
-Layer 1 — Conv(3×3, stride=1): RF = 3
-Layer 2 — MaxPool(2×2, stride=2): RF = 3 + (2−1)×1 = 4
-Layer 3 — Conv(3×3, stride=1): RF = 4 + (3−1)×2 = 8  (stride accumulates)
-Layer 4 — Conv(3×3, stride=1): RF = 8 + (3−1)×2 = 12
+Layer 1 — Conv(3x3, stride=1): RF = 3
+Layer 2 — MaxPool(2x2, stride=2): RF = 3 + (2−1)×1 = 4
+Layer 3 — Conv(3x3, stride=1): RF = 4 + (3−1)×2 = 8  (stride accumulates)
+Layer 4 — Conv(3x3, stride=1): RF = 8 + (3−1)×2 = 12
 
-**Receptive field = 12×12**
+**Receptive field = 12x12**
 
-Each neuron in the final layer sees a 12×12 region of the original input. This is why stacking layers with stride or pooling matters: it grows the receptive field so deeper layers can detect larger patterns.
+Each neuron in the final layer sees a $12{\times}12$ region of the original input. This is why stacking layers with stride or pooling matters: it grows the receptive field so deeper layers can detect larger patterns.
 
 Formula: RF_new = RF_old + (kernel_size - 1) × stride_product
 
@@ -959,7 +959,7 @@ where stride_product is the accumulated stride from all previous layers.
 
 - **Convolution is a structural prior, not just an operation:** Locality, weight sharing, and translation equivariance are baked in — those priors are the reason CNNs beat MLPs on images with orders of magnitude fewer parameters.
 - **The 7-nested loop exposes the cost:** `O(B × C_out × H × W × C_in × K²)` is cubic in spatial dimensions and quadratic in kernel size, which is why a single ResNet-50 forward pass on one image is ~4 billion MACs.
-- **im2col trades VRAM for throughput:** Unrolling sliding windows into one dense matrix hands the work to GPU GEMM kernels that exploit cache tiling. The duplicated memory is the tax you pay for ~100× acceleration.
+- **im2col trades VRAM for throughput:** Unrolling sliding windows into one dense matrix hands the work to GPU GEMM kernels that exploit cache tiling. The duplicated memory is the tax you pay for ~100$\times$ acceleration.
 - **Output shape, parameter count, and receptive field are the three CNN formulas you live by:** `(H + 2p - K)/s + 1`, `C_out × C_in × K²`, and `RF_new = RF_old + (K-1) × stride_product`. Every architectural decision traces back to these.
 - **Activation memory, not parameter memory, caps batch size:** A single (64, 256, 112, 112) feature map is ~784 MB. Fifty such layers, times two for backward, is what forces gradient checkpointing in practice.
 
