@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field, asdict
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
 
@@ -43,26 +44,42 @@ LEAK_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("dollar-math-text", re.compile(r"\$\\[a-zA-Z]+|\\[a-zA-Z]+\$")),
 ]
 
-# Patterns to strip BEFORE scanning (legitimate LaTeX zones).
-STRIP_PATTERNS: list[re.Pattern] = [
-    # Allow whitespace before the closing `>` (e.g. `</script >`) per HTML tokenization
-    re.compile(r"<script\b[^>]*>.*?</script\s*>", re.DOTALL | re.IGNORECASE),
-    re.compile(r"<style\b[^>]*>.*?</style\s*>", re.DOTALL | re.IGNORECASE),
-    re.compile(r"<pre\b[^>]*>.*?</pre>", re.DOTALL | re.IGNORECASE),
-    re.compile(r"<code\b[^>]*>.*?</code>", re.DOTALL | re.IGNORECASE),
-    re.compile(r'<span class="math[^"]*">.*?</span>', re.DOTALL),
-    # MathJax/Katex containers and accessible labels
-    re.compile(r'<mjx-container\b.*?</mjx-container>', re.DOTALL | re.IGNORECASE),
-    re.compile(r'<math\b.*?</math>', re.DOTALL | re.IGNORECASE),
-    re.compile(r'<annotation\b.*?</annotation>', re.DOTALL | re.IGNORECASE),
-    # HTML comments and doctype
-    re.compile(r"<!--.*?-->", re.DOTALL),
-    re.compile(r"<!DOCTYPE[^>]*>", re.IGNORECASE),
-    # Head section often holds raw LaTeX in citation metadata
-    re.compile(r"<head\b.*?</head>", re.DOTALL | re.IGNORECASE),
-]
+SKIP_TEXT_TAGS = {"script", "style", "pre", "code", "mjx-container", "math", "annotation", "head"}
 
-TAG_RE = re.compile(r"<[^>]+>")
+
+class VisibleTextExtractor(HTMLParser):
+    """Collect user-visible text while skipping HTML/MathJax code zones."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip_stack: list[str] = []
+        self._chunks: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        attr_map = {name.lower(): value or "" for name, value in attrs}
+        classes = set(attr_map.get("class", "").split())
+        if tag in SKIP_TEXT_TAGS or (tag == "span" and "math" in classes):
+            self._skip_stack.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if self._skip_stack and self._skip_stack[-1] == tag:
+            self._skip_stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_stack:
+            self._chunks.append(data)
+
+    def text(self) -> str:
+        return " ".join(self._chunks)
+
+
+def visible_text_from_html(html: str) -> str:
+    parser = VisibleTextExtractor()
+    parser.feed(html)
+    parser.close()
+    return parser.text()
 
 
 @dataclass
@@ -132,11 +149,7 @@ def find_html(name: str, volume: str, qmd_path: Path) -> Path | None:
 
 
 def scan_html(html: str) -> list[Leak]:
-    cleaned = html
-    for pat in STRIP_PATTERNS:
-        cleaned = pat.sub(" ", cleaned)
-    # After stripping the safe zones, also strip tags so we look at text only.
-    text = TAG_RE.sub(" ", cleaned)
+    text = visible_text_from_html(html)
 
     leaks: list[Leak] = []
     for label, pat in LEAK_PATTERNS:

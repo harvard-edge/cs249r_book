@@ -5,6 +5,21 @@ import { enableTooltip } from '../../components/tooltip/tooltip.js';
 // import { SpacedRepetitionModal } from '../../components/spaced_repetition/modal.js';
 import { SpacedRepetitionModal } from '../../components/spaced_repetition/spaced-repetition-modal-handler.js';
 
+function cleanMarkdownFragment(markdown) {
+    const template = document.createElement('template');
+    template.innerHTML = markdown;
+
+    template.content.querySelectorAll('script, style').forEach((node) => node.remove());
+    template.content.querySelectorAll('[style], [id], [class]').forEach((node) => {
+        node.removeAttribute('style');
+        node.removeAttribute('id');
+        node.removeAttribute('class');
+    });
+
+    return (template.content.textContent || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
 
 // Add the back button creation function (same as in create_quiz_button_grp.js)
 function createBackButton(shadowEle) {
@@ -40,22 +55,7 @@ export function copy_download(shadowEle, clone) {
     const getMarkdownContent = () => {
         const markdown = clone.getAttribute('data-markdown');
         if (markdown) {
-            // Clean up the markdown by removing HTML style tags and attributes (repeat until stable)
-            let out = markdown;
-            let prev;
-            do {
-                prev = out;
-                out = out
-                    .replace(/<style[^>]*>[\s\S]*?<\/style\s*>/gi, '') // Remove style tags and their content
-                    .replace(/<script[^>]*>[\s\S]*?<\/script\s*>/gi, '') // Remove script tags if present
-                    .replace(/<[^>]+style="[^"]*"[^>]*>/g, '') // Remove style attributes
-                    .replace(/id="[^"]*"/g, '') // Remove id attributes
-                    .replace(/class="[^"]*"/g, '') // Remove class attributes
-                    .replace(/<div[^>]*>([\s\S]*?)<\/div\s*>/gi, '$1') // Replace div tags with their content
-                    .replace(/\s+/g, ' ') // Normalize whitespace
-                    .trim();
-            } while (out !== prev);
-            return out;
+            return cleanMarkdownFragment(markdown);
         }
         
         const textSource = clone.querySelector('.text-sm.text-zinc-800');
