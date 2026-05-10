@@ -5873,16 +5873,21 @@ class F {
       let o = null;
       const s = (i) => {
         if (o) return;
-        o = document.createElement("div"), o.className = "comment-hover-tooltip", o.innerHTML = `
-                    <div class="comment-hover-header">
-                        <span class="comment-hover-author">${t.author}</span>
-                        <span class="comment-hover-time">${this.formatTimestamp(t.timestamp)}</span>
-                    </div>
-                    <div class="comment-hover-content">${this.escapeHtml(t.text)}</div>
-                    ${t.resolved ? '<div class="comment-hover-resolved">✓ Resolved</div>' : ""}
-                `, document.body.appendChild(o);
-        const a = e.getBoundingClientRect();
-        o.style.position = "absolute", o.style.top = `${a.top - o.offsetHeight - 5}px`, o.style.left = `${a.left}px`, o.style.zIndex = "10001";
+        o = document.createElement("div"), o.className = "comment-hover-tooltip";
+        const a = document.createElement("div");
+        a.className = "comment-hover-header";
+        const r = document.createElement("span");
+        r.className = "comment-hover-author", r.textContent = t.author || "";
+        const c = document.createElement("span");
+        c.className = "comment-hover-time", c.textContent = this.formatTimestamp(t.timestamp), a.append(r, c);
+        const l = document.createElement("div");
+        if (l.className = "comment-hover-content", l.textContent = t.text || "", o.append(a, l), t.resolved) {
+          const d = document.createElement("div");
+          d.className = "comment-hover-resolved", d.textContent = "✓ Resolved", o.appendChild(d);
+        }
+        document.body.appendChild(o);
+        const h = e.getBoundingClientRect();
+        o.style.position = "absolute", o.style.top = `${h.top - o.offsetHeight - 5}px`, o.style.left = `${h.left}px`, o.style.zIndex = "10001";
       }, n = () => {
         o && (o.remove(), o = null);
       };
@@ -7042,30 +7047,33 @@ class Q {
       const i = (r) => {
         n && (clearTimeout(n), n = null), !o && (s = setTimeout(() => {
           if (o) return;
-          o = document.createElement("div"), o.className = "comment-hover-tooltip", o.innerHTML = `
-                        <div class="comment-hover-header">
-                            <span class="comment-hover-author">${this.createClickableAuthor(t)}</span>
-                            <span class="comment-hover-time">${this.formatTimestamp(t.timestamp)}</span>
-                        </div>
-                        <div class="comment-hover-content">${this.escapeHtml(t.text)}</div>
-                        ${t.resolved ? '<div class="comment-hover-resolved">✓ Resolved</div>' : ""}
-                        ${t.resolved ? "" : `
-                            <div class="comment-hover-actions">
-                                <button class="comment-resolve-btn" data-comment-id="${t.id}" data-highlight-id="${t.highlightId}">
-                                    ✓ Resolve
-                                </button>
-                            </div>
-                        `}
-                    `, document.body.appendChild(o), o.addEventListener("mouseenter", () => {
+          o = document.createElement("div"), o.className = "comment-hover-tooltip";
+          const c = document.createElement("div");
+          c.className = "comment-hover-header";
+          const l = document.createElement("span");
+          l.className = "comment-hover-author", l.appendChild(this.createAuthorNode(t));
+          const d = document.createElement("span");
+          d.className = "comment-hover-time", d.textContent = this.formatTimestamp(t.timestamp), c.append(l, d);
+          const h = document.createElement("div");
+          if (h.className = "comment-hover-content", h.textContent = t.text || "", o.append(c, h), t.resolved) {
+            const m = document.createElement("div");
+            m.className = "comment-hover-resolved", m.textContent = "✓ Resolved", o.appendChild(m);
+          } else {
+            const m = document.createElement("div");
+            m.className = "comment-hover-actions";
+            const u = document.createElement("button");
+            u.className = "comment-resolve-btn", u.dataset.commentId = t.id || "", u.dataset.highlightId = t.highlightId || "", u.textContent = "✓ Resolve", m.appendChild(u), o.appendChild(m);
+          }
+          document.body.appendChild(o), o.addEventListener("mouseenter", () => {
             n && (clearTimeout(n), n = null);
           }), o.addEventListener("mouseleave", () => {
             a();
           });
-          const c = o.querySelector(".comment-resolve-btn");
-          c && c.addEventListener("click", (l) => {
-            l.preventDefault(), l.stopPropagation();
-            const d = c.dataset.commentId, h = c.dataset.highlightId;
-            this.resolveComment(d, h), a();
+          const p = o.querySelector(".comment-resolve-btn");
+          p && p.addEventListener("click", (m) => {
+            m.preventDefault(), m.stopPropagation();
+            const u = p.dataset.commentId, f = p.dataset.highlightId;
+            this.resolveComment(u, f), a();
           }), setTimeout(() => {
             if (o) {
               const l = e.getBoundingClientRect(), d = o.getBoundingClientRect();
@@ -7207,6 +7215,19 @@ class Q {
     if (!e.authorUrl)
       return this.escapeHtml(e.author);
     return safeLinkHtml(e.authorUrl, e.author, "comment-author-link") || this.escapeHtml(e.author);
+  }
+  createAuthorNode(e) {
+    if (e.author !== "You" && e.authorUrl)
+      try {
+        const t = new URL(e.authorUrl, window.location.href);
+        if (t.protocol === "http:" || t.protocol === "https:") {
+          const o = document.createElement("a");
+          return o.href = t.href, o.target = "_blank", o.className = "comment-author-link", o.rel = "noopener noreferrer", o.title = e.authorTitle || "View user page", o.textContent = e.author || "", o;
+        }
+      } catch {
+      }
+    const t = document.createElement("span");
+    return t.textContent = e.author || "", t;
   }
   /**
    * Format timestamp for display
@@ -12377,7 +12398,9 @@ class ne {
       if (r === -1) break;
       const c = i.substring(a + s.length, r).trim();
       try {
-        let l = c.replace(/<br\s*\/?>/gi, "").replace(/<[^>]*>/g, "").replace(/[\r\n\t]/g, "").trim();
+        const m = document.createElement("template");
+        m.innerHTML = c.replaceAll("<br>", "").replaceAll("<br/>", "").replaceAll("<br />", "");
+        let l = (m.content.textContent || "").replace(/[\r\n\t]/g, "").trim();
         console.log(`Parsing ${t} JSON:`, l);
         const d = JSON.parse(l);
         if (t === "quiz" && !d.quizId) {
