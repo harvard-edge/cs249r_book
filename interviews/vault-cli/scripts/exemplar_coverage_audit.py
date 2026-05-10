@@ -15,6 +15,7 @@ Referenced from ARCHITECTURE.md §14 Phase 0 milestone and REVIEWS.md R2-3 N-H3.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sqlite3
 import sys
@@ -108,17 +109,34 @@ def emit_yaml(report: dict[str, Any], out: Path) -> None:
 
 
 def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Generate exemplar coverage audit report")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help=(
+            "Path to write the YAML report. Defaults to "
+            "interviews/vault/exemplar-gaps.yaml for local use."
+        ),
+    )
+    args = parser.parse_args(argv)
+
     here = Path(__file__).resolve().parents[2]  # interviews/
     db_path = here / "vault" / "vault.db"
-    out_path = here / "vault" / "exemplar-gaps.yaml"
+    out_path = args.output or here / "vault" / "exemplar-gaps.yaml"
 
     corpus = load_corpus_from_db(db_path)
     report = audit(corpus)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     emit_yaml(report, out_path)
 
     print(f"exemplar audit: {report['total_cells']} cells, "
           f"{report['cells_with_gap']} with gap < {EXEMPLAR_MIN} eligible")
-    print(f"report written to {out_path.relative_to(here.parent)}")
+    try:
+        shown_path = out_path.relative_to(here.parent)
+    except ValueError:
+        shown_path = out_path
+    print(f"report written to {shown_path}")
     return 0
 
 

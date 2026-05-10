@@ -25,7 +25,7 @@
 > - **CI equivalence via Merkle hash (David N-1 / Chip N-H4)**: compare release_hash to `corpus-equivalence-hash.txt`, not 28 MB byte-diff. §11.5.
 > - **ID collision recovery (Dean N-2 / David N-2)**: `vault renumber` recovers from post-rebase dedup-seq collisions. §3.3.
 > - **FTS5 cost gate (Dean N-5)**: Phase-4 entry gated on ≤500 D1 row-reads per FTS5 query in addition to latency. §10.6.
-> - **Exemplar coverage audit (Chip N-H3)**: Phase 0 produces `vault/exemplar-gaps.yaml` inventory. §14.
+> - **Exemplar coverage audit (Chip N-H3)**: Phase 0 produces a generated `vault/exemplar-gaps.yaml` inventory. CI publishes it as an artifact. §14.
 > - **Codegen contract (Soumith H-NEW-3)**: PR authors run codegen locally; CI verifies via `vault codegen --check`, never pushes follow-up. §13.
 > - **Extended static fallback retention (Dean N-10)**: kept until first post-cutover schema-major bump OR 2 releases, whichever is later. §7.1.
 > - **Canary DAU-adjusted (David N-5)**: soak = max(15 min, ≥100 sessions observed). §4.3.
@@ -1258,7 +1258,7 @@ Each phase is a safe stopping point. If priorities shift, pause at a phase bound
 - Write `vault/schema/EVOLUTION.md` — SemVer rules, loader contract, migration mechanics. (Fixes H-1.)
 - Write `vault-cli/docs/JSON_OUTPUT.md` and `EXIT_CODES.md`.
 - CI scaffolding: `.github/workflows/staffml-validate-vault.yml` runs `vault check` placeholder (expanded in Phase 1).
-- **Exemplar-coverage audit** (v2.1 — Chip N-H3): `vault stats --exemplar-coverage` reports which `(track, level, zone)` cells have <3 human-reviewed questions eligible for the `vault/exemplars/` pool. Output to `vault/exemplar-gaps.yaml`. This is a READ-ONLY audit at Phase 0; filling gaps is backlog work that unblocks `vault generate` (Phase 7), not a Phase 0 blocker.
+- **Exemplar-coverage audit** (v2.1 — Chip N-H3): `vault stats --exemplar-coverage` reports which `(track, level, zone)` cells have <3 human-reviewed questions eligible for the `vault/exemplars/` pool. Output is generated as `vault/exemplar-gaps.yaml` for local use and published by CI as an artifact, not tracked as source. This is a READ-ONLY audit at Phase 0; filling gaps is backlog work that unblocks `vault generate` (Phase 7), not a Phase 0 blocker.
 - **Milestone**: `pip install -e vault-cli/ && vault --version` works. Skeleton CI green. Exemplar gap inventory produced.
 
 ### Phase 1 — Foundation (5 days) — was 3

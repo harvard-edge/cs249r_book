@@ -12,7 +12,7 @@ name: '🎯 StaffML · ✅ Validate (Vault)'
 #   - vault build + release_hash equivalence vs corpus-equivalence-hash.txt.
 #   - vault codegen --check (hash-based shared-types drift guard).
 #   - Registry append-only check vs base ref.
-#   - Exemplar-coverage audit staleness check.
+#   - Exemplar-coverage audit report generation.
 #   - Worker vitest (staffml-vault-worker/tests) on worker-path PRs.
 #
 # Referenced from: interviews/vault/ARCHITECTURE.md §19.3, TESTING.md §4.1.
@@ -201,11 +201,27 @@ jobs:
       - name: Reviewer-identity spoof check (Gemini R5-H-3)
         run: python3 "$VAULT_CLI_DIR/scripts/check_reviewer_identity.py"
 
-      - name: Exemplar-coverage audit staleness
+      - name: Exemplar-coverage audit report
         run: |
-          python3 "$VAULT_CLI_DIR/scripts/exemplar_coverage_audit.py"
-          git diff --exit-code "$VAULT_DIR/exemplar-gaps.yaml" \
-            || { echo "::error::exemplar-gaps.yaml is stale; re-run audit and commit"; exit 1; }
+          REPORT="$RUNNER_TEMP/exemplar-gaps.yaml"
+          python3 "$VAULT_CLI_DIR/scripts/exemplar_coverage_audit.py" --output "$REPORT"
+          {
+            echo "### Exemplar coverage audit"
+            echo ""
+            echo '```yaml'
+            sed -n '1,8p' "$REPORT"
+            echo '```'
+            echo ""
+            echo "Full report is attached as the \`exemplar-coverage-audit\` artifact."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload exemplar-coverage audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: exemplar-coverage-audit
+          path: ${{ runner.temp }}/exemplar-gaps.yaml
+          retention-days: 14
+          if-no-files-found: error
 
   worker:
     name: staffml-vault-worker (vitest)

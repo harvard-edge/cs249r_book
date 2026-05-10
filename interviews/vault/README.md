@@ -41,7 +41,7 @@ interviews/vault/
 ├── taxonomy.yaml            ← topic graph; DAG-enforced
 ├── chains.yaml              ← chain definitions (optional)
 ├── zones.yaml               ← 8 ikigai zones
-└── exemplar-gaps.yaml       ← Phase-0 coverage audit output
+└── exemplar-gaps.yaml       ← local/CI-generated coverage audit output (gitignored)
 ```
 
 ### Pipeline artifacts: `_pipeline/` (gitignored)

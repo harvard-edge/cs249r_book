@@ -230,7 +230,7 @@ All convergent items resolved inline per §18 "explicit engineering decision doc
 | N-C1 / N-1 / H-NEW-1 | `vault ship` journal + ordering missing | Chip, Dean, Soumith | §6.1.1 new: ordered protocol (D1→Next.js→paper-last), journal file, per-leg rollback matrix, paging triggers, `--resume` | §4.3, §6.1.1 |
 | Chip N-H1 | schema-fingerprint total outage | Chip | Degraded-mode (Cache-API-only, banner) on mismatch instead of 5xx | §10.1 |
 | Chip N-H2 / Dean N-6 / David N-4 | SW cache not release-keyed | 3 reviewers | SW keys include release_id; TTL 7d; skipWaiting+claim on release change | §7.1 |
-| Chip N-H3 | Exemplar pool coverage unknown | Chip | Phase 0 adds `vault stats --exemplar-coverage` → `vault/exemplar-gaps.yaml` | §14 Phase 0 |
+| Chip N-H3 | Exemplar pool coverage unknown | Chip | Phase 0 adds `vault stats --exemplar-coverage` → generated `vault/exemplar-gaps.yaml` report; CI publishes it as an artifact | §14 Phase 0 |
 | Chip N-H4 / David N-1 | CI 28MB byte-diff is expensive + flaky | 2 reviewers | Compare release_hash (Merkle) to `corpus-equivalence-hash.txt`; O(1); CI budget ≤2min | §11.5 |
 | Chip N-H5 | canon version not in Merkle | Chip | `__canon_version__` + `__policy__` leaves added to Merkle | §3.5 |
 | Soumith H-NEW-2 / Dean N-3 | X-Vault-Release hard-reject brownout | 2 reviewers | Header demoted to informational SLI; 10-min cross-release grace window | §6.1.1, §10.2 |
