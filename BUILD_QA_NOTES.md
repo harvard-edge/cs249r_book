@@ -230,7 +230,17 @@ Do not proceed to PDF until HTML is clean.
 
 ## Phase 4: PDF Chapter Pass
 
-Status: pending.
+Status: completed.
+
+Result:
+
+- Initial `./book/binder debug pdf --vol1`: 25 passed, 0 failed, 1 warning.
+- The warning was a real render defect in `data_engineering`: a citation appended after the `fig-hard-labels` div attribute block made Pandoc print raw QMD fence syntax into the PDF. Fixed in commit `0f84b72d5 Fix data engineering figure div parsing`.
+- Clean rerun `./book/binder debug pdf --vol1`: 25 passed, 0 failed, no fenced-div warning. Clean debug log directory: `book/quarto/_build/debug/vol1/pdf/20260509-223251`
+- `./book/binder debug pdf --vol2`: 26 passed, 0 failed. Debug log directory: `book/quarto/_build/debug/vol2/pdf/20260509-222515`
+- PDF text scan found one raw inline expression inside an `nn_architectures` code listing comment. Fixed in commit `42bd82720 Fix raw inline expression in architecture listing`.
+- Targeted rebuild `./book/binder build pdf nn_architectures --vol1 -v` passed after the listing fix.
+- Current rebuilt vol1 PDF text has no raw `{python}` or literal `:::` hits.
 
 Goal: every individual QMD entry that Binder treats as renderable should build as PDF.
 
@@ -280,7 +290,16 @@ Only commit if there are fixes.
 
 ## Phase 5: Full Volume Builds
 
-Status: pending.
+Status: completed.
+
+Result:
+
+- `./book/binder build html --vol1`: passed. Output: `book/quarto/_build/html-vol1/index.html`
+- `./book/binder build html --vol2`: passed. Output: `book/quarto/_build/html-vol2/index.html`
+- `./book/binder build pdf --vol1`: passed. Output: `book/quarto/_build/pdf-vol1/Machine-Learning-Systems-Vol1.pdf`
+- `./book/binder build pdf --vol2`: passed. Output: `book/quarto/_build/pdf-vol2/Machine-Learning-Systems-Vol2.pdf`
+- Final vol1 PDF text scan found no raw `{python}`, literal `:::`, `fig-hard-labels`, `MLPLayerStats`, or visible `Unresolved` markers.
+- Final vol2 PDF text scan found no raw `{python}`, literal `:::`, visible `Unresolved`, visible `Undefined`, or `??` markers.
 
 Only start after:
 
@@ -332,7 +351,15 @@ Only commit if there are fixes.
 
 ## Phase 6: Final Report
 
-Status: pending.
+Status: completed.
+
+Result:
+
+- Final style-regression scans returned no matches.
+- `pre-commit run --all-files` did not complete cleanly because of existing EPUB hygiene failures in generated mediabag SVG files with C0 control characters. The run left no source-file modifications in the working tree.
+- The all-files run also triggered BibTeX tidy, but the working tree remained unchanged after the hook sequence.
+- Per-commit hooks passed for the two QMD fixes when they were committed.
+- Remaining user-decision item: none for HTML/PDF publication builds. EPUB hygiene is outside this HTML/PDF build pass unless the next task is EPUB release readiness.
 
 Report must include:
 
