@@ -26,6 +26,14 @@ Do not use the main `/Users/VJ/GitHub/MLSysBook` dev worktree for this QA pass.
 7. Do not bulk rewrite QMD files.
 8. Commit after each major completed phase if fixes were made.
 9. Preserve unrelated files and do not touch the main dev worktree.
+10. Follow `.claude/rules/book-prose.md` as the source of truth for editorial decisions.
+11. If a problem requires user/editorial judgment rather than a clear mechanical fix, add it to [Needs User Decision](#needs-user-decision) and continue with other build work.
+
+## Needs User Decision
+
+Status: none currently.
+
+Use this section for questions that block only a local decision, not the entire build QA pass.
 
 ## Known Important Context
 
@@ -113,7 +121,15 @@ Need confirm exact accepted chapter identifiers before looping. Prefer Binder’
 
 ## Phase 1: Setup And Documentation
 
-Status: pending.
+Status: completed.
+
+Result:
+
+- Worktree verified: `/Users/VJ/GitHub/Dev-build-post-merge`
+- Branch verified: `dev-build-post-merge`
+- Binder help checked.
+- Binder inventory checked: vol1 has 33 entries, vol2 has 37 entries.
+- QA plan committed as `be38463a1 Document post-merge build QA plan`.
 
 Steps:
 
@@ -134,7 +150,17 @@ Steps:
 
 ## Phase 2: HTML Chapter Pass
 
-Status: pending.
+Status: completed.
+
+Result:
+
+- `./book/binder debug html --vol1`: 25 passed, 0 failed.
+- `./book/binder debug html --vol2`: 26 passed, 0 failed.
+- Vol1 debug log directory: `book/quarto/_build/debug/vol1/html/20260509-220517`
+- Vol2 debug log directory: `book/quarto/_build/debug/vol2/html/20260509-221120`
+- Artifact scan found no `katex-error`, math-processing error, raw `{python}` output, or visible `Unresolved` marker in generated HTML artifacts.
+- Style-regression scan for merge markers, disabled callout icons, manual note refs, bold-colon punctuation, and malformed caption-title endings returned no matches.
+- Watch item: `data_engineering` emitted two Quarto warnings that a literal `:::` string was found. The source uses the required three-colon fenced-div syntax, and the generated HTML artifact contains no literal `:::`. Treat as a warning to revisit if it appears in PDF or full-volume builds.
 
 Goal: every individual QMD entry that Binder treats as renderable should build as HTML.
 
@@ -183,7 +209,14 @@ Only commit if there are fixes.
 
 ## Phase 3: HTML Reflection Pass
 
-Status: pending.
+Status: completed once after the initial HTML pass.
+
+Result:
+
+- Rechecked generated HTML artifacts for obvious math/rendering failures.
+- Rechecked the agreed post-merge style-regression patterns across all vol1/vol2 QMD files.
+- No confirmed HTML-blocking issue found.
+- Remaining watch item is the `data_engineering` fenced-div warning described in Phase 2.
 
 Run at least one broad reflection sweep after HTML passes:
 
