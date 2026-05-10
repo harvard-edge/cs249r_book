@@ -220,6 +220,27 @@ class TestWheelConsistency:
             "Found absolute wheel URL. Use relative path '../../wheels/mlsysim-...' instead."
         )
 
+    def test_wheel_file_exists_on_disk(self):
+        """The wheel file referenced by labs must actually exist in wheels/.
+        If this fails, run: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/
+        """
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+
+        pyproject = REPO_ROOT / "mlsysim" / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            version = tomllib.load(f)["project"]["version"]
+
+        wheel_path = REPO_ROOT / "wheels" / f"mlsysim-{version}-py3-none-any.whl"
+        assert wheel_path.exists(), (
+            f"Wheel file missing: {wheel_path}\n"
+            f"Labs reference version {version} but the wheel is not present in wheels/.\n"
+            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/\n"
+            f"This causes BadZipFile in production when micropip fetches the missing URL."
+        )
+
 
 # ── Test: WASM Compatibility ────────────────────────────────────────────────
 
