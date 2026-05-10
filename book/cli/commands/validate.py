@@ -3131,6 +3131,10 @@ class ValidateCommand:
         hex_literal_pat = re.compile(r"0x[0-9a-fA-F]")
         # Cross-reference ID pattern: @tbl-foo300x, @fig-bar2x, @sec-baz1x — these are labels not multiplication
         xref_id_pat = re.compile(r"@(?:tbl|fig|sec|eq|lst)-[a-z0-9_-]+x\b")
+        # Quarto attribute blocks can contain IDs such as
+        # {#tbl-assumptions-mi300x tbl-colwidths="[...]"}; those are
+        # identifiers, not prose multiplication.
+        attr_block_pat = re.compile(r"\{[^{}]*(?:#[A-Za-z0-9_-]+|\.[A-Za-z0-9_-]+)[^{}]*\}")
         # fig-alt lines to skip
         fig_alt_pat = re.compile(r'fig-alt\s*=\s*"')
 
@@ -3189,7 +3193,8 @@ class ValidateCommand:
                 # Skip fig-alt lines and index entries
                 if not fig_alt_pat.search(line) and not stripped.startswith("\\index"):
                     # Strip cross-reference IDs before checking (e.g. @tbl-mi300x, @fig-foo2x)
-                    line_no_xrefs = xref_id_pat.sub("", line)
+                    line_no_attrs = attr_block_pat.sub("", line)
+                    line_no_xrefs = xref_id_pat.sub("", line_no_attrs)
                     for rm in lowercase_x_mult_pat.finditer(line_no_xrefs):
                         # Exclude hex literals like 0x61, 0xff
                         ctx_start = max(0, rm.start() - 1)
