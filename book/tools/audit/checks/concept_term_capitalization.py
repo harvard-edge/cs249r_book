@@ -40,10 +40,12 @@ automatically.
 
 §10.3 *sentence-style* display contexts — concept terms STAY LOWERCASE:
 
-    - Callout `title="..."` attributes ("box heads") — concept terms in
-      callout titles follow the same lowercase rule as body prose. Per
-      MIT Press style sheet: "Figure captions, table titles, and box
-      heads are set sentence style."
+    - Non-principle callout `title="..."` attributes ("box heads") —
+      concept terms in ordinary callout titles follow the same lowercase
+      rule as body prose. Per MIT Press style sheet: "Figure captions,
+      table titles, and box heads are set sentence style."
+    - `.callout-principle` titles are formal principle labels, not
+      ordinary box heads, and stay Title Case.
     - `fig-cap` / `tbl-cap` descriptive text *after* the bold title.
     - `fig-alt` / `tbl-alt` (entire content, no bold-title position).
     - `lst-cap` descriptive text after bold title.
@@ -144,19 +146,21 @@ _TERMS = {
 
 # ── Span helper that excludes attribute values ────────────────────────────
 #
-# Per the §10.3 update of 2026-05-07, callout `title=` attributes and
-# caption descriptive text are sentence-style display contexts that DO
-# need concept-term scanning. The shared `inline_protected_spans` covers
-# attribute spans (so the em-dash / quoting checks don't scan them); for
-# concept-caps we subtract those attribute spans so terms inside titles
-# and captions become visible to the audit.
+# Per the §10.3 update of 2026-05-07, non-principle callout `title=`
+# attributes and caption descriptive text are sentence-style display
+# contexts that DO need concept-term scanning. The shared
+# `inline_protected_spans` covers attribute spans (so the em-dash /
+# quoting checks don't scan them); for concept-caps we subtract those
+# attribute spans so terms inside ordinary titles and captions become
+# visible to the audit.
 
 def _spans_excluding_attributes(line: str) -> list[tuple[int, int]]:
     """Like `inline_protected_spans` but does NOT protect attribute
-    values (callout title=, fig-cap, fig-alt, lst-cap, tbl-cap, tbl-alt).
+    values (non-principle callout title=, fig-cap, fig-alt, lst-cap, tbl-cap,
+    tbl-alt).
     The bold-span check still handles `**Bold Title**:` portions inside
-    captions; the descriptive text after the bold title and the entire
-    callout title attribute fall back to the sentence-style rule.
+    captions; the descriptive text after the bold title and ordinary
+    callout title attributes fall back to the sentence-style rule.
     """
     spans = inline_protected_spans(line)
     if not spans:
@@ -315,11 +319,13 @@ def _skip_concept_term_line(line: str, state) -> bool:
     # Python chunk option directive (`#| echo: false`, etc.)
     if is_python_chunk_option(line):
         return True
+    # Principle callout titles are formal labels, not ordinary box heads.
+    if ".callout-principle" in line:
+        return True
     # Quarto div fence: skip only BARE closes / openers with no `title=`
-    # attribute. Opener lines containing `title="..."` (callout titles) are
-    # sentence-style display contexts that DO need to flag concept terms
-    # per the §10.3 update of 2026-05-07 (callout titles follow sentence
-    # style per MIT Press style sheet).
+    # attribute. Opener lines containing `title="..."` in non-principle
+    # callouts are sentence-style display contexts that DO need to flag
+    # concept terms per §10.3.
     stripped = line.lstrip()
     if stripped.startswith(":::") and 'title="' not in line:
         return True
@@ -381,12 +387,13 @@ def _skip_match(
     #    covers this, but kept for clarity and parity with the proven script).
     if is_inside_index_entry(line, start):
         return True
-    # 5. NOTE: callout title=, fig-cap, fig-alt, tbl-cap, tbl-alt, lst-cap
-    #    are sentence-style display contexts per MIT Press style sheet and
-    #    are NO LONGER broadly protected here. The bold-span check (rule 2)
-    #    handles the `**Bold Title**:` portion of captions; the descriptive
-    #    text after the bold title and callout `title=` attributes follow
-    #    the same lowercase-concept-term rule as body prose.
+    # 5. NOTE: non-principle callout title=, fig-cap, fig-alt, tbl-cap,
+    #    tbl-alt, lst-cap are sentence-style display contexts per MIT Press
+    #    style sheet and are NO LONGER broadly protected here. The bold-span
+    #    check (rule 2) handles the `**Bold Title**:` portion of captions;
+    #    the descriptive text after the bold title and ordinary callout
+    #    `title=` attributes follow the same lowercase-concept-term rule as
+    #    body prose.
     # 6. Per-term special cases
     if term == "Iron Law" and _is_hp_reference(line, end):
         return True
@@ -504,6 +511,8 @@ _POSITIVE_LINES = [
     "A Starving Accelerator is bottlenecked on data delivery.",
     "The Four Pillars Framework organizes our analysis.",
     "With Data Gravity, computation pulls toward large corpora.",
+    # Non-principle callout titles are sentence-style box heads.
+    '::: {.callout-definition title="Iron Law"}',
 ]
 
 _NEGATIVE_LINES = [
@@ -529,8 +538,8 @@ _NEGATIVE_LINES = [
     "### The Bitter Lesson",
     # Exception 5: inside \index{}
     "Earlier discussion \\index{Iron Law!definition} established the framework.",
-    # Exception 6: inside title="..."
-    '::: {.callout-definition title="Iron Law"}',
+    # Exception 6: principle callout titles are formal labels.
+    '::: {.callout-principle title="The Iron Law of ML Systems"}',
     # Exception 7: table header row (bold-in-pipe)
     "| **Iron Law** | **Memory Wall** | **Power Wall** |",
     # Exception 8: H&P canonical reference

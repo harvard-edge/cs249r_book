@@ -223,6 +223,8 @@ class ValidateCommand:
                   note='"[@k; @k]" or "[@k] [@k]" — same-key citeproc dup'),
             Scope("manual-bracket", "_run_manual_bracket_citation",
                   note='*et al.*(…) — manual attribution next to [@k]'),
+            Scope("principles", "_run_principle_refs",
+                  note="principles use #pri-* IDs and Principle \\ref{pri-*}"),
             # inline scope is run with --check-patterns OFF in the curated set
             # (matches former pre-commit hook). Pattern hazards still live in
             # the corpus; opt in with --check-patterns when cleaning them up.
@@ -270,6 +272,8 @@ class ValidateCommand:
         ],
         "figures": [
             Scope("captions", "_run_figures"),
+            Scope("caption-heads", "_run_caption_head_style",
+                  note="fig-cap/tbl-cap/lst-cap use **Bold Title**: Explanation"),
             Scope("div-syntax", "_run_figure_div_syntax"),
             # flow: deferred to copyeditor's PDF layout pass (2026-05-03).
             # The "near first reference" heuristic conflicts with the
@@ -292,6 +296,8 @@ class ValidateCommand:
                   note="low-level markup (backticks, dollar signs, asterisks)"),
             Scope("div-fences", "_run_div_fences",
                   note=":::/ :::: balance and form"),
+            Scope("callouts", "_run_callout_structure",
+                  note="supported callout types, titles, and attributes"),
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
@@ -1107,6 +1113,111 @@ class ValidateCommand:
         return ValidationRunResult(
             name="refs",
             description="Validate citation/reference placement in raw/code blocks",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _CALLOUT_OPEN_RE = re.compile(r"^:{3,}\s*\{([^}]*)\}")
+    _ATTR_CLASS_RE = re.compile(r"\.([A-Za-z0-9_-]+)")
+    _ATTR_ID_RE = re.compile(r"#([A-Za-z0-9_-]+)")
+
+    def _run_principle_refs(self, root: Path) -> ValidationRunResult:
+        """Validate semantic principle IDs and references.
+
+        This is a markup/semantic invariant, not a style-capitalization pass:
+        it does not decide whether a principle name should be lowercase in
+        prose. It only enforces the reference mechanics in book-prose §4.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        manual_principle_re = re.compile(r"\b[Pp]rinciple\s+\d+(?:\.\d+)?\b")
+        bad_principle_ref_re = re.compile(r"\b[Pp]rinciple\s+\\ref\{(?!pri-)([^}]+)\}")
+        cite_principle_re = re.compile(r"@pri-[A-Za-z0-9_-]+")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                opener = self._CALLOUT_OPEN_RE.match(stripped)
+                if opener:
+                    attrs = opener.group(1)
+                    classes = set(self._ATTR_CLASS_RE.findall(attrs))
+                    if "callout-principle" in classes:
+                        ids = self._ATTR_ID_RE.findall(attrs)
+                        if not any(label.startswith("pri-") for label in ids):
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="principle_missing_pri_id",
+                                    message="Principle callout must use a semantic #pri-* ID",
+                                    severity="error",
+                                    context=stripped[:160],
+                                )
+                            )
+                        if any(label.startswith("nte-") for label in ids):
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="principle_uses_note_id",
+                                    message="Principle callout uses #nte-*; use #pri-* for principles",
+                                    severity="error",
+                                    context=stripped[:160],
+                                )
+                            )
+
+                manual_match = manual_principle_re.search(line)
+                if manual_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="manual_principle_number",
+                            message="Avoid manual principle numbering; use Principle \\ref{pri-*}",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+                bad_ref_match = bad_principle_ref_re.search(line)
+                if bad_ref_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="principle_ref_non_pri",
+                            message="Principle references must point to \\ref{pri-*}",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+                cite_match = cite_principle_re.search(line)
+                if cite_match:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="principle_citation_syntax",
+                            message="Use Principle \\ref{pri-*}, not @pri-* citation syntax",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="principles",
+            description="Principle callout IDs and reference mechanics",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -2505,6 +2616,144 @@ class ValidateCommand:
     # ------------------------------------------------------------------
     # Figures  (ported from check_figure_completeness.py)
     # ------------------------------------------------------------------
+
+    _CAPTION_HEAD_ATTR_RE = re.compile(
+        r"""\b(?P<key>fig-cap|tbl-cap|lst-cap)\s*=\s*"(?P<value>[^"]*)\""""
+    )
+    _MARKDOWN_CAPTION_HEAD_RE = re.compile(
+        r"""^\s*:\s+(?P<value>.+?)\s+\{#(?P<label>(?:fig|tbl|lst)-[\w-]+)"""
+    )
+    _CHUNK_CAPTION_HEAD_RE = re.compile(
+        r"""^\s*(?:#|%%)\|\s*(?P<key>fig-cap|tbl-cap|lst-cap)\s*:\s*(?P<value>.*?)\s*$"""
+    )
+    _CAPTION_HEAD_STYLE_RE = re.compile(
+        r"""^\*\*(?P<head>[^*\n]+)\*\*(?P<index>(?:\\index\{[^}\n]+\})*):\s+(?P<body>\S.*)$"""
+    )
+
+    def _run_caption_head_style(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        def check_caption(
+            file: Path,
+            line_no: int,
+            key: str,
+            value: str,
+            context: str,
+        ) -> None:
+            if not value.startswith("**"):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_missing_bold",
+                        message=f"{key} must start with a bold caption head: **Bold Title**: Explanation",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+                return
+
+            match = self._CAPTION_HEAD_STYLE_RE.match(value)
+            if not match:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_separator",
+                        message=f"{key} must use colon outside bold: **Bold Title**: Explanation",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+                return
+
+            head = match.group("head").strip()
+            body = match.group("body").lstrip()
+            if head.endswith((".", ":", ";", "!", "?")):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_head_terminal_punctuation",
+                        message=f"{key} caption head should not end with punctuation inside bold",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+            if body and re.match(r"[a-z]", body[0]):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_body_lowercase_after_colon",
+                        message=f"{key} caption text after the colon should begin as a sentence",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+            if "**" in body:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=line_no,
+                        code="caption_body_extra_bold",
+                        message=f"{key} caption body should be plain prose; only the leading caption head is bold",
+                        severity="error",
+                        context=context[:160],
+                    )
+                )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.rstrip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                chunk_match = self._CHUNK_CAPTION_HEAD_RE.match(line)
+                if chunk_match:
+                    check_caption(
+                        file,
+                        idx,
+                        chunk_match.group("key"),
+                        chunk_match.group("value").strip().strip("'\""),
+                        line.strip(),
+                    )
+                    continue
+                if in_code:
+                    continue
+
+                for attr_match in self._CAPTION_HEAD_ATTR_RE.finditer(line):
+                    check_caption(
+                        file,
+                        idx,
+                        attr_match.group("key"),
+                        attr_match.group("value").strip(),
+                        line.strip(),
+                    )
+
+                md_match = self._MARKDOWN_CAPTION_HEAD_RE.match(line)
+                if md_match:
+                    label = md_match.group("label")
+                    key = f"{label.split('-', 1)[0]}-caption"
+                    check_caption(
+                        file,
+                        idx,
+                        key,
+                        md_match.group("value").strip(),
+                        line.strip(),
+                    )
+
+        return ValidationRunResult(
+            name="caption-heads",
+            description="Check figure, table, and listing caption heads use **Bold Title**: Explanation",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_figures(self, root: Path) -> ValidationRunResult:
         start = time.time()
@@ -4523,6 +4772,113 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    _ALLOWED_CALLOUT_CLASSES = {
+        "callout-chapter-connection",
+        "callout-checkpoint",
+        "callout-colab",
+        "callout-definition",
+        "callout-example",
+        "callout-important",
+        "callout-learning-objectives",
+        "callout-lighthouse",
+        "callout-note",
+        "callout-notebook",
+        "callout-perspective",
+        "callout-principle",
+        "callout-takeaways",
+        "callout-theorem",
+        "callout-tip",
+        "callout-war-story",
+        "callout-warning",
+    }
+    _CALLOUT_TITLE_OPTIONAL_CLASSES = {"callout-learning-objectives"}
+
+    def _run_callout_structure(self, root: Path) -> ValidationRunResult:
+        """Validate generic callout mechanics from book-prose §4."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                opener = self._CALLOUT_OPEN_RE.match(stripped)
+                if not opener:
+                    continue
+
+                attrs = opener.group(1)
+                classes = [
+                    cls for cls in self._ATTR_CLASS_RE.findall(attrs)
+                    if cls.startswith("callout-")
+                ]
+                if not classes:
+                    continue
+
+                if "icon=false" in attrs:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="callout_icon_false",
+                            message="Remove icon=false; callout icons should follow the type default",
+                            severity="error",
+                            context=stripped[:160],
+                        )
+                    )
+
+                has_title = re.search(r'\btitle\s*=', attrs) is not None
+                for cls in classes:
+                    if cls not in self._ALLOWED_CALLOUT_CLASSES:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="unsupported_callout_type",
+                                message=f"Unsupported callout type .{cls}; use a type from book-prose §4",
+                                severity="error",
+                                context=stripped[:160],
+                            )
+                        )
+                    if cls in self._CALLOUT_TITLE_OPTIONAL_CLASSES:
+                        if has_title:
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="learning_objectives_explicit_title",
+                                    message="Learning Objectives callouts use the auto-generated label; omit title=",
+                                    severity="warning",
+                                    context=stripped[:160],
+                                )
+                            )
+                    elif not has_title:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="callout_missing_title",
+                                message=f".{cls} callout needs an explicit chapter-specific title",
+                                severity="error",
+                                context=stripped[:160],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="callouts",
+            description="Callout types, required titles, and unsupported attributes",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     # ==================================================================
     # MIT PRESS CHECKS (§10 of book-prose-merged.md)
     # ==================================================================
@@ -6428,7 +6784,7 @@ class ValidateCommand:
         wall, data wall, bitter lesson, scaling laws, verification gap,
         degradation equation, etc. Respects the exception contexts
         (bold first-definition, §10.3 exception 2; §10.9 H1/H2 headline
-        case; callout titles; `\\index{}` keys).
+        case; principle callout titles; `\\index{}` keys).
         """
         return self._run_audit_check(
             root, "audit.checks.concept_term_capitalization",
