@@ -12410,7 +12410,7 @@ class ne {
         const h = await o.render(d);
         i = i.substring(0, a) + h + i.substring(r + n.length);
       } catch (l) {
-        console.error(`Failed to parse ${t} component:`, l), console.error("JSON content was:", c), i = i.substring(0, a) + `<div class="component-error">Invalid ${t} format: ${l.message}</div>` + i.substring(r + n.length);
+        console.error(`Failed to parse ${t} component:`, l), console.error("JSON content was:", c), i = i.substring(0, a) + `<div class="component-error">Invalid ${t} format</div>` + i.substring(r + n.length);
       }
       a = i.indexOf(s, a);
     }
