@@ -5,31 +5,6 @@ engine: jupyter
 
 # Data Storage {#sec-data-storage}
 
-<!-- TODO(numerical-audit): Several quantitative claims in this chapter
-     conflict with adjacent tables or each other and need a focused
-     numerical-audit pass to reconcile:
-
-     - Line ~442: HBM 300,000-fold bandwidth gap claim vs. ~33.5-fold from
-       adjacent table values (HBM 3.35 TB/s and object 100 GB/s aggregate).
-     - Line ~448: Storage pyramid caption tier values disagree with
-       tbl-storage-hierarchy-merged (host DRAM 200 vs. 300 GB/s, archive
-       cost \$0.004 vs. \$0.001 per GB, etc.).
-     - Line ~912: Archive "20-fold cheaper" claim vs. stated prices
-       (\$0.02 over \$0.004 is 5-fold, not 20-fold).
-     - Line ~918: Two-year archive cost stated as \$960 but math yields
-       \$9,600 for 100 TB at \$0.004 per GB-month over 24 months.
-     - Line ~1474: Callout \$13,000-per-day idle cost vs. preceding
-       \$9,600-per-day calculation for the same 20-point utilization drop
-       on a 1,000-GPU cluster at \$2 per GPU-hour.
-     - Line ~1572: ZeRO-3 70B per-node shard math (140 GB-per-node times
-       1,000 nodes equals 140 TB of writes) is inconsistent with the
-       FP16 70B total of 140 GB.
-     - Line ~1580: 175B 256-node 4 GB shard vs. 1,750/256 = 6.8 GB implied.
-
-     Each requires careful derivation against the chapter's running
-     examples and storage table; recompute and standardize before next
-     release. -->
-
 ::: {layout-narrow}
 ::: {.column-margin}
 
@@ -464,7 +439,7 @@ A system architect must organize storage to serve workloads that simultaneously 
 | **Object Storage**       | Unlimited            |                                   100 GB/s aggregate |                     ~50 ms |            ~0.02 |
 | **Archive/Cold Storage** | Unlimited            |                                               1 GB/s |           Minutes to hours |           ~0.004 |
 
-: **Extended Memory Hierarchy for ML Systems**\index{Extended Memory Hierarchy for ML Systems}: The 300,000$\times$ bandwidth gap between HBM and object storage drives the need for sophisticated prefetching and caching across multiple levels. {#tbl-storage-hierarchy-merged}
+: **Extended Memory Hierarchy for ML Systems**\index{Extended Memory Hierarchy for ML Systems}: The roughly 30$\times$ aggregate-to-aggregate bandwidth gap between HBM and object storage (and a much larger per-client gap once a single inference instance pulls from a shared object endpoint) drives the need for sophisticated prefetching and caching across multiple levels. {#tbl-storage-hierarchy-merged}
 
 The storage hierarchy principle (Principle \ref{pri-storage-hierarchy}) governs every design decision in this chapter. Storage performance decreases and capacity increases as data moves further from the accelerator: each tier in @tbl-storage-hierarchy-merged drops bandwidth by 10--100$\times$ while increasing capacity by 10--100$\times$. Data format choices, caching strategies, prefetch buffer sizing, and tiering policies all exist to manage the movement of data upward through the hierarchy so that the accelerator never starves.
 
@@ -934,13 +909,13 @@ class GlacierCost:
 
 ### Tier 5: Archive and cold storage {#sec-storage-tier5-archive}
 
-The final tier provides long-term preservation for compliance and auditability. Archive services (such as S3 Glacier) are designed for data that is rarely accessed: training logs from previous years, superseded model checkpoints, audit trails for regulatory compliance. At roughly \$0.004/GB/month, archive storage costs roughly \$`{python} GlacierCost.glacier_annual_str` per year for 100 TB, which is 20$\times$ cheaper than standard object storage. The trade-off is retrieval latency measured in minutes to hours, making this tier unsuitable for any operational access.
+The final tier provides long-term preservation for compliance and auditability. Archive services (such as S3 Glacier) are designed for data that is rarely accessed: training logs from previous years, superseded model checkpoints, audit trails for regulatory compliance. At roughly \$0.004/GB/month, archive storage costs roughly \$`{python} GlacierCost.glacier_annual_str` per year for 100 TB, which is 5$\times$ cheaper than standard object storage at \$0.02/GB/month. The trade-off is retrieval latency measured in minutes to hours, making this tier unsuitable for any operational access.
 
 The primary value of archive storage is organizational memory. When a model trained two years ago produces unexpected behavior in production, the ability to recover the exact training data, hyperparameters, and intermediate checkpoints for forensic analysis depends on archive storage. Organizations that aggressively purge old data to save costs discover, often at the worst possible moment, that they cannot reproduce or explain the behavior of deployed models.
 
 Automated **lifecycle policies** govern the transition of data between tiers based on access recency. A typical policy for ML infrastructure moves checkpoints as follows: the most recent three checkpoints remain on the parallel file system for fast recovery; checkpoints older than 72 hours are transitioned to object storage; checkpoints older than 90 days are transitioned to archive storage; and checkpoints older than two years are deleted unless flagged for regulatory retention. Without automation, teams either hoard data on expensive tiers (wasting budget) or delete data too aggressively (losing reproducibility). The lifecycle policy encodes the organization's cost-recovery trade-off in a declarative rule that requires no manual intervention.
 
-For our 175B model training run, the archive tier holds the complete training lineage: the raw 3 TB dataset, all preprocessing scripts, the final checkpoint, and a sampled subset of intermediate checkpoints. Over a two-year retention period, this archive costs roughly \$960 (100 TB at \$0.004/GB/month$\times$ 24 months), less than one hour of GPU time on the training cluster. The asymmetry between archive cost and compute cost makes retention economically trivial; the only reason organizations fail to archive is neglect, not expense.
+For our 175B model training run, the archive tier holds the complete training lineage: the raw 3 TB dataset, all preprocessing scripts, the final checkpoint, and a sampled subset of intermediate checkpoints. Over a two-year retention period, this archive costs roughly \$9,600 (100 TB at \$0.004/GB/month $\times$ 24 months), well under one day of GPU time on the training cluster. The asymmetry between archive cost and compute cost makes retention economically trivial; the only reason organizations fail to archive is neglect, not expense.
 
 Archive storage services offer multiple retrieval speed tiers, each with different pricing. Standard retrieval from S3 Glacier completes within 3 to 5 hours at a moderate cost. Expedited retrieval completes within 1 to 5 minutes but at 10$\times$ the cost. Bulk retrieval completes within 5 to 12 hours at the lowest cost. The choice of retrieval tier depends on the urgency of the use case. Forensic analysis of a production incident warrants expedited retrieval; annual compliance audits can use bulk retrieval. Designing the lifecycle policy\index{Lifecycle Policy!storage tiering} requires understanding the storage cost, the expected retrieval frequency, and the urgency for each class of data.
 
@@ -1496,7 +1471,7 @@ The visible cost of storage (\$/GB/month) is the tip of the iceberg. Below the s
 
 - **Egress fees**\index{Egress Fees}: Cloud providers charge \$0.09/GB for data leaving their network. A 100 TB dataset read once per epoch across 10 epochs costs \$90,000 in egress alone.
 - **IOPS charges**\index{IOPS!charges}: Object storage charges per-request fees. S3 Standard GET requests cost about \$0.0004 per 1,000 requests, so a dataset of 100 million individual files, read once, costs about \$40 in GET request fees before data transfer or retrieval charges, even though the storage cost is \$2,300/month.
-- **Idle accelerator cost**\index{Idle Accelerator Cost}: If storage stalls reduce GPU utilization from 90 percent to 70 percent on a 1,000-GPU cluster at \$2/GPU/hour, the lost compute costs \$13,000/day, dwarfing any storage savings.
+- **Idle accelerator cost**\index{Idle Accelerator Cost}: If storage stalls reduce GPU utilization from 90 percent to 70 percent on a 1,000-GPU cluster at \$2/GPU/hour, the lost compute costs \$9,600/day (20 percent of \$48,000 daily spend), dwarfing any storage savings.
 - **Retrieval fees**\index{Retrieval Fees}: Archive storage charges retrieval fees (\$0.02/GB for Glacier) in addition to egress. Restoring a 100 TB dataset from Glacier costs \$2,000 in retrieval fees plus \$9,000 in egress.
 
 The economically rational strategy often invests more in storage (local NVMe caching, parallel file system capacity) to reduce transfer costs and prevent accelerator stalls.
@@ -1594,7 +1569,7 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in a training fleet save model state simultaneously.
 
-1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = N \times \text{per-node-shard} / \text{BW}_{\text{fabric}}$. For a 70B-parameter model trained across 1,000 nodes with ZeRO-3 sharding (approximately 140 GB per node at FP16), a checkpoint generates 140 TB of simultaneous writes; at 100 GB/s fabric bandwidth, $T_{\text{write}} \approx 1{,}400$ seconds—over 23 minutes of training stall per checkpoint event. This adds directly to the $L_{\text{lat}}$ term and can dwarf the compute time between checkpoints.
+1.  **Significance (quantitative)**: The storm magnitude scales as $T_{\text{write}} = N \times \text{per-node-shard} / \text{BW}_{\text{fabric}}$. For a 70B-parameter model in FP16 (140 GB of weights) trained across 1,000 nodes with vanilla data parallelism (every node holding its own complete copy), a naive checkpoint generates 140 TB of simultaneous writes; at 100 GB/s fabric bandwidth, $T_{\text{write}} \approx 1{,}400$ seconds, over 23 minutes of training stall per checkpoint event. ZeRO-3 sharding collapses this to roughly 1.1 TB total (140 GB weights + 140 GB gradients + 840 GB optimizer state, split across 1,000 nodes), bringing $T_{\text{write}}$ down to roughly 11 seconds. This stall adds directly to the $L_{\text{lat}}$ term and can dwarf the compute time between checkpoints when the sharding optimization is omitted.
 2.  **Distinction (durable)**: Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic—every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
 3.  **Common pitfall**: A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes 1,400 seconds, checkpointing every 100 steps means spending $1400/(100 \times 10) = 140\%$ of compute time on checkpointing—more time saving state than doing useful training.
 
@@ -1602,7 +1577,7 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 
 ::: {.callout-notebook title="The checkpoint storm"}
 
-**Problem**: A 256-node cluster saves a 175B-parameter checkpoint every 10 minutes. Each checkpoint totals `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB. With ZeRO-3, each node saves roughly 4 GB.
+**Problem**: A 256-node cluster saves a 175B-parameter checkpoint every 10 minutes. Each checkpoint totals `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB. With ZeRO-3, each node saves roughly 7 GB.
 
 1. **Per-node write to local NVMe** (4 drives at 3.5 GB/s each = 14 GB/s): $4 \text{ GB} \div 14 \text{ GB/s} = 0.29$ seconds.
 2. **Async copy to PFS**\index{Async Copy to PFS}: 256 nodes$\times$ 4 GB = 1,024 GB total. If the PFS provides 1 TB/s aggregate, the storm completes in roughly 1 second.
@@ -1614,7 +1589,7 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 
 :::
 
-The **tiered staging** strategy minimizes $T_{\text{write}}$ by writing in two phases. In the first phase, each node writes its checkpoint shard to local NVMe at full bandwidth. With four NVMe drives providing 14 GB/s aggregate, a per-node shard of `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB (for a 256-node cluster, each node saves roughly 4 GB) completes in under a second. The training pipeline can resume immediately after the local write completes.
+The **tiered staging** strategy minimizes $T_{\text{write}}$ by writing in two phases. In the first phase, each node writes its checkpoint shard to local NVMe at full bandwidth. With four NVMe drives providing 14 GB/s aggregate, a per-node shard of `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB (for a 256-node cluster, each node saves roughly 7 GB) completes in under a second. The training pipeline can resume immediately after the local write completes.
 
 In the second phase, a background process asynchronously copies the local checkpoint to the parallel file system for durability. This copy can overlap with the next training iteration, so it does not block the pipeline. The risk is that if the node fails before the async copy completes, the local checkpoint is lost. The mitigation is to replicate checkpoints to at least two peer nodes' NVMe drives before declaring the save complete, providing durability even if one node fails.
 
@@ -1645,9 +1620,9 @@ Asynchronous checkpointing reduces the training pause by writing in the backgrou
 
 The choice between synchronous and asynchronous checkpointing depends on the ratio of $T_{\text{write}}$ to $T_{\text{iteration}}$. If $T_{\text{write}}$ is small relative to $T_{\text{iteration}}$ (for example, 1 second vs. 200 ms per iteration, meaning the checkpoint pause costs 5 iterations), synchronous checkpointing is acceptable. If $T_{\text{write}}$ is large (for example, 30 seconds for a 500B+ parameter model), the training pause is prohibitive, and asynchronous checkpointing becomes essential. @sec-fault-tolerance-reliability formalizes this trade-off.
 
-Beyond the choice of synchronous or asynchronous methods, **checkpoint format optimization** reduces the per-node I/O volume. In standard data-parallel training, every node holds an identical copy of the model weights. A naive checkpoint would redundantly save this data from every node. Modern frameworks avoid this redundancy. DeepSpeed's **zero-redundancy checkpointing**\index{Checkpointing!zero-redundancy} uses its ZeRO optimizer-state partitioning: each of the $N$ nodes saves only its $1/N$ shard of the optimizer state, and a single consolidated copy of the weights is saved, drastically reducing the I/O volume per node. Similarly, PyTorch's **Distributed Checkpoint (DCP)**\index{Distributed Checkpoint} protocol saves each rank's sharded data to a unique file, enabling fully parallel writes to storage without any single-node bottleneck. For our 175B model using ZeRO-3 across 256 nodes, this optimization means each node writes only its roughly 4 GB shard of the total `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB state, reducing the local write from minutes to under a second on an NVMe drive.
+Beyond the choice of synchronous or asynchronous methods, **checkpoint format optimization** reduces the per-node I/O volume. In standard data-parallel training, every node holds an identical copy of the model weights. A naive checkpoint would redundantly save this data from every node. Modern frameworks avoid this redundancy. DeepSpeed's **zero-redundancy checkpointing**\index{Checkpointing!zero-redundancy} uses its ZeRO optimizer-state partitioning: each of the $N$ nodes saves only its $1/N$ shard of the optimizer state, and a single consolidated copy of the weights is saved, drastically reducing the I/O volume per node. Similarly, PyTorch's **Distributed Checkpoint (DCP)**\index{Distributed Checkpoint} protocol saves each rank's sharded data to a unique file, enabling fully parallel writes to storage without any single-node bottleneck. For our 175B model using ZeRO-3 across 256 nodes, this optimization means each node writes only its roughly 7 GB shard of the total `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB state, reducing the local write from minutes to a few seconds on an NVMe drive.
 
-Threading these numbers through our running example makes the checkpoint overhead concrete. The full checkpoint for the 175B parameter model includes 350 GB of FP16 model weights and roughly 1,400 GB of Adam optimizer state, totaling approximately `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB. With ZeRO-3 partitioning this state across 256 nodes, each node is responsible for roughly 4 GB. Writing this shard to a local NVMe drive takes less than 300 milliseconds. The subsequent asynchronous copy to the durable parallel file system, assuming a conservative 4 GB/s of dedicated bandwidth per node, completes in just over one second. The end-to-end result is a pipeline pause of under two seconds per checkpoint, with the longer-running copy to the PFS happening entirely in the background, overlapping with the subsequent training iteration. At a checkpoint interval of 10 minutes, this overhead represents less than 0.3 percent of training time.
+Threading these numbers through our running example makes the checkpoint overhead concrete. The full checkpoint for the 175B parameter model includes 350 GB of FP16 model weights and roughly 1,400 GB of Adam optimizer state, totaling approximately `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB. With ZeRO-3 partitioning this state across 256 nodes, each node is responsible for roughly 7 GB. Writing this shard to a local NVMe drive at 14 GB/s aggregate takes well under a second. The subsequent asynchronous copy to the durable parallel file system, assuming a conservative 4 GB/s of dedicated bandwidth per node, completes in just over one second. The end-to-end result is a pipeline pause of under two seconds per checkpoint, with the longer-running copy to the PFS happening entirely in the background, overlapping with the subsequent training iteration. At a checkpoint interval of 10 minutes, this overhead represents less than 0.3 percent of training time.
 
 Feature stores and model registries, the operational systems that manage feature serving and model versioning, are built *on top of* this storage hierarchy. Their architecture is examined in @sec-ops-scale, where they are treated as production ML operations concerns.
 

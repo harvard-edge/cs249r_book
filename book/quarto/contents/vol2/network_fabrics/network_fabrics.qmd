@@ -852,19 +852,13 @@ To mitigate congestion at this edge, network architects maximize the switch **ra
 
 \index{Fat-Tree}\index{Clos network}
 
-<!-- TODO(numerical-audit): Fat-tree host and switch counts in this chapter
-     (lines 859, 861, 907, 978, 980, 1078) need a numerical-audit pass to
-     reconcile claims for a specific k-ary topology. Distinguish two-tier
-     leaf-spine from three-tier Clos and use one set of consistent
-     assumptions. Current numbers are illustrative; some pairs cannot all
-     be true under one topology model. -->
 ::: {.callout-definition title="Fat-tree"}
 
 ***Fat-Tree***\index{Fat-Tree!definition} is a hierarchical network topology in which the number of parallel paths—and therefore aggregate cross-sectional capacity—increases at each switch tier toward the spine, providing full bisection bandwidth and multiple equal-cost routes between any two nodes [@al-fares2008].
 
-1.  **Significance (quantitative)**: A fat-tree built from radix-$k$ switches supports $k^3/4$ hosts with full bisection bandwidth. With $k=64$, a two-tier pod supports 1,024 GPUs and a three-tier fabric supports 65,536 hosts. Because every AllReduce can use any available spine path, the fabric sustains simultaneous full-rate communication from all accelerators, meeting the $\text{BW}$ requirement in the iron law for gradient synchronization.
+1.  **Significance (quantitative)**: A k-ary fat-tree built from radix-$k$ switches supports $k^2/2$ hosts in a two-tier (pod) configuration and $k^3/4$ hosts in a three-tier configuration with full bisection bandwidth. With $k=64$, a two-tier pod supports 2,048 GPUs and a three-tier fabric supports 65,536 hosts. Because every AllReduce can use any available spine path, the fabric sustains simultaneous full-rate communication from all accelerators, meeting the $\text{BW}$ requirement in the iron law for gradient synchronization.
 2.  **Distinction (durable)**: Unlike a standard tree (where bandwidth at the root is a single bottleneck shared by all leaves), a fat-tree replaces each root with multiple spine switches whose combined uplink capacity matches the total edge bandwidth, eliminating the bottleneck.
-3.  **Common pitfall**: A frequent misconception is that fat-trees guarantee zero network cost. They require $O(N \log N)$ switches and dense cabling: a 4,096-GPU non-blocking fat-tree needs roughly 2,048 switches, costing \$20–100 million in switching hardware alone.
+3.  **Common pitfall**: A frequent misconception is that fat-trees guarantee zero network cost. They require $O(N \log N)$ switches and dense cabling: a non-blocking three-tier fat-tree at the 4,000-GPU scale needs hundreds of switches and tens of thousands of optical cables, costing \$20–100 million in switching hardware alone.
 
 :::
 
@@ -910,7 +904,7 @@ class FatTreeScaling:
     fat_tree_hosts = fmt(fat_tree_hosts_val, precision=0)
 ```
 
-A fat-tree built from switches with **radix**[^fn-switch-radix-density] $k$ supports $N = k^3/4$ hosts. In a two-tier network using radix-64 switches, a single pod can support up to 1,024 GPUs, perfectly accommodating our 1,000-GPU reference cluster with only leaf and spine layers.
+A fat-tree built from switches with **radix**[^fn-switch-radix-density] $k$ supports $N = k^3/4$ hosts at three tiers, or $k^2/2$ at two tiers. In a two-tier network using radix-64 switches, a single pod can therefore support up to 2,048 GPUs, comfortably accommodating our 1,000-GPU reference cluster with only leaf and spine layers.
 
 ```{python}
 #| label: bisection-bandwidth-scaling
@@ -983,7 +977,7 @@ Verify your understanding of hierarchical switch fabrics:
 
 [^fn-switch-radix-density]: **Switch Radix**: Modern high-end switches (for example, NVIDIA Quantum-2) feature a radix of 64 ports, each at 400 Gbps. This density allows a two-tier fat-tree to support up to 2,048 GPUs with only two switch hops. As model scale pushes toward 100,000 GPUs, increasing switch radix (to 128 or 256) is the only way to avoid adding more tiers and the resulting latency/cost explosion. \index{Switch Radix!port density}
 
-Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts` hosts. The infrastructure cost is substantial: a non-blocking $k=64$ tree requires 4,096 switches. At \$10,000 to \$50,000 per switch, the switching layer alone represents \$40 to \$200 million.
+Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts` hosts. The infrastructure cost is substantial: a non-blocking $k=64$ three-tier tree requires roughly $5k^2/4 \approx 5{,}120$ switches across the core, aggregation, and edge layers. At \$10,000 to \$50,000 per switch, the switching layer alone represents \$50 to \$250 million.
 
 However, scale imposes a latency tax. Typical **hop counts**\index{Hop Counts} are 2 for intra-pod (leaf-spine-leaf) and 4 for inter-pod (leaf-spine-core-spine-leaf). Each additional hop introduces serialization delay and switch processing time, adding microseconds to the $\alpha$ latency term that accumulates during the thousands of synchronization steps in a training run.
 
@@ -1363,7 +1357,7 @@ The NVIDIA DGX SuperPOD architecture connects DGX H100 nodes using a two-tier In
 
 This architecture explicitly instantiates the five-level model constructed in this chapter. At Level 1, it minimizes latency by using passive copper (DAC) within the rack and active optics only for spine connections. At Level 2, it relies on InfiniBand's native credit-based flow control to guarantee a lossless medium without the fragility of Ethernet PFC. Level 3 implements a rail-optimized fat-tree: all GPU 0s across the cluster connect to the same leaf switch group, ensuring that latency-sensitive tensor parallelism operations traverse only a single switch hop. At Level 4, hardware-based adaptive routing sprays packets across all spine links to maximize bisection bandwidth for data parallelism. At Level 5, the design is modular: multiple SuperPODs connect via a core switching layer to form massive clusters. For our 175B-parameter model, the physical infrastructure would consist of approximately four SuperPOD units wired together, allowing 1,024 GPUs to function as a single synchronous instrument.
 
-### Case study: Meta grand teton {#sec-network-fabrics-grand-teton}
+### Case study: Meta Grand Teton {#sec-network-fabrics-grand-teton}
 
 Meta disclosed two Grand Teton-based 24,576-H100 clusters: one using RoCE over an Arista/OCP Ethernet fabric and one using NVIDIA Quantum-2 InfiniBand, both with 400 Gbps endpoints. Meta used both for Llama 3 training and used the RoCE cluster for the largest model. The primary motivation for Ethernet is operational scale and supply chain resilience: by using Ethernet, Meta can source switches from multiple vendors and use the same optical infrastructure and management tooling shared by their front-end serving fleet, avoiding the operational silo of a dedicated InfiniBand island.
 

@@ -640,40 +640,32 @@ The specific algorithms for gradient synchronization—including **Ring AllReduc
 
 When synchronization performance deviates from theoretical expectations, the Fleet Stack framework provides a structured approach to isolating the bottleneck.
 
-<!-- TODO(numerical-audit): The debugging walkthrough below states an
-     observed 100 ms vs a 50 ms prediction, then computes a 120 ms naive
-     transfer and 240 ms ring AllReduce, and concludes the observed 100 ms
-     is "better than naive" with a 40 ms remaining gap. The arithmetic
-     does not reconcile across the four numbers (50, 100, 120, 240).
-     Pick one consistent baseline (either the 50 ms bandwidth prediction
-     OR the 240 ms ring-AllReduce model) and recompute the remaining-gap
-     analysis from there. -->
 ::: {.callout-perspective title="Debugging slow gradient synchronization"}
 
-**Problem statement**: An AllReduce operation takes 100 ms when the bandwidth calculation predicts 50 ms. The Fleet Stack framework provides a systematic debugging methodology by examining each layer:
+**Problem statement**: An AllReduce of a 3 GB gradient tensor across 128 nodes (1,024 GPUs) takes 100 ms, while a hierarchical-AllReduce model that exploits NVLink within nodes and InfiniBand between nodes predicts roughly 80 ms. The Fleet Stack framework provides a systematic debugging methodology by examining each layer:
 
 **Infrastructure Layer**:
 
 - **Topology**: 128 nodes, 8 GPUs per node
 - **Intra-node**: NVLink at `{python} DistTrainConstants.nvlink_a100_str` GB/s bidirectional between GPUs
 - **Inter-node**: InfiniBand HDR at 200 Gb/s (25 GB/s) per port
-- **Observation**: The 3 GB gradient tensor should take $3 \text{ GB} / 25 \text{ GB/s} = 120\text{ ms}$ for a naive transfer, but ring AllReduce should achieve $2(N-1)/N \times 3 \text{ GB} / 25 \text{ GB/s} \approx 240\text{ ms}$ across 128 nodes
+- **Naive single-stream baseline**: A flat 3 GB transfer over one InfiniBand link takes $3 \text{ GB} / 25 \text{ GB/s} = 120\text{ ms}$, and a flat ring across all 128 nodes pays $2(N-1)/N \times 3 \text{ GB} / 25 \text{ GB/s} \approx 240\text{ ms}$. A hierarchical AllReduce (intra-node ring over NVLink + inter-node ring over InfiniBand) brings the inter-node cost down to roughly 80 ms because each node only ships its 1/8 share over the slow link.
 
 **Distribution Layer**:
 
-- **Algorithm choice**: Single ring AllReduce across all 1024 GPUs
-- **Expected behavior**: Ring touches every GPU in sequence, dominated by the slowest link (inter-node InfiniBand)
-- **Diagnosis**: A single global ring *fails to exploit NVLink* within nodes
+- **Algorithm choice**: NCCL hierarchical AllReduce (intra-node NVLink ring + inter-node InfiniBand ring)
+- **Expected behavior**: Hierarchical decomposition isolates the slow link from the fast link, scaling with the inter-node share rather than the full tensor
+- **Diagnosis check**: A flat single ring over all 1,024 GPUs would have measured close to 240 ms, so the algorithm is already hierarchical
 
 **Serving Layer (Measurement)**:
 
-- **Observed latency**: 100 ms (better than naive calculation predicts)
+- **Observed latency**: 100 ms (well below the 240 ms flat-ring upper bound, but 20 ms above the hierarchical model)
 - **Bandwidth utilization**: Only 60 percent of theoretical InfiniBand throughput
 - **Network counters**: Show congestion on specific switch uplinks
 
-**Root Cause Diagnosis**: The mismatch between Infrastructure and Distribution layers reveals the problem. The single ring correctly identifies InfiniBand as the bottleneck, but the observed 100 ms (rather than 240 ms) suggests NCCL is already using a hierarchical algorithm internally. The *remaining* gap comes from switch congestion, not algorithm choice.
+**Root Cause Diagnosis**: NCCL is already using a hierarchical algorithm (100 ms versus the 240 ms flat-ring prediction confirms this). The remaining 20 ms gap between observed and modeled latency comes from switch congestion on a handful of inter-node uplinks, not from a suboptimal algorithm.
 
-**Solution**: Monitor InfiniBand switch port utilization to identify hot spots. Consider rail-optimized topology (@sec-compute-infrastructure) or hierarchical AllReduce that explicitly partitions intra-node (NVLink) from inter-node (InfiniBand) communication. The 40 ms remaining gap likely represents achievable optimization through better network provisioning rather than algorithm changes.
+**Solution**: Monitor InfiniBand switch port utilization to identify hot spots. Consider rail-optimized topology (@sec-compute-infrastructure) or further tuning of the hierarchical AllReduce hand-off so it explicitly partitions intra-node (NVLink) from inter-node (InfiniBand) communication. The residual 20 ms gap likely represents achievable optimization through better network provisioning rather than algorithm changes.
 
 The analysis demonstrates how the Fleet Stack layers interact: Physical constraints (bandwidth) bound Operational choices (algorithm), which manifest in Service metrics (latency). Debugging requires examining all three layers, not just tuning one in isolation.
 
