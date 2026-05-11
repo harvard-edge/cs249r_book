@@ -54,7 +54,7 @@ Items where I made a judgment call against the YAML, kept something the YAML fla
 ## model_serving.qmd
 
 - **Inline-Python-in-math at lines 2363, 2373, 2379**: converted the `\(...\{python}...\)` and `$$...{python}...$$` patterns to plain prose with inline-Python references outside math delimiters, since `$$...$$` does not support backtick-Python evaluation. The math now renders reliably in both HTML and PDF.
-- **Batching-window formula at line 3419**: relabeled as a heuristic rather than an "optimum"; verified dimensional consistency (S/λ has units of seconds² so √ gives seconds) and added explicit unit annotations. Also softened "$T_{\text{optimal}}$" to "$T_{\text{window}}$" since no derivation is provided. **Action needed**: if the original `sqrt(S/λ)` formula has a published derivation, restore "$T_{\text{optimal}}$" and cite the source.
+- **Batching-window formula at line 3419** **[REVISIT CAREFULLY]**: relabeled as a heuristic rather than an "optimum"; verified dimensional consistency (S/λ has units of seconds² so √ gives seconds) and added explicit unit annotations. Also softened "$T_{\text{optimal}}$" to "$T_{\text{window}}$" since no derivation is provided. **Action needed**: focused session to decide between (a) keep `T_window` heuristic framing or (b) restore `T_optimal` with a published derivation/citation (e.g., M/M/1 cost-balance result, or a specific batching paper). User flagged this needs careful treatment.
 - **DLRM/ResNet transition fix at line 1725**: rewrote the post-DLRM-callout transition to acknowledge both lighthouses rather than reverting to ResNet image-decoding.
 - **Llama-3-8B case study disambiguation at line 4254**: added an explicit framing paragraph noting that @fig-kv-cache-growth uses 70B-class assumptions as a contrast before the 8B-specific analysis. **Action needed**: consider regenerating the figure with 8B-class assumptions if the chapter wants strict scope alignment.
 - **Pricing citations** at lines 197, 4228: same as benchmarking — out of scope for prose pass.
@@ -297,56 +297,50 @@ Deferred to discussion:
 
 ## vol2/data_storage/data_storage.qmd
 
-Applied: second-person → impersonal in four `**Problem**:` / `**Scenario**:` / `**Systems conclusion**:` callout openers (lines 202, 651, 699, 1033, 1385 originals), `post-training` → `posttraining` in retention prose.
+**Walkthrough complete.** Earlier prose-pass + deferred items resolved:
 
-Deferred to discussion (all math/structural):
-
-- **`@fig-access-patterns-vol2` figure-vs-caption mismatch (line ~417)**: Prose discusses sequential-vs-random access; figure caption describes I/O throughput vs model size. **Action**: align figure asset/caption with the prose, or revise prose to match the displayed figure.
-- **HBM↔object-storage 300,000x bandwidth gap (line ~442)**: Adjacent table values imply ~33.5x, not 300,000x. Claim recurs in summary + takeaways. **Action**: recompute and standardize.
-- **Storage pyramid caption vs `@tbl-storage-hierarchy-merged` mismatch (line ~448)**: Several tier values disagree. **Action**: pick one authoritative set.
-- **Archive cost ratio 5x vs 20x (line ~912)**: Stated prices yield 5x, prose says 20x. **Action**: reconcile.
-- **Two-year archive cost off by 10x (line ~918)**: Computed total should be \$9,600, prose says \$960. **Action**: correct dollar amount or volume.
-- **ZeRO-3 70B per-node shard math (line ~1572)**: 140 GB per-node for FP16 weights of a 70B model across 1,000 nodes is inconsistent with sharding. **Action**: clarify checkpoint contents + sharding assumption, recompute.
-- **175B per-node checkpoint 4 GB vs 6.8 GB (line ~1580)**: Multiple downstream calculations build from 4 GB but the implied math gives 6.8 GB. **Action**: pick one shard-size model.
-- **Idle-accelerator cost \$9,600/day vs \$13,000/day (line ~1474)**: Callout disagrees with immediately preceding calculation. **Action**: align.
-- **Retrieval-infrastructure subsection interrupts Fallacies/Pitfalls (line ~1647)**: Reorganize or convert to fallacy/pitfall.
+- **`@fig-access-patterns-vol2` figure-vs-caption mismatch**: Revised the surrounding prose at lines 415/423–425 to discuss the displayed I/O-throughput-vs-model-size figure (storage-bottleneck regime) instead of the sequential-vs-random comparison the prose previously described. The figure stays; the prose now matches it.
+- **Retrieval-infrastructure subsection reorganization**: Moved out of `## Fallacies and Pitfalls` into its own top-level `## Retrieval Infrastructure` section before Fallacies. Section ID `#sec-data-storage-retrieval-infrastructure` preserved.
+- **Numerical inconsistencies (7 sites)**: Single TODO(numerical-audit) block added at the top of the chapter, enumerating: HBM 300,000x gap, storage pyramid caption vs table, archive 5x vs 20x, 2-year cost \$960 vs \$9,600, idle-cost \$9,600 vs \$13,000, ZeRO-3 70B shard math, 175B 256-node 4 GB vs 6.8 GB. Each needs careful derivation against the running examples; queued for a focused numerical-audit pass.
 
 ## vol2/network_fabrics/network_fabrics.qmd
 
-Applied: trailing colon-only QMD garbage stripped (lines 1662–1664), `us` → `μs` for microseconds in fig-cap/fig-alt at line 478, `Meta grand teton` → `Meta Grand Teton` heading at line 1360, `datacenter` → `data center` / `data-center` partial sweep.
+**Walkthrough complete.** Earlier prose-pass items + deferred items resolved:
 
-Deferred to discussion:
+- **Five-level taxonomy mismatch**: Figure caption labels updated to match section-heading taxonomy (Level 1 Wire and Link, Level 2 Transport, Level 3 Switch and Topology, Level 4 Fabric Behavior, Level 5 Cluster Design).
+- **Oversubscription dollar discrepancy**: Line 963 hardcoded \$75M → \$142M (matching the BisectionBottleneck computed model in @sec-network-fabrics-fat-tree). Forward-reference using `{python}` not feasible without moving the LEGO cell up; literal value with explicit cross-reference is the pragmatic fix.
+- **Checkpoint over-explained**: Prompt at line 1530 trimmed so it asks the diagnostic question without giving the reasoning. The reader has to identify the communication-vs-compute distinction independently.
+- **Fat-tree scaling claims**: Added `<!-- TODO(numerical-audit) -->` comment before the Fat-Tree callout marking the five-site reconciliation work. Defer to a focused numerical-audit pass.
+- **Fallacies bold paragraph starters**: After review, the `**Fallacy**: *italic statement.* / Corrective paragraph` format is the canonical book pattern explicitly specified in book-prose.md §3 (Fallacies and Pitfalls). YAML's flag was inconsistent with house style. Kept.
 
-- **Five-level taxonomy mismatch (line ~113)**: Figure caption's Level 2–5 labels don't match the section heading taxonomy in lines 373–377. **Action needed**: unify taxonomy.
-- **Fat-tree scaling claims conflict (line ~859)**: Multiple host/switch counts cannot all be true under one topology. **Action needed**: recompute and distinguish two-tier leaf-spine from k-ary three-tier Clos.
-- **Oversubscription dollar discrepancy (line ~963 vs ~1169)**: Hardcoded \$75M waste estimate contradicts later `BisectionBottleneck` ~\$142M. **Action needed**: align models.
-- **Bandwidth-staircase figure mismatch (line ~1350)**: `@fig-hierarchical-staircase` rendered asset doesn't match the prose intent. **Action needed**: replace asset OR revise prose+cross-reference.
-- **Rail-optimization data-vs-tensor parallelism confusion (line ~998)**: Mixes traffic patterns. **Action needed**: separate same-rank data-parallel AllReduce from tensor-parallel activation exchange.
-- **Checkpoint over-explained (line ~1530)**: Diagnostic reasoning included in the prompt undermines exercise value. **Action**: shorten prompt or move reasoning to answer key.
-- **Fallacies bold paragraph starters (line ~1542)**: Operations-manual anti-pattern. **Action**: convert to proper list/callout/prose topic sentences.
+Queued for focused follow-up:
+
+- **Bandwidth-staircase figure (line ~1350)**: `@fig-hierarchical-staircase` rendered asset doesn't match prose intent. Needs either new figure asset or prose revision.
+- **Rail-optimization data-vs-tensor confusion (line ~998)**: Mixes traffic patterns. Needs technical clarification separating same-rank data-parallel AllReduce from tensor-parallel activation exchange.
 
 ## vol2/compute_infrastructure/compute_infrastructure.qmd
 
-Applied: heading hierarchy fix (`### Accelerator spectrum` → `## Accelerator Spectrum`), four rhetorical-question section transitions converted to declarative (lines 187/197/213/227 originals), arithmetic-intensity callout opener rewritten with full definition sentence, two additional rhetorical questions in Roofline + Benchmarking sections (855/1459) converted, hyphen→en-dash ranges, `50g`/`400g` → `50 g`/`400 g`, `datacenter` → `data center` / `data-center` partial sweep, Summary fragment joined, "But"→"however" recast in chapter-connection.
+**Walkthrough complete.** Earlier prose-pass items + five deferred items resolved:
 
-Deferred to discussion:
+- **Roofline ridge precision standardized on FP16 (~295 FLOP/byte)**: Footnote line 825 was already correct (989 / 3.35 ≈ 295). Fixed HBM3 definition callout at line 517 (was using A100's 312 TFLOPS — corrected to H100's 989 TFLOPS). Fixed figure caption (~591 → ~295 FP16). Updated `H100_FLOPS_FP8_TENSOR` → `H100_FLOPS_FP16_TENSOR` in the roofline figure LEGO cell and the roofline-analysis LEGO cell. Adjusted prose "591× gap" → "~2,000× gap" (the actual intensity ratio).
+- **Cooling rack count**: "128-rack training cluster" → "32-rack training cluster" at line 2225 (matches the 1,024 GPU / 32-rack running example used elsewhere).
+- **TCO figure caption**: "1,000-node H100 cluster (8,000 GPUs)" → "1,000-GPU H100 cluster (125 nodes at 8 GPUs/node)". Cloud cost was already correct for the smaller scale; caption now matches surrounding prose.
+- **Bold Step starters in planning-methodology example (line 3067)**: Converted seven `**Step N**:` paragraph starters into flowing prose with topic sentences. Also propagated the FP16 precision fix into the worked-example math ($1,979 \to 989$ TFLOPS, $891 \to 445$ TFLOPS sustained, $912 \to 456$ PFLOPS cluster). One-week idealized compute time stays in the 2–4 week operational-overhead range.
 
-- **Roofline ridge-point inconsistency (line ~829 region)**: Footnote says ~295 FLOP/byte (FP16 H100); later figure caption and prose use ~591 FLOP/byte. The two values reflect different precisions (FP16 vs FP8 peak). **Action needed**: choose one precision for the H100 Roofline example and make footnote, figure caption, plotted value, and prose agree.
-- **Cooling rack-count inconsistency (line ~2231 region)**: Cooling paragraph says "128-rack training cluster"; nearby rack arithmetic uses 1,024 GPUs as 32 racks. **Action needed**: reconcile to one example scale.
-- **TCO figure-caption inconsistency (line ~2811)**: Figure caption describes 1,000-node H100 cluster (8,000 GPUs); surrounding prose analyzes a 1,000-GPU/125-node cluster; caption's cloud cost matches the smaller scale. **Action needed**: align caption, plotted data, and prose totals.
-- **Citation gaps in environmental-impact paragraph (line ~2165)**: GPT-3 energy estimate, carbon-intensity values, Microsoft nuclear procurement, Google geothermal investment are uncited.
-- **Bold step starters in planning-methodology example (line ~3073)**: `**Step 1**`, `**Step 2**`, … inside a long body paragraph. Flagged as operations-manual style. **Options**: (a) convert to flowing prose; (b) restructure as proper numbered list with full sentences.
+Queued for bib pass:
 
-## vol2/introduction/introduction.qmd (major structural items deferred)
+- Environmental-impact citations (line ~2165): GPT-3 energy estimate, carbon-intensity values, Microsoft nuclear procurement, Google geothermal investment.
 
-This is the largest single deliverable in vol2. YAML reports 11 findings; mechanical fixes applied (Latent-Bound → latency-bound at line 816, "datacenters" → "data centers" co-located). The structural items below need user input:
+## vol2/introduction/introduction.qmd
 
-- **Foundational Concepts section reintroduces frameworks (line 1675)**: C³, Fleet Stack, roadmap, AI Triad, Five-Pillar Framework, systems principles, and archetypes are all re-presented after their initial development earlier in the chapter. **Options**: (a) consolidate the repeated framework overview into earlier sections; (b) make line 1675 a brief synthesis-and-forward-pointer rather than a re-presentation; (c) keep current structure if a final-section synthesis is pedagogically desired.
-- **C³ taxonomy figure duplicated (line 1679)**: One TikZ at `@fig-c3-taxonomy`, one SVG at `@fig-vol2-c3-taxonomy`. **Action needed**: keep one canonical, update cross-references in lockstep.
-- **Lighthouse archetypes introduced twice**: Once in a callout near line 328, again at the canonical section + table at lines 1910–1934. **Options**: (a) replace the early callout with a forward pointer to `@sec-vol2-introduction-archetypes`; (b) move the canonical table near the first mention.
-- **Cloud Archetype vs Archetype A naming drift (line 806)**: Line 806 says Frontier Training "inherits the Cloud Archetype" and uses GPT-4. The canonical roster (line 1912+) defines Archetype A as GPT-4/Llama-3 and does not include a Cloud Archetype. **Action needed**: align line 806 with the canonical Archetype A label, or define Cloud Archetype as a separate taxonomy.
-- **C³ corner mapping inconsistency (line 1912)**: Archetype intro says each archetype stresses Communication, Coordination, or Compute, but the table maps the archetypes via Throughput Bound / Volume & Latency / Power & Privacy. No archetype clearly occupies Compute. **Action needed**: choose one constraint vocabulary for the canonical table.
-- **Scale-Moment magnitude inconsistency (line 227 vs line 103)**: Table caption says seven orders of magnitude; line 103 references 10²⁵–10²⁶ FLOPs for frontier (suggesting eight orders from 10¹⁸). **Action needed**: reconcile.
-- **Purpose paragraph density (line 28)**: Long opening paragraph stacks emphatic italicized When/What constructions. **Options**: (a) split into two paragraphs and reduce italic density; (b) keep as-is — the manifesto register may be intentional for a volume opener.
-- **Fleet Stack + Roadmap figures duplicate four-part progression (line 1723)**: Adjacent figures present the same vertical structure. **Options**: (a) merge into one figure; (b) keep both if they serve distinct pedagogical purposes.
-- **Six Systems Engineering Principles bullet-list format (line 1901)**: Bold-label paragraphs flagged as operations-manual style. **Options**: (a) keep as-is for compact reference; (b) move to a callout; (c) replace with synthesis paragraph.
+**Walkthrough complete (2026-05-11).** All nine YAML structural items resolved:
+
+- **C³ taxonomy figure dedup**: SVG kept as canonical at `@fig-c3-taxonomy` (the original ID retained); TikZ source **deleted** (git history preserves it). Duplicate `@fig-vol2-c3-taxonomy` block deleted; line 1665 prose redirected to `@fig-c3-taxonomy`.
+- **Lighthouse archetypes**: Early callout at line 328 region **kept** (vol2 is independent of vol1; readers need the introduction at first mention) and edited to add a forward pointer to `@sec-vol2-introduction-archetypes` for the canonical roster. The early callout serves as the introduction; the section + table at line 1912 is the deeper reference.
+- **Cloud Archetype vs Archetype A naming**: Line 806 rewritten to use the canonical "Archetype A (GPT-4 / Llama-3)" label with `@sec-vol2-introduction-archetypes` reference.
+- **C³ corner mapping**: Archetypes now cleanly map to C³ corners — A=Communication (fleet-wide), B=Coordination (all-to-all), C=Compute (per-device envelope). Prose at line 1910 and table at line 1916 aligned to use C³ vocabulary; "Throughput Bound / Volume & Latency / Power & Privacy" replaced with the corner labels. Archetype C's "Compute" framing clarifies that the binding constraint is the per-device milliwatt envelope, not fleet-level network or coordination.
+- **Scale-Moment magnitude**: Line 103 tightened to "approaching $10^{25}$ FLOPs ... roughly seven orders of magnitude" — matches table caption.
+- **Foundational Concepts section**: On inspection, this section is the **first introduction** of AI Triad and Five-Pillar Framework (not a re-introduction); the only re-introduced framework is C³, and that was already resolved by the figure dedup. Fleet Stack figure here is the canonical visual. Three systems archetypes here is the canonical roster. No further edit needed.
+- **Purpose paragraph density (line 28)**: Kept as-is — manifesto register intentional for volume opener.
+- **Fleet Stack + Roadmap figure duplication**: Kept both — Fleet Stack figure shows the layered architecture; Roadmap figure shows chapter sequence through the same four parts. Distinct pedagogical purposes.
+- **Six Systems Engineering Principles bullets**: Kept as compact reference list.

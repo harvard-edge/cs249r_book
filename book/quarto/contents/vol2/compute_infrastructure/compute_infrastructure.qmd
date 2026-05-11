@@ -514,9 +514,9 @@ Despite the `{python} InfraSetup.frontier_params_b`B model's massive total memor
 
 ***High Bandwidth Memory (HBM)***\index{High Bandwidth Memory!definition} is a 3D-stacked DRAM architecture in which multiple memory dies are vertically bonded and connected to the processor through thousands of Through-Silicon Vias (TSVs) on a shared silicon interposer, eliminating the centimeter-scale PCB traces of conventional DRAM and replacing them with micrometer-scale vertical paths.
 
-1.  **Significance (quantitative)**: HBM3 in the H100 delivers approximately 3.35 TB/s of memory bandwidth—roughly 16$\times$ DDR5's ~200 GB/s—at 2 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\text{BW}$ ceiling in the iron law: the H100's ridge point is approximately $312\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 93$ FLOP/byte, so any operator with arithmetic intensity below 93 FLOP/byte (for example, attention at 5–20 FLOP/byte) remains memory-bound even with HBM.
+1.  **Significance (quantitative)**: HBM3 in the H100 delivers approximately 3.35 TB/s of memory bandwidth—roughly 16$\times$ DDR5's ~200 GB/s—at 2 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\text{BW}$ ceiling in the iron law: the H100's FP16 ridge point is approximately $989\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 295$ FLOP/byte, so any operator with arithmetic intensity below 295 FLOP/byte (for example, attention at 5–20 FLOP/byte) remains memory-bound even with HBM.
 2.  **Distinction (durable)**: Unlike DDR memory, which connects through centimeters of PCB trace (introducing capacitance, attenuation, and high driving current), HBM uses 1,024-bit-wide TSV buses with path lengths measured in micrometers—a 1,000$\times$ reduction in signal distance that enables the wider bus without proportionally higher power.
-3.  **Common pitfall**: A frequent misconception is that HBM solves the memory wall. HBM moves the wall rather than eliminates it: Tensor Core throughput $(R_{\text{peak}})$ has scaled faster than HBM bandwidth across generations (from 900 GB/s in V100 to 3.35 TB/s in H100 while FP16 TFLOPS grew from 125 to 312), so the ridge point continues rising and more operations remain memory-bound despite HBM improvements.
+3.  **Common pitfall**: A frequent misconception is that HBM solves the memory wall. HBM moves the wall rather than eliminates it: Tensor Core throughput $(R_{\text{peak}})$ has scaled faster than HBM bandwidth across generations (from 900 GB/s with 125 FP16 TFLOPS in V100 to 3.35 TB/s with 989 FP16 TFLOPS in H100), so the ridge point continues rising and more operations remain memory-bound despite HBM improvements.
 
 :::
 
@@ -861,9 +861,9 @@ If the point lies below either line, the workload is not fully using the availab
 
 The Roofline's diagnostic power extends beyond individual kernels to entire training runs. For our `{python} InfraSetup.frontier_params_b`B model, the computation graph contains thousands of distinct operations with different arithmetic intensities. The dense Feed-Forward Network (FFN) layers are dominated by large GEMMs with high arithmetic intensity, placing them firmly in the compute-bound regime where Tensor Core utilization is the bottleneck. Conversely, operations like layer normalization and element-wise activations possess low arithmetic intensity, sitting deep in the memory-bound region where the compute units idle while waiting for data. The self-attention mechanism fluctuates between regimes depending on sequence length: while the quadratic complexity of attention scores suggests a compute bound, the loading of Key and Value matrices creates memory pressure at shorter sequences. This diagnostic distinction dictates the optimization strategy: memory-bound layers benefit from kernel fusion (reducing HBM round-trips), while compute-bound layers benefit from precision reduction (moving from FP16 to FP8, which effectively raises the hardware's compute ceiling).
 
-@fig-roofline-landscape makes these relationships visible for the H100. Notice how LLM decode at batch size 1 sits deep in the memory-bound region, achieving less than 1 percent of peak compute, while LLM training at large batch sizes crosses the ridge point into the compute-bound regime. The 591$\times$ gap between these two workloads' arithmetic intensities explains why the same hardware that delivers excellent training throughput can appear woefully underutilized during inference.
+@fig-roofline-landscape makes these relationships visible for the H100. Notice how LLM decode at batch size 1 sits deep in the memory-bound region, achieving less than 1 percent of peak compute, while LLM training at large batch sizes crosses the ridge point into the compute-bound regime. The roughly 2,000$\times$ gap between these two workloads' arithmetic intensities (~1 FLOP/byte for decode versus ~2,000 FLOP/byte for training) explains why the same hardware that delivers excellent training throughput can appear woefully underutilized during inference.
 
-::: {#fig-roofline-landscape fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Landscape: NVIDIA H100**: The roofline is defined by two ceilings: memory bandwidth (diagonal) and peak compute (horizontal), meeting at the ridge point (~591 FLOP/byte). ML workloads span the full range: LLM decode at batch size 1 is deeply memory-bound, while LLM training at large batch sizes is compute-bound. The position of each workload determines whether faster memory or faster compute would improve performance." fig-alt="Log-log roofline plot for H100 showing memory-bound and compute-bound regions with five ML workloads plotted from LLM decode at 1 FLOP per byte to LLM training at 2000 FLOP per byte."}
+::: {#fig-roofline-landscape fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Landscape: NVIDIA H100 (FP16)**: The roofline is defined by two ceilings: memory bandwidth (diagonal) and peak compute (horizontal), meeting at the FP16 ridge point (~295 FLOP/byte for 989 TFLOPS over 3.35 TB/s). ML workloads span the full range: LLM decode at batch size 1 is deeply memory-bound, while LLM training at large batch sizes is compute-bound. The position of each workload determines whether faster memory or faster compute would improve performance." fig-alt="Log-log roofline plot for H100 FP16 showing memory-bound and compute-bound regions with five ML workloads plotted from LLM decode at 1 FLOP per byte to LLM training at 2000 FLOP per byte."}
 
 ```{python}
 #| echo: false
@@ -872,25 +872,25 @@ The Roofline's diagnostic power extends beyond individual kernels to entire trai
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-roofline-landscape—H100 roofline and workload placement
 # │
-# │ Goal: H100 roofline; plot LLM decode/CNN/LLM training workloads; show
-# │       memory-bound vs compute-bound; ridge ~591 FLOP/byte.
+# │ Goal: H100 FP16 roofline; plot LLM decode/CNN/LLM training workloads; show
+# │       memory-bound vs compute-bound; ridge ~295 FLOP/byte (FP16).
 # │ Show: Log-log; roofline; filled regions; workload scatter.
 # │ How: y = min(BW*x, P_peak); workloads dict; matplotlib.
 # │
 # │ Imports: matplotlib.pyplot (plt), numpy (np),
-# │          mlsysim.core.constants (H100_FLOPS_FP8_TENSOR, H100_MEM_BW,
+# │          mlsysim.core.constants (H100_FLOPS_FP16_TENSOR, H100_MEM_BW,
 # │          TFLOPs, TB, second)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ H100 roofline; plot LLM decode/CNN/LLM training workloads; show
+# │ H100 FP16 roofline; plot LLM decode/CNN/LLM training workloads; show
 import matplotlib.pyplot as plt
 import numpy as np
-from mlsysim.core.constants import H100_FLOPS_FP8_TENSOR, H100_MEM_BW, TFLOPs, TB, second
+from mlsysim.core.constants import H100_FLOPS_FP16_TENSOR, H100_MEM_BW, TFLOPs, TB, second
 
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-P_PEAK_TFLOPS = H100_FLOPS_FP8_TENSOR.m_as(TFLOPs/second)
+P_PEAK_TFLOPS = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
 BW_TBS = H100_MEM_BW.m_as(TB/second)
 RIDGE_POINT = P_PEAK_TFLOPS/BW_TBS
 
@@ -1018,21 +1018,21 @@ The Roofline's diagnostic power makes it one of the most practically useful anal
 # │ Context: @sec-compute-memory-hierarchy—arithmetic intensity
 # │
 # │ Goal: Provide H100 and GPT-3 specs for roofline analysis.
-# │ Show: ~1,979 TFLOPS; ~3.35 TB/s; ~591 FLOP/byte ridge.
+# │ Show: ~989 FP16 TFLOPS; ~3.35 TB/s; ~295 FLOP/byte ridge (FP16).
 # │ How: pulling constants from mlsysim.core.constants.
 # │
-# │ Imports: mlsysim.core.constants (H100_FLOPS_FP8_TENSOR, H100_MEM_BW, GPT3_PARAMS,
+# │ Imports: mlsysim.core.constants (H100_FLOPS_FP16_TENSOR, H100_MEM_BW, GPT3_PARAMS,
 # │          TFLOPs, TB, second, param, BILLION, flop, byte)
 # │ Exports: InfraSetup.gpt3_params_b, H100PerformanceScenario.h100_tflops, MemoryBandwidthScenario.h100_bw, InfraSetup.h100_ridge
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import H100_FLOPS_FP8_TENSOR, H100_MEM_BW, GPT3_PARAMS, TFLOPs, TB, second, param, BILLION, flop, byte
+from mlsysim.core.constants import H100_FLOPS_FP16_TENSOR, H100_MEM_BW, GPT3_PARAMS, TFLOPs, TB, second, param, BILLION, flop, byte
 from mlsysim.fmt import check
 
 class RooflineScenario:
     """H100 and GPT-3 specs for roofline analysis\index{Roofline Analysis}."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    flops = H100_FLOPS_FP8_TENSOR
+    flops = H100_FLOPS_FP16_TENSOR
     bw = H100_MEM_BW
     gpt3_params = GPT3_PARAMS.m_as(param)
 
@@ -2222,7 +2222,7 @@ The operational procedures for immersion-cooled facilities differ sharply from a
 ![](images/svg/cooling-comparison.svg)
 :::
 
-@fig-cooling-comparison and @tbl-cooling-limits together illustrate the stark contrast between these approaches. The capital cost of these cooling technologies spans an order of magnitude. Standard air cooling infrastructure costs \$2,000--5,000 per rack (fans, CRAC units, raised floor tiles). Direct-to-chip liquid cooling costs \$15,000--25,000 per rack (cold plates, manifolds, CDUs, piping). Full immersion cooling costs \$30,000--50,000 per tank (dielectric fluid, sealed tanks, specialized heat exchangers). The break-even analysis between air and liquid cooling depends on rack power density: at 20 kW per rack, air cooling's lower CapEx wins over a 3-year lifecycle. At 40 kW per rack, the electricity savings from liquid cooling's lower PUE (1.08 vs. 1.5) offset the higher CapEx within 18--24 months. At 60+ kW per rack -- the regime of modern ML infrastructure -- air cooling is physically impossible, making the comparison moot. For our `{python} InfraSetup.frontier_params_b`B model's 128-rack training cluster at `{python} RackPowerScenario.rack_power_str` kW per rack, direct-to-chip liquid cooling is the standard choice, balancing density, serviceability, and cost. Immersion cooling offers marginal PUE improvement (1.03 vs. 1.08) but introduces operational complexity that most organizations find unjustified at current rack densities.
+@fig-cooling-comparison and @tbl-cooling-limits together illustrate the stark contrast between these approaches. The capital cost of these cooling technologies spans an order of magnitude. Standard air cooling infrastructure costs \$2,000--5,000 per rack (fans, CRAC units, raised floor tiles). Direct-to-chip liquid cooling costs \$15,000--25,000 per rack (cold plates, manifolds, CDUs, piping). Full immersion cooling costs \$30,000--50,000 per tank (dielectric fluid, sealed tanks, specialized heat exchangers). The break-even analysis between air and liquid cooling depends on rack power density: at 20 kW per rack, air cooling's lower CapEx wins over a 3-year lifecycle. At 40 kW per rack, the electricity savings from liquid cooling's lower PUE (1.08 vs. 1.5) offset the higher CapEx within 18--24 months. At 60+ kW per rack -- the regime of modern ML infrastructure -- air cooling is physically impossible, making the comparison moot. For our `{python} InfraSetup.frontier_params_b`B model's 32-rack training cluster at `{python} RackPowerScenario.rack_power_str` kW per rack, direct-to-chip liquid cooling is the standard choice, balancing density, serviceability, and cost. Immersion cooling offers marginal PUE improvement (1.03 vs. 1.08) but introduces operational complexity that most organizations find unjustified at current rack densities.
 
 ::: {.callout-notebook title="The cooling tax"}
 
@@ -2802,7 +2802,7 @@ For our `{python} InfraSetup.frontier_params_b`B model, a minimum viable trainin
 
 The most consequential infrastructure decision is whether to build an on-premises cluster or rent capacity from a cloud provider. This decision depends primarily on one variable: sustained utilization, as @fig-tco-build-vs-buy makes visible by plotting cumulative cost over time for both options at varying utilization rates.
 
-::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**TCO: Build vs. Buy**: Cumulative cost over 30 months for a 1,000-node H100 cluster (8,000 GPUs) at 80 percent sustained utilization. On-premises (CapEx plus OpEx) breaks even against cloud on-demand at about month 22--26; break-even requires 55--65 percent sustained utilization, and below 20 percent cloud wins regardless. Cloud grows linearly at about \\$3M/month with no upfront cost." fig-alt="Cumulative cost vs. months plot. The cloud line rises linearly at about 3 million per month. The on-premises line starts with a large CapEx jump of about 58 million and has a shallower slope. The lines cross at a break-even point around month 22 to 26."}
+::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**TCO: Build vs. Buy**: Cumulative cost over 30 months for a 1,000-GPU H100 cluster (125 nodes at 8 GPUs/node) at 80 percent sustained utilization. On-premises (CapEx plus OpEx) breaks even against cloud on-demand at about month 22--26; break-even requires 55--65 percent sustained utilization, and below 20 percent cloud wins regardless. Cloud grows linearly with no upfront cost." fig-alt="Cumulative cost vs. months plot. The cloud line rises linearly. The on-premises line starts with a large CapEx jump and has a shallower slope. The lines cross at a break-even point around month 22 to 26."}
 ![](images/svg/tco-build-vs-buy.svg)
 :::
 
@@ -3064,7 +3064,7 @@ Step 6: TCO Analysis. Compute the 3-year total cost of ownership, including hard
 
 Step 7: Timeline and Risk Assessment. Map the procurement, construction, and deployment timelines to the project schedule. Identify the longest-lead items (typically electrical infrastructure and GPU procurement) and start those procurement processes first.
 
-To illustrate this methodology concretely, consider planning the infrastructure for training our `{python} InfraSetup.frontier_params_b`B model. **Step 1**: The training workload at large batch sizes is compute-bound, so we optimize for TFLOPS per dollar and select the H100 (highest available TFLOPS at reasonable cost). **Step 2**: The 2.2 TB training state requires 8-way tensor parallelism within each node, yielding a DGX H100 configuration. **Step 3**: The total compute budget is $6 \times 175 \times 10^9 \times 300 \times 10^9 = 3.15 \times 10^{23}$ FLOPs. At 45 percent MFU on H100s, each GPU delivers $1,979 \times 10^{12} \times 0.45 \approx 891$ TFLOPS sustained. With 1,024 GPUs, the cluster delivers $891 \times 1,024 \approx 912$ PFLOPS sustained, completing training in $3.15 \times 10^{23} / 9.12 \times 10^{17} \approx 345,000$ seconds or roughly 4 days of idealized compute time (2--4 weeks with operational overhead). **Step 4**\index{Step 4}: The TP-8, PP-4, DP-32 configuration generates structured AllReduce traffic suited to a rail-optimized InfiniBand fabric. **Step 5**\index{Step 5}: 128 nodes at `{python} RackPowerScenario.rack_power_str` kW per 4-node rack requires 32 racks drawing approximately 1.1 MW total at PUE 1.08, necessitating liquid cooling. **Step 6**\index{Step 6}: The 3-year TCO is approximately \$63M on-premises vs. \$19M cloud for this specific workload, with the break-even depending on utilization beyond the initial training run. **Step 7**\index{Step 7}: GPU procurement (6--12 months) and facility preparation (if needed) must begin immediately, with phased deployment targeting initial capacity within 3 months.
+To illustrate this methodology concretely, consider planning the infrastructure for training our `{python} InfraSetup.frontier_params_b`B model. The training workload at large batch sizes is compute-bound, so the design optimizes for TFLOPS per dollar and selects the H100 as the highest available TFLOPS at reasonable cost. The 2.2 TB training state requires 8-way tensor parallelism within each node, yielding a DGX H100 configuration. Sizing the cluster follows from the compute budget: at $6 \times 175 \times 10^9 \times 300 \times 10^9 = 3.15 \times 10^{23}$ FLOPs total and 45 percent MFU on H100s, each GPU delivers $989 \times 10^{12} \times 0.45 \approx 445$ TFLOPS sustained; with 1,024 GPUs the cluster reaches roughly 456 PFLOPS sustained, completing the run in about a week of idealized compute time, or 2--4 weeks with operational overhead. The TP-8, PP-4, DP-32 configuration generates structured AllReduce traffic suited to a rail-optimized InfiniBand fabric. The 128 nodes draw `{python} RackPowerScenario.rack_power_str` kW per 4-node rack across 32 racks at approximately 1.1 MW total under PUE 1.08, necessitating liquid cooling. The 3-year TCO comes to approximately \$63M on-premises versus \$19M cloud for this specific workload, with the break-even depending on utilization beyond the initial training run. GPU procurement (6--12 months) and facility preparation must begin immediately, with phased deployment targeting initial capacity within 3 months.
 
 ::: {.callout-checkpoint title="Infrastructure planning exercise"}
 

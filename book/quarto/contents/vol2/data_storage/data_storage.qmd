@@ -5,6 +5,31 @@ engine: jupyter
 
 # Data Storage {#sec-data-storage}
 
+<!-- TODO(numerical-audit): Several quantitative claims in this chapter
+     conflict with adjacent tables or each other and need a focused
+     numerical-audit pass to reconcile:
+
+     - Line ~442: HBM 300,000-fold bandwidth gap claim vs. ~33.5-fold from
+       adjacent table values (HBM 3.35 TB/s and object 100 GB/s aggregate).
+     - Line ~448: Storage pyramid caption tier values disagree with
+       tbl-storage-hierarchy-merged (host DRAM 200 vs. 300 GB/s, archive
+       cost \$0.004 vs. \$0.001 per GB, etc.).
+     - Line ~912: Archive "20-fold cheaper" claim vs. stated prices
+       (\$0.02 over \$0.004 is 5-fold, not 20-fold).
+     - Line ~918: Two-year archive cost stated as \$960 but math yields
+       \$9,600 for 100 TB at \$0.004 per GB-month over 24 months.
+     - Line ~1474: Callout \$13,000-per-day idle cost vs. preceding
+       \$9,600-per-day calculation for the same 20-point utilization drop
+       on a 1,000-GPU cluster at \$2 per GPU-hour.
+     - Line ~1572: ZeRO-3 70B per-node shard math (140 GB-per-node times
+       1,000 nodes equals 140 TB of writes) is inconsistent with the
+       FP16 70B total of 140 GB.
+     - Line ~1580: 175B 256-node 4 GB shard vs. 1,750/256 = 6.8 GB implied.
+
+     Each requires careful derivation against the chapter's running
+     examples and storage table; recompute and standardize before next
+     release. -->
+
 ::: {layout-narrow}
 ::: {.column-margin}
 
@@ -412,7 +437,7 @@ You are designing the storage subsystem for a new ML training cluster with 512 G
 
 The storage hierarchy described in the next section is the engineering response to these inverted requirements.
 
-Understanding *how* data is accessed across storage tiers is essential for choosing the right storage system. @fig-access-patterns-vol2 compares throughput for sequential vs. random access, showing how storage performance degrades dramatically when workloads deviate from sequential streaming.
+Understanding which storage tier can keep accelerators fed is essential to system design. @fig-access-patterns-vol2 plots the required I/O throughput to sustain full GPU utilization against model size, with horizontal ceilings for each storage tier overlaid. Below the NVMe ceiling, local SSDs can sustain the training feed; between NVMe and parallel-filesystem ceilings, only Lustre-class storage suffices; and beyond the parallel-filesystem ceiling, the workload enters the storage-bottleneck regime where no single tier can sustain the accelerators on its own.
 
 ::: {#fig-access-patterns-vol2 fig-env="figure" fig-pos="htb" fig-cap="**The Storage Bottleneck Zone**: Required I/O throughput (GB/s) for full GPU utilization vs. model size (parameters, 100M to 175B). The red curve shows storage demand growing with model size; horizontal dashed lines mark the ceilings for common storage tiers (NVMe at 7 GB/s, Object at 50 GB/s, Lustre at 100 GB/s). Between the Compute-Bound and Storage-Bottleneck regions lies the transition where storage, not compute, limits training throughput." fig-alt="Log-scale line chart: Model Size 100M to 175B parameters on the x-axis, Data Throughput (GB/s) on the y-axis. Red curve shows required I/O rising to about 500 GB/s at 175B. Dashed lines mark NVMe (7), Object (50), and Lustre (100 GB/s) ceilings."}
 
@@ -420,9 +445,9 @@ Understanding *how* data is accessed across storage tiers is essential for choos
 
 :::
 
-The gap labeled "The I/O wall" in @fig-access-patterns-vol2 widens as request sizes shrink: at 4 KB, sequential reads outperform random reads by 10$\times$. This is *why* datasets stored as millions of small files (the "small file problem") perform catastrophically on ML workloads, even on high-bandwidth storage [@shvachko2010]. The solution, as we will see in the parallel file system and object storage tiers, is to aggregate small samples into large sequential shards.
+The storage-bottleneck region in @fig-access-patterns-vol2 widens with model size: as parameter counts grow, the required throughput rises faster than commodity storage tiers can supply, pushing larger models into regimes where only parallel filesystems or sharded object storage can sustain the training feed. At small request sizes, the gap also widens between sequential and random access: at 4 KB, sequential reads outperform random reads by 10$\times$. This is *why* datasets stored as millions of small files (the "small file problem") perform catastrophically on ML workloads, even on high-bandwidth storage [@shvachko2010]. The solution, as we will see in the parallel file system and object storage tiers, is to aggregate small samples into large sequential shards.
 
-The practical consequence for our running example is stark. The 1.5 trillion tokens of training data, stored as compressed text, produce roughly 3 TB of sequential reads per epoch. If each token were stored as an individual file (as naive data collection might produce), the metadata overhead alone would throttle throughput to a fraction of what the storage hardware can deliver. Instead, the data must be preprocessed into large shards, typically 256 MB to 4 GB each, so that each read operation amortizes the fixed overhead of file open, seek, and close across millions of tokens. This preprocessing step transforms the access pattern from random [@zaharia2012resilient] (one file per sample) to sequential (one contiguous read per shard), moving the workload from the red line to the blue line in @fig-access-patterns-vol2.
+The practical consequence for our running example is stark. The 1.5 trillion tokens of training data, stored as compressed text, produce roughly 3 TB of sequential reads per epoch. If each token were stored as an individual file (as naive data collection might produce), the metadata overhead alone would throttle throughput to a fraction of what the storage hardware can deliver. Instead, the data must be preprocessed into large shards, typically 256 MB to 4 GB each, so that each read operation amortizes the fixed overhead of file open, seek, and close across millions of tokens. This preprocessing step transforms the access pattern from random [@zaharia2012resilient] (one file per sample) to sequential (one contiguous read per shard), keeping the workload below the storage ceiling shown in @fig-access-patterns-vol2.
 
 With these inversions established, we can trace the storage hierarchy that ML systems use to bridge the gap between accelerator appetite and storage capacity.
 
@@ -1628,6 +1653,14 @@ Feature stores and model registries, the operational systems that manage feature
 
 The interplay of bandwidth physics and cost economics creates fertile ground for misconceptions, and mistakes in storage design are among the most expensive to fix once training is underway.
 
+## Retrieval Infrastructure: Vector Indexes and Hybrid Search {#sec-data-storage-retrieval-infrastructure}
+
+While model training relies heavily on streaming sequential blobs via formats like TFRecord or Parquet, modern inference architectures—particularly those leveraging Retrieval-Augmented Generation (RAG)—introduce a fundamentally different storage profile. Machine learning data in this context is not just sequential bytes, but rather high-dimensional vector graphs representing semantic embeddings.
+
+::: {.callout-perspective title="The IOPS bottleneck in high-dimensional search"}
+This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth** to **random access memory IOPS**. Vector databases must traverse high-dimensional graphs (such as HNSW) to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity** trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. Sustaining sub-100 ms latency at scale demands keeping the upper routing layers of the vector index pinned in host DRAM, while aggressively paging payload data from NVMe, treating the storage tier as a massive, low-latency key-value store rather than a sequential pipe [@chang2008].
+:::
+
 ## Fallacies and Pitfalls {#sec-storage-fallacies}
 
 Storage design errors are among the most expensive mistakes in ML infrastructure because they are discovered late (when training begins) and remediation requires either expensive hardware upgrades or time-consuming data reformatting. The following fallacies and pitfalls capture the most common errors that experienced storage engineers make when first encountering ML workloads.
@@ -1643,14 +1676,6 @@ Prefetching hides *average* latency, not *tail* latency. Object storage P99 late
 **Pitfall**: *Using millions of small files for training data.*
 
 Storing each training sample as an individual file (one JPEG per image, one JSON per text sample) is natural for data collection but catastrophic for training at scale. Each file requires metadata operations (`open()`, `stat()`, `close()`) that serialize on the metadata server. At 10,000 concurrent workers, metadata operations become the bottleneck long before data bandwidth saturates. The solution is to aggregate samples into large sequential shards (TFRecord, WebDataset tar, Parquet) during preprocessing. This reduces metadata operations by 10,000 to 100,000$\times$ and transforms random access patterns into sequential streaming.
-
-### Retrieval infrastructure: Vector indexes and hybrid search {#sec-data-storage-retrieval-infrastructure}
-
-While model training relies heavily on streaming sequential blobs via formats like TFRecord or Parquet, modern inference architectures—particularly those leveraging Retrieval-Augmented Generation (RAG)—introduce a fundamentally different storage profile. Machine learning data in this context is not just sequential bytes, but rather high-dimensional vector graphs representing semantic embeddings.
-
-::: {.callout-perspective title="The IOPS bottleneck in high-dimensional search"}
-This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth** to **random access memory IOPS**. Vector databases must traverse high-dimensional graphs (such as HNSW) to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity** trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. Sustaining sub-100 ms latency at scale demands keeping the upper routing layers of the vector index pinned in host DRAM, while aggressively paging payload data from NVMe, treating the storage tier as a massive, low-latency key-value store rather than a sequential pipe [@chang2008].
-:::
 
 **Pitfall**: *Ignoring egress costs when designing the storage architecture.*
 
