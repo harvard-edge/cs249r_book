@@ -122,7 +122,7 @@ class AllReduceCost:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     llama_params_b = 70
-    bytes_per_param = 4 # FP32 gradients
+    bytes_per_param = 2 # BF16 gradients (standard for Llama-class training)
     n_gpus = 64
     ib_bw_gbs = 50 # GB/s NDR 400 Gbps per port
     alpha_us = 3 # microseconds
@@ -141,7 +141,7 @@ class AllReduceCost:
     ring_total_ms = ring_bw_time_ms + ring_lat_time_ms
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(ring_total_ms > 5000, f"AllReduce ({ring_total_ms:.0f}ms) should be significant (>5s) for 70B model.")
+    check(ring_total_ms > 5000, f"AllReduce ({ring_total_ms:.0f}ms) should be significant (>5s) for 70B BF16 model.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gradient_size_gb_str = f"{gradient_size_gb}"
@@ -154,15 +154,15 @@ class AllReduceCost:
 
 ::: {.callout-notebook title="AllReduce cost for a 70B model"}
 
-**Problem**: A 70 billion parameter model trains with data parallelism across `{python} AllReduceCost.n_gpus_napkin_str` GPUs connected by InfiniBand NDR (50 GB/s per port). Each GPU computes gradients in FP32 (4 bytes per parameter). How long does one AllReduce take?
+**Problem**: A 70 billion parameter model trains with data parallelism across `{python} AllReduceCost.n_gpus_napkin_str` GPUs connected by InfiniBand NDR (50 GB/s per port). Each GPU computes gradients in BF16 (2 bytes per parameter, standard for Llama-class training). How long does one AllReduce take?
 
 **Step 1**: Size the gradient payload.
-Each GPU produces a full gradient tensor: $70 \times 10^9 \times 4\ \text{bytes} =$ `{python} AllReduceCost.gradient_size_gb_str` GB.
+Each GPU produces a full gradient tensor: $70 \times 10^9 \times 2\ \text{bytes} =$ `{python} AllReduceCost.gradient_size_gb_str` GB.
 
 **Step 2**: Apply the Ring AllReduce bandwidth formula.
 $$T_{\text{bandwidth}} = 2 \cdot \frac{N-1}{N} \cdot \frac{n}{\beta}$$
 
-Substituting: $T_{\text{bandwidth}}$ = `{python} AllReduceCost.ring_bw_factor_str`$\times$ 280 GB/50 GB/s $\approx$ `{python} AllReduceCost.ring_bw_time_ms_str` ms.
+Substituting: $T_{\text{bandwidth}}$ = `{python} AllReduceCost.ring_bw_factor_str`$\times$ 140 GB/50 GB/s $\approx$ `{python} AllReduceCost.ring_bw_time_ms_str` ms.
 
 **Step 3**: Add the latency term.
 $$T_{\text{latency}} = 2(N-1) \cdot \alpha$$
@@ -172,13 +172,13 @@ Substituting: $T_{\text{latency}} = 2 \times 63 \times 3\ \mu\text{s} =$ `{pytho
 **Step 4**: Total communication time.
 Total: $T_{\text{AllReduce}} \approx$ `{python} AllReduceCost.ring_bw_time_ms_str` + `{python} AllReduceCost.ring_lat_time_ms_str` $\approx$ `{python} AllReduceCost.ring_total_ms_str` ms.
 
-**Systems insight**: The gradient AllReduce alone takes over 11 seconds. This is pure communication overhead added to every training step. At this scale, communication dominates the step time unless overlapped with backward pass computation. This is why production systems pipeline AllReduce with the backward pass, launching communication for early layers while later layers are still computing.
+**Systems insight**: The gradient AllReduce alone takes over five seconds. This is pure communication overhead added to every training step. At this scale, communication dominates the step time unless overlapped with backward pass computation. This is why production systems pipeline AllReduce with the backward pass, launching communication for early layers while later layers are still computing.
 
 :::
 
-The exercise above reveals why data movement, not computation, becomes the governing constraint at scale. A single AllReduce on a 70B model's gradients consumes seconds of wall-clock time, during which all GPUs would otherwise sit idle. This asymmetry between local computation (which parallelizes perfectly) and global coordination (which requires physical data movement) motivates every algorithm in the remainder of this chapter. Reducing those 11 seconds by even 50 percent would save thousands of GPU-hours over a typical training campaign, translating directly to reduced cost and faster time to deployment.
+The exercise above reveals why data movement, not computation, becomes the governing constraint at scale. A single AllReduce on a 70B model's gradients consumes seconds of wall-clock time, during which all GPUs would otherwise sit idle. This asymmetry between local computation (which parallelizes perfectly) and global coordination (which requires physical data movement) motivates every algorithm in the remainder of this chapter. Halving that multi-second AllReduce would save thousands of GPU-hours over a typical training campaign, translating directly to reduced cost and faster time to deployment.
 
-The cost analysis also explains why the choice of collective algorithm matters far more than most practitioners realize. Using a suboptimal algorithm that achieves only 60 percent of theoretical bandwidth (a common outcome with poor topology mapping) would inflate the 11-second AllReduce to nearly 19 seconds, adding 8 seconds of pure waste to every training step.
+The cost analysis also explains why the choice of collective algorithm matters far more than most practitioners realize. Using a suboptimal algorithm that achieves only 60 percent of theoretical bandwidth (a common outcome with poor topology mapping) would inflate the five-second AllReduce to over nine seconds, adding several seconds of pure waste to every training step.
 
 ::: {.callout-perspective title="Fleet stack connection"}
 
@@ -508,7 +508,7 @@ In practice, most engineering calculations start with the $\alpha$-$\beta$ model
 
 ### Putting the model to work: Llama 70B communication budget {#sec-communication-llama-budget}
 
-The alpha-beta model becomes most valuable when applied to real training configurations. Consider a concrete scenario: training a Llama-class 70B parameter model using data parallelism across 128 GPUs spanning 16 nodes of 8 GPUs each. The gradient tensor is 280 GB in FP32 (70 billion parameters at 4 bytes each). During each training step, this entire gradient must be synchronized across all workers.
+The alpha-beta model becomes most valuable when applied to real training configurations. Consider a concrete scenario: training a Llama-class 70B parameter model using data parallelism across 128 GPUs spanning 16 nodes of 8 GPUs each. The gradient tensor is 140 GB in BF16 (70 billion parameters at 2 bytes each, standard for Llama-class training). During each training step, this entire gradient must be synchronized across all workers.
 
 ```{python}
 #| label: llama-budget-calc
